@@ -1,103 +1,173 @@
+/* eslint-disable @typescript-eslint/no-unused-vars */
+"use client";
+
+import AOS from "aos";
+import "aos/dist/aos.css";
 import Image from "next/image";
+import { useState, useEffect } from "react";
+import { getAdvertisements } from "@/lib/storage-service"; // Ensure this imports correctly
+import DisplayAd from "@/components/DisplayAd";
 
-export default function Home() {
-  return (
-    <div className="grid grid-rows-[20px_1fr_20px] items-center justify-items-center min-h-screen p-8 pb-20 gap-16 sm:p-20 font-[family-name:var(--font-geist-sans)]">
-      <main className="flex flex-col gap-[32px] row-start-2 items-center sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={180}
-          height={38}
-          priority
-        />
-        <ol className="list-inside list-decimal text-sm/6 text-center sm:text-left font-[family-name:var(--font-geist-mono)]">
-          <li className="mb-2 tracking-[-.01em]">
-            Get started by editing{" "}
-            <code className="bg-black/[.05] dark:bg-white/[.06] px-1 py-0.5 rounded font-[family-name:var(--font-geist-mono)] font-semibold">
-              src/app/page.tsx
-            </code>
-            .
-          </li>
-          <li className="tracking-[-.01em]">
-            Save and see your changes instantly.
-          </li>
-        </ol>
+import VideoPreviewPlayer from "@/components/VideoPreviewPlayer";
+import FeaturedBrandsCarousel from "@/components/FeaturedBrandsCarousel";
+import GiftCards from "@/components/GiftCards";
+import Testimonials from "@/components/Testimonials";
+import TrustedBrands from "@/components/TrustedBrands";
+import clsx from "clsx";
+import StatSection from "@/components/StatSection";
+import Link from "next/link";
 
-        <div className="flex gap-4 items-center flex-col sm:flex-row">
-          <a
-            className="rounded-full border border-solid border-transparent transition-colors flex items-center justify-center bg-foreground text-background gap-2 hover:bg-[#383838] dark:hover:bg-[#ccc] font-medium text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 sm:w-auto"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={20}
-              height={20}
-            />
-            Deploy now
-          </a>
-          <a
-            className="rounded-full border border-solid border-black/[.08] dark:border-white/[.145] transition-colors flex items-center justify-center hover:bg-[#f2f2f2] dark:hover:bg-[#1a1a1a] hover:border-transparent font-medium text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 w-full sm:w-auto md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Read our docs
-          </a>
-        </div>
-      </main>
-      <footer className="row-start-3 flex gap-[24px] flex-wrap items-center justify-center">
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/file.svg"
-            alt="File icon"
-            width={16}
-            height={16}
-          />
-          Learn
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/window.svg"
-            alt="Window icon"
-            width={16}
-            height={16}
-          />
-          Examples
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/globe.svg"
-            alt="Globe icon"
-            width={16}
-            height={16}
-          />
-          Go to nextjs.org →
-        </a>
-      </footer>
-    </div>
-  );
+interface Advertisement {
+	id: string;
+	imageUrl: string;
+	link: string;
 }
+
+const images = [
+	{ id: 0, src: "/images/camera.svg", alt: "Camera" },
+	{ id: 1, src: "/images/person1.svg", alt: "Man in suit" },
+	{ id: 2, src: "/images/person2.svg", alt: "People at event" },
+];
+
+const Home = () => {
+	const [ads, setAds] = useState<Advertisement[]>([]);
+	const [activeId, setActiveId] = useState(0);
+	const [hoverId, setHoverId] = useState<number | null>(null);
+
+	const getDisplayId = () => (hoverId !== null ? hoverId : activeId);
+
+	useEffect(() => {
+		const fetchAds = async () => {
+			const data = await getAdvertisements();
+			setAds(data);
+		};
+		fetchAds();
+	}, []);
+
+	useEffect(() => {
+		AOS.init({ duration: 800, once: true });
+		AOS.refresh();
+	}, []);
+
+	return (
+		<div className="bg-white text-[#020839]">
+			<VideoPreviewPlayer />
+
+			<StatSection />
+
+			<div
+				className="p-8 rounded-lg my-32 flex flex-col items-center justify-between gap-8"
+				data-aos="fade-in"
+			>
+				<div className="flex-1 space-y-4" data-aos="fade-right">
+					<div className="flex flex-col md:flex-row items-center justify-between md:gap-64 gap-28">
+						<div className="flex flex-col gap-6 w-sm">
+							<p className="text-black" data-aos="fade-up">
+								We are a branding and digital design agency that connects
+								people, brands, and cultures.
+							</p>
+							<p
+								className="text-black text-sm"
+								data-aos="fade-up"
+								data-aos-delay="100"
+							>
+								Our service scope includes web3 & web2 product development,
+								Brand Identity Design, Industrial Print Production, Brand
+								Communications and Marketing, Environmental Branding, Brand
+								Consultancy
+							</p>
+
+							<Link
+								href="/Works"
+								className=" py-2 md:w-40 w-full border border-gray-800 rounded-full hover:bg-gray-100 transition text-center"
+								data-aos="fade-up"
+								data-aos-delay="200"
+							>
+								See Our Project
+							</Link>
+						</div>
+
+						<div
+							className="flex-1 flex justify-center items-center"
+							data-aos="fade-left"
+						>
+							<div className="text-center">
+								<Image
+									src="/images/CDS Space logo.svg"
+									alt="CDS Logo"
+									width={400}
+									height={400}
+									className="mx-auto"
+								/>
+							</div>
+						</div>
+					</div>
+				</div>
+			</div>
+
+			<div>
+				<DisplayAd />
+			</div>
+
+			<div className="min-h-screen flex flex-col md:flex-row items-center justify-center gap-12 md:gap-44 bg-gray-100 px-6 md:px-10 py-20 md:py-32">
+				{/* Text Section */}
+				<div className="text-center md:text-left mb-10 md:mb-0">
+					<h1 className="text-7xl md:text-7xl font-extrabold mb-6 leading-tight">
+						<span className="text-blue-600 block">People</span>
+						<span className="text-black block">Brands</span>
+						<span className="text-orange-600 block">Identities</span>
+					</h1>
+
+					<Link
+						href="/About"
+						className="px-20 py-2 md:px-6 md:py-2 border rounded-full md:text-sm hover:bg-black hover:text-white transition"
+					>
+						ABOUT US
+					</Link>
+				</div>
+
+				{/* Image Section - remains horizontal on all screen sizes */}
+				<div className="flex flex-row w-full max-w-7xl overflow-hidden gap-2 md:gap-4 h-[180px] md:h-[400px]">
+					{images.map((img) => {
+						const isActive = getDisplayId() === img.id;
+
+						return (
+							<div
+								key={img.id}
+								className={clsx(
+									"cursor-pointer overflow-hidden rounded-xl transition-all duration-700 ease-in-out",
+									isActive ? "basis-2/3" : "basis-1/3"
+								)}
+								onMouseEnter={() => {
+									if (window.innerWidth >= 768) setHoverId(img.id);
+								}}
+								onMouseLeave={() => {
+									if (window.innerWidth >= 768) setHoverId(null);
+								}}
+								onClick={() => {
+									if (window.innerWidth < 768) setActiveId(img.id);
+								}}
+							>
+								<Image
+									src={img.src}
+									alt={img.alt}
+									width={800}
+									height={600}
+									className="object-cover w-full h-full transition-all duration-700 ease-in-out"
+								/>
+							</div>
+						);
+					})}
+				</div>
+			</div>
+
+			<FeaturedBrandsCarousel />
+
+			<GiftCards />
+			<Testimonials />
+			<TrustedBrands />
+		</div>
+	);
+};
+
+export default Home;
