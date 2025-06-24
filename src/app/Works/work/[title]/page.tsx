@@ -6,10 +6,13 @@
 import { useState, useEffect } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
-import { Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { supabase } from "@/lib/supabase";
 import { getSlugFromTitle } from "@/lib/utils";
+import Link from "next/link";
+import { CATEGORIES } from "@/lib/constants";
+
+
 
 interface WorkImage {
 	id: number;
@@ -54,6 +57,21 @@ export default function ViewWorkPage() {
 	const [images, setImages] = useState<WorkImage[]>([]);
 	const [loading, setLoading] = useState<boolean>(true);
 	const [error, setError] = useState<string | null>(null);
+	const [workCategory, setWorkCategory] = useState<{ name: string; slug: string } | null>(null);
+
+
+
+	useEffect(() => {
+		if (work?.category) {
+			const category = CATEGORIES.find((cat) => cat.name === work.category);
+			if (category) {
+				setWorkCategory({ name: category.name, slug: category.slug });
+			}
+		}
+	}, [work]);
+	
+
+	
 
 	useEffect(() => {
 		const slug = params.title as string;
@@ -158,14 +176,24 @@ export default function ViewWorkPage() {
 
 	if (loading) {
 		return (
-			<div className="min-h-screen bg-white text-black p-6 flex items-center justify-center">
-				<div className="text-center">
-					<Loader2 className="h-8 w-8 animate-spin mx-auto mb-4" />
-					<p>Loading project details...</p>
-				</div>
+		  <div className="min-h-screen bg-white text-black p-6 flex items-center justify-center">
+			<div className="text-center">
+			  <div className="mx-auto mb-4 w-28 h-28  rounded-full overflow-hidden">
+				<video
+				  src="/loader.mp4"  // replace with your video path
+				  autoPlay
+				  loop
+				  muted
+				  playsInline
+				  className="rounded-full object-fill h-24 w-24"
+				/>
+			  </div>
+			  <p>Loading project details...</p>
 			</div>
+		  </div>
 		);
-	}
+	  }
+	  
 
 	if (error) {
 		return (
@@ -175,9 +203,9 @@ export default function ViewWorkPage() {
 					<Button
 						variant="outline"
 						className="mt-4"
-						onClick={() => router.push("/admin")}
+						onClick={() => router.push("/")}
 					>
-						Back to Dashboard
+						Back to Home
 					</Button>
 				</div>
 			</div>
@@ -192,9 +220,9 @@ export default function ViewWorkPage() {
 					<Button
 						variant="outline"
 						className="mt-4"
-						onClick={() => router.push("/admin")}
+						onClick={() => router.push("/")}
 					>
-						Back to Dashboard
+						Back to Home
 					</Button>
 				</div>
 			</div>
@@ -202,12 +230,31 @@ export default function ViewWorkPage() {
 	}
 
 	return (
-		<div className="min-h-screen bg-white py-40 text-black p-6">
-			<div className="max-w-6xl mx-auto">
+		<div className="min-h-screen bg-white pb-40 text-black p-6">
+			<div className="max-w-6xl mx-auto pt-28">
 
-				<div className="space-y-6 mb-8 md:flex justify-between max-w-6xl border-b pb-14">
-        <h1 className="text-3xl font-bold">{work.title}</h1>
-					<div className="md:text-right md:mt-14 mt-8 max-w-md">
+					{/* Breadcrumb */}
+					<div className="text-sm md:text-base">
+	<Link href="/Works" className="hover:underline mr-1">Works</Link>
+	&gt;
+	{workCategory && (
+		<>
+			<Link
+				href={`/Works/categories/${workCategory.slug}`}
+				className="hover:underline ml-1 font-medium"
+			>
+				{workCategory.name}
+			</Link>
+
+		</>
+	)}
+
+</div>
+
+
+				<div className="space-y-6 md:flex justify-between max-w-6xl border-b pt-18 pb-40">
+        <h1 className="text-5xl font-black">{work.title}</h1>
+					<div className="text-right md:mt-44 mt-32 max-w-md">
 						<p className="text-black whitespace-pre-line">
 							{work.description || "No description provided."}
 						</p>
@@ -215,19 +262,18 @@ export default function ViewWorkPage() {
 				</div>
 
 				
-    <div className="pt-20">
+    <div className="pt-40">
 				{images.length > 0 ? (
-					<div className="space-y-4">
+					<div className="">
 						{gridRows.map((row, rowIndex) => (
 							<div
 								key={rowIndex}
-								className="grid grid-cols-2 gap-4"
-								style={{ height: `${row.height}rem` }}
+								className="grid grid-cols-2"
 							>
 								{row.items.map(({ image, index, isFullWidth }) => (
 									<div
 										key={index}
-										className={`relative rounded-md overflow-hidden ${
+										className={`relative overflow-hidden ${
 											isFullWidth ? "col-span-2" : ""
 										}`}
 										style={{
@@ -238,7 +284,7 @@ export default function ViewWorkPage() {
 										<img
 											src={image.image_url || "/placeholder.svg"}
 											alt={`Project image ${index + 1}`}
-											className="w-full h-full object-cover"
+											className="w-full md:h-full object-cover"
 											style={{
 												transform: `scale(${
 													(image.transformations?.size?.width || 100) / 100

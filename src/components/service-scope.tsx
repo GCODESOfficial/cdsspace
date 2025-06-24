@@ -59,19 +59,19 @@ export default function ServiceScope() {
 	}, []);
 
 	return (
-		<section className="py-24 bg-[#f5f5f5]  text-[#040b37]">
+		<section className="py-28 bg-[#f5f5f5]  text-[#040b37]">
 			<div className="container mx-auto px-4">
 				<h2
-					className="text-3xl md:text-5xl font-extrabold md:text-left text-center px-14 mb-12"
+					className="md:text-5xl text-2xl font-extrabold text-left md:px-14 mb-28"
 					data-aos="fade-up"
 				>
 					Our Service Scope
 				</h2>
 			</div>
 
-      <div className="flex justify-center items-center bg-white py-24 mx-0">
+      <div className="flex justify-center items-center bg-white py-40 mx-0">
 					<div
-						className="grid grid-cols-1 md:grid-cols-3 gap-6 w-full max-w-6xl px-4"
+						className="grid grid-cols-1 md:grid-cols-3 md:gap-6 gap-20 w-full max-w-6xl px-4"
 						data-aos="fade-up"
 						data-aos-delay="200"
 					>
@@ -80,11 +80,11 @@ export default function ServiceScope() {
 								key={index}
 								className="space-y-4 border border-[#0A4FE8] p-6 rounded-2xl shadow-sm"
 							>
-								<h3 className="font-semibold text-black text-lg">
+								<h3 className="font-semibold text-black md:text-lg">
 									{category.title}
 								</h3>
 								<hr className="border-t border-[#0A4FE8]" />
-								<ul className="space-y-2 list-disc px-6 text-black">
+								<ul className="space-y-2 list-disc md:px-6 px-2 text-black text-sm md:text-base">
 									{category.services.map((service, serviceIndex) => (
 										<li key={serviceIndex}>{service}</li>
 									))}

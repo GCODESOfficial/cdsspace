@@ -1,9 +1,10 @@
 @import "tailwindcss";
+@import url('https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700;800;900&display=swap');
+
 
 :root {
   --background: #FFFFFF;
   --foreground: #FFFFFF;
-  --font-poppins: 'Poppins', sans-serif;
 }
 
 
@@ -11,7 +12,24 @@
 body {
 	background: var(--background);
 	color: var(--foreground);
-  font-family: var(--font-poppins);
+  font-family: 'Poppins', sans-serif;
+}
+
+
+@keyframes floatAndScale {
+  0% {
+    transform: translateY(0) scale(1);
+  }
+  50% {
+    transform: translateY(-8px) scale(1.03);
+  }
+  100% {
+    transform: translateY(0) scale(1);
+  }
+}
+
+.animate-float-scale {
+  animation: floatAndScale 2s ease-in-out infinite;
 }
 
 
@@ -112,5 +130,16 @@ body {
   .animate-scroll-right {
     animation: scroll-right 60s linear infinite;
   }
+}
+
+
+/* Hide scrollbars completely */
+.scrollbar-hide {
+  scrollbar-width: none; /* Firefox */
+  -ms-overflow-style: none;  /* IE 10+ */
+}
+
+.scrollbar-hide::-webkit-scrollbar {
+  display: none; /* Safari and Chrome */
 }
 

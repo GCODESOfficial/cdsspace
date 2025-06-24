@@ -26,10 +26,10 @@ export default function Footer() {
   };
 
 	return (
-		<footer className="bg-[#020839] text-white py-20 relative">
-			<div className="md:max-w-5xl mx-auto grid grid-cols-1 md:grid-cols-2 md:gap-80 gap-20 max-w-[90%]">
+		<footer className="bg-[#020839] text-white md:py-20 pt-20 pb-3 relative">
+			<div className="md:w-full mx-auto grid grid-cols-1 md:flex md:gap-0 md:justify-between md:px-9 px-7 gap-20">
 				{/* Logo and Subscription */}
-				<div data-aos="fade-up">
+				<div data-aos="fade-up ">
 					<div className="mb-4">
 						<div className="flex items-center">
 						<Link href="/Home">
@@ -45,7 +45,7 @@ export default function Footer() {
 
           <div className="md:pt-24 pt-14">
 					<p className="font-semibold mb-2">Stay in touch</p>
-					<p className="text-xs mb-3 ">
+					<p className="text-xs mb-3 md:w-xs">
 						Join our mailing list to stay in touch with our newest feature
 						releases, and tips about branding
 					</p>
@@ -68,19 +68,21 @@ export default function Footer() {
 					</form>
           </div>
 				</div>
-				<div>
+				<div className="">
 					{/* Contact Info */}
-					<div data-aos="fade-up" data-aos-delay="100">
-						<p className="text-white font-semibold mb-2">
+					<div data-aos="fade-up " data-aos-delay="100">
+						<p className="text-white font-semibold mb-2 md:w-xs md:ml-44">
 							We collaborate with forward thinking brands and people, let’s
 							talk.
 						</p>
-						<p className="text-sm mb-1">contact.cdsspace@gmail.com</p>
-						<p className="text-sm">+234-81-028-27049</p>
+						<a href="mailto:contact.cdsspace@gmail.com">
+						<p className="text-sm mb-1 md:ml-44">contact.cdsspace@gmail.com</p>
+						</a>
+						<p className="text-sm md:ml-44">+234-81-028-27049</p>
 					</div>
 
 					{/* Social + Initiatives */}
-					<div className="md:flex grid grid-cols-2 pt-10 md:gap-10" data-aos="fade-up" data-aos-delay="300">
+					<div className="md:flex grid md:grid-cols-2 pt-10 gap-7 md:gap-32" data-aos="fade-up" data-aos-delay="300">
 						{/* Menu Links */}
 						<div className="text-left">
 							<p className="text-white font-semibold mb-2">MENU</p>
@@ -97,6 +99,9 @@ export default function Footer() {
 								<li>
 									<Link href="/Contact">Contact</Link>
 								</li>
+								<li>
+									<Link href="/Links">Links</Link>
+								</li>
 							</ul>
 						</div>
 
@@ -110,28 +115,34 @@ export default function Footer() {
 									<Link href="https://web.facebook.com/cdsspace">Facebook</Link>
 								</li>
 								<li>
-									<Link href="https://www.pinterest.com/cdsspace_/">Pinterest</Link>
-								</li>
-								<li>
-									<Link href="https://linktr.ee/cdsspace">Linktree</Link>
-								</li>
-								<li>
 									<Link href="https://twitter.com/cdsspace_">X</Link>
 								</li>
 								<li>
 									<Link href="https://linktr.ee/cdsspace">LinkedIn</Link>
 								</li>
+								<li>
+									<Link href="https://www.youtube.com/@cdsspacelive">Youtube</Link>
+								</li>
+								<li>
+									<Link href="https://www.tiktok.com/@cdsspace_">TikTok</Link>
+								</li>
+								<li>
+									<Link href="https://wa.me/message/V7K4SBQW7METG1">WhatsApp</Link>
+								</li>
 							</ul>
 						</div>
 
 						<div className="text-left ">
-							<p className="text-white font-semibold mb-2">Initiatives</p>
+							<p className="text-white font-semibold mb-2">SUB-BRANDS</p>
 							<ul className="space-y-1 text-sm">
 								<li>
 									<Link href="#">Prime Nuptials</Link>
 								</li>
 								<li>
-									<Link href="#">CDS Space Creative Network (CSCN)</Link>
+									<Link href="#">CDS Labs</Link>
+								</li>
+								<li>
+									<Link href="#">CSCN</Link>
 								</li>
 							</ul>
 						</div>
@@ -140,13 +151,21 @@ export default function Footer() {
 			</div>
 
 			{/* Footer Bottom */}
-			<div className="mt-10 border-t border-gray-700 w-full">
-  <div className="max-w-5xl mx-auto pt-4 text-sm flex flex-col md:flex-row justify-between items-center">
+			<div className="mt-10 border-t border-gray-700 w-full px-1 hidden md:block">
+  <div className=" mx-auto pt-4 md:text-sm text-xs flex flex-col md:flex-row justify-between items-center px-9">
   <p className="absolute bottom-4 md:bottom-0 md:relative">© {new Date().getFullYear()} CDS Space | Branding Agency.</p>
     <div className="flex md:gap-4 gap-32 mt-2 md:mt-0 ">
       <Link href="#">Privacy Policy</Link>
       <Link href="#">Terms of Service</Link>
     </div>
+  </div>
+</div>
+
+<div className="mt-10 border-t border-gray-700 w-full px-7 md:hidden">
+  <div className="pt-4 md:text-sm text-xs  space-y-4">
+     <p> <Link href="#">Privacy Policy</Link></p>
+	 <p> <Link href="#">Terms of Service</Link></p>
+     <p>© {new Date().getFullYear()} CDS Space | Branding Agency.</p>
   </div>
 </div>
 

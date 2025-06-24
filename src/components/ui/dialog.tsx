@@ -62,11 +62,13 @@ function DialogContent({
         )}
         {...props}
       >
+        <div className="relative w-full h-full">
         {/* Close button - fixed at top right inside the modal */}
-        <DialogPrimitive.Close className="w-6 h-6 text-white flex justify-center items-center bg-gradient-to-r rounded-lg from-[#08129C] to-[#072056] border border-white ring-offset-background focus:ring-ring data-[state=open]:bg-accent data-[state=open]:text-muted-foreground absolute top-0 right-0 opacity-70 transition-opacity hover:opacity-100 disabled:pointer-events-none [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4">
+        <DialogPrimitive.Close className="w-8 h-8 text-white flex justify-center items-center bg-gradient-to-r cursor-pointer rounded-lg from-[#08129C] to-[#072056] border border-white ring-offset-background focus:ring-ring data-[state=open]:bg-accent data-[state=open]:text-muted-foreground absolute -top-4 -right-4 z-50 hover:scale-105 disabled:pointer-events-none [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4">
           <XIcon />
           <span className="sr-only">Close</span>
         </DialogPrimitive.Close>
+        </div>
 
         {/* Scrolling content area */}
         <div className="overflow-y-auto scrollbar-hide max-h-[calc(90vh-3rem)] pr-1">

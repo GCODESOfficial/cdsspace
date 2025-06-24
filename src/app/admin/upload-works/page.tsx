@@ -145,9 +145,7 @@ export default function UploadWorkPage() {
                 isFullWidth: image.isFullWidth ?? false,
                 spanRows: image.spanRows ?? 1,
                 ...image.transformations,
-              },
-              caption: image.caption || null,
-              alt_text: image.alt_text || null,
+              }
             }
           }),
         )
@@ -185,31 +183,31 @@ export default function UploadWorkPage() {
   }
 
   return (
-    <div className="min-h-screen bg-white text-black p-6">
+    <div className="min-h-screen bg-white text-[#020839] p-6 pt-10">
       <div className="max-w-6xl mx-auto">
         <div className="flex justify-between items-center">
           <h1 className="text-3xl font-bold">Upload New Work</h1>
-          <Button variant="outline" onClick={() => router.push("/admin")}>
+          <Button variant="outline" className="hover:bg-blue-50 cursor-pointer" onClick={() => router.push("/admin")}>
             Cancel
           </Button>
         </div>
 
-        <form onSubmit={handleSubmit} className="space-y-6 mt-6">
+        <form onSubmit={handleSubmit} className="space-y-20 mt-24">
           <Card>
             <CardContent className="p-6 space-y-4">
               <div>
-                <Label htmlFor="title">Title</Label>
+                <Label htmlFor="title" className="mb-2 text-lg">Title</Label>
                 <Input
                   id="title"
                   value={title}
                   onChange={handleTitleChange}
                   placeholder="Enter project title"
-                  className="bg-wite border-gray-700"
+                  className="bg-white border-gray-300"
                 />
               </div>
 
               <div>
-                <Label htmlFor="description">Description</Label>
+                <Label htmlFor="description" className="mb-2 text-lg">Description</Label>
                 <Textarea
                   id="description"
                   value={description}
@@ -232,9 +230,9 @@ export default function UploadWorkPage() {
             <Button
               type="button"
               onClick={handleContinueToUpload}
-              className="bg-green-600 hover:bg-green-700 px-6 py-2 text-lg font-medium"
+              className="bg-gradient-to-r rounded-lg from-[#08129C] to-[#072056] cursor-pointer text-white px-6 py-2 text-lg font-medium"
             >
-              Continue to Upload
+              NEXT
             </Button>
           </div>
         </form>
@@ -245,7 +243,7 @@ export default function UploadWorkPage() {
             <div className="bg-white p-6 rounded-lg max-w-md w-full">
               <h2 className="text-xl font-bold mb-4">Finalize Upload</h2>
 
-              <div className="space-y-4 mb-6">
+              <div className="space-y-4 mb-6 cursor-pointer">
                 <div>
                   <label htmlFor="category" className="block text-sm font-medium mb-1">
                     Select Category
@@ -278,7 +276,7 @@ export default function UploadWorkPage() {
                     className="w-full bg-white border border-gray-300 rounded-md p-2"
                   />
                   {coverImagePreview && (
-                    <div className="mt-2 relative aspect-video rounded-md overflow-hidden">
+                    <div className="mt-2 relative aspect-video rounded-md overflow-hidden cursor-pointer">
                       <img
                         src={coverImagePreview || "/placeholder.svg"}
                         alt="Cover preview"
@@ -294,7 +292,7 @@ export default function UploadWorkPage() {
                   type="button"
                   onClick={() => setShowModal(false)}
                   disabled={isSubmitting}
-                  className="px-4 py-2 border border-gray-300 rounded-md hover:bg-blue-50"
+                  className="px-4 py-2 border border-gray-300 rounded-md hover:bg-blue-50 cursor-pointer"
                 >
                   Cancel
                 </button>
@@ -302,7 +300,7 @@ export default function UploadWorkPage() {
                   type="button"
                   onClick={handleFinalSubmit}
                   disabled={isSubmitting}
-                  className="px-4 py-2 bg-green-600 hover:bg-green-700 rounded-md"
+                  className="px-4 py-2 bg-gradient-to-r from-[#08129C] to-[#072056] cursor-pointer text-white rounded-md"
                 >
                   {isSubmitting ? "Uploading..." : "Upload Work"}
                 </button>

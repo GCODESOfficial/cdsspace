@@ -111,14 +111,14 @@ export function CarrierLinkModal({ isOpen, onClose }: CarrierLinkModalProps) {
 							type="button"
 							variant="outline"
 							onClick={onClose}
-							className="bg-transparent rounded-lg border-[#072056] hover:text-white hover:bg-[#08129C]"
+							className="bg-transparent rounded-lg border-[#072056] hover:bg-blue-50 cursor-pointer"
 						>
 							Cancel
 						</Button>
 						<Button
 							type="submit"
 							disabled={isLoading}
-							className="bg-gradient-to-r from-[#08129C] to-[#072056] text-white rounded-lg hover:shadow-[0_0_15px_4px_rgba(255,255,255,0.3)] transition-shadow duration-300"
+							className="bg-gradient-to-r from-[#08129C] to-[#072056] text-white rounded-lg hover:scale-105 cursor-pointer"
 						>
 							{isLoading ? "Updating..." : "Update Link"}
 						</Button>

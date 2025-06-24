@@ -15,7 +15,7 @@ export const CATEGORIES = [
     name: "UX/UI Design & Website Development",
     slug: "uxui-design",
     description: "We pay keen attention to user experience, this enabling consumers engross in the brand while using its platform.",
-    category_description: "We create engaging and highly aesthetic digital solutions with the help of UI/UX Design & Website Development solutions. We pay extensive attention to the user experience and develop websites, which are not only beautiful but also effective and sensitive. This approach also helps to avoid such issues as getting lost in application, low attraction of users and poor performance of the final result, which gives your company’s website a proper image of your company and helps to achieve your corporate objectives."
+    category_description: "We create engaging and highly aesthetic digital solutions with the help of UI/UX Design & Website Development solutions.\n\nWe pay extensive attention to the user experience and develop websites, which are not only beautiful but also effective and sensitive. This approach also helps to avoid such issues as getting lost in application, low attraction of users and poor performance of the final result, which gives your company’s website a proper image of your company and helps to achieve your corporate objectives."
   },
   {
     name: "Event Branding & Print Logistics",
@@ -30,15 +30,15 @@ export const CATEGORIES = [
     category_description: "Event Branding & printing Logistics \n\nWe offer full-scale Event Branding & print Logistics solutions, so your brand would be distinctive and memorable.\n\nOur Event Branding scope ranges from creating captivating stage designs, backdrops, roll-up banners to creating high quality printed materials that will effectively promote your Brand's products or services.\n\nReliability is absolute when delivering your brand message to your audience and our logistics team are adequately trained to ensure your event is a success"
   },
   {
-    name: "3D Modeling (AR & NFT)",
+    name: "3D Modeling (AR & VR)",
     slug: "3d-modeling",
     description: "We creates highly detailed 3D models that help in improving and give you product a virtual reality in the virtual spaces, bringing out the best of your brand.",
     category_description: "3D Modeling for AR & VR; we produce 3D models for Augmented Reality and Virtual Reality; using powerful digital environments. Our professional staff creates highly detailed 3D models that help in improving the aesthetics of the augmented and virtual spaces, bringing out the best of your brand."
   },
   {
-    name: "Video Editing",
-    slug: "video-editing",
-    description: "Story-driven video content with engaging cuts, transitions, and sound design to elevate your message.",
+    name: "Corporate Documents",
+    slug: "corporate-documents",
+    description: "We craft compelling corporate documents that resonate with stakeholders and elevate brand narratives. From company profiles and brochures to annual reports and pitch decks, our designs blend clarity with creativity, ensuring your message is both impactful and memorable.",
     category_description: "Whether it’s a promo reel or narrative sequence, we turn raw footage into polished, compelling edits."
   },
 ]

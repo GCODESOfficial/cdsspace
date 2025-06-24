@@ -15,23 +15,23 @@ export default function StatSection() {
 
   return (
     <div
-      className="flex h-40 items-center justify-around text-center bg-[#EDF0F6]"
+      className="flex md:h-40 h-24 items-center justify-around text-center bg-[#EDF0F6] text-[#020839]"
       ref={ref}
     >
       <div data-aos="zoom-in">
-        <h2 className="text-3xl font-extrabold">
+        <h2 className="text-2xl md:text-4xl font-black">
           {inView ? <CountUp end={1024} duration={2} /> : 0}+
         </h2>
         <p>Brands</p>
       </div>
       <div data-aos="zoom-in" data-aos-delay="100">
-        <h2 className="text-3xl font-extrabold">
+        <h2 className="text-2xl md:text-4xl font-black">
           {inView ? <CountUp end={50} duration={2} /> : 0}+
         </h2>
         <p>Events</p>
       </div>
       <div data-aos="zoom-in" data-aos-delay="200">
-        <h2 className="text-3xl font-extrabold">
+        <h2 className="text-2xl md:text-4xl font-black">
           {inView ? <CountUp end={10} duration={2} /> : 0}+
         </h2>
         <p>Countries</p>

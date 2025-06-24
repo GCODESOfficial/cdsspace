@@ -12,6 +12,7 @@ import Image from "next/image";
 import { useEffect, useRef, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import Link from "next/link";
+import { getSlugFromTitle } from "@/lib/utils";
 
 export default function FeaturedBrandsCarousel() {
 	const carouselRef = useRef<HTMLDivElement | null>(null);
@@ -116,10 +117,10 @@ export default function FeaturedBrandsCarousel() {
 	}, [isMobile]);
 
 	return (
-		<section className="py-32 px-6 bg-[#EDF0F6]">
-			<div className="max-w-6xl mx-auto">
+		<section className="md:py-32 md:px-20 py-20 px-6 bg-[#EDF0F6]">
+			<div className="mx-auto">
 				<div className="md:flex justify-between items-center mb-20">
-					<h2 className="md:text-5xl text-5xl font-extrabold mb-10 md:mb-0">
+					<h2 className="text-5xl font-bold mb-10 md:mb-0">
 						Featured Brands
 					</h2>
 					<Link
@@ -132,19 +133,21 @@ export default function FeaturedBrandsCarousel() {
 
 				{/* Mobile View: Vertical Stack */}
 				{isMobile ? (
-					<div className="space-y-4">
+					<div className="md:space-y-4 space-y-8">
 						{selectedWorks.map((work) => (
 							<div
 								key={work.id}
 								className="relative w-full h-[300px] rounded-xl overflow-hidden shadow bg-white"
 							>
 								{work.cover_image ? (
+									<Link href={`/Works/work/${getSlugFromTitle(work.title)}`}>
 									<Image
 										src={work.cover_image}
 										alt={work.title || "Featured Work"}
 										fill
 										className="object-cover"
 									/>
+									</Link>
 								) : (
 									<div className="flex items-center justify-center w-full h-full text-gray-400 text-sm">
 										No Image
@@ -167,12 +170,14 @@ export default function FeaturedBrandsCarousel() {
 										<CarouselItem key={work.id} className="pl-4 md:basis-1/4">
 											<div className="relative w-full h-[250px] rounded-xl overflow-hidden shadow bg-white">
 												{work.cover_image ? (
+													<Link href={`/Works/work/${getSlugFromTitle(work.title)}`}>
 													<Image
 														src={work.cover_image}
 														alt={work.title || "Featured Work"}
 														fill
-														className="object-cover"
+														className="object-cover cursor-pointer"
 													/>
+													</Link>
 												) : (
 													<div className="flex items-center justify-center w-full h-full text-gray-400 text-sm">
 														No Image

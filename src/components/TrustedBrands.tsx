@@ -14,17 +14,17 @@ const groupedLogos = [
 
 export default function TrustedBrands() {
   return (
-    <section className="md:pb-32 py-24 bg-gradient-to-b from-white to-slate-100">
-      <div className="container mx-auto text-center">
-        <h2 className="text-lg font-semibold mb-10 px-8 tracking-widest text-gray-700 uppercase">
+    <section className="md:pb-32 py-24 bg-gradient-to-b from-white to-slate-100 overflow-hidden">
+      <div className="text-center w-full">
+        <h2 className="text-lg font-semibold mb-16 px-8 tracking-widest text-gray-700 uppercase">
           Brands and Projects That Trust Our Services
         </h2>
 
         <div className="space-y-8 sm:space-y-10">
           {groupedLogos.map((src, rowIdx) => (
-            <div key={rowIdx} className="relative overflow-hidden w-full">
+            <div key={rowIdx} className="overflow-hidden w-screen">
               <div
-                className={`flex min-w-max gap-6 sm:gap-10 ${
+                className={`flex md:w-max gap-6 w-[350%] ${
                   rowIdx % 2 === 0 ? 'animate-scroll-left' : 'animate-scroll-right'
                 }`}
               >
@@ -33,9 +33,9 @@ export default function TrustedBrands() {
                     key={i}
                     src={src}
                     alt={`Logo Row ${rowIdx + 1} Copy ${i + 1}`}
-                    width={1500}
+                    width={1920}
                     height={100}
-                    className="shrink-0 w-[900px] sm:w-[1500px] h-auto"
+                    className="shrink-0 md:w-screen md:h-auto w-[3840px] h-[40px] object-contain"
                     priority
                   />
                 ))}

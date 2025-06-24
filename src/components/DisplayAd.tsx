@@ -5,6 +5,7 @@ import Image from 'next/image';
 import { useEffect, useRef, useState } from 'react';
 import { supabase } from '@/lib/supabase';
 import clsx from 'clsx';
+import { ArrowLeft, ArrowRight } from 'lucide-react'
 
 interface Ad {
   id: string;
@@ -59,9 +60,9 @@ export default function DisplayAdCarousel() {
       onTouchStart={handleMouseEnter}
       onTouchEnd={handleMouseLeave}
     >
-      <div className="max-w-7xl mx-auto relative overflow-hidden">
+      <div className="mx-auto relative overflow-hidden">
         {/* Carousel */}
-        <div className="relative w-full h-[400px] overflow-hidden shadow">
+        <div className="relative w-full md:h-[400px] h-[180px] overflow-hidden shadow">
           {ads.length === 0 ? (
             <div className="text-center text-gray-400 py-12">No ads available</div>
           ) : (
@@ -74,8 +75,9 @@ export default function DisplayAdCarousel() {
               <Image
                 src={ads[currentIndex].image_path}
                 alt={`Ad ${currentIndex + 1}`}
-                fill
-                className="object-cover w-full h-full"
+                width={800} // Set actual width and height (or aspect ratio)
+  height={200}
+                className="object-cover h-full md:w-screen"
                 priority
               />
             </a>
@@ -83,13 +85,13 @@ export default function DisplayAdCarousel() {
 
           {/* Dots inside image */}
           {ads.length > 1 && (
-            <div className="absolute bottom-14 left-1/2 -translate-x-1/2 flex gap-2 z-20">
+            <div className="absolute md:bottom-5 bottom-2 left-1/2 -translate-x-1/2 flex gap-2 z-20">
               {ads.map((_, index) => (
                 <span
                   key={index}
                   className={clsx(
-                    'h-2 rounded-full transition-all duration-300',
-                    index === currentIndex ? 'w-6 bg-white' : 'w-2 bg-white/50'
+                    'md:h-2 h-1 rounded-full transition-all duration-300',
+                    index === currentIndex ? 'md:w-6 w-3 bg-[#D3D3D3]' : 'md:w-2 w-1 bg-white/50'
                   )}
                 />
               ))}
@@ -101,15 +103,15 @@ export default function DisplayAdCarousel() {
             <>
               <button
                 onClick={goToPrevious}
-                className="absolute left-4 top-1/2 -translate-y-1/2 z-20 px-2 py-1 text-white border border-white rounded-full hover:scale-110 transition cursor-pointer"
+                className="absolute left-4 top-1/2 -translate-y-1/2 z-20 md:px-2 md:py-2 p-1 text-[#D3D3D3]  border border-[#D3D3D3] rounded-full hover:scale-110 transition cursor-pointer"
               >
-                ←
+               <ArrowLeft className="md:w-4 md:h-4 w-2 h-2" />
               </button>
               <button
                 onClick={goToNext}
-                className="absolute right-4 top-1/2 -translate-y-1/2 z-20 px-2 py-1 text-white border border-white rounded-full hover:scale-110 transition cursor-pointer"
+                className="absolute right-4 top-1/2 -translate-y-1/2 z-20 md:px-2 md:py-2 p-1 text-[#D3D3D3] border border-[#D3D3D3] rounded-full hover:scale-110 transition cursor-pointer"
               >
-                →
+               <ArrowRight className="md:w-4 md:h-4 w-2 h-2" />
               </button>
             </>
           )}

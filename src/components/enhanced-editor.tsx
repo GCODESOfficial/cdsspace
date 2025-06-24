@@ -381,10 +381,10 @@ export function EnhancedEditor({ initialImages = [], onImagesChange }: EnhancedE
   const gridRows = createGridLayout()
 
   return (
-    <div className="space-y-4 text-white" ref={containerRef}>
-      <div className="flex justify-between items-center">
+    <div className="space-y-4 text-blue-300" ref={containerRef}>
+      <div className="flex justify-between items-center text-[#020839]">
         <h3 className="text-lg font-medium">Project Images ({images.length})</h3>
-        <Button type="button" variant="outline" size="sm" onClick={() => fileInputRef.current?.click()}>
+        <Button type="button" className="hover:bg-blue-50 cursor-pointer" variant="outline" size="sm" onClick={() => fileInputRef.current?.click()}>
           Add Images
         </Button>
         <Input
@@ -585,7 +585,7 @@ export function EnhancedEditor({ initialImages = [], onImagesChange }: EnhancedE
                         handleRemoveImage(index)
                       }}
                     >
-                      <Trash2 className="h-3 w-3" />
+                      <Trash2 className="h-3 w-3 text-red-500" />
                     </Button>
                   </div>
 
@@ -594,7 +594,7 @@ export function EnhancedEditor({ initialImages = [], onImagesChange }: EnhancedE
                   </div>
 
                   {spanRows > 1 && (
-                    <div className="absolute top-1 left-8 bg-background/80 rounded-md px-1 text-xs">
+                    <div className="absolute top-1 left-8 bg-background/80 rounded-md px-1 text-xs text-[#020839]">
                       {spanRows} rows
                     </div>
                   )}
@@ -604,7 +604,7 @@ export function EnhancedEditor({ initialImages = [], onImagesChange }: EnhancedE
           ))}
         </div>
       ) : (
-        <div className="border rounded-md p-8 text-center text-muted-foreground">
+        <div className="border text-[#020839] border-gray-300 rounded-md p-8 text-center text-muted-foreground cursor-pointer" onClick={() => fileInputRef.current?.click()}>
           <Move className="mx-auto h-8 w-8 mb-2 opacity-50" />
           <p>Drag and drop images here or click &quot;Add Images&quot;</p>
         </div>
@@ -612,7 +612,7 @@ export function EnhancedEditor({ initialImages = [], onImagesChange }: EnhancedE
 
       {/* Caption editing modal */}
       {editingCaption && selectedIndex !== null && (
-        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50">
+        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 text-[#020839]">
           <div className="bg-[#1a1a2e] p-6 rounded-lg max-w-md w-full">
             <h2 className="text-xl font-bold mb-4">Add Caption</h2>
             <div className="mb-4">
@@ -635,7 +635,7 @@ export function EnhancedEditor({ initialImages = [], onImagesChange }: EnhancedE
 
       {/* Alt text editing modal */}
       {editingAltText && selectedIndex !== null && (
-        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50">
+        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 text-[#020839]">
           <div className="bg-[#1a1a2e] p-6 rounded-lg max-w-md w-full">
             <h2 className="text-xl font-bold mb-4">Add Alt Text</h2>
             <div className="mb-4">
@@ -661,7 +661,7 @@ export function EnhancedEditor({ initialImages = [], onImagesChange }: EnhancedE
 
       {/* Debug section - only visible in development */}
       {process.env.NODE_ENV === "development" && (
-        <details className="mt-4 p-2 border border-dashed border-gray-700 rounded-md">
+        <details className="mt-4 p-2 border border-dashed border-gray-700 rounded-md text-[#020839]">
           <summary className="cursor-pointer text-sm">Debug Information</summary>
           <div className="mt-2 text-xs">
             <p>Images Count: {images.length}</p>

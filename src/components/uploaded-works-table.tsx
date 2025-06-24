@@ -14,7 +14,6 @@ import {
 import {
 	getWorks,
 	deleteWork,
-	searchWorks,
 	sortWorks,
 	type Work,
 	type SortBy,
@@ -72,17 +71,23 @@ export function UploadedWorksTable({
 		}
 	};
 
-	const handleSearch = async (query: string) => {
-		try {
-			const searchResults = await searchWorks(query);
-			const sortedResults = sortWorks(searchResults, sortBy, sortOrder);
-			setFilteredWorks(sortedResults);
-			setTotalPages(Math.ceil(sortedResults.length / itemsPerPage));
-			setCurrentPage(1);
-		} catch (error) {
-			console.error("Error searching works:", error);
+	const handleSearch = (query: string) => {
+		let results = works;
+	
+		if (query.trim()) {
+			const lowerQuery = query.toLowerCase();
+			results = works.filter((work) =>
+				work.title.toLowerCase().includes(lowerQuery) ||
+				work.category.toLowerCase().includes(lowerQuery)
+			);
 		}
+	
+		const sortedResults = sortWorks(results, sortBy, sortOrder);
+		setFilteredWorks(sortedResults);
+		setTotalPages(Math.ceil(sortedResults.length / itemsPerPage));
+		setCurrentPage(1);
 	};
+	
 
 	const handleLocalSearchChange = (e: ChangeEvent<HTMLInputElement>) => {
 		const query = e.target.value;
@@ -205,7 +210,7 @@ export function UploadedWorksTable({
 										</td>
 
 										<td className="py-2 px-10 flex space-x-1">
-											<Link href={`/work/${work.id}`} target="_blank">
+											<Link href={`/admin/works/${work.id}`} target="_blank">
 												<Button
 													size="sm"
 													variant="ghost"

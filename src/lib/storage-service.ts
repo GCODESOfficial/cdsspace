@@ -83,25 +83,23 @@ const mapCarrierLinkFromDb = (row: any): CarrierLink => ({
 });
 
 // File upload functions
+
 export async function uploadFile(file: File, folder: string): Promise<string> {
-	const fileExt = file.name.split(".").pop() || "";
-	const filePath = `${folder}/${uuidv4()}.${fileExt}`;
+  const extension = file.name.split('.').pop(); // Preserve original file extension
+  const filePath = `${folder}/${uuidv4()}.${extension}`;
 
-	const { error } = await supabase.storage
-		.from("media")
-		.upload(filePath, file);
+  const { error } = await supabase.storage.from("media").upload(filePath, file);
 
-	if (error) {
-		console.error("Error uploading file:", error);
-		throw new Error(`Failed to upload file: ${error.message}`);
-	}
+  if (error) {
+    console.error("Error uploading file:", error);
+    throw new Error(`Failed to upload file: ${error.message}`);
+  }
 
-	const publicUrl = supabase.storage
-		.from("media")
-		.getPublicUrl(filePath);
+  const publicUrl = supabase.storage.from("media").getPublicUrl(filePath);
 
-	return publicUrl.data.publicUrl;
+  return publicUrl.data.publicUrl;
 }
+
 
 export async function deleteFile(url: string): Promise<void> {
 	try {
@@ -473,7 +471,7 @@ export async function updateBrandOrder(brandIds: string[]): Promise<void> {
 
 // Advertisement logic (enhanced with ad limit and better UX)
 
-const MAX_ADS = 3; // Set your ad limit
+const MAX_ADS = 10; // Set your ad limit
 
 export async function getAdvertisements(): Promise<Advertisement[]> {
 	try {

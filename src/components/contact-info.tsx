@@ -55,6 +55,14 @@ const socialItems: SocialItem[] = [
     name: "LinkedIn",
     link: "https://linkedin.com",
   },
+  {
+    name: "Youtube",
+    link: "https://www.youtube.com/@cdsspacelive",
+  },
+  {
+    name: "WhatsApp",
+    link: "https://wa.me/message/V7K4SBQW7METG1",
+  },
 ]
 
 export default function ContactInfo() {

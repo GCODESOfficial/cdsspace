@@ -42,12 +42,12 @@ export default function VideoPreviewPlayer() {
   };
 
   return (
-    <div id="video-section" className="relative w-full max-w-7xl mx-auto flex perspective-1000">
+    <div id="video-section" className="relative md:w-screen h-screen md:h-auto mx-auto flex perspective-1000 mt-16 md:mt-0 overflow-hidden">
       <div className="relative w-full aspect-video overflow-hidden flex-grow">
 
         {/* Preview Video */}
 <div
-  className={`absolute w-full h-full object-contain z-30 transition-all duration-700 ease-in-out ${
+  className={`absolute md:w-screen md:h-full h-screen object-cover z-30 transition-all duration-700 ease-in-out ${
     isPlaying ? 'opacity-0 scale-90 rotate-y-12' : 'opacity-100 scale-100 rotate-y-0'
   }`}
 >
@@ -58,14 +58,14 @@ export default function VideoPreviewPlayer() {
       loop
       muted
       playsInline
-      className="w-full h-full object-contain"
+      className="md:w-screen w-full md:h-full h-screen object-cover"
     />
   )}
 </div>
 
 {/* Main Video */}
 <div
-  className={`absolute w-full h-full object-contain z-40 ${
+  className={`absolute md:w-screen md:h-full h-screen object-cover z-40 ${
     isPlaying
       ? 'opacity-100 scale-100 rotate-y-0'
       : 'opacity-0 scale-90 -rotate-y-12'
@@ -78,7 +78,7 @@ export default function VideoPreviewPlayer() {
       loop
       muted={isMuted}
       playsInline
-      className="w-full h-full object-contain"
+      className="md:w-screen w-full md:h-full h-screen object-cover"
     />
   )}
 </div>
@@ -86,16 +86,28 @@ export default function VideoPreviewPlayer() {
         {/* WATCH REEL Tracker */}
         {!isPlaying && (
           <div
-            className="absolute inset-0 z-50 cursor-pointer"
+            className="absolute inset-0 z-40 cursor-pointer"
             onClick={handleWatchReelClick}
             onMouseEnter={() => setIsHovering(true)}
             onMouseLeave={() => setIsHovering(false)}
             onMouseMove={(e) => setMousePos({ x: e.nativeEvent.offsetX, y: e.nativeEvent.offsetY })}
           >
+             {/* Mobile Static View */}
+    <div className="md:hidden absolute inset-0 flex items-center justify-center pointer-events-none">
+      <div className="text-white font-bold text-center space-y-3">
+      <div className="color-cycle rounded-full shadow-md leading-tight text-center flex justify-center items-center w-28 h-28 animate-pulse font-semibold">
+      WATCH<br />REEL
+        </div>
+        <Image src="/images/cds-logo.svg" alt="CDS Logo" width={80} height={30} className="mx-auto" />
+        <div className="text-sm">2024+♾️</div>
+      </div>
+    </div>
+
+    {/* Desktop Hover Tracker */}
             {isHovering && (
               <div
                 ref={trackerRef}
-                className="absolute pointer-events-none transition-opacity duration-200"
+                className="hidden md:block absolute pointer-events-none transition-opacity duration-200"
                 style={{
                   left: mousePos.x,
                   top: mousePos.y,
@@ -120,21 +132,21 @@ export default function VideoPreviewPlayer() {
 
       {/* Controls */}
       {isPlaying && (
-        <div className="absolute top-1/2 transform -translate-y-1/2 right-4 flex flex-col gap-6 z-40 scale-50 md:scale-100">
+        <div className="absolute md:top-1/2 transform -translate-y-1/2 md:right-4 right-0 bottom-2 flex flex-col gap-6 z-40 scale-50 md:scale-100">
           <button onClick={toggleSound} className="bg-white text-[#020839] p-3 rounded-full shadow-md">
             {isMuted ? (
-              <svg xmlns="http://www.w3.org/2000/svg" className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <svg xmlns="http://www.w3.org/2000/svg" className="md:w-6 md:h-6 w-12 h-12" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5v14l-5-5H2V10h2l5-5zM15 9l6 6M21 9l-6 6" />
               </svg>
             ) : (
-              <svg xmlns="http://www.w3.org/2000/svg" className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <svg xmlns="http://www.w3.org/2000/svg" className="md:w-6 md:h-6 w-12 h-12" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5v14l-5-5H2V10h2l5-5zm7.5 1.5a9 9 0 010 12M18 8.25a5.25 5.25 0 010 7.5" />
               </svg>
             )}
           </button>
 
           <button onClick={goBackToPreview} className="bg-white p-3 flex justify-center items-center rounded-full shadow-md">
-            <Image src="/images/download (1).jpeg" width={24} height={24} alt="Back" className="w-6 h-6" />
+            <Image src="/images/download (1).jpeg" width={24} height={24} alt="Back" className="md:w-6 md:h-6 w-12 h-12" />
           </button>
         </div>
       )}

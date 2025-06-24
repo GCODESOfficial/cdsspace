@@ -10,17 +10,24 @@ import { SonnerProvider } from '@/components/sonner-provider';
 import { AuthProvider } from '@/contexts/auth-context';
 import Navbar from '@/components/navbar'; // Adjust path if needed
 import Footer from '@/components/footer'; // Adjust path if needed
+import { logVisit } from '@/utils/logVisit';
 
 export default function LayoutWrapper({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const isAdmin = pathname.startsWith('/admin');
   const isLogin = pathname.startsWith('/login');
   const isLinks = pathname.startsWith('/Links');
+  const is404 = pathname === '/404' || pathname === '/not-found';
 
   useEffect(() => {
     AOS.init({ duration: 800, once: true });
     AOS.refresh(); // <- forces recalculation
   }, []);
+
+  useEffect(() => {
+    logVisit();
+  }, []);
+  
   
 
   return (
@@ -28,7 +35,7 @@ export default function LayoutWrapper({ children }: { children: React.ReactNode 
       <AuthProvider>
         {!isAdmin && !isLogin && !isLinks && <Navbar />}
         <main>{children}</main>
-        {!isAdmin && !isLogin && !isLinks && <Footer />}
+        {!isAdmin && !isLogin && !isLinks && !is404 && <Footer />}
         <SonnerProvider />
       </AuthProvider>
     </ThemeProvider>

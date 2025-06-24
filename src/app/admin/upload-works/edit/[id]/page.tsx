@@ -124,8 +124,6 @@ export default function EditWorkPage() {
           isFullWidth: img.transformations?.isFullWidth ?? false,
           spanRows: img.transformations?.spanRows || 1,
           transformations: img.transformations || {},
-          caption: img.caption,
-          alt_text: img.alt_text,
         }))
 
         console.log("Processed images:", processedImages)
@@ -190,8 +188,11 @@ export default function EditWorkPage() {
 
   const handleSubmit = (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault()
-    validateForm()
+    if (validateForm()) {
+      handleFinalSubmit()
+    }
   }
+  
 
   const handleFinalSubmit = async () => {
     if (!coverImage && !originalCoverImage) {
@@ -300,9 +301,7 @@ export default function EditWorkPage() {
                 isFullWidth: image.isFullWidth ?? false,
                 spanRows: image.spanRows ?? 1,
                 ...image.transformations,
-              },
-              caption: image.caption || null,
-              alt_text: image.alt_text || null,
+              }
             }
           }),
         )
@@ -321,13 +320,11 @@ export default function EditWorkPage() {
           .update({
             position: image.position,
             transformations: {
-              size: image.size ?? { width: 100, height: 100 },
-              isFullWidth: image.isFullWidth ?? false,
-              spanRows: image.spanRows ?? 1,
               ...image.transformations,
-            },
-            caption: image.caption || null,
-            alt_text: image.alt_text || null,
+              size: image.size ?? image.transformations?.size ?? { width: 100, height: 100 },
+              isFullWidth: image.isFullWidth ?? image.transformations?.isFullWidth ?? false,
+              spanRows: image.spanRows ?? image.transformations?.spanRows ?? 1,
+            }
           })
           .eq("id", image.id)
 
@@ -382,20 +379,20 @@ export default function EditWorkPage() {
   }
 
   return (
-    <div className="min-h-screen bg-white text-black p-6">
+    <div className="min-h-screen bg-white text-black p-6 pt-10">
       <div className="max-w-6xl mx-auto">
         <div className="flex justify-between items-center">
           <h1 className="text-3xl font-bold">Edit Work</h1>
-          <Button variant="outline" onClick={() => router.push("/admin")}>
+          <Button variant="outline" className="hover:bg-blue-50 cursor-pointer" onClick={() => router.push("/admin")}>
             Cancel
           </Button>
         </div>
 
-        <form onSubmit={handleSubmit} className="space-y-6 mt-6">
+        <form onSubmit={handleSubmit} className="space-y-20 mt-24">
           <Card>
             <CardContent className="p-6 space-y-4">
               <div>
-                <Label htmlFor="title">Title</Label>
+                <Label htmlFor="title" className="mb-2 text-lg">Title</Label>
                 <Input
                   id="title"
                   value={title}
@@ -406,7 +403,7 @@ export default function EditWorkPage() {
               </div>
 
               <div>
-                <Label htmlFor="description">Description</Label>
+                <Label htmlFor="description" className="mb-2 text-lg">Description</Label>
                 <Textarea
                   id="description"
                   value={description}
@@ -418,12 +415,12 @@ export default function EditWorkPage() {
               </div>
 
               <div>
-                <Label htmlFor="category">Category</Label>
+                <Label htmlFor="category" className="mb-2 text-lg">Category</Label>
                 <Select value={category} onValueChange={setCategory}>
                   <SelectTrigger className="bg-white border-gray-300">
                     <SelectValue placeholder="Select a category" />
                   </SelectTrigger>
-                  <SelectContent className="bg-[#1a1a2e] border-gray-300">
+                  <SelectContent className="bg-gradient-to-r rounded-lg from-[#08129C] to-[#072056] cursor-pointer text-white  border-gray-300">
                     {CATEGORIES.map((cat) => (
                       <SelectItem key={cat.slug} value={cat.name}>
                         {cat.name}
@@ -449,7 +446,7 @@ export default function EditWorkPage() {
           </Card>
 
           <div className="flex justify-end">
-            <Button type="button" onClick={handlePrepareSubmit} className="bg-green-600 hover:bg-green-700">
+            <Button type="button" onClick={handlePrepareSubmit} className="bg-gradient-to-r rounded-lg from-[#08129C] to-[#072056] cursor-pointer text-white ">
               Save Changes
             </Button>
           </div>
@@ -461,9 +458,9 @@ export default function EditWorkPage() {
               <DialogTitle>Finalize Update</DialogTitle>
             </DialogHeader>
 
-            <div className="space-y-4">
+            <div className="space-y-4 py-6">
               <div>
-                <Label htmlFor="coverImage">Cover Image</Label>
+                <Label htmlFor="coverImage" className="text-lg mb-2">Cover Image</Label>
                 <Input id="coverImage" type="file" accept="image/*" onChange={handleCoverImageChange} />
                 {(coverImagePreview || originalCoverImage) && (
                   <div className="mt-2 relative aspect-video rounded-md overflow-hidden">
@@ -478,10 +475,10 @@ export default function EditWorkPage() {
             </div>
 
             <DialogFooter>
-              <Button variant="outline" onClick={() => setIsModalOpen(false)} disabled={isSubmitting}>
+              <Button variant="outline" className="hover:bg-blue-50 cursor-pointer" onClick={() => setIsModalOpen(false)} disabled={isSubmitting}>
                 Cancel
               </Button>
-              <Button onClick={handleFinalSubmit} disabled={isSubmitting} className="bg-green-600 hover:bg-green-700">
+              <Button onClick={handleFinalSubmit} disabled={isSubmitting} className="bg-gradient-to-r rounded-lg from-[#08129C] to-[#072056] cursor-pointer text-white ">
                 {isSubmitting ? "Updating..." : "Update Work"}
               </Button>
             </DialogFooter>

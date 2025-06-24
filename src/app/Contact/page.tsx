@@ -4,9 +4,29 @@ import ContactInfo from "@/components/contact-info"
 import MapSection from "@/components/map-section"
 
 export const metadata: Metadata = {
-  title: "Contact Us | CDS Spaces",
-  description: "Get in touch with our team",
-}
+  title: "Contact Us - CDSSpace",
+  description: "Get in touch with CDSSpace for branding, development, and design services.",
+  openGraph: {
+    title: "Contact CDSSpace",
+    description: "Reach out for world-class branding and digital services.",
+    url: "https://cdsspace.com/contact",
+    type: "website",
+    images: [
+      {
+        url: "/images/Contact.jpg",
+        width: 1200,
+        height: 630,
+        alt: "Contact CDSSpace",
+      },
+    ],
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "Contact CDSSpace",
+    description: "Reach out for world-class branding and digital services.",
+    images: ["/images/Contact.jpg"],
+  },
+};
 
 export default function ContactPage() {
   return (
@@ -14,13 +34,13 @@ export default function ContactPage() {
       <div className="container mx-auto py-12">
         <div className="grid grid-cols-1 md:grid-cols-2 gap-8 items-center md:px-40 px-8 border-b-2 py-32 border-gray-400">
           <div className="space-y-4" data-aos="fade-right" data-aos-duration="1000">
-            <div className="md:text-8xl text-7xl font-extrabold">
+            <div className="md:text-8xl text-6xl font-extrabold">
               <h1>Let&apos;s</h1>
               <h1 className="">Partner</h1>
             </div>
             <p className="text-xl text-blue-500">and create magic together</p>
           </div>
-          <div className="relative h-[300px] md:h-[400px]" data-aos="fade-left" data-aos-duration="1000">
+          <div className="relative h-[200px] md:h-[400px]" data-aos="fade-left" data-aos-duration="1000">
             <Image src="/images/contacts.svg" alt="Partner banners" fill className="object-cover rounded-md" />
           </div>
         </div>

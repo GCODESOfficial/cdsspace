@@ -72,30 +72,31 @@ export default function Testimonials() {
   }, [isHovered]);
 
   return (
-    <section className="pt-32 bg-white">
-      <div className="container mx-auto px-4 text-center">
-       <div className='flex justify-between items-center mb-14 max-w-6xl mx-auto'>
-       <h2 className="text-3xl md:text-5xl font-bold ">Testimonials</h2>
-       
+    <section className="md:pt-32 pt-20 bg-white px-5 md:px-24 w-screen overflow-hidden">
+      <div className="w-full text-center">
+        <div className="flex md:flex-row flex-col justify-between items-center mb-14 w-full">
+          <h2 className="text-5xl font-bold">Testimonials</h2>
 
-       <a
-  href="https://g.page/r/CTOux0GUNmChEB0/review"
-  target="_blank"
-  rel="noopener noreferrer"
->
-  <button className="text-sm border px-5 py-2 rounded-full bg-[#040b37] text-white cursor-pointer">
-    Write a review
-  </button>
-</a>
+        
 
+          <a
+            href="https://g.page/r/CTOux0GUNmChEB0/review"
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            <button className="w-xs md:w-auto text-sm border md:px-5 py-2 rounded-full bg-[#040b37] text-white cursor-pointer mt-4 md:mt-0">
+              Write a review
+            </button>
+          </a>
+          
+        </div>
 
-       </div>
         {/* Grid layout on mobile */}
         <div className="grid gap-6 md:hidden">
           {testimonials.map((t, i) => (
             <div
               key={i}
-              className="bg-muted p-6 rounded-2xl shadow text-left bg-gradient-to-b from-blue-[#FFFFFF] to-[#DFEAF8]"
+              className="bg-muted p-6 rounded-2xl shadow text-left bg-gradient-to-b from-[#FFFFFF] to-[#DFEAF8]"
             >
               {t.logo && (
                 <Image
@@ -114,7 +115,7 @@ export default function Testimonials() {
           ))}
         </div>
 
-        {/* Carousel on md and up */}
+        {/* Carousel layout on desktop */}
         <div
           onMouseEnter={() => setIsHovered(true)}
           onMouseLeave={() => setIsHovered(false)}
@@ -122,7 +123,7 @@ export default function Testimonials() {
         >
           <Carousel
             opts={{ startIndex: current }}
-            className="w-full max-w-5xl mx-auto transition-all"
+            className="w-full mx-auto transition-all"
           >
             <CarouselContent>
               {testimonials.map((t, i) => (
@@ -130,7 +131,7 @@ export default function Testimonials() {
                   key={i}
                   className="basis-full md:basis-1/2 lg:basis-1/3 p-4"
                 >
-                  <div className="bg-muted p-6 py-10 rounded-2xl h-[23rem] bg-gradient-to-b from-blue-[#FFFFFF] to-[#DFEAF8] shadow text-left">
+                  <div className="bg-muted p-6 py-10 rounded-2xl h-[23rem] bg-gradient-to-b from-[#FFFFFF] to-[#DFEAF8] shadow text-left">
                     {t.logo && (
                       <Image
                         src={t.logo}
@@ -140,7 +141,9 @@ export default function Testimonials() {
                         className="mb-8"
                       />
                     )}
-                    <p className="text-gray-700 text-sm mb-7 text-justify">&quot;{t.text}&quot;</p>
+                    <p className="text-gray-700 text-sm mb-7 text-justify">
+                      &quot;{t.text}&quot;
+                    </p>
                     <p className="font-semibold text-primary tracking-tighter">
                       – {t.name} {t.emoji ?? ''}
                     </p>
@@ -155,9 +158,18 @@ export default function Testimonials() {
           </Carousel>
         </div>
 
-        <button className="mt-6 inline-flex items-center bg-primary text-white py-2 px-4 rounded-full hover:bg-primary/80">
-          Write a review
-        </button>
+        {/* Secondary CTA Button */}
+        <div className="mt-6">
+          <a
+            href="https://g.page/r/CTOux0GUNmChEB0/review"
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            <button className="inline-flex items-center bg-primary text-white py-2 px-4 rounded-full hover:bg-primary/80">
+              Write a review
+            </button>
+          </a>
+        </div>
       </div>
     </section>
   );

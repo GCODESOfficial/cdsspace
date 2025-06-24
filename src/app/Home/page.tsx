@@ -50,24 +50,71 @@ const Home = () => {
 	}, []);
 
 	return (
-		<div className="bg-white text-[#020839]">
+		<div className="bg-white text-[#020839] overflow-hidden">
 			<VideoPreviewPlayer />
 
 			<StatSection />
 
 			<div
-				className="p-8 rounded-lg my-32 flex flex-col items-center justify-between gap-8"
+				className="p-20 rounded-lg my-32 md:flex flex-col items-center justify-between gap-10 hidden"
 				data-aos="fade-in"
 			>
 				<div className="flex-1 space-y-4" data-aos="fade-right">
-					<div className="flex flex-col md:flex-row items-center justify-between md:gap-64 gap-28">
+					<div className="flex flex-col md:flex-row items-center md:justify-between gap-52 w-full max-w-none">
 						<div className="flex flex-col gap-6 w-sm">
 							<p className="text-black" data-aos="fade-up">
 								We are a branding and digital design agency that connects
 								people, brands, and cultures.
 							</p>
+							<p className="text-black" data-aos="fade-up" data-aos-delay="100">
+								Our service scope includes web3 & web2 product development,
+								Brand Identity Design, Industrial Print Production, Brand
+								Communications and Marketing, Environmental Branding, Brand
+								Consultancy
+							</p>
+
+							<Link
+								href="/Works"
+								className=" py-2 md:w-40 border border-gray-800 rounded-full hover:bg-gray-100 transition text-center"
+								data-aos="fade-up"
+								data-aos-delay="200"
+							>
+								See Our Project
+							</Link>
+						</div>
+
+						<div className="flex-1 " data-aos="fade-left">
+							<div className="text-center">
+								<Image
+									src="/images/CDS Space logo.svg"
+									alt="CDS Logo"
+									width={800}
+									height={800}
+									className="mx-auto w-[800px] h-auto"
+								/>
+							</div>
+						</div>
+					</div>
+				</div>
+			</div>
+
+			<div
+				className="p-4 px-6 rounded-lg my-20 flex flex-col items-center justify-center gap-8 md:hidden"
+				data-aos="fade-in"
+			>
+				<div
+					className="flex-1 space-y-4 justify-center flex"
+					data-aos="fade-right"
+				>
+					<div className="flex flex-col gap-24 justify-center">
+						
+						<div className="flex flex-col gap-6 justify-center">
+							<p className="text-black" data-aos="fade-up">
+								We are a branding and digital design agency that connects
+								people, brands, and cultures.
+							</p>
 							<p
-								className="text-black text-sm"
+								className="text-black"
 								data-aos="fade-up"
 								data-aos-delay="100"
 							>
@@ -77,14 +124,16 @@ const Home = () => {
 								Consultancy
 							</p>
 
-							<Link
-								href="/Works"
-								className=" py-2 md:w-40 w-full border border-gray-800 rounded-full hover:bg-gray-100 transition text-center"
-								data-aos="fade-up"
-								data-aos-delay="200"
-							>
-								See Our Project
-							</Link>
+							<div className="flex justify-center">
+								<Link
+									href="/Works"
+									className=" py-2 md:w-40 w-11/12 border border-gray-800 rounded-full hover:bg-gray-100 transition text-center"
+									data-aos="fade-up"
+									data-aos-delay="200"
+								>
+									See Our Project
+								</Link>
+							</div>
 						</div>
 
 						<div
@@ -97,7 +146,7 @@ const Home = () => {
 									alt="CDS Logo"
 									width={400}
 									height={400}
-									className="mx-auto"
+									className="mx-auto w-auto md:scale-100 md:w-auto md:h-auto"
 								/>
 							</div>
 						</div>
@@ -109,21 +158,33 @@ const Home = () => {
 				<DisplayAd />
 			</div>
 
-			<div className="min-h-screen flex flex-col md:flex-row items-center justify-center gap-12 md:gap-44 bg-gray-100 px-6 md:px-10 py-20 md:py-32">
+			<div className="min-h-screen flex flex-col md:flex-row items-center justify-center gap-12 md:gap-44 bg-gray-100 px-6 md:px-20 py-20 md:py-32">
 				{/* Text Section */}
-				<div className="text-center md:text-left mb-10 md:mb-0">
-					<h1 className="text-7xl md:text-7xl font-extrabold mb-6 leading-tight">
+				<div className="text-left mb-10 md:mb-0">
+					<h1 className="text-6xl md:text-7xl font-extrabold mb-6 leading-tight text-left">
 						<span className="text-blue-600 block">People</span>
 						<span className="text-black block">Brands</span>
 						<span className="text-orange-600 block">Identities</span>
 					</h1>
 
+
+					<Link
+								href="/About"
+								className="hidden md:block  py-2 px-4 md:w-40 border border-gray-800 rounded-full hover:bg-gray-100 transition text-center"
+								data-aos="fade-up"
+								data-aos-delay="200"
+							>
+								ABOUT US
+							</Link>
+
+					<div className="flex justify-center">
 					<Link
 						href="/About"
-						className="px-20 py-2 md:px-6 md:py-2 border rounded-full md:text-sm hover:bg-black hover:text-white transition"
+						className=" md:hidden w-11/12 text-center py-2 border rounded-full md:text-sm hover:bg-black hover:text-white transition"
 					>
 						ABOUT US
 					</Link>
+					</div>
 				</div>
 
 				{/* Image Section - remains horizontal on all screen sizes */}

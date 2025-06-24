@@ -81,10 +81,10 @@ export function AdvertisementModal({
 	const handleSubmit = async (e: FormEvent<HTMLFormElement>) => {
 		e.preventDefault();
 
-		if (ads.length >= 3) {
+		if (ads.length >= 10) {
 			toast({
 				title: "Limit Reached",
-				description: "Only 3 advertisements allowed at a time.",
+				description: "Only 10 advertisements allowed at a time.",
 				variant: "destructive",
 			});
 			return;
@@ -139,21 +139,21 @@ export function AdvertisementModal({
 
 	return (
 		<Dialog open={isOpen} onOpenChange={onClose}>
-			<DialogContent className="bg-white text-[#151D48] max-w-xl">
+			<DialogContent className="bg-white text-[#151D48] max-w-xl ">
 				<DialogHeader>
 					<DialogTitle>Manage Advertisements</DialogTitle>
 				</DialogHeader>
 
-				<Tabs value={activeTab} onValueChange={setActiveTab} className="pt-2">
+				<Tabs value={activeTab} onValueChange={setActiveTab} className="pt-4">
 					<TabsList className="grid w-full grid-cols-2 bg-[#D9D9D9]">
 						<TabsTrigger value="add">Add Advertisement</TabsTrigger>
 						<TabsTrigger value="manage">Manage Ads</TabsTrigger>
 					</TabsList>
 
 					<TabsContent value="add">
-						<form onSubmit={handleSubmit} className="space-y-4 pt-4">
+						<form onSubmit={handleSubmit} className="space-y-6 pt-4 pb-5">
 							<div>
-								<Label htmlFor="image">Upload Image</Label>
+								<Label htmlFor="image" className="mb-2">Upload Image</Label>
 								{preview ? (
 									<div className="relative w-full h-60 rounded-md overflow-hidden bg-[#D9D9D9] cursor-pointer">
 										<input
@@ -183,7 +183,7 @@ export function AdvertisementModal({
 							</div>
 
 							<div>
-								<Label htmlFor="link">Add Link</Label>
+								<Label htmlFor="link" className="mb-2">Add Link</Label>
 								<Input
 									id="link"
 									value={link}
@@ -198,14 +198,14 @@ export function AdvertisementModal({
 									type="button"
 									variant="outline"
 									onClick={onClose}
-									className="bg-transparent border-[#072056]"
+									className="bg-transparent border-[#072056] hover:bg-blue-50 cursor-pointer"
 								>
 									Cancel
 								</Button>
 								<Button
 									type="submit"
-									disabled={isLoading || ads.length >= 3}
-									className="bg-gradient-to-r from-[#08129C] to-[#072056] text-white"
+									disabled={isLoading || ads.length >= 10}
+									className="bg-gradient-to-r from-[#08129C] to-[#072056] text-white hover:scale-105 cursor-pointer"
 								>
 									{isLoading ? "Adding..." : "Add Advertisement"}
 								</Button>

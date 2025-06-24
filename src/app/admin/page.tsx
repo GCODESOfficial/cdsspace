@@ -13,6 +13,8 @@ import { FeaturedWorksList } from "@/components/featured-brands-list";
 import { getWorks } from "@/lib/storage-service";
 import Link from "next/link";
 import { LogOut, Search } from "lucide-react";
+import { logVisit } from "@/utils/logVisit";
+
 
 export default function AdminDashboard() {
 	const { signOut } = useAuth();
@@ -22,6 +24,30 @@ export default function AdminDashboard() {
 	const [searchQuery, setSearchQuery] = useState<string>("");
 	const [workCount, setWorkCount] = useState<number>(0);
 	const [isLoading, setIsLoading] = useState<boolean>(true);
+	const [visits, setVisits] = useState(0);
+  const [countryList, setCountryList] = useState<{ name: string; count: number }[]>([]);
+  const [last7days, setLast7days] = useState<{ date: string; count: number }[]>([]);
+  
+
+  useEffect(() => {
+	logVisit().catch((err) => console.error("Failed to log visit:", err));
+  }, []);
+  
+
+  useEffect(() => {
+    const fetchTraffic = async () => {
+      const res = await fetch("/api/traffic-summary");
+      const data = await res.json();
+      setVisits(data.total);
+      setCountryList(data.countries || []);
+      setLast7days(data.last7days || []);
+    };
+
+    fetchTraffic();
+    const interval = setInterval(fetchTraffic, 5000);
+    return () => clearInterval(interval);
+  }, []);
+  
 
 	useEffect(() => {
 		const fetchWorkCount = async () => {
@@ -118,37 +144,63 @@ export default function AdminDashboard() {
 						</div>
 					</Card>
 
-					<Card className="bg-gradient-to-r from-[#FFFFFF] to-[#5BA8FF] border-none rounded-lg p-6 h-40 w-auto">
-						<div className="flex flex-col space-y-4 items-start">
-							<div className="flex items-center">
-								<Image
-									src="/images/icon.svg"
-									alt="CDS Logo"
-									width={50}
-									height={50}
-									className="mr-4"
-								/>
-								<p className="text-lg text-[#425166]">Website Traffic</p>
-							</div>
-							<p className="text-4xl text-[#151D48] ml-2 font-bold">1000</p>
-						</div>
-					</Card>
+					<Card className="relative group bg-gradient-to-r from-[#FFFFFF] to-[#5BA8FF] border-none rounded-lg p-6 h-40 w-auto overflow-visible">
+            <div className="flex flex-col space-y-4 items-start">
+              <div className="flex items-center">
+                <Image
+                  src="/images/icon.svg"
+                  alt="Website Traffic"
+                  width={50}
+                  height={50}
+                  className="mr-4"
+                />
+                <p className="text-lg text-[#425166]">Website Traffic</p>
+              </div>
+              <p className="text-4xl text-[#151D48] ml-2 font-bold">{visits}</p>
+            </div>
 
-					<Card className="bg-gradient-to-r from-[#FFFFFF] to-[#5BA8FF] border-none rounded-lg p-6 h-40 w-auto">
-						<div className="flex flex-col space-y-4 items-start">
-							<div className="flex items-center">
-								<Image
-									src="/images/countries.svg"
-									alt="CDS Logo"
-									width={50}
-									height={50}
-									className="mr-4"
-								/>
-								<p className="text-lg tracking-tight text-[#425166]">Countries Joined In</p>
-							</div>
-							<p className="text-4xl text-[#151D48] ml-2 font-bold">10+</p>
-						</div>
-					</Card>
+            {/* Hover Overlay showing last 7 days count */}
+            <div className="absolute z-50 left-7 -top-20 mt-2 w-64 font-semibold text-sm text-gray-700 rounded-md shadow-lg bg-white  opacity-0 group-hover:opacity-100 pointer-events-none group-hover:pointer-events-auto transition-opacity duration-300 p-4">
+  {last7days.length > 0
+    ? `Last 7 Days Visits: ${last7days.reduce((acc, day) => acc + day.count, 0)}`
+    : "Loading..."}
+</div>
+          </Card>
+
+					<Card className="relative group bg-gradient-to-r from-[#FFFFFF] to-[#5BA8FF] border-none rounded-lg p-6 h-40 w-auto overflow-visible">
+  <div className="flex flex-col space-y-4 items-start">
+    <div className="flex items-center">
+      <Image
+        src="/images/countries.svg"
+        alt="Countries"
+        width={50}
+        height={50}
+        className="mr-4"
+      />
+      <p className="text-lg tracking-tight text-[#425166]">Countries Joined In</p>
+    </div>
+    <p className="text-4xl text-[#151D48] ml-2 font-bold">
+      {countryList.length}+
+    </p>
+  </div>
+
+  {/* Hover Overlay */}
+  <div className="absolute z-50 left-7 -top-20 mt-2 w-64 rounded-md shadow-lg bg-white text-black opacity-0 group-hover:opacity-100 pointer-events-none group-hover:pointer-events-auto transition-opacity duration-300 p-4">
+    <p className="font-semibold text-sm mb-2 text-gray-700">Traffic by Country</p>
+    <ul className="text-sm space-y-1 max-h-48 overflow-y-auto">
+      {countryList.map((c) => {
+        const percentage = ((c.count / visits) * 100).toFixed(1);
+        return (
+          <li key={c.name} className="flex justify-between">
+            <span className="text-gray-800">{c.name}</span>
+            <span className="text-gray-500">{percentage}%</span>
+          </li>
+        );
+      })}
+    </ul>
+  </div>
+</Card>
+
 				</div>
 
 				{/* Action Buttons */}
