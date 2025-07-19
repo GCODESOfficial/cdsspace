@@ -228,6 +228,17 @@ export default function AdminDashboard() {
 					>
 						Career Link
 					</Button>
+
+					<Link href="/admin/generate-code">
+						<Button className="bg-gradient-to-r from-[#FFFFFF] to-[#5BA8FF] text-[#2E0202] border-none text-xl h-20 w-full">
+							Generate Codes
+						</Button>
+					</Link>
+					<Link href="/admin/viewcodes">
+						<Button className="bg-gradient-to-r from-[#FFFFFF] to-[#5BA8FF] text-[#2E0202] border-none text-xl h-20 w-full">
+							View Codes
+						</Button>
+					</Link>
 				</div>
 
 				{/* Content Area */}

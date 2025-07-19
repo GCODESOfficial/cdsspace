@@ -184,15 +184,22 @@ for (let i = activeIdx + 1; i <= activeIdx + 3; i++) {
       <div className="fixed inset-0 z-30 pointer-events-none flex md:items-center justify-center items-start  mt-24 md:mt-0">
         {safeProjects.length > 0 && (
           <motion.img
-            key={getCircularIndex(activeIdx)}
-            src={safeProjects[getCircularIndex(activeIdx)].cover_image || '/placeholder.svg'}
-            alt={safeProjects[getCircularIndex(activeIdx)].title}
-            initial={{ opacity: 0, scale: 0.95 }}
-            animate={{ opacity: 1, scale: 1 }}
-            exit={{ opacity: 0, scale: 0.9 }}
-            transition={{ duration: 0.6, ease: 'easeInOut' }}
-            className="md:max-h-[80vh] md:h-full h-52 md:w-4/12 w-9/12 md:object-contain object-cover"
-          />
+          key={getCircularIndex(activeIdx)}
+          src={`${safeProjects[getCircularIndex(activeIdx)].cover_image}?width=800`}
+          srcSet={`
+            ${safeProjects[getCircularIndex(activeIdx)].cover_image}?width=800 800w,
+            ${safeProjects[getCircularIndex(activeIdx)].cover_image}?width=1600 1600w,
+            ${safeProjects[getCircularIndex(activeIdx)].cover_image}?width=2400 2400w
+          `}
+          sizes="(max-width: 768px) 90vw, 50vw"
+          alt={safeProjects[getCircularIndex(activeIdx)].title}
+          initial={{ opacity: 0, scale: 0.95 }}
+          animate={{ opacity: 1, scale: 1 }}
+          exit={{ opacity: 0, scale: 0.9 }}
+          transition={{ duration: 0.6, ease: 'easeInOut' }}
+          className="md:max-h-[80vh] md:h-full h-52 md:w-4/12 w-9/12 md:object-contain object-cover"
+        />
+        
         )}
       </div>
 

@@ -102,6 +102,9 @@ export default function Footer() {
 								<li>
 									<Link href="/Links">Links</Link>
 								</li>
+								<li>
+									<Link href="/logofolio">Logofolio</Link>
+								</li>
 							</ul>
 						</div>
 
