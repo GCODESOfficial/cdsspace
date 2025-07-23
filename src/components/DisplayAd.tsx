@@ -75,7 +75,7 @@ export default function DisplayAdCarousel() {
               <Image
                 src={ads[currentIndex].image_path}
                 alt={`Ad ${currentIndex + 1}`}
-                width={800} // Set actual width and height (or aspect ratio)
+                width={800} 
   height={200}
                 className="object-cover h-full md:w-screen"
                 priority
@@ -83,7 +83,7 @@ export default function DisplayAdCarousel() {
             </a>
           )}
 
-          {/* Dots inside image */}
+        
           {ads.length > 1 && (
             <div className="absolute md:bottom-5 bottom-2 left-1/2 -translate-x-1/2 flex gap-2 z-20">
               {ads.map((_, index) => (
