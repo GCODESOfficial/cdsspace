@@ -1,66 +1,79 @@
-/* eslint-disable @next/next/no-page-custom-font */
-import type { Metadata } from "next";
-import type React from "react";
-import "@/app/globals.css";
-import LayoutWrapper from "@/components/layoutwrapper";
-import ClientOnly from "@/components/ClientOnly";
+import type { Metadata, Viewport } from "next";
+import { Inter } from "next/font/google";
+import "./globals.css";
+
+const inter = Inter({
+  variable: "--font-sans",
+  subsets: ["latin"],
+});
+
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  themeColor: "#040b37",
+};
 
 export const metadata: Metadata = {
-  title: "CDS Space Branding Agency",
-  description:
-    "We help forward thinking brands and individuals create great experiences for their users, forging connections betweeb people, brands, and cultures. Our service scope includes web3 & web2 product development, Brand Identity Design, Industrial Print Production, Brand Communications and Marketing, Environmental Branding, Brand Consultancy",
+  metadataBase: new URL("https://cdsspace.pro"),
+  title: {
+    default: "CDS Space — Branding Agency | Brand Identity, Web Development & Industrial Print",
+    template: "%s | CDS Space",
+  },
+  description: "CDS Space is a full-service branding agency specializing in brand identity design, UI/UX, web development, industrial print production, and brand consultancy. We help forward-thinking brands create great experiences.",
   keywords: [
-    "CDSSpace",
-    "Branding",
-    "Branding Agency",
-    "UI/UX",
-    "Web Development",
-    "Event Branding",
-    "Print Logistics",
-    "Merch Printing & Packaging",
-    "Modelling",
-    "Brand Identity",
+    "CDS Space", "CDSSpace", "branding agency", "brand identity design",
+    "UI/UX design", "web development", "industrial print", "brand consultancy",
+    "logo design", "packaging design", "environmental branding",
+    "brand communications", "marketing agency", "creative agency",
+    "Web3 branding", "Uyo branding agency", "Nigeria branding agency",
   ],
-  authors: [{ name: "CDS Space", url: "https://cdsspace.com" }],
-  metadataBase: new URL("https://cdsspace.com"),
+  authors: [{ name: "CDS Space", url: "https://cdsspace.pro" }],
+  creator: "CDS Space",
+  publisher: "CDS Space",
+  alternates: {
+    canonical: "https://cdsspace.pro",
+  },
   openGraph: {
-    title: "CDS Space Branding Agency",
-    description:
-      "We help forward thinking brands and individuals create great experiences for their users, forging connections betweeb people, brands, and cultures. Our service scope includes web3 & web2 product development, Brand Identity Design, Industrial Print Production, Brand Communications and Marketing, Environmental Branding, Brand Consultancy",
+    title: "CDS Space — Branding Agency | Brand Identity, Web Development & Industrial Print",
+    description: "We help forward-thinking brands and individuals create great experiences, forging connections between people, brands, and cultures through premium design and production.",
+    url: "https://cdsspace.pro",
+    siteName: "CDS Space",
     images: [
       {
-        url: "/images/Metadata.png",
+        url: "/navbar/CDS Logo.svg",
         width: 1200,
         height: 630,
-        alt: "cdsspace Overview",
+        alt: "CDS Space Branding Agency",
       },
     ],
-    url: "https://cdsspace.com",
-    siteName: "CDS Space",
     locale: "en_US",
     type: "website",
   },
   twitter: {
     card: "summary_large_image",
-    title: "CDS Space Branding Agency",
-    description:
-      "We help forward thinking brands and individuals create great experiences for their users, forging connections betweeb people, brands, and cultures. Our service scope includes web3 & web2 product development, Brand Identity Design, Industrial Print Production, Brand Communications and Marketing, Environmental Branding, Brand Consultancy",
-    images: ["/images/Metadata.png"],
+    title: "CDS Space — Branding Agency",
+    description: "Full-service branding agency specializing in brand identity, UI/UX, web development, and industrial print production.",
     creator: "@cdsspace_",
+    site: "@cdsspace_",
+    images: ["/navbar/CDS Logo.svg"],
   },
-  category: "technology",
+  icons: {
+    icon: "/navbar/CDS Logo.svg",
+  },
   robots: {
     index: true,
     follow: true,
     googleBot: {
       index: true,
       follow: true,
-      "max-snippet": -1,
-      "max-image-preview": "large",
       "max-video-preview": -1,
+      "max-image-preview": "large",
+      "max-snippet": -1,
     },
   },
 };
+
+import { AuthProvider } from "@/contexts/auth-context";
 
 export default function RootLayout({
   children,
@@ -69,16 +82,45 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en">
-      <head>
-        <link
-          href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700;800;900&display=swap"
-          rel="stylesheet"
+      <body className={`${inter.variable} font-sans antialiased`}>
+        <script
+          type="application/ld+json"
+          dangerouslySetInnerHTML={{
+            __html: JSON.stringify({
+              "@context": "https://schema.org",
+              "@type": "Organization",
+              name: "CDS Space",
+              url: "https://cdsspace.pro",
+              logo: "https://cdsspace.pro/navbar/CDS Logo.svg",
+              description:
+                "Full-service branding agency specializing in brand identity design, UI/UX, web development, industrial print production, and brand consultancy.",
+              sameAs: [
+                "https://www.instagram.com/cdsspace",
+                "https://twitter.com/cdsspace_",
+                "https://web.facebook.com/cdsspace",
+                "https://www.tiktok.com/@cdsspace_",
+                "https://www.youtube.com/@cdsspacelive",
+              ],
+              contactPoint: {
+                "@type": "ContactPoint",
+                contactType: "customer service",
+                url: "https://cdsspace.pro/Contact",
+              },
+              serviceType: [
+                "Brand Identity Design",
+                "UI/UX Design",
+                "Web Development",
+                "Industrial Print Production",
+                "Brand Consultancy",
+                "Environmental Branding",
+                "Packaging Design",
+              ],
+            }),
+          }}
         />
-      </head>
-      <body className={`antialiased`}>
-        <ClientOnly>
-          <LayoutWrapper>{children}</LayoutWrapper>
-        </ClientOnly>
+        <AuthProvider>
+          {children}
+        </AuthProvider>
       </body>
     </html>
   );

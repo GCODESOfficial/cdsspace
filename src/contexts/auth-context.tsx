@@ -54,9 +54,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, [])
 
-  // Redirect if on admin page and not authenticated
+  // Redirect if on dashboard page and not authenticated (admin has its own auth)
   useEffect(() => {
-    if (!isLoading && !user && pathname?.startsWith("/admin")) {
+    if (!isLoading && !user && pathname?.startsWith("/dashboard")) {
       router.push("/login")
     }
   }, [user, isLoading, pathname, router])

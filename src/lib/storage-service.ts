@@ -522,6 +522,30 @@ export async function addAdvertisement(adData: {
 	}
 }
 
+export async function updateAdvertisement(
+	id: string,
+	updates: { imageUrl?: string; link?: string; oldImageUrl?: string }
+): Promise<{ success: boolean; message: string }> {
+	try {
+		const payload: any = {};
+		if (updates.link !== undefined) payload.link = updates.link;
+		if (updates.imageUrl) payload.image_path = updates.imageUrl;
+
+		const { error } = await supabase.from("advertisements").update(payload).eq("id", id);
+		if (error) throw error;
+
+		// Clean up old image if a new one replaced it
+		if (updates.imageUrl && updates.oldImageUrl && updates.imageUrl !== updates.oldImageUrl) {
+			await deleteFile(updates.oldImageUrl).catch(() => {});
+		}
+
+		return { success: true, message: "Ad updated successfully." };
+	} catch (error) {
+		console.error("Error updating advertisement:", error);
+		return { success: false, message: "Failed to update advertisement." };
+	}
+}
+
 export async function deleteAdvertisement(
 	id: string,
 	imageUrl?: string

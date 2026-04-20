@@ -1,145 +1,257 @@
 @import "tailwindcss";
-@import url('https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700;800;900&display=swap');
 
+@theme {
+  /* Brand Colors from Figma */
+  --color-brand-navy: #040B37;
+  --color-brand-blue: #1C4ED1;
+  --color-brand-bg: #F4F6FB;
+  --color-brand-title: #040B37;
+  --color-brand-body: #4B5563;
+  --color-brand-mute: #9CA3AF;
+  --color-brand-success: #16A34A;
+  --color-brand-stroke: #E3E8F4;
+  --color-brand-stroke-ii: #C8D1E0;
+  --color-brand-white: #F5F5F5;
+  --color-brand-cards: #FFFFFF;
+
+  /* Typography */
+  --font-sans: var(--font-sans);
+
+  /* Animation Scales */
+  --animate-reveal: reveal 0.8s cubic-bezier(0.2, 0, 0, 1) forwards;
+  --animate-marquee-vertical: marquee-vertical 40s linear infinite;
+  --animate-marquee-vertical-reverse: marquee-vertical-reverse 40s linear infinite;
+
+  /* Brand Gradient */
+  --color-brand-gradient: linear-gradient(153.9deg, #0035C1 8.83%, #0575FF 86.3%);
+}
+
+@keyframes marquee-vertical {
+  from {
+    transform: translateY(0);
+  }
+
+  to {
+    transform: translateY(-50%);
+  }
+}
+
+@keyframes marquee-vertical-reverse {
+  from {
+    transform: translateY(-50%);
+  }
+
+  to {
+    transform: translateY(0);
+  }
+}
+
+@keyframes reveal {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
 
 :root {
-  --background: #FFFFFF;
-  --foreground: #FFFFFF;
+  --background: #F4F6FB;
+  --foreground: #040B37;
 }
-
-
 
 body {
-	background: var(--background);
-	color: var(--foreground);
-  font-family: 'Poppins', sans-serif;
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-sans), Arial, Helvetica, sans-serif;
+  -webkit-font-smoothing: antialiased;
 }
 
+@layer utilities {
+  .glass {
+    background: rgba(255, 255, 255, 0.7);
+    backdrop-filter: blur(10px);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+  }
 
-@keyframes floatAndScale {
-  0% {
-    transform: translateY(0) scale(1);
+  /* Hide the scrollbar but keep the element scrollable.
+     Tailwind v4 doesn't load the tailwind-scrollbar-hide plugin from
+     tailwind.config.ts, so we ship our own utility. */
+  .no-scrollbar {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
   }
-  50% {
-    transform: translateY(-8px) scale(1.03);
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
   }
-  100% {
-    transform: translateY(0) scale(1);
+
+  .section-container {
+    @apply mx-auto max-w-[1440px] px-6 md:px-12 lg:px-24;
+  }
+
+  /* 
+     STYLISH PREMIUM SCROLLBAR 
+     Inspired by top-tier SaaS interfaces (Linear, Stripe)
+  */
+  .premium-scrollbar::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+
+  .premium-scrollbar::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  .premium-scrollbar::-webkit-scrollbar-thumb {
+    background: transparent;
+    border-radius: 100px;
+    border: 3px solid transparent;
+    background-clip: content-box;
+    transition: background 0.3s ease;
+  }
+
+  /* Shows a subtle brand-tinted pill on container hover */
+  .premium-scrollbar:hover::-webkit-scrollbar-thumb {
+    background-color: #0035C125;
+  }
+
+  .premium-scrollbar::-webkit-scrollbar-thumb:hover {
+    background-color: #0575FF !important;
+    height: 20px !important;
+    border: 2px solid transparent;
+  }
+
+  /* Firefox specific styling */
+  .premium-scrollbar {
+    scrollbar-width: thin;
+    scrollbar-color: transparent transparent;
+  }
+
+  .premium-scrollbar:hover {
+    scrollbar-color: #0035C140 transparent;
   }
 }
 
-.animate-float-scale {
-  animation: floatAndScale 2s ease-in-out infinite;
+/* ------------------------------------------------------------------
+ * .legal-prose — typography for admin-editable legal pages
+ *
+ * Rendered HTML comes from the `legal_documents` table. Keep these rules
+ * self-contained (no @apply) so the CSS remains valid regardless of the
+ * editor's markup choices after a .docx round-trip.
+ * ----------------------------------------------------------------- */
+.legal-prose {
+  color: var(--color-brand-body);
+  font-size: 15px;
+  line-height: 1.75;
 }
-
-
-/* Animation for opening the main video (X-axis rotation) */
-@keyframes rotateOpen {
-  0% {
-    transform: rotateX(90deg);
-    opacity: 0;
-  }
-  100% {
-    transform: rotateX(0deg);
-    opacity: 1;
-  }
+@media (min-width: 768px) {
+  .legal-prose { font-size: 16px; }
 }
-
-/* Animation for closing the video (X-axis rotation) */
-@keyframes rotateClose {
-  0% {
-    transform: rotateX(0deg);
-    opacity: 1;
-  }
-  100% {
-    transform: rotateX(-90deg);
-    opacity: 0;
-  }
+.legal-prose h1,
+.legal-prose h2 {
+  color: var(--color-brand-navy);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  line-height: 1.2;
+  scroll-margin-top: 120px;
+  margin-top: 2.5rem;
+  margin-bottom: 1rem;
+  font-size: 22px;
 }
-
-
-
-/* Animate between white, black, and blue */
-@keyframes colorCycle {
-  0% { background-color: white; color: black; }
-  33% { background-color: black; color: white; }
-  66% { background-color: #007BFF; color: white; }
-  100% { background-color: white; color: black; }
+@media (min-width: 768px) {
+  .legal-prose h1,
+  .legal-prose h2 { font-size: 26px; }
 }
-
-.color-cycle {
-  animation: colorCycle 3s infinite;
+.legal-prose h3 {
+  color: var(--color-brand-navy);
+  font-weight: 600;
+  margin-top: 1.75rem;
+  margin-bottom: 0.5rem;
+  font-size: 17px;
 }
-
-
-@keyframes scrollX {
-  0% {
-    transform: translateX(0);
-  }
-  100% {
-    transform: translateX(-50%);
-  }
+@media (min-width: 768px) {
+  .legal-prose h3 { font-size: 18px; }
 }
-
-.animate-scroll-x {
-  animation: scrollX 25s linear infinite;
-  display: flex;
-  flex-wrap: nowrap;
-  will-change: transform;
+.legal-prose h4 {
+  color: var(--color-brand-navy);
+  font-weight: 600;
+  margin-top: 1.25rem;
+  margin-bottom: 0.5rem;
+  font-size: 16px;
 }
-
-
-#map {
+.legal-prose p,
+.legal-prose ul,
+.legal-prose ol,
+.legal-prose blockquote,
+.legal-prose table {
+  margin-bottom: 1rem;
+}
+.legal-prose ul {
+  list-style: disc;
+  padding-left: 1.5rem;
+}
+.legal-prose ol {
+  list-style: decimal;
+  padding-left: 1.5rem;
+}
+.legal-prose li {
+  margin-bottom: 0.4rem;
+}
+.legal-prose li > p { margin-bottom: 0.25rem; }
+.legal-prose a {
+  color: var(--color-brand-blue);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.legal-prose a:hover { opacity: 0.85; }
+.legal-prose strong { color: var(--color-brand-navy); font-weight: 600; }
+.legal-prose em { font-style: italic; }
+.legal-prose code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.9em;
+  background: #EEF2FB;
+  padding: 0.1em 0.35em;
+  border-radius: 4px;
+  color: var(--color-brand-navy);
+}
+.legal-prose blockquote {
+  border-left: 3px solid var(--color-brand-stroke);
+  padding-left: 1rem;
+  color: var(--color-brand-body);
+  font-style: italic;
+}
+.legal-prose hr {
+  border: 0;
+  border-top: 1px solid var(--color-brand-stroke);
+  margin: 2rem 0;
+}
+.legal-prose table {
+  border-collapse: collapse;
   width: 100%;
-  height: 100%;
+  font-size: 14px;
+  display: block;
+  overflow-x: auto;
 }
-
-@keyframes scroll-left {
-  0% {
-    transform: translateX(0%);
-  }
-  100% {
-    transform: translateX(-50%);
-  }
+@media (min-width: 768px) {
+  .legal-prose table { font-size: 15px; display: table; }
 }
-
-@keyframes scroll-right {
-  0% {
-    transform: translateX(-50%);
-  }
-  100% {
-    transform: translateX(0%);
-  }
+.legal-prose th,
+.legal-prose td {
+  border-bottom: 1px solid #E6EAF3;
+  padding: 0.65rem 0.75rem;
+  text-align: left;
+  vertical-align: top;
 }
-
-/* Default (desktop) */
-.animate-scroll-left {
-  animation: scroll-left 30s linear infinite;
+.legal-prose th {
+  border-bottom-width: 2px;
+  color: var(--color-brand-navy);
+  font-weight: 600;
 }
-
-.animate-scroll-right {
-  animation: scroll-right 30s linear infinite;
+.legal-prose img {
+  max-width: 100%;
+  height: auto;
+  border-radius: 8px;
 }
-
-/* Slower animation on small screens */
-@media (max-width: 768px) {
-  .animate-scroll-left {
-    animation: scroll-left 60s linear infinite;
-  }
-
-  .animate-scroll-right {
-    animation: scroll-right 60s linear infinite;
-  }
-}
-
-
-/* Hide scrollbars completely */
-.scrollbar-hide {
-  scrollbar-width: none; /* Firefox */
-  -ms-overflow-style: none;  /* IE 10+ */
-}
-
-.scrollbar-hide::-webkit-scrollbar {
-  display: none; /* Safari and Chrome */
-}
-

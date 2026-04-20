@@ -19,6 +19,7 @@ export default function LayoutWrapper({ children }: { children: React.ReactNode 
   const isLinks = pathname.startsWith('/Links');
   const isForm = pathname.startsWith('/logofolio');
   const isAccess = pathname.startsWith('/access');
+  const isCareer = pathname.startsWith('/careerform');
   const is404 = pathname === '/404' || pathname === '/not-found';
 
   useEffect(() => {
@@ -35,9 +36,9 @@ export default function LayoutWrapper({ children }: { children: React.ReactNode 
   return (
     <ThemeProvider attribute="class" defaultTheme="dark" enableSystem disableTransitionOnChange>
       <AuthProvider>
-        {!isAdmin && !isLogin && !isLinks && !isForm && !isAccess && <Navbar />}
+        {!isAdmin && !isLogin && !isLinks && !isForm && !isAccess && !isCareer && <Navbar />}
         <main>{children}</main>
-        {!isAdmin && !isLogin && !isLinks && !is404 && !isForm && !isAccess && <Footer />}
+        {!isAdmin && !isLogin && !isLinks && !is404 && !isForm && !isAccess && !isCareer && <Footer />}
         <SonnerProvider />
       </AuthProvider>
     </ThemeProvider>

@@ -5,7 +5,7 @@ import Image from 'next/image';
 import { useEffect, useRef, useState } from 'react';
 import { supabase } from '@/lib/supabase';
 import clsx from 'clsx';
-import { ArrowLeft, ArrowRight } from 'lucide-react'
+import { ArrowLeft, ArrowRight } from 'lucide-react';
 
 interface Ad {
   id: string;
@@ -54,67 +54,69 @@ export default function DisplayAdCarousel() {
 
   return (
     <section
-      className="relative w-full bg-[#EDF0F6]"
+      className="relative w-full bg-brand-bg px-4 py-8 md:px-6 md:py-12"
       onMouseEnter={handleMouseEnter}
       onMouseLeave={handleMouseLeave}
       onTouchStart={handleMouseEnter}
       onTouchEnd={handleMouseLeave}
     >
-      <div className="mx-auto relative overflow-hidden">
-        {/* Carousel */}
-        <div className="relative w-full md:h-[400px] h-[180px] overflow-hidden shadow">
-          {ads.length === 0 ? (
-            <div className="text-center text-gray-400 py-12">No ads available</div>
-          ) : (
-            <a
-              href={ads[currentIndex].link}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="block w-full h-full"
-            >
-              <Image
-                src={ads[currentIndex].image_path}
-                alt={`Ad ${currentIndex + 1}`}
-                width={800} // Set actual width and height (or aspect ratio)
-  height={200}
-                className="object-cover h-full md:w-screen"
-                priority
-              />
-            </a>
-          )}
-
-          {/* Dots inside image */}
-          {ads.length > 1 && (
-            <div className="absolute md:bottom-5 bottom-2 left-1/2 -translate-x-1/2 flex gap-2 z-20">
-              {ads.map((_, index) => (
-                <span
-                  key={index}
-                  className={clsx(
-                    'md:h-2 h-1 rounded-full transition-all duration-300',
-                    index === currentIndex ? 'md:w-6 w-3 bg-[#D3D3D3]' : 'md:w-2 w-1 bg-white/50'
-                  )}
+      <div className="mx-auto w-full max-w-[1320px]">
+        <div className="relative overflow-hidden rounded-[24px] border border-[#D9E1F2] bg-white p-2 shadow-[0_24px_60px_rgba(4,11,55,0.08)] md:rounded-[32px] md:p-3">
+          {/* Carousel */}
+          <div className="relative h-[180px] w-full overflow-hidden rounded-[20px] bg-[#0A1246] md:h-[400px] md:rounded-[28px]">
+            {ads.length === 0 ? (
+              <div className="flex h-full items-center justify-center px-6 text-center text-gray-400">No ads available</div>
+            ) : (
+              <a
+                href={ads[currentIndex].link}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="block h-full w-full"
+              >
+                <Image
+                  src={ads[currentIndex].image_path}
+                  alt={`Ad ${currentIndex + 1}`}
+                  width={800}
+                  height={200}
+                  className="h-full w-full object-cover"
+                  priority
                 />
-              ))}
-            </div>
-          )}
+              </a>
+            )}
 
-          {/* Arrows */}
-          {ads.length > 1 && (
-            <>
-              <button
-                onClick={goToPrevious}
-                className="absolute left-4 top-1/2 -translate-y-1/2 z-20 md:px-2 md:py-2 p-1 text-[#D3D3D3]  border border-[#D3D3D3] rounded-full hover:scale-110 transition cursor-pointer"
-              >
-               <ArrowLeft className="md:w-4 md:h-4 w-2 h-2" />
-              </button>
-              <button
-                onClick={goToNext}
-                className="absolute right-4 top-1/2 -translate-y-1/2 z-20 md:px-2 md:py-2 p-1 text-[#D3D3D3] border border-[#D3D3D3] rounded-full hover:scale-110 transition cursor-pointer"
-              >
-               <ArrowRight className="md:w-4 md:h-4 w-2 h-2" />
-              </button>
-            </>
-          )}
+            {/* Dots inside image */}
+            {ads.length > 1 && (
+              <div className="absolute bottom-2 left-1/2 z-20 flex -translate-x-1/2 gap-2 md:bottom-5">
+                {ads.map((_, index) => (
+                  <span
+                    key={index}
+                    className={clsx(
+                      'h-1 rounded-full transition-all duration-300 md:h-2',
+                      index === currentIndex ? 'w-3 bg-[#D3D3D3] md:w-6' : 'w-1 bg-white/50 md:w-2'
+                    )}
+                  />
+                ))}
+              </div>
+            )}
+
+            {/* Arrows */}
+            {ads.length > 1 && (
+              <>
+                <button
+                  onClick={goToPrevious}
+                  className="absolute left-3 top-1/2 z-20 -translate-y-1/2 rounded-full border border-white/40 bg-[#08103D]/35 p-1 text-white backdrop-blur-sm transition hover:scale-105 md:left-5 md:px-2 md:py-2"
+                >
+                  <ArrowLeft className="h-2 w-2 md:h-4 md:w-4" />
+                </button>
+                <button
+                  onClick={goToNext}
+                  className="absolute right-3 top-1/2 z-20 -translate-y-1/2 rounded-full border border-white/40 bg-[#08103D]/35 p-1 text-white backdrop-blur-sm transition hover:scale-105 md:right-5 md:px-2 md:py-2"
+                >
+                  <ArrowRight className="h-2 w-2 md:h-4 md:w-4" />
+                </button>
+              </>
+            )}
+          </div>
         </div>
       </div>
     </section>

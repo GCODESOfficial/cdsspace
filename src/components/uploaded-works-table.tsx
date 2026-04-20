@@ -2,15 +2,6 @@
 "use client";
 
 import { useState, useEffect, type ChangeEvent } from "react";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import {
-	Select,
-	SelectContent,
-	SelectItem,
-	SelectTrigger,
-	SelectValue,
-} from "@/components/ui/select";
 import {
 	getWorks,
 	deleteWork,
@@ -20,8 +11,9 @@ import {
 	type SortOrder,
 } from "@/lib/storage-service";
 import { toast } from "sonner";
-import { Eye, Pencil, Trash2, Search, ArrowUpDown } from "lucide-react";
+import { Eye, Pencil, Trash2, Search, ArrowUpDown, ChevronLeft, ChevronRight, Archive } from "lucide-react";
 import Link from "next/link";
+import BulkActionBar from "@/components/admin/BulkActionBar";
 
 interface UploadedWorksTableProps {
 	searchQuery?: string;
@@ -34,38 +26,26 @@ export function UploadedWorksTable({
 }: UploadedWorksTableProps) {
 	const [works, setWorks] = useState<Work[]>([]);
 	const [filteredWorks, setFilteredWorks] = useState<Work[]>([]);
-	const [isLoading, setIsLoading] = useState<boolean>(true);
-	const [currentPage, setCurrentPage] = useState<number>(1);
-	const [totalPages, setTotalPages] = useState<number>(1);
-	const [localSearchQuery, setLocalSearchQuery] = useState<string>(searchQuery);
+	const [selected, setSelected] = useState<Set<string>>(new Set());
+	const [isLoading, setIsLoading] = useState(true);
+	const [currentPage, setCurrentPage] = useState(1);
+	const [totalPages, setTotalPages] = useState(1);
+	const [localSearchQuery, setLocalSearchQuery] = useState(searchQuery);
 	const [sortBy, setSortBy] = useState<SortBy>("date");
 	const [sortOrder, setSortOrder] = useState<SortOrder>("desc");
 	const itemsPerPage = 7;
 
-	// Sync local search query with the prop when it changes
-	useEffect(() => {
-		setLocalSearchQuery(searchQuery);
-	}, [searchQuery]);
-
-	useEffect(() => {
-		fetchWorks();
-	}, []);
-
-	useEffect(() => {
-		if (works.length > 0) {
-			handleSearch(localSearchQuery);
-		}
-	}, [works, localSearchQuery, sortBy, sortOrder]);
+	useEffect(() => { setLocalSearchQuery(searchQuery); }, [searchQuery]);
+	useEffect(() => { fetchWorks(); }, []);
+	useEffect(() => { if (works.length > 0) handleSearch(localSearchQuery); }, [works, localSearchQuery, sortBy, sortOrder]);
 
 	const fetchWorks = async () => {
 		try {
 			setIsLoading(true);
 			const data = await getWorks();
 			setWorks(data);
-			handleSearch(localSearchQuery);
 		} catch (error) {
 			toast.error("Failed to load works");
-			console.error("Failed to load works:", error);
 		} finally {
 			setIsLoading(false);
 		}
@@ -73,46 +53,51 @@ export function UploadedWorksTable({
 
 	const handleSearch = (query: string) => {
 		let results = works;
-	
 		if (query.trim()) {
-			const lowerQuery = query.toLowerCase();
-			results = works.filter((work) =>
-				work.title.toLowerCase().includes(lowerQuery) ||
-				work.category.toLowerCase().includes(lowerQuery)
+			const q = query.toLowerCase();
+			results = works.filter((w) =>
+				w.title.toLowerCase().includes(q) || w.category.toLowerCase().includes(q)
 			);
 		}
-	
-		const sortedResults = sortWorks(results, sortBy, sortOrder);
-		setFilteredWorks(sortedResults);
-		setTotalPages(Math.ceil(sortedResults.length / itemsPerPage));
+		const sorted = sortWorks(results, sortBy, sortOrder);
+		setFilteredWorks(sorted);
+		setTotalPages(Math.ceil(sorted.length / itemsPerPage));
 		setCurrentPage(1);
 	};
-	
 
 	const handleLocalSearchChange = (e: ChangeEvent<HTMLInputElement>) => {
-		const query = e.target.value;
-		setLocalSearchQuery(query);
-		// Sync with parent component
-		onSearchChange(query);
+		const q = e.target.value;
+		setLocalSearchQuery(q);
+		onSearchChange(q);
 	};
 
 	const handleDelete = async (id: string) => {
 		try {
 			await deleteWork(id);
 			await fetchWorks();
-			toast.success("Work deleted successfully");
+			toast.success("Work deleted");
 		} catch (error) {
-			toast.error("Failed to delete work");
-			console.error("Failed to delete work:", error);
+			toast.error("Failed to delete");
 		}
 	};
 
-	const handleSortChange = (value: string) => {
-		setSortBy(value as SortBy);
+	const handleBulkDelete = async () => {
+		if (!window.confirm(`Delete ${selected.size} works?`)) return;
+		for (const id of selected) { await deleteWork(id).catch(() => {}); }
+		setSelected(new Set());
+		await fetchWorks();
+		toast.success(`${selected.size} works deleted`);
 	};
 
-	const toggleSortOrder = () => {
-		setSortOrder(sortOrder === "asc" ? "desc" : "asc");
+	const toggleSelect = (id: string) => {
+		const copy = new Set(selected);
+		copy.has(id) ? copy.delete(id) : copy.add(id);
+		setSelected(copy);
+	};
+
+	const toggleAll = () => {
+		if (selected.size === paginatedWorks.length) setSelected(new Set());
+		else setSelected(new Set(paginatedWorks.map(w => w.id)));
 	};
 
 	const paginatedWorks = filteredWorks.slice(
@@ -121,180 +106,162 @@ export function UploadedWorksTable({
 	);
 
 	return (
-		<div className="border-none rounded-lg p-4">
-			<div className="bg-white rounded-lg p-10 text-[#072056]">
-				<div className="flex flex-col md:flex-row gap-8 mb-4 w-full">
-					<h2 className="font-bold text-xl">Uploaded Works</h2>
-					<div className="relative flex-1">
-						<Input
-							placeholder="Search works..."
+		<div className="p-6">
+			{/* Header */}
+			<div className="flex items-center justify-between mb-5">
+				<h2 className="text-[16px] font-semibold text-[#0D1B39]">Uploaded Works</h2>
+				<div className="flex items-center gap-2.5">
+					{/* Search */}
+					<div className="relative">
+						<Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
+						<input
+							placeholder="Search..."
 							value={localSearchQuery}
 							onChange={handleLocalSearchChange}
-							className="pl-8 bg-[#E7E7E7]"
+							className="pl-8 pr-3 py-2 w-44 rounded-lg bg-gray-50 border border-gray-200 text-xs text-gray-700 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-300 transition"
 						/>
-						<Search className="absolute left-2 top-2.5 h-4 w-4 text-gray-500" />
-					</div>
-					<div className="flex gap-2 text-lg font-semibold">
-						<Select value={sortBy} onValueChange={handleSortChange}>
-							<SelectTrigger className="w-[180px] bg-[#E7E7E7]">
-								<h1 className="font-normal text-sm text-gray-500">
-									sorted by:
-								</h1>
-								<SelectValue placeholder="Sort by" />
-							</SelectTrigger>
-							<SelectContent className="bg-[#E7E7E7] text-[#072056]">
-								<SelectItem value="date">Date</SelectItem>
-								<SelectItem value="name">Name</SelectItem>
-								<SelectItem value="category">Category</SelectItem>
-							</SelectContent>
-						</Select>
-						<Button
-							variant="outline"
-							size="icon"
-							onClick={toggleSortOrder}
-							className="bg-[#E7E7E7] border-gray-700"
-						>
-							<ArrowUpDown className="h-4 w-4" />
-						</Button>
 					</div>
 
+					{/* Sort */}
+					<select
+						value={sortBy}
+						onChange={(e) => setSortBy(e.target.value as SortBy)}
+						className="px-3 py-2 rounded-lg bg-gray-50 border border-gray-200 text-xs text-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-100 cursor-pointer"
+					>
+						<option value="date">Date</option>
+						<option value="name">Name</option>
+						<option value="category">Category</option>
+					</select>
+
+					<button
+						onClick={() => setSortOrder(sortOrder === "asc" ? "desc" : "asc")}
+						className="p-2 rounded-lg bg-gray-50 border border-gray-200 text-gray-500 hover:bg-gray-100 hover:text-gray-700 transition"
+					>
+						<ArrowUpDown className="w-3.5 h-3.5" />
+					</button>
+
+					{/* Add */}
 					<Link href="/admin/upload-works">
-						<Button
-							size="sm"
-							className="bg-[#072056] hover:bg-[#08129C] text-white text-2xl"
-						>
+						<button className="w-8 h-8 rounded-lg bg-[#0A4FE8] text-white flex items-center justify-center hover:bg-[#083EC0] transition text-lg font-light">
 							+
-						</Button>
+						</button>
 					</Link>
 				</div>
+			</div>
 
-				<div className="overflow-x-auto">
-					<table className="w-full text-sm">
-						<thead>
-							<tr className="bg-[#08129C] text-white flex justify-between rounded-tl-xl rounded-tr-xl">
-								<th className="text-left py-4 px-14">Date</th>
-								<th className="text-left py-4 px-14">Name</th>
-								<th className="text-left py-4 px-14">Category</th>
-								<th className="text-left py-4 px-14">Manage</th>
-							</tr>
-						</thead>
-						<tbody>
-							{isLoading ? (
-								<tr>
-									<td colSpan={7} className="py-4 text-center text-gray-400">
-										Loading...
+			{/* Bulk Actions */}
+			<BulkActionBar
+				selectedCount={selected.size}
+				onClear={() => setSelected(new Set())}
+				actions={[
+					{ label: "Delete", icon: <Trash2 className="w-3.5 h-3.5" />, onClick: handleBulkDelete, variant: "danger" },
+				]}
+			/>
+
+			{/* Table */}
+			<div className="overflow-x-auto">
+				<table className="w-full">
+					<thead>
+						<tr className="border-b border-gray-100">
+							<th className="py-2.5 px-3 w-10">
+								<input type="checkbox" checked={paginatedWorks.length > 0 && selected.size === paginatedWorks.length} onChange={toggleAll} className="w-4 h-4 rounded border-gray-300 text-[#0A4FE8] cursor-pointer" />
+							</th>
+							<th className="text-left py-2.5 px-3 text-[11px] font-semibold text-gray-400 uppercase tracking-wider">Date</th>
+							<th className="text-left py-2.5 px-3 text-[11px] font-semibold text-gray-400 uppercase tracking-wider">Name</th>
+							<th className="text-left py-2.5 px-3 text-[11px] font-semibold text-gray-400 uppercase tracking-wider">Category</th>
+							<th className="text-right py-2.5 px-3 text-[11px] font-semibold text-gray-400 uppercase tracking-wider">Actions</th>
+						</tr>
+					</thead>
+					<tbody>
+						{isLoading ? (
+							<tr><td colSpan={4} className="py-10 text-center text-gray-400 text-sm">Loading...</td></tr>
+						) : paginatedWorks.length === 0 ? (
+							<tr><td colSpan={4} className="py-10 text-center text-gray-400 text-sm">
+								{localSearchQuery ? `No results for "${localSearchQuery}"` : "No works found"}
+							</td></tr>
+						) : (
+							paginatedWorks.map((work) => (
+								<tr key={work.id} className={`border-b border-gray-50 hover:bg-blue-50/30 transition ${selected.has(work.id) ? "bg-blue-50/50" : ""}`}>
+									<td className="py-3 px-3">
+										<input type="checkbox" checked={selected.has(work.id)} onChange={() => toggleSelect(work.id)} className="w-4 h-4 rounded border-gray-300 text-[#0A4FE8] cursor-pointer" />
 									</td>
-								</tr>
-							) : paginatedWorks.length === 0 ? (
-								<tr>
-									<td colSpan={7} className="py-4 text-center text-gray-400">
-										{localSearchQuery
-											? `No works found matching "${localSearchQuery}"`
-											: "No works found"}
+									<td className="py-3 px-3 text-[13px] text-gray-500">
+										{new Date(work.createdAt).toLocaleDateString()}
 									</td>
-								</tr>
-							) : (
-								paginatedWorks.map((work) => (
-									<tr
-										key={work.id}
-										className="border-b border-gray-700 text-sm flex items-center justify-between"
-									>
-										<td className="py-2 px-10">
-											{new Date(work.createdAt).toLocaleDateString()}
-										</td>
-										<td className="py-2 px-10 truncate overflow-hidden whitespace-nowrap max-w-[150px]">
-											{work.title}
-										</td>
-										<td className="py-2 px-10 truncate overflow-hidden whitespace-nowrap max-w-[150px]">
+									<td className="py-3 px-3 text-[13px] font-medium text-[#0D1B39] max-w-[180px] truncate">
+										{work.title}
+									</td>
+									<td className="py-3 px-3">
+										<span className="inline-block px-2.5 py-1 rounded-md bg-blue-50 text-[#0A4FE8] text-[11px] font-medium">
 											{work.category}
-										</td>
-
-										<td className="py-2 px-10 flex space-x-1">
+										</span>
+									</td>
+									<td className="py-3 px-3">
+										<div className="flex items-center justify-end gap-1">
 											<Link href={`/admin/works/${work.id}`} target="_blank">
-												<Button
-													size="sm"
-													variant="ghost"
-													className="h-8 w-8 p-0"
-												>
-													<Eye className="h-4 w-4" />
-												</Button>
+												<button className="p-1.5 rounded-md text-gray-400 hover:text-[#0A4FE8] hover:bg-blue-50 transition">
+													<Eye className="w-3.5 h-3.5" />
+												</button>
 											</Link>
 											<Link href={`/admin/upload-works/edit/${work.id}`}>
-												<Button
-													size="sm"
-													variant="ghost"
-													className="h-8 w-8 p-0"
-												>
-													<Pencil className="h-4 w-4" />
-												</Button>
+												<button className="p-1.5 rounded-md text-gray-400 hover:text-amber-600 hover:bg-amber-50 transition">
+													<Pencil className="w-3.5 h-3.5" />
+												</button>
 											</Link>
-											<Button
-												size="sm"
-												variant="ghost"
-												className="h-8 w-8 p-0"
+											<button
+												className="p-1.5 rounded-md text-gray-400 hover:text-red-500 hover:bg-red-50 transition"
 												onClick={() => {
-													if (
-														window.confirm(
-															"Are you sure you want to delete this work?"
-														)
-													) {
-														handleDelete(work.id);
-													}
+													if (window.confirm("Delete this work?")) handleDelete(work.id);
 												}}
 											>
-												<Trash2 className="h-4 w-4" />
-											</Button>
-										</td>
-									</tr>
-								))
-							)}
-						</tbody>
-					</table>
-				</div>
+												<Trash2 className="w-3.5 h-3.5" />
+											</button>
+										</div>
+									</td>
+								</tr>
+							))
+						)}
+					</tbody>
+				</table>
 			</div>
 
-			<div className="flex justify-between items-center mt-4 text-xs">
-				<div className="text-gray-400">
-					Showing {paginatedWorks.length} out of {filteredWorks.length} entries
-				</div>
-				<div className="flex space-x-1">
-					<Button
-						size="sm"
-						variant="ghost"
-						className="w-6 h-6 p-0 bg-white text-[#072056] font-bold text-xl"
-						disabled={currentPage === 1}
-						onClick={() => setCurrentPage(currentPage - 1)}
-					>
-						{"<"}
-					</Button>
-
-					{Array.from({ length: totalPages }).map((_, index) => (
-						<Button
-							key={index}
-							size="sm"
-							variant={currentPage === index + 1 ? "default" : "ghost"}
-							className={`w-6 h-6 p-0 ${
-								currentPage === index + 1
-									? "bg-gradient-to-r rounded from-[#08129C] to-[#072056] border border-white"
-									: "bg-gradient-to-r rounded from-[#08129C] to-[#072056]"
-							}`}
-							onClick={() => setCurrentPage(index + 1)}
+			{/* Pagination */}
+			{totalPages > 1 && (
+				<div className="flex items-center justify-between mt-4 pt-4 border-t border-gray-50">
+					<p className="text-[11px] text-gray-400">
+						{paginatedWorks.length} of {filteredWorks.length} entries
+					</p>
+					<div className="flex items-center gap-1">
+						<button
+							disabled={currentPage === 1}
+							onClick={() => setCurrentPage(currentPage - 1)}
+							className="w-7 h-7 rounded-lg flex items-center justify-center text-gray-400 hover:bg-gray-100 disabled:opacity-30 transition"
 						>
-							{index + 1}
-						</Button>
-					))}
-
-					<Button
-						size="sm"
-						variant="ghost"
-						className="w-6 h-6 p-0 bg-white text-[#072056] font-bold text-xl"
-						disabled={currentPage === totalPages}
-						onClick={() => setCurrentPage(currentPage + 1)}
-					>
-						&gt;
-					</Button>
+							<ChevronLeft className="w-4 h-4" />
+						</button>
+						{Array.from({ length: totalPages }).map((_, i) => (
+							<button
+								key={i}
+								onClick={() => setCurrentPage(i + 1)}
+								className={`w-7 h-7 rounded-lg text-xs font-medium transition ${
+									currentPage === i + 1
+										? "bg-[#0A4FE8] text-white shadow-sm"
+										: "text-gray-500 hover:bg-gray-100"
+								}`}
+							>
+								{i + 1}
+							</button>
+						))}
+						<button
+							disabled={currentPage === totalPages}
+							onClick={() => setCurrentPage(currentPage + 1)}
+							className="w-7 h-7 rounded-lg flex items-center justify-center text-gray-400 hover:bg-gray-100 disabled:opacity-30 transition"
+						>
+							<ChevronRight className="w-4 h-4" />
+						</button>
+					</div>
 				</div>
-			</div>
+			)}
 		</div>
 	);
 }

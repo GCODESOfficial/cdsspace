@@ -20,6 +20,11 @@ export default function AccessPage() {
     videoRef.current?.play();
   };
 
+  const handleSkip = () => {
+    setShowForm(true);
+    videoRef.current?.pause();
+  };
+
   const handleSubmit = async () => {
     setLoading(true);
   
@@ -73,6 +78,18 @@ export default function AccessPage() {
             className=" text-lg font-bold bg-blue-700 px-6 py-3 rounded-full hover:bg-blue-800 transition-all"
           >
             Your Journey Begins Now!
+          </button>
+        </div>
+      )}
+
+      {/* ⏭️ Skip Button - Shows when video is playing */}
+      {hasInteracted && !showForm && (
+        <div className="absolute top-4 right-4 z-20">
+          <button
+            onClick={handleSkip}
+            className="bg-black/50 text-white px-4 py-2 rounded-full hover:bg-black/70 transition-all duration-200 text-sm font-medium"
+          >
+            Skip Video
           </button>
         </div>
       )}

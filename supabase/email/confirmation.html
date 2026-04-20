@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Confirm Your Signup - CDS Space</title>
+  <style>
+    /* Reset & Clean Baseline */
+    body, p, h1, h2, h3, a {
+      margin: 0;
+      padding: 0;
+    }
+    body {
+      background-color: #F4F6FB;
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+      color: #040B37;
+      -webkit-font-smoothing: antialiased;
+      line-height: 1.5;
+    }
+    
+    /* Layout */
+    .email-wrapper {
+      width: 100%;
+      background-color: #F4F6FB;
+      padding: 40px 16px;
+      box-sizing: border-box;
+    }
+    .email-container {
+      max-width: 560px;
+      margin: 0 auto;
+      background-color: #ffffff;
+      border-radius: 16px;
+      border: 1px solid #E3E8F4;
+      box-shadow: 0 12px 24px rgba(0, 0, 0, 0.04);
+      overflow: hidden;
+    }
+    
+    /* Header (Brand Presentation) */
+    .email-header {
+      padding: 32px 40px;
+      text-align: center;
+      background-color: #ffffff;
+      border-bottom: 1px solid #E3E8F4;
+    }
+    .brand-logo {
+      font-weight: 800;
+      font-size: 28px;
+      letter-spacing: -0.04em;
+      background: linear-gradient(153.9deg, #0035C1 8.83%, #0575FF 86.3%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      color: #0035C1; /* Fallback for unsupported email clients */
+      margin: 0;
+    }
+
+    /* Body/Content */
+    .email-body {
+      padding: 40px;
+      text-align: center;
+    }
+    .email-body h2 {
+      font-size: 24px;
+      font-weight: 700;
+      color: #040B37;
+      margin-bottom: 16px;
+      letter-spacing: -0.02em;
+    }
+    .email-body p {
+      font-size: 15px;
+      color: #4B5563;
+      line-height: 1.6;
+      margin-bottom: 32px;
+      font-weight: 500;
+    }
+    
+    /* CTA Button matching Figma Design */
+    .btn-container {
+      margin-bottom: 40px;
+    }
+    .btn {
+      display: inline-block;
+      padding: 16px 36px;
+      background: linear-gradient(153.9deg, #0035C1 8.83%, #0575FF 86.3%);
+      background-color: #0575FF; /* Fallback */
+      color: #ffffff !important;
+      text-decoration: none;
+      font-size: 16px;
+      font-weight: 600;
+      border-radius: 100px;
+      border: 1px solid #648EFC;
+      box-shadow: 0 4px 8px rgba(0, 0, 0, 0.04);
+      letter-spacing: -0.01em;
+      transition: opacity 0.3s ease;
+    }
+    .btn:hover {
+      opacity: 0.9;
+    }
+
+    /* Footer */
+    .email-footer {
+      background-color: #F9FAFC;
+      padding: 24px 40px;
+      text-align: center;
+      border-top: 1px solid #E3E8F4;
+    }
+    .email-footer p {
+      font-size: 13px;
+      color: #9CA3AF;
+      font-weight: 500;
+      line-height: 1.6;
+    }
+    .email-footer a {
+      color: #0575FF;
+      text-decoration: none;
+    }
+  </style>
+</head>
+<body>
+  <div class="email-wrapper">
+    <div class="email-container">
+      
+      <!-- Brand Header -->
+      <div class="email-header">
+        <h1 class="brand-logo">CDS Space</h1>
+      </div>
+      
+      <!-- Main Content -->
+      <div class="email-body">
+        <h2>Confirm your email address</h2>
+        <p>
+          Welcome to the CDS Space community! To securely unlock all features and authenticate your account, please verify your email address by clicking the button below.
+        </p>
+        
+        <div class="btn-container">
+          <a href="{{ .ConfirmationURL }}" class="btn">Verify your email</a>
+        </div>
+        
+        <!-- Helpful text -->
+        <p style="font-size: 13px; color: #9CA3AF; margin-bottom: 0;">
+          If you didn't attempt to create a CDS Space account, you can safely ignore this email.
+        </p>
+      </div>
+      
+      <!-- Footer -->
+      <div class="email-footer">
+        <p>
+          &copy; 2026 CDS Space. All rights reserved.<br>
+          <a href="#">Privacy Policy</a> &nbsp;&bull;&nbsp; <a href="#">Terms of Service</a>
+        </p>
+      </div>
+
+    </div>
+  </div>
+</body>
+</html>

@@ -32,6 +32,10 @@ export default function EditWorkPage() {
   const [title, setTitle] = useState<string>("")
   const [description, setDescription] = useState<string>("")
   const [category, setCategory] = useState<string>("")
+  const [industry, setIndustry] = useState<string>("")
+  const [projectScope, setProjectScope] = useState<string>("")
+  const [deliverables, setDeliverables] = useState<string>("")
+  const [timeline, setTimeline] = useState<string>("")
   const [projectImages, setProjectImages] = useState<ImageType[]>([])
   const [originalImages, setOriginalImages] = useState<ImageType[]>([])
   const [workId, setWorkId] = useState<string | number | null>(null)
@@ -99,6 +103,10 @@ export default function EditWorkPage() {
       // Set work data
       setTitle(workData.title || "")
       setDescription(workData.description || "")
+      setIndustry(workData.industry || "")
+      setProjectScope(workData.project_scope || "")
+      setDeliverables(workData.deliverables || "")
+      setTimeline(workData.timeline || "")
 
       // Set category if it exists
       if (workData.category) {
@@ -230,6 +238,10 @@ export default function EditWorkPage() {
         description,
         cover_image: coverImagePath,
         category,
+        industry: industry.trim() || null,
+        project_scope: projectScope.trim() || null,
+        deliverables: deliverables.trim() || null,
+        timeline: timeline.trim() || null,
       }
 
       console.log("Update data:", updateData)
@@ -429,6 +441,53 @@ export default function EditWorkPage() {
                   </SelectContent>
                 </Select>
               </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2">
+                <div>
+                  <Label htmlFor="industry" className="mb-2 text-lg">Industry</Label>
+                  <Input
+                    id="industry"
+                    value={industry}
+                    onChange={(e) => setIndustry(e.target.value)}
+                    placeholder="e.g. Web3 / Blockchain Technology"
+                    className="bg-white border-gray-300"
+                  />
+                </div>
+                <div>
+                  <Label htmlFor="timeline" className="mb-2 text-lg">Timeline</Label>
+                  <Input
+                    id="timeline"
+                    value={timeline}
+                    onChange={(e) => setTimeline(e.target.value)}
+                    placeholder="e.g. 3 months"
+                    className="bg-white border-gray-300"
+                  />
+                </div>
+                <div>
+                  <Label htmlFor="project_scope" className="mb-2 text-lg">Project Scope</Label>
+                  <p className="text-xs text-gray-500 mb-1.5">One item per line.</p>
+                  <Textarea
+                    id="project_scope"
+                    value={projectScope}
+                    onChange={(e) => setProjectScope(e.target.value)}
+                    rows={4}
+                    placeholder={"Brand Identity\nUI/UX Design\nPrototyping\nDevelopment"}
+                    className="bg-white border-gray-300 min-h-[100px]"
+                  />
+                </div>
+                <div>
+                  <Label htmlFor="deliverables" className="mb-2 text-lg">Deliverables</Label>
+                  <p className="text-xs text-gray-500 mb-1.5">One item per line.</p>
+                  <Textarea
+                    id="deliverables"
+                    value={deliverables}
+                    onChange={(e) => setDeliverables(e.target.value)}
+                    rows={4}
+                    placeholder={"Logo\nLanding page\nApp UI\nAdmin Dashboard"}
+                    className="bg-white border-gray-300 min-h-[100px]"
+                  />
+                </div>
+              </div>
             </CardContent>
           </Card>
 
@@ -461,6 +520,10 @@ export default function EditWorkPage() {
             <div className="space-y-4 py-6">
               <div>
                 <Label htmlFor="coverImage" className="text-lg mb-2">Cover Image</Label>
+                <p className="text-xs text-gray-500 leading-snug mb-3">
+                  <span className="font-semibold text-gray-700">Recommended: 1200 × 1500 px</span> (4:5 portrait).
+                  Keep the subject centered — the card is ~397×496 px on the home page and ~443×504 px on the Work page, so edges may crop slightly. JPG, PNG, or WebP, under 2 MB.
+                </p>
                 <Input id="coverImage" type="file" accept="image/*" onChange={handleCoverImageChange} />
                 {(coverImagePreview || originalCoverImage) && (
                   <div className="mt-2 relative aspect-video rounded-md overflow-hidden">

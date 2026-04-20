@@ -1,0 +1,106 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model Profile {
+  id             String          @id @db.Uuid
+  email          String          @unique
+  fullName       String?
+  companyName    String?
+  phoneNumber    String?
+  avatarUrl      String?
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+  referralCode   String?         @unique
+  designRequests DesignRequest[]
+  subscriptions  Subscription[]
+  bannerRequests BannerRequest[]
+
+  @@map("profiles")
+}
+
+// ... existing Subscription model ...
+model Subscription {
+  id           String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId       String   @db.Uuid
+  plan         String
+  industry     String
+  companyName  String
+  brandBrief   String?
+  designCount  Int      @default(0)
+  status       String   @default("active")
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  assets       String?
+  referralCode String?
+  referrerId   String?  @db.Uuid
+  lastResetAt  DateTime @default(now())
+  user         Profile  @relation(fields: [userId], references: [id])
+
+  @@map("subscriptions")
+}
+
+enum DesignRequestStatus {
+  PENDING
+  IN_REVIEW
+  ACTIVE
+  COMPLETED
+}
+
+enum BannerStatus {
+  PENDING
+  ACTIVE
+  DRAFT
+  SCHEDULED
+  ARCHIVED
+  COMPLETED
+}
+
+model DesignRequest {
+  id          String              @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId      String              @db.Uuid
+  title       String
+  description String
+  status      DesignRequestStatus @default(PENDING)
+  createdAt   DateTime            @default(now())
+  updatedAt   DateTime            @updatedAt
+  displayId   String?
+  user        Profile             @relation(fields: [userId], references: [id])
+
+  @@map("design_requests")
+}
+
+model BannerRequest {
+  id              String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId          String       @db.Uuid
+  displayId       String?      // BNR-001
+  title           String       @default("Untitled Banner")
+  size            String
+  quality         String       @default("Standard")
+  environment     String       @default("Indoor")
+  executionMode   String       @default("Upload")
+  designBrief     String?
+  quantity        Int          @default(1)
+  status          BannerStatus @default(DRAFT)
+  mockupUrl       String?
+
+  fulfillmentType String       @default("Door-to-door")
+  country         String?
+  state           String?
+  city            String?
+  streetAddress   String?
+  recipientName   String?
+  phoneNumber     String?
+  instructions    String?
+  pickupStation   String?
+
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+  user            Profile      @relation(fields: [userId], references: [id])
+
+  @@map("banner_requests")
+}

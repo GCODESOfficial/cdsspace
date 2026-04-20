@@ -17,3 +17,11 @@ export const supabaseAdmin = supabaseServiceRoleKey
       },
     })
   : null
+
+// Non-nullable admin client for API routes (throws if service role key missing)
+export function getSupabaseAdmin() {
+  if (!supabaseAdmin) {
+    throw new Error("SUPABASE_SERVICE_ROLE_KEY is not configured");
+  }
+  return supabaseAdmin;
+}
