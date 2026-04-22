@@ -3,10 +3,11 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
-import { Plus, FileText, Search, CheckCircle2, Clock, Send, Trash2, X, Check } from "lucide-react";
+import { Plus, FileText, Search, CheckCircle2, Clock, Send, Trash2, X, Check, Copy, Share2 } from "lucide-react";
 import FinanceShell, { glassCard } from "@/components/finance/FinanceShell";
 import StatCard from "@/components/finance/StatCard";
 import { Currency, formatMoney } from "@/lib/finance/types";
+import { appAlert, appConfirm, appPrompt } from "@/lib/app-notify";
 
 interface Row {
   id: string; invoice_number: string; client_name: string; currency: Currency;
@@ -65,12 +66,65 @@ export default function InvoicesPage() {
     setWorking(false); clearSelection(); load();
   };
   const bulkDelete = async () => {
-    if (!confirm(`Delete ${selected.size} invoice${selected.size === 1 ? "" : "s"}? This cannot be undone.`)) return;
+    if (!(await appConfirm(`Delete ${selected.size} invoice${selected.size === 1 ? "" : "s"}? This cannot be undone.`))) return;
     setWorking(true);
     await Promise.all(
       Array.from(selected).map((id) => fetch(`/api/admin/finance/invoices/${id}`, { method: "DELETE" }))
     );
     setWorking(false); clearSelection(); load();
+  };
+
+  const bulkDuplicate = async () => {
+    setWorking(true);
+    try {
+      for (const id of selected) {
+        const res = await fetch(`/api/admin/finance/invoices/${id}`);
+        const { invoice, items } = await res.json();
+        
+        // Prepare duplication payload
+        const payload = {
+          ...invoice,
+          id: undefined,
+          invoice_number: undefined,
+          created_at: undefined,
+          public_token: undefined,
+          status: "draft",
+          items: items.map((it: any) => ({
+            name: it.name, description: it.description, quantity: it.quantity, unit_price: it.unit_price, position: it.position
+          }))
+        };
+        
+        await fetch("/api/admin/finance/invoices", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload)
+        });
+      }
+      appAlert(`Duplicated ${selected.size} invoice(s) as drafts.`);
+    } catch (e) {
+      console.error("Duplication failed", e);
+      appAlert("Failed to duplicate some invoices");
+    }
+    setWorking(false); clearSelection(); load();
+  };
+
+  const bulkShare = async () => {
+    const urls: string[] = [];
+    const origin = window.location.origin;
+    
+    for (const id of selected) {
+      const res = await fetch(`/api/admin/finance/invoices/${id}`);
+      const { invoice } = await res.json();
+      if (invoice.public_token) {
+        urls.push(`${origin}/invoice/${invoice.public_token}`);
+      }
+    }
+    
+    if (urls.length > 0) {
+      await navigator.clipboard.writeText(urls.join("\n"));
+      appAlert(`${urls.length} share link(s) copied to clipboard.`);
+    }
+    clearSelection();
   };
 
   const filtered = rows.filter((r) =>
@@ -137,6 +191,13 @@ export default function InvoicesPage() {
                 </button>
                 <button disabled={working} onClick={() => bulkPatch("cancelled")} className="text-[11px] font-semibold uppercase tracking-wider px-3 py-1.5 rounded-lg bg-slate-50 text-slate-700 ring-1 ring-slate-200 hover:bg-slate-100 transition disabled:opacity-50">
                   Cancel
+                </button>
+                <div className="w-[1px] h-6 bg-gray-200 mx-1" />
+                <button disabled={working} onClick={bulkDuplicate} className="text-[11px] font-semibold uppercase tracking-wider px-3 py-1.5 rounded-lg bg-white text-gray-700 ring-1 ring-gray-200 hover:bg-gray-50 transition disabled:opacity-50 inline-flex items-center gap-1.5">
+                  <Copy className="w-3.5 h-3.5" /> Duplicate
+                </button>
+                <button disabled={working} onClick={bulkShare} className="text-[11px] font-semibold uppercase tracking-wider px-3 py-1.5 rounded-lg bg-white text-gray-700 ring-1 ring-gray-200 hover:bg-gray-50 transition disabled:opacity-50 inline-flex items-center gap-1.5">
+                  <Share2 className="w-3.5 h-3.5" /> Copy Links
                 </button>
                 <button disabled={working} onClick={bulkDelete} className="text-[11px] font-semibold uppercase tracking-wider px-3 py-1.5 rounded-lg bg-red-50 text-red-700 ring-1 ring-red-200 hover:bg-red-100 transition disabled:opacity-50 inline-flex items-center gap-1.5">
                   <Trash2 className="w-3.5 h-3.5" /> Delete

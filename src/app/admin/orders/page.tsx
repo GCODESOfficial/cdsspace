@@ -4,6 +4,7 @@ import { useState, useEffect, useMemo } from "react";
 import Link from "next/link";
 import { Search, ExternalLink, ShoppingBag, Clock, Loader2, CheckCircle, TrendingUp, Trash2, Archive, Package, Repeat } from "lucide-react";
 import BulkActionBar from "@/components/admin/BulkActionBar";
+import { appAlert, appConfirm, appPrompt } from "@/lib/app-notify";
 
 interface OrderProfile { full_name: string; email: string; }
 interface Order {
@@ -44,7 +45,7 @@ export default function AdminOrdersPage() {
     else setSelected(new Set(filtered.map(o => o.id)));
   };
   const handleBulkArchive = async () => {
-    if (!confirm(`Archive ${selected.size} orders?`)) return;
+    if (!(await appConfirm(`Archive ${selected.size} orders?`))) return;
     for (const id of selected) {
       await fetch(`/api/admin/orders/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ status: "ARCHIVED" }) }).catch(() => {});
     }

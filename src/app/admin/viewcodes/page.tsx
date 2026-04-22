@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { Search, Copy, Check, Send, Trash2, ChevronLeft, ChevronRight, Eye, Clock, Archive } from "lucide-react";
 import BulkActionBar from "@/components/admin/BulkActionBar";
+import { appAlert, appConfirm, appPrompt } from "@/lib/app-notify";
 
 interface AccessCode {
   id: number;
@@ -46,7 +47,7 @@ export default function ViewCodesPage() {
   };
 
   const handleDelete = async (id: number) => {
-    if (!confirm("Delete this code?")) return;
+    if (!(await appConfirm("Delete this code?"))) return;
     const { error } = await supabase.from("access_codes").delete().eq("id", id);
     if (!error) setCodes((prev) => prev.filter((c) => c.id !== id));
   };
@@ -69,7 +70,7 @@ export default function ViewCodesPage() {
   };
 
   const handleBulkDelete = async () => {
-    if (!confirm(`Delete ${selected.size} selected codes?`)) return;
+    if (!(await appConfirm(`Delete ${selected.size} selected codes?`))) return;
     for (const id of selected) {
       const { error } = await supabase.from("access_codes").delete().eq("id", id);
       if (!error) setCodes((prev) => prev.filter((c) => c.id !== id));

@@ -8,6 +8,7 @@ import { INDUSTRY_CATEGORIES } from "@/lib/industry-categories";
 import { Trash2, Loader2, Plus, Filter, ImagePlus, X, AlertCircle } from "lucide-react";
 import Image from "next/image";
 import BulkActionBar from "@/components/admin/BulkActionBar";
+import { appAlert, appConfirm, appPrompt } from "@/lib/app-notify";
 
 interface PortfolioDesign {
   id: string;
@@ -142,7 +143,7 @@ export default function PortfolioDesignsPage() {
   }
 
   async function handleBulkDelete() {
-    if (!confirm(`Delete ${selected.size} designs?`)) return;
+    if (!(await appConfirm(`Delete ${selected.size} designs?`))) return;
     const ids = Array.from(selected);
     const toDelete = designs.filter(d => ids.includes(d.id));
     const paths = toDelete.map(d => d.image_url.split("/portfolio-designs/").pop()).filter(Boolean) as string[];

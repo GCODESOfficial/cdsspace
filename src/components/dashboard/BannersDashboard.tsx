@@ -21,6 +21,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import Image from "next/image";
+import { appAlert, appConfirm, appPrompt } from "@/lib/app-notify";
 
 // --- Types ---
 
@@ -335,7 +336,7 @@ export const BannersDashboard = ({
     };
 
     const handleDelete = async (id: string) => {
-        if (!window.confirm("Are you sure you want to delete this draft?")) return;
+        if (!(await appConfirm("Are you sure you want to delete this draft?"))) return;
         
         try {
             const res = await fetch(`/api/banners?id=${id}`, { method: "DELETE" });

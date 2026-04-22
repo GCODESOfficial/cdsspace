@@ -15,7 +15,7 @@ const mainNavItems = [
     { name: "Brand Brief", href: "/brand-brief", icon: FileText },
     { name: "Banners", href: "/dashboard/banners", icon: ImageIcon, comingSoon: true },
     { name: "Merch", href: "/dashboard/merch", icon: Package, comingSoon: true },
-    { name: "Messages", href: "/dashboard/messages", icon: MessageSquare },
+    { name: "Secured Chat", href: "/dashboard/messages", icon: MessageSquare },
     { name: "Orders", href: "/dashboard/orders", icon: ShoppingBag },
     { name: "Best Partner", href: "/partnership", icon: Handshake },
 ];

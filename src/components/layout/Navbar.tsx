@@ -142,34 +142,35 @@ export const Navbar = () => {
                     {isMobileMenuOpen && (
                         <motion.div
                             initial={{ opacity: 0, height: 0 }}
-                            animate={{ opacity: 1, height: "100vh" }}
+                            animate={{ opacity: 1, height: "calc(100vh - 78px)" }}
                             exit={{ opacity: 0, height: 0 }}
                             transition={{ duration: 0.3, ease: "easeInOut" }}
                             className="absolute top-[62px] left-4 right-4 bg-white/95 backdrop-blur-md border-x border-b border-brand-stroke/20 rounded-b-[24px] shadow-2xl md:hidden overflow-hidden origin-top z-40"
                         >
-                            <div className="flex flex-col p-6 h-full">
-                                {/* Mobile Nav Links */}
-                                <div className="space-y-4 mb-8">
-                                    {navLinks.map((link) => (
-                                        <Link
-                                            key={link.name}
-                                            href={link.href}
-                                            onClick={() => setIsMobileMenuOpen(false)}
-                                            className={cn(
-                                                "block text-2xl font-semibold tracking-[-0.5px] transition-colors",
-                                                pathname === link.href ? "text-brand-blue" : "text-[#4b5563]"
-                                            )}
-                                        >
-                                            {link.name}
-                                        </Link>
-                                    ))}
+                            <div className="flex flex-col h-full">
+                                {/* Scrollable nav area — keeps the CTA pinned at the bottom */}
+                                <div className="flex-1 overflow-y-auto px-6 pt-6">
+                                    <div className="space-y-4">
+                                        {navLinks.map((link) => (
+                                            <Link
+                                                key={link.name}
+                                                href={link.href}
+                                                onClick={() => setIsMobileMenuOpen(false)}
+                                                className={cn(
+                                                    "block text-2xl font-semibold tracking-[-0.5px] transition-colors",
+                                                    pathname === link.href ? "text-brand-blue" : "text-[#4b5563]"
+                                                )}
+                                            >
+                                                {link.name}
+                                            </Link>
+                                        ))}
 
-                                    {/* Mobile Studio Accordion */}
-                                    <MobileStudioAccordion onClose={() => setIsMobileMenuOpen(false)} />
+                                        <MobileStudioAccordion onClose={() => setIsMobileMenuOpen(false)} />
+                                    </div>
                                 </div>
 
-                                {/* Mobile CTA - Fixed at bottom of menu view */}
-                                <div className="mt-auto pb-10">
+                                {/* Mobile CTA — pinned */}
+                                <div className="shrink-0 px-6 pt-4 pb-6 border-t border-brand-stroke/10 bg-white/95">
                                     <Link
                                         href={accountHref}
                                         onClick={() => setIsMobileMenuOpen(false)}

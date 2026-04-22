@@ -198,7 +198,7 @@ export default function ClientMessagesPage() {
             <MessageSquare className="w-5 h-5 text-white" />
           </div>
           <div>
-            <h1 className={`text-lg font-semibold ${isCosmic ? "text-white" : "text-brand-navy"}`}>Messages</h1>
+            <h1 className={`text-lg font-semibold ${isCosmic ? "text-white" : "text-brand-navy"}`}>Secured Chat</h1>
             <p className={`text-xs ${isCosmic ? "text-white/60" : "text-brand-body/60"}`}>Chat with the CDS Space team</p>
           </div>
         </div>

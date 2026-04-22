@@ -54,21 +54,33 @@ export async function signup(formData: any) {
     return { success: true }
 }
 
-export async function oauthLogin(provider: 'google', next?: string) {
-    // We host the entire Google OAuth dance on cdsspace.com so the consent
-    // screen reads "to continue to cdsspace.com" instead of the Supabase
-    // project URL. /api/auth/google/login generates state + nonce and
-    // redirects to Google; /api/auth/google/callback exchanges the auth
-    // code for an id_token and hands it to supabase.auth.signInWithIdToken.
-    // Supabase still owns the session — Google just never sees the raw
-    // Supabase URL.
-    if (provider !== 'google') {
-        return { error: 'Unsupported provider' }
-    }
+export async function oauthLogin(provider: 'google' | 'twitter' | 'facebook', next?: string) {
     const siteUrl = getSiteUrl()
-    const url = new URL(`${siteUrl}/api/auth/google/login`)
-    if (next) url.searchParams.set('next', next)
-    return { url: url.toString() }
+
+    // Google uses a custom OAuth dance hosted on cdsspace.com so the consent
+    // screen reads "to continue to cdsspace.com" instead of the Supabase URL.
+    if (provider === 'google') {
+        const url = new URL(`${siteUrl}/api/auth/google/login`)
+        if (next) url.searchParams.set('next', next)
+        return { url: url.toString() }
+    }
+
+    // Twitter (X) and Facebook go through Supabase's standard OAuth flow,
+    // which redirects back to /auth/callback?code=... to exchange the code.
+    if (provider === 'twitter' || provider === 'facebook') {
+        const supabase = await createClient()
+        const redirectTo = new URL(`${siteUrl}/auth/callback`)
+        if (next) redirectTo.searchParams.set('next', next)
+        const { data, error } = await supabase.auth.signInWithOAuth({
+            provider,
+            options: { redirectTo: redirectTo.toString() },
+        })
+        if (error) return { error: error.message }
+        if (data?.url) return { url: data.url }
+        return { error: 'Failed to initiate OAuth flow' }
+    }
+
+    return { error: 'Unsupported provider' }
 }
 
 export async function logout() {

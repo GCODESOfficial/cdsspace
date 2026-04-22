@@ -13,6 +13,7 @@ import FinanceShell, { glassCard } from "@/components/finance/FinanceShell";
 import BankPicker from "@/components/finance/BankPicker";
 import { findBankByCode } from "@/lib/finance/banks";
 import type { FinanceContractor } from "@/lib/finance/types";
+import { appAlert, appConfirm, appPrompt } from "@/lib/app-notify";
 
 const EMPTY = {
   name: "", business_niche: "", phone: "", whatsapp: "", email: "",
@@ -39,7 +40,7 @@ export default function ContractorsPage() {
   const save = async () => {
     if (!form.name) return;
     const r = await fetch("/api/admin/finance/contractors", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(form) });
-    if (r.ok) { setOpen(false); setForm(EMPTY); load(); } else alert("Failed");
+    if (r.ok) { setOpen(false); setForm(EMPTY); load(); } else appAlert("Failed");
   };
 
   const generateInvite = async () => {

@@ -12,6 +12,7 @@ import ModalHeader from "@/components/finance/ModalHeader";
 import BankPicker from "@/components/finance/BankPicker";
 import { findBankByCode } from "@/lib/finance/banks";
 import { FinanceEmployee, FinancePayrollRun, formatMoney } from "@/lib/finance/types";
+import { appAlert, appConfirm, appPrompt } from "@/lib/app-notify";
 
 export default function PayrollPage() {
   const [tab, setTab] = useState<"runs" | "employees">("runs");
@@ -37,7 +38,7 @@ export default function PayrollPage() {
     if (r.ok) { setEmpOpen(false); setEmpForm({ name: "", role: "", email: "", phone: "", bank_code: "", bank_name: "", account_number: "", account_name: "", base_salary: "" }); load(); }
   };
   const removeEmp = async (id: string) => {
-    if (!confirm("Delete employee?")) return;
+    if (!(await appConfirm("Delete employee?"))) return;
     await fetch(`/api/admin/finance/payroll/employees/${id}`, { method: "DELETE" }); load();
   };
   const saveRun = async () => {

@@ -2,7 +2,8 @@
 
 import { useState } from "react";
 import { supabase } from "@/lib/supabase";
-import { KeyRound, Send, Copy, Check, MessageSquare, Info } from "lucide-react";
+import Link from "next/link";
+import { KeyRound, Send, Copy, Check, MessageSquare, Info, Eye } from "lucide-react";
 
 export default function GenerateCodePage() {
   const [contact, setContact] = useState("");
@@ -103,6 +104,16 @@ export default function GenerateCodePage() {
               {message}
             </div>
           )}
+          <div className="pt-4 mt-4 border-t border-gray-50 flex items-center justify-between">
+            <p className="text-[12px] text-gray-400">Need to see existing codes?</p>
+            <Link
+              href="/admin/viewcodes"
+              className="flex items-center gap-1.5 text-[12px] font-medium text-[#0A4FE8] hover:underline"
+            >
+              <Eye className="w-3.5 h-3.5" />
+              View Codes List
+            </Link>
+          </div>
         </div>
       </div>
 

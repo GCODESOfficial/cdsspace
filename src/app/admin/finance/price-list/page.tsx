@@ -10,8 +10,10 @@ import ModalHeader from "@/components/finance/ModalHeader";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Plus, Tag, Search, Upload, Download, Trash2, Edit2, ImageIcon } from "lucide-react";
 import { CURRENCIES, Currency, FinancePriceItem, formatMoney } from "@/lib/finance/types";
+import { AIAssistButton } from "@/components/ai/AIAssistButton";
 import FinanceShell, { glassCard } from "@/components/finance/FinanceShell";
 import Image from "next/image";
+import { appAlert, appConfirm, appPrompt } from "@/lib/app-notify";
 
 const EMPTY = { name: "", description: "", unit_price: "", currency: "NGN" as Currency, category: "", image_url: "" };
 
@@ -51,11 +53,11 @@ export default function PriceListPage() {
     const url = editing ? `/api/admin/finance/price-list/${editing.id}` : "/api/admin/finance/price-list";
     const method = editing ? "PATCH" : "POST";
     const r = await fetch(url, { method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
-    if (r.ok) { setOpen(false); load(); } else alert("Failed");
+    if (r.ok) { setOpen(false); load(); } else appAlert("Failed");
   };
 
   const remove = async (id: string) => {
-    if (!confirm("Delete this item?")) return;
+    if (!(await appConfirm("Delete this item?"))) return;
     await fetch(`/api/admin/finance/price-list/${id}`, { method: "DELETE" });
     load();
   };
@@ -67,15 +69,15 @@ export default function PriceListPage() {
     const r = await fetch("/api/admin/finance/upload", { method: "POST", body: fd });
     setUploading(false);
     if (r.ok) { const d = await r.json(); setForm((p) => ({ ...p, image_url: d.url })); }
-    else alert("Upload failed");
+    else appAlert("Upload failed");
   };
 
   const importCsv = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const f = e.target.files?.[0]; if (!f) return;
     const fd = new FormData(); fd.append("file", f);
     const r = await fetch("/api/admin/finance/price-list/import", { method: "POST", body: fd });
-    if (r.ok) { const d = await r.json(); alert(`Imported ${d.inserted} items`); load(); }
-    else { const d = await r.json(); alert(d.error || "Import failed"); }
+    if (r.ok) { const d = await r.json(); appAlert(`Imported ${d.inserted} items`); load(); }
+    else { const d = await r.json(); appAlert(d.error || "Import failed"); }
     if (csvRef.current) csvRef.current.value = "";
   };
 
@@ -125,7 +127,20 @@ export default function PriceListPage() {
                   </div>
                 </div>
                 <Field label="Name"><Input className="h-11 rounded-xl" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} /></Field>
-                <Field label="Description"><Textarea className="rounded-xl min-h-[70px]" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} /></Field>
+                <Field
+                  label={
+                    <span className="flex items-center justify-between gap-2 w-full">
+                      Description
+                      <AIAssistButton
+                        kind="price_item_description"
+                        input={{ name: form.name, category: form.category, notes: form.description }}
+                        onAccept={(text) => setForm({ ...form, description: text })}
+                      />
+                    </span>
+                  }
+                >
+                  <Textarea className="rounded-xl min-h-[70px]" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} />
+                </Field>
                 <div className="grid grid-cols-2 gap-4">
                   <Field label="Unit Price"><Input type="number" className="h-11 rounded-xl" value={form.unit_price} onChange={(e) => setForm({ ...form, unit_price: e.target.value })} /></Field>
                   <Field label="Currency">
@@ -195,7 +210,7 @@ export default function PriceListPage() {
   );
 }
 
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
+function Field({ label, children }: { label: React.ReactNode; children: React.ReactNode }) {
   return (
     <div>
       <Label className="text-xs uppercase tracking-wide text-gray-500">{label}</Label>

@@ -15,8 +15,6 @@ const stats = [
 ];
 
 const topLogos = [
-    "/home/brands/Frame 2147228406.svg",
-    "/home/brands/Frame 2147228407.svg",
     "/home/brands/Frame 2147228408.svg",
     "/home/brands/Frame 2147228411.svg",
     "/home/brands/Frame 2147228406-2.svg",

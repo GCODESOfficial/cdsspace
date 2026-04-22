@@ -13,6 +13,7 @@ import { Step2_VisualExecution } from "./banner-lab/Step2_VisualExecution";
 import { Step3_Fulfillment } from "./banner-lab/Step3_Fulfillment";
 import { BannerStudioSuccessModal } from "./banner-lab/BannerStudioSuccessModal";
 import { BannerLabProps, Step, BannerFormData } from "./banner-lab/types";
+import { appAlert, appConfirm, appPrompt } from "@/lib/app-notify";
 
 /**
  * BannerLab - The main orchestrator for the Banner Studio.
@@ -70,7 +71,7 @@ export const BannerLab = ({ onBack }: BannerLabProps) => {
             if (response.ok) {
                 onBack(); // Go back to dashboard on success
             } else {
-                alert("Failed to save draft");
+                appAlert("Failed to save draft");
             }
         } catch (error) {
             console.error("Save draft error:", error);

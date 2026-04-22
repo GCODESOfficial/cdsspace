@@ -70,7 +70,53 @@ export interface FinanceInvoice {
   public_token: string;
   created_at: string;
   items?: FinanceInvoiceItem[];
+  payment_terms?: string | null;
+  revisions_note?: string | null;
+  working_hours?: string | null;
+  delivery_speed?: "standard" | "express" | "super_express" | "flash" | null;
+  delivery_period?: string | null;
 }
+
+export const DELIVERY_SPEEDS = [
+  { value: "standard",      label: "Standard",      helper: "Client's regular schedule",   surchargeType: "none"  as const, defaultSurcharge: 0    },
+  { value: "express",       label: "Express",       helper: "Priority handling",           surchargeType: "pct"   as const, defaultSurcharge: 15   },
+  { value: "super_express", label: "Super Express", helper: "Top of the queue",            surchargeType: "pct"   as const, defaultSurcharge: 30   },
+  { value: "flash",         label: "Flash",         helper: "Same-day / fastest possible", surchargeType: "pct"   as const, defaultSurcharge: 50   },
+] as const;
+
+export type DeliverySpeed = typeof DELIVERY_SPEEDS[number]["value"];
+
+export function deliverySpeedLabel(v: DeliverySpeed | null | undefined): string {
+  return DELIVERY_SPEEDS.find((s) => s.value === v)?.label || "Standard";
+}
+
+export function deliverySpeedMeta(v: DeliverySpeed | null | undefined) {
+  return DELIVERY_SPEEDS.find((s) => s.value === v) ?? DELIVERY_SPEEDS[0];
+}
+
+export const DEFAULT_PAYMENT_TERMS = "100% Upfront Payment. Payment is not Refundable";
+export const DEFAULT_REVISIONS_NOTE = "Designs are subject to Free 2 Revisions";
+export const DEFAULT_WORKING_HOURS = "9am–5:30pm Monday–Friday  UTC+1";
+
+// Bank accounts shown on every invoice
+export const CDS_BANK_ACCOUNTS = [
+  {
+    bank: "MoniePoint Microfinance Bank",
+    account_name: "CDS Space Branding Agency Limited.",
+    account_number: "5696555358",
+    color: "#0A4FE8", // blue
+    initial: "M",
+    logo: "/moniepoint.png",
+  },
+  {
+    bank: "Wema Bank",
+    account_name: "CDS Space Branding Agency Limited.",
+    account_number: "0126148969",
+    color: "#8A1A5A", // wema purple
+    initial: "W",
+    logo: "/wemabank.png",
+  },
+] as const;
 
 export interface FinanceSubscription {
   id: string;

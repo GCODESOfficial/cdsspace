@@ -71,6 +71,11 @@ create table if not exists finance_invoices (
   issue_date date not null default current_date,
   due_date date,
   notes text,
+  payment_terms text not null default '100% Upfront Payment. Payment is not Refundable',
+  revisions_note text not null default 'Designs are subject to Free 2 Revisions',
+  working_hours text not null default '9am-5:30pm Monday-Friday UTC+1',
+  delivery_speed text not null default 'standard' check (delivery_speed in ('standard','express','super_express','flash')),
+  delivery_period text,
   public_token text unique not null,
   created_at timestamptz not null default now()
 );

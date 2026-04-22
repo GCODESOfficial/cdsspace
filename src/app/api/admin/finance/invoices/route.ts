@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { financeDb, requireFinanceAdmin } from "@/lib/finance/api-auth";
 import { generateInvoiceNumber, randomToken } from "@/lib/finance/types";
+import { isMissingInvoiceExtensionColumn, stripInvoiceExtensionFields } from "@/lib/finance/invoice-schema-fallback";
 
 export async function GET(req: NextRequest) {
   const denied = requireFinanceAdmin(req); if (denied) return denied;
@@ -20,6 +21,8 @@ export async function POST(req: NextRequest) {
     project_id = null, milestone_id = null, client_name, client_email, client_address,
     currency = "NGN", tax_rate = 0, discount = 0, status = "draft",
     scope = "custom", period_month = null, issue_date, due_date, notes,
+    payment_terms, revisions_note, working_hours,
+    delivery_speed = "standard", delivery_period = null,
     items = [],
   } = body;
   if (!client_name) return NextResponse.json({ error: "client_name required" }, { status: 400 });
@@ -33,14 +36,29 @@ export async function POST(req: NextRequest) {
   const public_token = randomToken(28);
 
   const sb = financeDb();
-  const { data: invoice, error } = await sb.from("finance_invoices").insert({
+  const insertPayload = {
     invoice_number, project_id, milestone_id, client_name,
     client_email: client_email || null, client_address: client_address || null,
     currency, subtotal, tax_rate, tax_amount, discount, total,
     status, scope, period_month,
     issue_date: issue_date || new Date().toISOString().slice(0, 10),
     due_date: due_date || null, notes: notes || null, public_token,
-  }).select().single();
+    // NEW: terms + delivery (fall back to DB defaults if caller omits them)
+    ...(payment_terms !== undefined ? { payment_terms } : {}),
+    ...(revisions_note !== undefined ? { revisions_note } : {}),
+    ...(working_hours !== undefined ? { working_hours } : {}),
+    delivery_speed,
+    delivery_period: delivery_period || null,
+  };
+
+  let { data: invoice, error } = await sb.from("finance_invoices").insert(insertPayload).select().single();
+  if (error && isMissingInvoiceExtensionColumn(error)) {
+    ({ data: invoice, error } = await sb
+      .from("finance_invoices")
+      .insert(stripInvoiceExtensionFields(insertPayload))
+      .select()
+      .single());
+  }
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
   // Insert items + autosave any new ones to price list

@@ -18,6 +18,7 @@ import {
   Trash2,
 } from "lucide-react";
 import BulkActionBar from "@/components/admin/BulkActionBar";
+import { appAlert, appConfirm, appPrompt } from "@/lib/app-notify";
 
 const ASSIGNABLE_ROLES = [
   "Creative Designer",
@@ -196,7 +197,7 @@ export default function AdminTablePage() {
   };
 
   const bulkDelete = async () => {
-    if (!confirm(`Delete ${selected.size} applicant(s)? This cannot be undone.`)) return;
+    if (!(await appConfirm(`Delete ${selected.size} applicant(s)? This cannot be undone.`))) return;
 
     const ids = Array.from(selected);
     const { error } = await supabase.from("applications").delete().in("id", ids);

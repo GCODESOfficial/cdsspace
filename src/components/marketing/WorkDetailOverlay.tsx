@@ -5,8 +5,11 @@
 import { useEffect, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import Image from "next/image";
-import { X, Loader2 } from "lucide-react";
+import NextLink from "next/link";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { X, Loader2, Maximize2, Share2, Check } from "lucide-react";
 import { supabase } from "@/lib/supabase";
+import { slugifyTitle } from "@/lib/work-slug";
 
 interface WorkRow {
     id: number;
@@ -49,6 +52,59 @@ export function WorkDetailOverlay({ workId, onClose }: WorkDetailOverlayProps) {
     const [images, setImages] = useState<WorkImageRow[]>([]);
     const [heroUrl, setHeroUrl] = useState<string | null>(null);
     const [loading, setLoading] = useState(false);
+    const [copied, setCopied] = useState(false);
+
+    const router = useRouter();
+    const pathname = usePathname();
+    const searchParams = useSearchParams();
+
+    // Keep the URL in sync with the open workId so a shareable deep link exists.
+    useEffect(() => {
+        if (typeof window === "undefined") return;
+        const currentId = searchParams.get("id");
+        if (workId != null && currentId !== String(workId)) {
+            const next = new URLSearchParams(searchParams.toString());
+            next.set("id", String(workId));
+            router.replace(`${pathname}?${next.toString()}`, { scroll: false });
+        } else if (workId == null && currentId) {
+            const next = new URLSearchParams(searchParams.toString());
+            next.delete("id");
+            const qs = next.toString();
+            router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
+        }
+    }, [workId, pathname, router, searchParams]);
+
+    const slug = work?.title ? slugifyTitle(work.title) : null;
+    const detailHref = slug ? `/work/${slug}` : null;
+    const shareUrl =
+        typeof window !== "undefined" && detailHref
+            ? `${window.location.origin}${detailHref}`
+            : "";
+
+    const handleShare = async () => {
+        if (!shareUrl) return;
+        const shareData = {
+            title: work?.title ?? "CDS Space Project",
+            text: work?.description ?? "Check out this project by CDS Space.",
+            url: shareUrl,
+        };
+        try {
+            if (typeof navigator !== "undefined" && typeof navigator.share === "function") {
+                await navigator.share(shareData);
+                return;
+            }
+        } catch {
+            // user cancelled or share failed — fall through to copy
+        }
+        try {
+            await navigator.clipboard.writeText(shareUrl);
+            setCopied(true);
+            setTimeout(() => setCopied(false), 1800);
+        } catch {
+            // last-resort fallback
+            window.prompt("Copy this link:", shareUrl);
+        }
+    };
 
     // Fetch work + images whenever a new workId is set.
     useEffect(() => {
@@ -187,14 +243,40 @@ export function WorkDetailOverlay({ workId, onClose }: WorkDetailOverlayProps) {
                                     </span>
                                 )}
                             </div>
-                            <button
-                                type="button"
-                                onClick={onClose}
-                                aria-label="Close project"
-                                className="shrink-0 inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border border-gray-200 text-gray-600 text-sm font-medium hover:bg-gray-50 hover:text-[#040B37] transition"
-                            >
-                                Close <X className="w-4 h-4" />
-                            </button>
+                            <div className="shrink-0 flex items-center gap-2">
+                                {detailHref && (
+                                    <>
+                                        <NextLink
+                                            href={detailHref}
+                                            aria-label="Open full project view"
+                                            title="Open full view"
+                                            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border border-gray-200 text-gray-600 text-sm font-medium hover:bg-gray-50 hover:text-[#040B37] transition"
+                                        >
+                                            <Maximize2 className="w-4 h-4" />
+                                            <span className="hidden sm:inline">Expand</span>
+                                        </NextLink>
+                                        <button
+                                            type="button"
+                                            onClick={handleShare}
+                                            aria-label={copied ? "Link copied" : "Share project"}
+                                            title={copied ? "Link copied" : "Share / copy link"}
+                                            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border border-gray-200 text-gray-600 text-sm font-medium hover:bg-gray-50 hover:text-[#040B37] transition"
+                                        >
+                                            {copied ? <Check className="w-4 h-4 text-emerald-600" /> : <Share2 className="w-4 h-4" />}
+                                            <span className="hidden sm:inline">{copied ? "Copied" : "Share"}</span>
+                                        </button>
+                                    </>
+                                )}
+                                <button
+                                    type="button"
+                                    onClick={onClose}
+                                    aria-label="Close project"
+                                    className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border border-gray-200 text-gray-600 text-sm font-medium hover:bg-gray-50 hover:text-[#040B37] transition"
+                                >
+                                    <span className="hidden sm:inline">Close</span>
+                                    <X className="w-4 h-4" />
+                                </button>
+                            </div>
                         </header>
 
                         {loading && !work ? (

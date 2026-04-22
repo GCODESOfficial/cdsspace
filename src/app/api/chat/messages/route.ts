@@ -1,6 +1,11 @@
 import { NextResponse } from "next/server";
 import { verifyAdmin, verifyUser } from "@/lib/admin-auth";
 import { supabaseAdmin } from "@/lib/supabase";
+import { getActiveWhatsAppIntegration, phoneFromWaRoomId } from "@/lib/whatsapp/config";
+import { sendCloudApiMessage } from "@/lib/whatsapp/cloud";
+import { isQrConnected, sendQrMessage } from "@/lib/whatsapp/qr-runtime";
+import { externalIdFromRoomId, getMetaIntegration } from "@/lib/meta/config";
+import { graphPost } from "@/lib/meta/graph";
 
 export const dynamic = "force-dynamic";
 
@@ -12,6 +17,9 @@ export async function GET(request: Request) {
     if (!admin && !userSession) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
+    if (!supabaseAdmin) {
+      return NextResponse.json({ error: "Supabase not configured" }, { status: 500 });
+    }
 
     const { searchParams } = new URL(request.url);
     const roomId = searchParams.get("roomId");
@@ -19,13 +27,9 @@ export async function GET(request: Request) {
     const before = searchParams.get("before");
 
     if (!roomId) {
-      return NextResponse.json(
-        { error: "roomId is required" },
-        { status: 400 }
-      );
+      return NextResponse.json({ error: "roomId is required" }, { status: 400 });
     }
 
-    // If client, only allow access to their own room
     if (!admin && userSession) {
       const expectedRoomId = `client_${userSession.user.id}`;
       if (roomId !== expectedRoomId) {
@@ -40,23 +44,14 @@ export async function GET(request: Request) {
       .order("created_at", { ascending: true })
       .limit(limit);
 
-    if (before) {
-      query = query.lt("created_at", before);
-    }
+    if (before) query = query.lt("created_at", before);
 
     const { data, error } = await query;
-
-    if (error) {
-      return NextResponse.json({ error: error.message }, { status: 500 });
-    }
-
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
     return NextResponse.json({ messages: data });
   } catch (err) {
     console.error("GET /api/chat/messages error:", err);
-    return NextResponse.json(
-      { error: "Internal server error" },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: "Internal server error" }, { status: 500 });
   }
 }
 
@@ -68,30 +63,42 @@ export async function POST(request: Request) {
     if (!admin && !userSession) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
+    if (!supabaseAdmin) {
+      return NextResponse.json({ error: "Supabase not configured" }, { status: 500 });
+    }
 
     const body = await request.json();
     const { roomId, message, fileUrl } = body;
 
     if (!roomId || !message) {
-      return NextResponse.json(
-        { error: "roomId and message are required" },
-        { status: 400 }
-      );
+      return NextResponse.json({ error: "roomId and message are required" }, { status: 400 });
     }
 
     const isAdmin = !!admin;
     const senderId = isAdmin ? admin.id : userSession!.user.id;
     const senderRole = isAdmin ? "admin" : "client";
 
-    // If client, only allow sending to their own room
-    if (!isAdmin) {
+    // External channel rooms can only be replied to by admin.
+    const isWaRoom = roomId.startsWith("whatsapp_");
+    const metaRoom = externalIdFromRoomId(roomId);
+    const isExternalRoom = isWaRoom || !!metaRoom;
+
+    if (isExternalRoom && !isAdmin) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
+    if (!isAdmin && !isExternalRoom) {
       const expectedRoomId = `client_${senderId}`;
       if (roomId !== expectedRoomId) {
         return NextResponse.json({ error: "Forbidden" }, { status: 403 });
       }
     }
 
-    // Insert the chat message
+    const outboundSource = isWaRoom
+      ? await resolveWaSource()
+      : metaRoom
+        ? metaRoom.platform
+        : "web";
+
     const { data: chatMessage, error: insertError } = await supabaseAdmin
       .from("chat_messages")
       .insert({
@@ -100,20 +107,93 @@ export async function POST(request: Request) {
         sender_role: senderRole,
         message,
         file_url: fileUrl || null,
+        source: outboundSource,
       })
       .select()
       .single();
 
     if (insertError) {
-      return NextResponse.json(
-        { error: insertError.message },
-        { status: 500 }
-      );
+      return NextResponse.json({ error: insertError.message }, { status: 500 });
     }
 
-    // Create a notification for the other party
-    if (isAdmin) {
-      // Notify the client: extract userId from roomId "client_{userId}"
+    // Ship to the right channel.
+    if (isWaRoom && isAdmin) {
+      const phone = phoneFromWaRoomId(roomId);
+      const integ = await getActiveWhatsAppIntegration();
+      if (!phone || !integ) {
+        return NextResponse.json(
+          { error: "WhatsApp is not active. Enable a mode in /admin/integrations/whatsapp." },
+          { status: 409 },
+        );
+      }
+
+      if (integ.mode === "cloud_api") {
+        const result = await sendCloudApiMessage(integ, phone, message);
+        if (!result.ok) {
+          return NextResponse.json({ error: `WhatsApp send failed: ${result.error}` }, { status: 502 });
+        }
+        await supabaseAdmin
+          .from("chat_messages")
+          .update({ external_id: result.externalId })
+          .eq("id", chatMessage.id);
+      } else {
+        // web_qr: if the in-process client is connected, send directly; otherwise
+        // hand off to the standalone bridge process via the outbox table.
+        if (isQrConnected()) {
+          try {
+            const externalId = await sendQrMessage(phone, message);
+            if (externalId) {
+              await supabaseAdmin
+                .from("chat_messages")
+                .update({ external_id: externalId })
+                .eq("id", chatMessage.id);
+            }
+          } catch (err) {
+            return NextResponse.json(
+              { error: `WhatsApp send failed: ${err instanceof Error ? err.message : String(err)}` },
+              { status: 502 },
+            );
+          }
+        } else {
+          await supabaseAdmin.from("whatsapp_outbox").insert({
+            to_phone: phone,
+            body: message,
+            chat_message_id: chatMessage.id,
+          });
+        }
+      }
+    } else if (metaRoom && isAdmin) {
+      const integ = await getMetaIntegration(metaRoom.platform);
+      if (!integ?.page_access_token || !integ.page_id) {
+        return NextResponse.json(
+          { error: `${metaRoom.platform} integration is not configured.` },
+          { status: 409 },
+        );
+      }
+      try {
+        const sender =
+          metaRoom.platform === "instagram" && integ.ig_business_id
+            ? integ.ig_business_id
+            : integ.page_id;
+        const res = await graphPost<{ message_id?: string }>(`/${sender}/messages`, integ.page_access_token, {
+          recipient: { id: metaRoom.id },
+          messaging_type: "RESPONSE",
+          message: { text: message },
+        });
+        if (res.message_id) {
+          await supabaseAdmin
+            .from("chat_messages")
+            .update({ external_id: res.message_id })
+            .eq("id", chatMessage.id);
+        }
+      } catch (err) {
+        return NextResponse.json(
+          { error: `${metaRoom.platform} send failed: ${err instanceof Error ? err.message : String(err)}` },
+          { status: 502 },
+        );
+      }
+    } else if (isAdmin) {
+      // Internal: notify client
       const clientUserId = roomId.replace("client_", "");
       await supabaseAdmin.from("notifications").insert({
         user_id: clientUserId,
@@ -123,12 +203,12 @@ export async function POST(request: Request) {
         link: "/chat",
       });
     } else {
+      // Internal: notify admin
       const { data: adminProfile } = await supabaseAdmin
         .from("profiles")
         .select("id")
         .eq("email", "ceo@cdsspace.pro")
         .single();
-
       if (adminProfile) {
         await supabaseAdmin.from("notifications").insert({
           user_id: adminProfile.id,
@@ -143,9 +223,11 @@ export async function POST(request: Request) {
     return NextResponse.json({ message: chatMessage });
   } catch (err) {
     console.error("POST /api/chat/messages error:", err);
-    return NextResponse.json(
-      { error: "Internal server error" },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: "Internal server error" }, { status: 500 });
   }
+}
+
+async function resolveWaSource(): Promise<"whatsapp_cloud" | "whatsapp_qr"> {
+  const integ = await getActiveWhatsAppIntegration();
+  return integ?.mode === "cloud_api" ? "whatsapp_cloud" : "whatsapp_qr";
 }

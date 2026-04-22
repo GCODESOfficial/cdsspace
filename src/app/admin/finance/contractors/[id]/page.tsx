@@ -13,6 +13,7 @@ import StatCard from "@/components/finance/StatCard";
 import ModalHeader from "@/components/finance/ModalHeader";
 import { findBankByCode } from "@/lib/finance/banks";
 import { Currency, FinanceContractor, FinanceContractorAssignment, FinanceContractorPayment, formatMoney } from "@/lib/finance/types";
+import { appAlert, appConfirm, appPrompt } from "@/lib/app-notify";
 
 export default function ContractorDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
@@ -45,7 +46,7 @@ export default function ContractorDetailPage({ params }: { params: Promise<{ id:
     if (r.ok) { setAssignOpen(false); setAssignForm({ project_id: "", agreed_amount: "", currency: "NGN", notes: "" }); load(); }
   };
   const removeAssign = async (aid: string) => {
-    if (!confirm("Remove assignment?")) return;
+    if (!(await appConfirm("Remove assignment?"))) return;
     await fetch(`/api/admin/finance/contractor-assignments/${aid}`, { method: "DELETE" }); load();
   };
 
@@ -64,7 +65,7 @@ export default function ContractorDetailPage({ params }: { params: Promise<{ id:
     if (r.ok) { setPayOpen(false); setPayForm({ project_id: "", amount: "", currency: "NGN", paid_on: new Date().toISOString().slice(0, 10), payment_ref: "", proof_url: "", notes: "" }); load(); }
   };
   const removePay = async (pid: string) => {
-    if (!confirm("Delete payment?")) return;
+    if (!(await appConfirm("Delete payment?"))) return;
     await fetch(`/api/admin/finance/contractor-payments/${pid}`, { method: "DELETE" }); load();
   };
 

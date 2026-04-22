@@ -21,6 +21,7 @@ import {
 import { RequestDetailView } from "./RequestDetailView";
 import { CreateRequestView } from "./CreateRequestView";
 import { FeedbackView } from "./FeedbackView";
+import { appAlert, appConfirm, appPrompt } from "@/lib/app-notify";
 
 interface RequestCardProps {
     title: string;
@@ -345,7 +346,7 @@ export const ActiveSubscriptionView = ({
 
     const handleDeleteRequest = async (e: React.MouseEvent, reqId: string, status: string) => {
         e.stopPropagation();
-        if (!window.confirm("Are you sure you want to delete this design request?")) return;
+        if (!(await appConfirm("Are you sure you want to delete this design request?"))) return;
 
         try {
             const res = await fetch(`/api/requests?id=${reqId}`, {

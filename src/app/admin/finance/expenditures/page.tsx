@@ -13,6 +13,7 @@ import FinanceShell, { glassCard } from "@/components/finance/FinanceShell";
 import StatCard from "@/components/finance/StatCard";
 import ModalHeader from "@/components/finance/ModalHeader";
 import { CURRENCIES, Currency, FinanceExpenditure, formatMoney } from "@/lib/finance/types";
+import { appAlert, appConfirm, appPrompt } from "@/lib/app-notify";
 
 type Cycle = "daily" | "weekly" | "monthly" | "quarterly" | "yearly" | "custom";
 
@@ -47,7 +48,7 @@ export default function ExpendituresPage() {
     if (r.ok) { setOpen(false); setForm(EMPTY); load(); }
   };
   const remove = async (id: string) => {
-    if (!confirm("Delete this expenditure?")) return;
+    if (!(await appConfirm("Delete this expenditure?"))) return;
     await fetch(`/api/admin/finance/expenditures/${id}`, { method: "DELETE" }); load();
   };
 

@@ -7,6 +7,7 @@ import {
   ClipboardCheck, Upload, FileText, BookOpen, TrendingUp, Scale, Loader2,
   Download, FileSpreadsheet, Trash2, Calendar, Receipt, Wallet, ArrowRight,
 } from "lucide-react";
+import { appAlert, appConfirm, appPrompt } from "@/lib/app-notify";
 
 interface BankStatement {
   id: string;
@@ -119,7 +120,7 @@ export default function FinancialAuditPage() {
   }
 
   async function handleDelete(id: string, path: string) {
-    if (!confirm("Delete this bank statement?")) return;
+    if (!(await appConfirm("Delete this bank statement?"))) return;
     await supabase.storage.from("bank-statements").remove([path]);
     await supabase.from("finance_bank_statements").delete().eq("id", id);
     fetchStatements();

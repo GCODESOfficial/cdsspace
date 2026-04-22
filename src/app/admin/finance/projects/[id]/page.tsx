@@ -10,6 +10,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Plus, Trash2, Edit2, Wallet, TrendingUp, Clock } from "lucide-react";
 import { Currency, formatMoney, FinanceProject, FinanceMilestone } from "@/lib/finance/types";
 import FinanceShell, { glassCard } from "@/components/finance/FinanceShell";
+import { appAlert, appConfirm, appPrompt } from "@/lib/app-notify";
 
 const STATUS_PILL: Record<string, string> = {
   pending:     "bg-gray-100 text-gray-700 ring-1 ring-gray-200",
@@ -65,17 +66,17 @@ export default function ProjectDetail({ params }: { params: Promise<{ id: string
     const url = editing ? `/api/admin/finance/milestones/${editing.id}` : `/api/admin/finance/projects/${id}/milestones`;
     const method = editing ? "PATCH" : "POST";
     const r = await fetch(url, { method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
-    if (r.ok) { setOpen(false); load(); } else { const d = await r.json(); alert(d.error || "Failed"); }
+    if (r.ok) { setOpen(false); load(); } else { const d = await r.json(); appAlert(d.error || "Failed"); }
   };
 
   const remove = async (mid: string) => {
-    if (!confirm("Delete this milestone?")) return;
+    if (!(await appConfirm("Delete this milestone?"))) return;
     await fetch(`/api/admin/finance/milestones/${mid}`, { method: "DELETE" });
     load();
   };
 
   const removeProject = async () => {
-    if (!confirm("Delete this project and all its milestones? This cannot be undone.")) return;
+    if (!(await appConfirm("Delete this project and all its milestones? This cannot be undone."))) return;
     const r = await fetch(`/api/admin/finance/projects/${id}`, { method: "DELETE" });
     if (r.ok) window.location.href = "/admin/finance/projects";
   };

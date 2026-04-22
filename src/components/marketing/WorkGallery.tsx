@@ -52,10 +52,10 @@ function dedupeWorks(rows: Work[]): Work[] {
 interface WorkGalleryProps {
     activeCategory: string;
     searchQuery?: string;
-    onProjectClick: (id: string) => void;
+    onOpen: (id: number) => void;
 }
 
-export const WorkGallery = ({ activeCategory, searchQuery = "", onProjectClick }: WorkGalleryProps) => {
+export const WorkGallery = ({ activeCategory, searchQuery = "", onOpen }: WorkGalleryProps) => {
     const [works, setWorks] = useState<Work[]>([]);
     const [loading, setLoading] = useState(true);
 
@@ -110,7 +110,7 @@ export const WorkGallery = ({ activeCategory, searchQuery = "", onProjectClick }
                             <div key={work.id} className="h-[504px]">
                                 <ProjectCard
                                     work={work}
-                                    onClick={() => onProjectClick(String(work.id))}
+                                    onClick={() => onOpen(work.id)}
                                 />
                             </div>
                         ))}

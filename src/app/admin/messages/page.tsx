@@ -9,7 +9,7 @@ export default function AdminMessagesPage() {
       {/* Header */}
       <div className="mb-6 flex-shrink-0">
         <p className="text-[#0A4FE8] text-sm font-semibold">Communication</p>
-        <h1 className="text-[28px] font-bold text-[#0D1B39] tracking-tight">Messages</h1>
+        <h1 className="text-[28px] font-bold text-[#0D1B39] tracking-tight">Client Conversation</h1>
       </div>
 
       {/* Chat Panel */}

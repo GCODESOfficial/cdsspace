@@ -4,7 +4,9 @@ import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { useToast } from "@/hooks/use-toast";
 import { Trash2, Loader2, Plus, Pencil, Save, X, GripVertical, HelpCircle } from "lucide-react";
+import { AIAssistButton } from "@/components/ai/AIAssistButton";
 import BulkActionBar from "@/components/admin/BulkActionBar";
+import { appAlert, appConfirm, appPrompt } from "@/lib/app-notify";
 
 interface FAQ {
   id: string;
@@ -78,7 +80,7 @@ export default function FAQsAdmin() {
   }
 
   async function handleBulkDelete() {
-    if (!confirm(`Delete ${selected.size} FAQs?`)) return;
+    if (!(await appConfirm(`Delete ${selected.size} FAQs?`))) return;
     await supabase.from("faqs").delete().in("id", Array.from(selected));
     setSelected(new Set());
     fetchFAQs();
@@ -132,8 +134,15 @@ export default function FAQsAdmin() {
               <input value={question} onChange={(e) => setQuestion(e.target.value)} placeholder="e.g. How quickly can we expect results?"
                 className="w-full px-4 py-2.5 rounded-xl bg-gray-50 border border-gray-200 text-sm text-gray-800 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-300 transition" />
             </div>
-            <div>
+            <div className="relative">
               <label className="block text-xs font-medium text-gray-500 mb-1.5">Answer</label>
+              <div className="absolute top-0 right-0">
+                <AIAssistButton
+                  kind="faq_answer"
+                  input={{ question, draft: answer }}
+                  onAccept={setAnswer}
+                />
+              </div>
               <textarea value={answer} onChange={(e) => setAnswer(e.target.value)} placeholder="Write the answer..." rows={3}
                 className="w-full px-4 py-2.5 rounded-xl bg-gray-50 border border-gray-200 text-sm text-gray-800 placeholder:text-gray-400 resize-none focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-300 transition" />
             </div>
@@ -180,8 +189,15 @@ export default function FAQsAdmin() {
                       <input value={editQuestion} onChange={(e) => setEditQuestion(e.target.value)}
                         className="w-full px-4 py-2.5 rounded-xl bg-white border border-gray-200 text-sm text-gray-800 focus:outline-none focus:ring-2 focus:ring-blue-100 transition" />
                     </div>
-                    <div>
+                    <div className="relative">
                       <label className="block text-xs font-medium text-gray-500 mb-1.5">Answer</label>
+                      <div className="absolute top-0 right-0">
+                        <AIAssistButton
+                          kind="faq_answer"
+                          input={{ question: editQuestion, draft: editAnswer }}
+                          onAccept={setEditAnswer}
+                        />
+                      </div>
                       <textarea value={editAnswer} onChange={(e) => setEditAnswer(e.target.value)} rows={3}
                         className="w-full px-4 py-2.5 rounded-xl bg-white border border-gray-200 text-sm text-gray-800 resize-none focus:outline-none focus:ring-2 focus:ring-blue-100 transition" />
                     </div>

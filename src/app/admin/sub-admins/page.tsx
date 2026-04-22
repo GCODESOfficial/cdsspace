@@ -5,6 +5,7 @@ import { supabase } from "@/lib/supabase";
 import { PERMISSION_GROUPS, ALL_PERMISSIONS } from "@/lib/admin-permissions";
 import { useToast } from "@/hooks/use-toast";
 import { Trash2, Loader2, Plus, Eye, EyeOff, Shield, UserPlus, Check, ToggleLeft, ToggleRight, ChevronDown, ChevronRight, Copy, Mail, Link2, X, Send } from "lucide-react";
+import { appAlert, appConfirm, appPrompt } from "@/lib/app-notify";
 
 interface SubAdmin {
   id: string;
@@ -189,7 +190,7 @@ export default function SubAdminsPage() {
   }
 
   async function handleDelete(admin: SubAdmin) {
-    if (!window.confirm(`Remove ${admin.name}? This cannot be undone.`)) return;
+    if (!(await appConfirm(`Remove ${admin.name}? This cannot be undone.`))) return;
     const { error } = await supabase.from("sub_admins").delete().eq("id", admin.id);
     if (!error) {
       toast({ title: "Removed", description: `${admin.name} has been removed` });

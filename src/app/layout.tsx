@@ -33,19 +33,15 @@ export const metadata: Metadata = {
   alternates: {
     canonical: "https://cdsspace.pro",
   },
+  // NOTE: no explicit `images` here — Next.js auto-picks up the nearest
+  // `opengraph-image.tsx` / `twitter-image.tsx` per route segment and injects
+  // the correct 1200×630 PNG URL. SVGs were previously ignored by WhatsApp/Meta,
+  // which is why link previews came out text-only. Per-route images override.
   openGraph: {
     title: "CDS Space — Branding Agency | Brand Identity, Web Development & Industrial Print",
     description: "We help forward-thinking brands and individuals create great experiences, forging connections between people, brands, and cultures through premium design and production.",
     url: "https://cdsspace.pro",
     siteName: "CDS Space",
-    images: [
-      {
-        url: "/navbar/CDS Logo.svg",
-        width: 1200,
-        height: 630,
-        alt: "CDS Space Branding Agency",
-      },
-    ],
     locale: "en_US",
     type: "website",
   },
@@ -55,7 +51,6 @@ export const metadata: Metadata = {
     description: "Full-service branding agency specializing in brand identity, UI/UX, web development, and industrial print production.",
     creator: "@cdsspace_",
     site: "@cdsspace_",
-    images: ["/navbar/CDS Logo.svg"],
   },
   icons: {
     icon: "/navbar/CDS Logo.svg",
@@ -74,6 +69,7 @@ export const metadata: Metadata = {
 };
 
 import { AuthProvider } from "@/contexts/auth-context";
+import { AppNotifyRoot } from "@/lib/app-notify";
 
 export default function RootLayout({
   children,
@@ -120,6 +116,7 @@ export default function RootLayout({
         />
         <AuthProvider>
           {children}
+          <AppNotifyRoot />
         </AuthProvider>
       </body>
     </html>

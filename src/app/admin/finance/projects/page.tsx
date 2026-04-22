@@ -13,6 +13,7 @@ import { CURRENCIES, Currency, formatMoney } from "@/lib/finance/types";
 import FinanceShell, { glassCard } from "@/components/finance/FinanceShell";
 import StatCard from "@/components/finance/StatCard";
 import ModalHeader from "@/components/finance/ModalHeader";
+import { appAlert, appConfirm, appPrompt } from "@/lib/app-notify";
 
 interface ProjectRow {
   id: string;
@@ -61,7 +62,7 @@ export default function ProjectsPage() {
       load();
     } else {
       const d = await r.json();
-      alert(d.error || "Failed");
+      appAlert(d.error || "Failed");
     }
   };
 

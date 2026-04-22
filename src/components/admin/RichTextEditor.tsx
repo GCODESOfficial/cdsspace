@@ -25,6 +25,7 @@ import {
     Pilcrow,
     RemoveFormatting,
 } from "lucide-react";
+import { appAlert, appConfirm, appPrompt } from "@/lib/app-notify";
 
 interface RichTextEditorProps {
     value: string;
@@ -180,9 +181,9 @@ function Toolbar({ editor }: { editor: Editor }) {
             {/* Link */}
             <Btn
                 active={editor.isActive("link")}
-                onClick={() => {
+                onClick={async () => {
                     const prev = editor.getAttributes("link").href as string | undefined;
-                    const url = window.prompt("Link URL (leave blank to remove):", prev ?? "https://");
+                    const url = (await appPrompt("Link URL (leave blank to remove):", prev ?? "https://"));
                     if (url === null) return;
                     if (url.trim() === "") {
                         editor.chain().focus().extendMarkRange("link").unsetLink().run();

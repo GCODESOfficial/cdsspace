@@ -3,6 +3,7 @@
 "use client";
 import { useState } from "react";
 import Link from "next/link";
+import { appAlert, appConfirm, appPrompt } from "@/lib/app-notify";
 
 export default function BrandIdentityBrief() {
   const [step, setStep] = useState(1);
@@ -64,7 +65,7 @@ export default function BrandIdentityBrief() {
 
       const result = await res.json();
       if (!result.success) {
-        alert("Failed to send email. Please try again.");
+        appAlert("Failed to send email. Please try again.");
         return;
       }
     } catch (err) {

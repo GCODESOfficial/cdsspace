@@ -14,6 +14,7 @@ import { toast } from "sonner";
 import { Eye, Pencil, Trash2, Search, ArrowUpDown, ChevronLeft, ChevronRight, Archive } from "lucide-react";
 import Link from "next/link";
 import BulkActionBar from "@/components/admin/BulkActionBar";
+import { appAlert, appConfirm, appPrompt } from "@/lib/app-notify";
 
 interface UploadedWorksTableProps {
 	searchQuery?: string;
@@ -82,7 +83,7 @@ export function UploadedWorksTable({
 	};
 
 	const handleBulkDelete = async () => {
-		if (!window.confirm(`Delete ${selected.size} works?`)) return;
+		if (!(await appConfirm(`Delete ${selected.size} works?`))) return;
 		for (const id of selected) { await deleteWork(id).catch(() => {}); }
 		setSelected(new Set());
 		await fetchWorks();
@@ -210,8 +211,8 @@ export function UploadedWorksTable({
 											</Link>
 											<button
 												className="p-1.5 rounded-md text-gray-400 hover:text-red-500 hover:bg-red-50 transition"
-												onClick={() => {
-													if (window.confirm("Delete this work?")) handleDelete(work.id);
+												onClick={async () => {
+													if ((await appConfirm("Delete this work?"))) handleDelete(work.id);
 												}}
 											>
 												<Trash2 className="w-3.5 h-3.5" />

@@ -1,0 +1,17 @@
+{
+  "name": "cds-whatsapp-bridge",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Long-running process that links a WhatsApp business account via QR and bridges messages to/from Supabase.",
+  "type": "module",
+  "main": "index.mjs",
+  "scripts": {
+    "start": "node index.mjs"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.49.4",
+    "dotenv": "^16.5.0",
+    "qrcode": "^1.5.4",
+    "whatsapp-web.js": "^1.27.0"
+  }
+}

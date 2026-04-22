@@ -56,7 +56,7 @@ export const SignUpForm = () => {
         }
     };
 
-    const handleSocialLogin = async (provider: 'google') => {
+    const handleSocialLogin = async (provider: 'google' | 'twitter' | 'facebook') => {
         try {
             const result = await oauthLogin(provider, nextPath || undefined);
             if (result?.error) {
@@ -222,21 +222,55 @@ export const SignUpForm = () => {
                 </div>
 
                 {/* Social Login */}
-                <div className="w-full">
+                <div className="w-full flex flex-col gap-2.5 lg:gap-3">
                     <button
                         type="button"
                         onClick={() => handleSocialLogin('google')}
                         className="w-full flex items-center justify-center gap-3 py-3 lg:py-3.5 2xl:py-4 bg-white border border-brand-stroke rounded-[10px] lg:rounded-[12px] 2xl:rounded-[16px] shadow-[0_4px_8px_rgba(0,0,0,0.04)] hover:shadow-md transition-all cursor-pointer group"
                     >
-                        <Image 
-                            src="/auth/Signup/flat-color-icons_google.svg" 
-                            alt="Google" 
-                            width={24} 
-                            height={24} 
+                        <Image
+                            src="/auth/Signup/flat-color-icons_google.svg"
+                            alt="Google"
+                            width={24}
+                            height={24}
                             className="2xl:w-7 2xl:h-7"
                         />
                         <span className="text-brand-navy text-[14px] lg:text-[15px] 2xl:text-[16px] font-semibold group-hover:text-brand-blue transition-colors">
                             Sign up with Google
+                        </span>
+                    </button>
+
+                    <button
+                        type="button"
+                        onClick={() => handleSocialLogin('twitter')}
+                        className="w-full flex items-center justify-center gap-3 py-3 lg:py-3.5 2xl:py-4 bg-white border border-brand-stroke rounded-[10px] lg:rounded-[12px] 2xl:rounded-[16px] shadow-[0_4px_8px_rgba(0,0,0,0.04)] hover:shadow-md transition-all cursor-pointer group"
+                    >
+                        <Image
+                            src="/auth/Signup/x-icon.svg"
+                            alt="X"
+                            width={22}
+                            height={22}
+                            className="2xl:w-6 2xl:h-6"
+                        />
+                        <span className="text-brand-navy text-[14px] lg:text-[15px] 2xl:text-[16px] font-semibold group-hover:text-brand-blue transition-colors">
+                            Sign up with X
+                        </span>
+                    </button>
+
+                    <button
+                        type="button"
+                        onClick={() => handleSocialLogin('facebook')}
+                        className="w-full flex items-center justify-center gap-3 py-3 lg:py-3.5 2xl:py-4 bg-white border border-brand-stroke rounded-[10px] lg:rounded-[12px] 2xl:rounded-[16px] shadow-[0_4px_8px_rgba(0,0,0,0.04)] hover:shadow-md transition-all cursor-pointer group"
+                    >
+                        <Image
+                            src="/auth/Signup/logos_facebook.svg"
+                            alt="Facebook"
+                            width={24}
+                            height={24}
+                            className="2xl:w-7 2xl:h-7"
+                        />
+                        <span className="text-brand-navy text-[14px] lg:text-[15px] 2xl:text-[16px] font-semibold group-hover:text-brand-blue transition-colors">
+                            Sign up with Facebook
                         </span>
                     </button>
                 </div>

@@ -17,7 +17,7 @@ const SECTIONS = [
   { href: "/admin/finance/contractors",   label: "Contractors",   desc: "Team & contractor payments",                  icon: Users,     tint: "from-violet-500 to-purple-500" },
   { href: "/admin/finance/expenditures",  label: "Expenditures",  desc: "Track all outgoing spend",                    icon: Receipt,   tint: "from-rose-500 to-red-500" },
   { href: "/admin/finance/payroll",       label: "Payroll",       desc: "Employees & bank payroll exports",            icon: Wallet,    tint: "from-cyan-500 to-sky-500" },
-  { href: "/admin/finance/dashboard",     label: "Detailed",      desc: "Full financial summary",                      icon: BarChart3, tint: "from-slate-700 to-slate-900" },
+  { href: "/admin/finance/audit",       label: "Detailed",      desc: "Full financial summary",                      icon: BarChart3, tint: "from-slate-700 to-slate-900" },
 ];
 
 interface Stats {

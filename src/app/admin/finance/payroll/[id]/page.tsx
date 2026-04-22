@@ -13,6 +13,7 @@ import ModalHeader from "@/components/finance/ModalHeader";
 import BankPicker from "@/components/finance/BankPicker";
 import { findBankByCode } from "@/lib/finance/banks";
 import { FinanceEmployee, FinancePayrollRun, FinancePayrollItem, formatMoney } from "@/lib/finance/types";
+import { appAlert, appConfirm, appPrompt } from "@/lib/app-notify";
 
 export default function PayrollRunPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
@@ -46,13 +47,13 @@ export default function PayrollRunPage({ params }: { params: Promise<{ id: strin
   };
 
   const save = async () => {
-    if (!form.account_number || !form.amount || !form.bank_code || !form.narration) { alert("All fields required"); return; }
+    if (!form.account_number || !form.amount || !form.bank_code || !form.narration) { appAlert("All fields required"); return; }
     const r = await fetch(`/api/admin/finance/payroll/runs/${id}/items`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...form, employee_id: form.employee_id || null, amount: Number(form.amount) }) });
     if (r.ok) { setOpen(false); setForm({ employee_id: "", account_number: "", amount: "", bank_code: "", bank_name: "", narration: "" }); load(); }
   };
 
   const remove = async (iid: string) => {
-    if (!confirm("Remove item?")) return;
+    if (!(await appConfirm("Remove item?"))) return;
     await fetch(`/api/admin/finance/payroll/items/${iid}`, { method: "DELETE" }); load();
   };
 
@@ -62,7 +63,7 @@ export default function PayrollRunPage({ params }: { params: Promise<{ id: strin
   };
 
   const removeRun = async () => {
-    if (!confirm("Delete this entire payroll run?")) return;
+    if (!(await appConfirm("Delete this entire payroll run?"))) return;
     const r = await fetch(`/api/admin/finance/payroll/runs/${id}`, { method: "DELETE" });
     if (r.ok) window.location.href = "/admin/finance/payroll";
   };

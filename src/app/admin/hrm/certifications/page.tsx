@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { useToast } from "@/hooks/use-toast";
 import { Loader2, Award, Mail, Phone, Calendar, Trash2, Check, ExternalLink, X } from "lucide-react";
+import { appAlert, appConfirm, appPrompt } from "@/lib/app-notify";
 
 interface CertRequest {
   id: string;
@@ -58,7 +59,7 @@ export default function CertificationsPage() {
   }
 
   async function handleDelete(id: string) {
-    if (!confirm("Delete this request?")) return;
+    if (!(await appConfirm("Delete this request?"))) return;
     await supabase.from("cert_requests").delete().eq("id", id);
     fetchRequests();
   }

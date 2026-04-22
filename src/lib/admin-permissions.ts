@@ -77,11 +77,11 @@ export const PERMISSION_GROUPS: PermissionGroup[] = [
   },
   {
     key: "messages",
-    label: "Messages",
+    label: "Client Conversation",
     route: "/admin/messages",
     permissions: [
-      { key: "messages.view", label: "View Messages", description: "Read client conversations" },
-      { key: "messages.send", label: "Send Messages", description: "Reply to clients" },
+      { key: "messages.view", label: "View Client Conversation", description: "Read client conversations" },
+      { key: "messages.send", label: "Send Client Conversation", description: "Reply to clients" },
     ],
   },
   {
@@ -162,6 +162,65 @@ export const PERMISSION_GROUPS: PermissionGroup[] = [
       { key: "legal.edit", label: "Edit Legal", description: "Edit, download, and upload legal documents" },
     ],
   },
+  {
+    key: "team_chat",
+    label: "Team Chat",
+    route: "/admin/chat",
+    permissions: [
+      { key: "team_chat.view", label: "View Chat", description: "See internal team conversations" },
+      { key: "team_chat.send", label: "Send Messages", description: "Post in chat threads" },
+      { key: "team_chat.broadcast", label: "Broadcast", description: "Send company-wide announcements" },
+    ],
+  },
+  {
+    key: "workspace",
+    label: "Workspace",
+    permissions: [
+      { key: "workspace.protect_docs", label: "Protect Docs", description: "Manage secure team documents" },
+      { key: "workspace.cmeet", label: "cMeet", description: "Create and moderate meetings" },
+      { key: "workspace.cdocs", label: "cDocs", description: "Create and edit internal docs" },
+      { key: "workspace.csign", label: "cSign", description: "Request signatures on documents" },
+      { key: "workspace.cresume", label: "cResume", description: "View team member resumes" },
+      { key: "workspace.ai_system", label: "AI System", description: "Manage AI settings, knowledge docs, and templates" },
+    ],
+  },
+  {
+    key: "team_payroll",
+    label: "Team Payroll",
+    route: "/admin/team-payroll",
+    permissions: [
+      { key: "team_payroll.view", label: "View Payroll", description: "See team member payroll entries" },
+      { key: "team_payroll.edit", label: "Edit Payroll", description: "Create and update payroll entries" },
+    ],
+  },
+  {
+    key: "team_members",
+    label: "Team Members",
+    route: "/admin/team-members",
+    permissions: [
+      { key: "team_members.view", label: "View Members", description: "See the team roster" },
+      { key: "team_members.invite", label: "Invite", description: "Create accounts & generate invite links" },
+      { key: "team_members.edit", label: "Edit Members", description: "Update roles, departments, contact info" },
+      { key: "team_members.promote", label: "Promote to Sub-admin", description: "Grant or revoke sub-admin access" },
+      { key: "team_members.delete", label: "Remove Members", description: "Delete accounts" },
+    ],
+  },
+  {
+    key: "departments",
+    label: "Departments",
+    route: "/admin/departments",
+    permissions: [
+      { key: "departments.view", label: "View Departments", description: "See all departments" },
+      { key: "departments.manage", label: "Manage Departments", description: "Create, rename, delete departments" },
+    ],
+  },
+  {
+    key: "upload_works_edit",
+    label: "Works Team",
+    permissions: [
+      { key: "upload_works.assign", label: "Assign Team Members", description: "Pick who works on a project" },
+    ],
+  },
 ];
 
 /** Flat list of all permissions, for validation */
@@ -194,6 +253,23 @@ export function getPermissionForRoute(pathname: string): string | null {
   if (prefix) return prefix.key;
 
   if (pathname.startsWith("/admin/works/")) return "upload_works";
+  if (pathname.startsWith("/admin/ai-system")) return "workspace.ai_system";
+
+  // Workspace group — individual sub-routes all fall under one permission group
+  if (
+    pathname.startsWith("/admin/protect-docs") ||
+    pathname.startsWith("/admin/cmeet") ||
+    pathname.startsWith("/admin/cdocs") ||
+    pathname.startsWith("/admin/csign") ||
+    pathname.startsWith("/admin/cresume")
+  ) {
+    return "workspace";
+  }
+
+  if (pathname.startsWith("/admin/team-members")) return "team_members";
+  if (pathname.startsWith("/admin/departments")) return "departments";
+  if (pathname.startsWith("/admin/chat")) return "team_chat";
+  if (pathname.startsWith("/admin/team-payroll")) return "team_payroll";
 
   return null;
 }

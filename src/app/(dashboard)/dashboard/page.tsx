@@ -7,7 +7,7 @@ import { createClient } from "@/lib/supabase/client";
 import { supabase } from "@/lib/supabase";
 import {
     Plus, FileText, Image as ImageIcon, Package, Handshake, Calendar, MessageSquare,
-    ShoppingBag, Loader2, ArrowRight, Sparkles, Volume2, Share2, Download,
+    ShoppingBag, Loader2, ArrowRight, Volume2, Share2, Download,
     X, Check, BookOpen, Clock, FileCheck, Star,
 } from "lucide-react";
 

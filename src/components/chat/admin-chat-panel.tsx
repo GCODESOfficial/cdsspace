@@ -1,17 +1,34 @@
 "use client";
 
 import { useState, useEffect, useRef, useCallback } from "react";
-import { MessageSquare, Send, User, ChevronLeft } from "lucide-react";
+import { MessageSquare, Send, User, ChevronLeft, Forward, X, Search, Loader2, CornerDownRight } from "lucide-react";
+
+type MessageSource = "web" | "whatsapp_cloud" | "whatsapp_qr" | "instagram" | "facebook";
 
 interface ChatRoom {
   roomId: string;
   lastMessage: string;
   lastMessageAt: string;
   unreadCount: number;
+  source?: MessageSource;
   client?: {
     id: string;
     email: string;
     full_name: string | null;
+    avatar_url: string | null;
+  } | null;
+  whatsapp?: {
+    phone: string;
+    display_name: string | null;
+    wa_name: string | null;
+    linked_client_id: string | null;
+  } | null;
+  meta?: {
+    platform: "facebook" | "instagram";
+    external_user_id: string;
+    display_name: string | null;
+    username: string | null;
+    linked_client_id: string | null;
   } | null;
 }
 
@@ -24,6 +41,35 @@ interface ChatMessage {
   file_url?: string;
   created_at: string;
   is_read: boolean;
+  source?: MessageSource;
+  forwarded?: {
+    original_sender_name: string;
+    original_body: string;
+    original_source: "client" | "team";
+  } | null;
+}
+
+function SourceBadge({ source }: { source?: MessageSource }) {
+  const s = source || "web";
+  const styles: Record<MessageSource, { bg: string; label: string }> = {
+    web: { bg: "bg-gray-500/20 text-gray-300", label: "Web" },
+    whatsapp_cloud: { bg: "bg-emerald-500/20 text-emerald-300", label: "WhatsApp" },
+    whatsapp_qr: { bg: "bg-emerald-500/20 text-emerald-300", label: "WhatsApp" },
+    instagram: { bg: "bg-pink-500/20 text-pink-300", label: "Instagram" },
+    facebook: { bg: "bg-blue-500/20 text-blue-300", label: "Facebook" },
+  };
+  const { bg, label } = styles[s];
+  return (
+    <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-semibold uppercase tracking-wide ${bg}`}>
+      {label}
+    </span>
+  );
+}
+
+interface TeamThreadLite {
+  id: string;
+  name: string | null;
+  kind: string;
 }
 
 export function AdminChatPanel() {
@@ -35,6 +81,7 @@ export function AdminChatPanel() {
   const [isLoadingRooms, setIsLoadingRooms] = useState(true);
   const [isLoadingMessages, setIsLoadingMessages] = useState(false);
   const [mobileShowThread, setMobileShowThread] = useState(false);
+  const [forwardMsg, setForwardMsg] = useState<ChatMessage | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -182,7 +229,37 @@ export function AdminChatPanel() {
   };
 
   const getClientName = (room: ChatRoom) => {
-    return room.client?.full_name || room.client?.email || room.roomId;
+    if (room.client?.full_name || room.client?.email) {
+      return room.client.full_name || room.client.email;
+    }
+    if (room.whatsapp) {
+      return room.whatsapp.display_name || room.whatsapp.wa_name || `+${room.whatsapp.phone}`;
+    }
+    if (room.meta) {
+      return (
+        room.meta.display_name ||
+        (room.meta.username ? `@${room.meta.username}` : room.meta.external_user_id)
+      );
+    }
+    // No linked profile yet — hide the raw uuid from the admin UI.
+    return "Client";
+  };
+
+  const getAvatarUrl = (room: ChatRoom) => room.client?.avatar_url || null;
+
+  const getInitials = (room: ChatRoom) => {
+    const name = getClientName(room);
+    if (!name || name === "Client") return "?";
+    const parts = name.trim().split(/\s+/);
+    return (parts[0]?.[0] || "") + (parts[1]?.[0] || "");
+  };
+
+  const getRoomSource = (room: ChatRoom): MessageSource => {
+    if (room.source) return room.source;
+    if (room.roomId.startsWith("whatsapp_")) return "whatsapp_qr";
+    if (room.roomId.startsWith("facebook_")) return "facebook";
+    if (room.roomId.startsWith("instagram_")) return "instagram";
+    return "web";
   };
 
   // Group messages by date
@@ -236,14 +313,25 @@ export function AdminChatPanel() {
               >
                 <div className="flex items-start gap-3">
                   {/* Avatar */}
-                  <div className="w-10 h-10 rounded-full bg-[#2a3578] flex items-center justify-center shrink-0">
-                    <User className="w-5 h-5 text-[#5BA8FF]" />
+                  <div className="w-10 h-10 rounded-full bg-[#2a3578] flex items-center justify-center shrink-0 overflow-hidden text-[#5BA8FF] text-[11px] font-bold uppercase">
+                    {getAvatarUrl(room) ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        src={getAvatarUrl(room) as string}
+                        alt={getClientName(room)}
+                        className="w-full h-full object-cover"
+                      />
+                    ) : room.client || room.whatsapp || room.meta ? (
+                      <span>{getInitials(room)}</span>
+                    ) : (
+                      <User className="w-5 h-5" />
+                    )}
                   </div>
 
                   {/* Content */}
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center justify-between">
-                      <span className="text-white font-medium text-sm truncate">
+                      <span className="text-white font-medium text-sm truncate flex items-center gap-1.5">
                         {getClientName(room)}
                       </span>
                       <span className="text-gray-400 text-xs shrink-0 ml-2">
@@ -252,8 +340,9 @@ export function AdminChatPanel() {
                           : ""}
                       </span>
                     </div>
-                    <div className="flex items-center justify-between mt-1">
-                      <p className="text-gray-400 text-xs truncate pr-2">
+                    <div className="flex items-center gap-1.5 mt-1">
+                      <SourceBadge source={getRoomSource(room)} />
+                      <p className="text-gray-400 text-xs truncate pr-2 flex-1">
                         {room.lastMessage || "No messages"}
                       </p>
                       {room.unreadCount > 0 && (
@@ -286,14 +375,32 @@ export function AdminChatPanel() {
               >
                 <ChevronLeft className="w-5 h-5" />
               </button>
-              <div className="w-9 h-9 rounded-full bg-[#2a3578] flex items-center justify-center">
-                <User className="w-5 h-5 text-[#5BA8FF]" />
+              <div className="w-9 h-9 rounded-full bg-[#2a3578] flex items-center justify-center overflow-hidden text-[#5BA8FF] text-[11px] font-bold uppercase">
+                {selectedRoomData && getAvatarUrl(selectedRoomData) ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={getAvatarUrl(selectedRoomData) as string}
+                    alt={getClientName(selectedRoomData)}
+                    className="w-full h-full object-cover"
+                  />
+                ) : selectedRoomData && (selectedRoomData.client || selectedRoomData.whatsapp || selectedRoomData.meta) ? (
+                  <span>{getInitials(selectedRoomData)}</span>
+                ) : (
+                  <User className="w-5 h-5" />
+                )}
               </div>
               <div>
-                <p className="text-white font-medium text-sm">
+                <p className="text-white font-medium text-sm flex items-center gap-2">
                   {selectedRoomData ? getClientName(selectedRoomData) : selectedRoom}
+                  {selectedRoomData && <SourceBadge source={getRoomSource(selectedRoomData)} />}
                 </p>
-                <p className="text-gray-400 text-xs">Client</p>
+                <p className="text-gray-400 text-xs">
+                  {selectedRoomData?.whatsapp
+                    ? `WhatsApp · +${selectedRoomData.whatsapp.phone}`
+                    : selectedRoomData?.meta
+                      ? `${selectedRoomData.meta.platform === "facebook" ? "Messenger" : "Instagram"}${selectedRoomData.meta.username ? ` · @${selectedRoomData.meta.username}` : ""}`
+                      : "Client"}
+                </p>
               </div>
             </div>
 
@@ -320,8 +427,17 @@ export function AdminChatPanel() {
                       return (
                         <div
                           key={msg.id}
-                          className={`flex mb-2 ${isOwn ? "justify-end" : "justify-start"}`}
+                          className={`group flex mb-2 items-end gap-2 ${isOwn ? "justify-end" : "justify-start"}`}
                         >
+                          {isOwn && (
+                            <button
+                              onClick={() => setForwardMsg(msg)}
+                              className="opacity-0 group-hover:opacity-100 transition p-1.5 rounded-full hover:bg-[#2a3578] text-gray-400 hover:text-[#5BA8FF]"
+                              title="Forward"
+                            >
+                              <Forward className="w-3.5 h-3.5" />
+                            </button>
+                          )}
                           <div
                             className={`max-w-[75%] px-4 py-2.5 rounded-2xl text-sm ${
                               isOwn
@@ -329,6 +445,19 @@ export function AdminChatPanel() {
                                 : "bg-[#1a2255] text-gray-200 rounded-bl-sm"
                             }`}
                           >
+                            {msg.forwarded && (
+                              <div
+                                className={`text-[11px] mb-1.5 pl-2.5 border-l-2 flex items-start gap-1 ${
+                                  isOwn ? "border-white/50 text-white/85" : "border-[#5BA8FF]/50 text-gray-400"
+                                }`}
+                              >
+                                <CornerDownRight className="w-3 h-3 shrink-0 mt-0.5" />
+                                <span>
+                                  Forwarded · originally from{" "}
+                                  <span className="font-semibold">{msg.forwarded.original_sender_name}</span>
+                                </span>
+                              </div>
+                            )}
                             <p className="whitespace-pre-wrap break-words">
                               {msg.message}
                             </p>
@@ -352,6 +481,15 @@ export function AdminChatPanel() {
                               {formatTime(msg.created_at)}
                             </p>
                           </div>
+                          {!isOwn && (
+                            <button
+                              onClick={() => setForwardMsg(msg)}
+                              className="opacity-0 group-hover:opacity-100 transition p-1.5 rounded-full hover:bg-[#2a3578] text-gray-400 hover:text-[#5BA8FF]"
+                              title="Forward to team"
+                            >
+                              <Forward className="w-3.5 h-3.5" />
+                            </button>
+                          )}
                         </div>
                       );
                     })}
@@ -395,6 +533,119 @@ export function AdminChatPanel() {
             </p>
           </div>
         )}
+      </div>
+
+      {forwardMsg && (
+        <ClientMsgForwardDialog
+          message={forwardMsg}
+          onClose={() => setForwardMsg(null)}
+          onDone={() => setForwardMsg(null)}
+        />
+      )}
+    </div>
+  );
+}
+
+function ClientMsgForwardDialog({
+  message,
+  onClose,
+  onDone,
+}: {
+  message: ChatMessage;
+  onClose: () => void;
+  onDone: () => void;
+}) {
+  const [threads, setThreads] = useState<TeamThreadLite[]>([]);
+  const [search, setSearch] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    (async () => {
+      const r = await fetch("/api/team/chat/threads", { cache: "no-store" });
+      const j = await r.json();
+      if (r.ok && j.ok) setThreads(j.threads || []);
+    })();
+  }, []);
+
+  async function forward(threadId: string) {
+    setBusy(true);
+    setError(null);
+    const r = await fetch("/api/chat/forward", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        source: "client",
+        source_id: message.id,
+        target: "team",
+        target_id: threadId,
+      }),
+    });
+    const j = await r.json();
+    setBusy(false);
+    if (!r.ok || !j.ok) {
+      setError(j.error || "Couldn't forward");
+      return;
+    }
+    onDone();
+  }
+
+  const filtered = threads.filter((t) => (t.name || "").toLowerCase().includes(search.toLowerCase()));
+
+  return (
+    <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4" onClick={onClose}>
+      <div className="bg-white rounded-2xl w-full max-w-md max-h-[80vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
+        <div className="px-5 py-4 border-b border-gray-100 flex items-center justify-between">
+          <div>
+            <h3 className="text-[14px] font-semibold text-[#0D1B39]">Forward to team chat</h3>
+            <p className="text-[11px] text-gray-400 mt-0.5">Only the original sender will show on the other side.</p>
+          </div>
+          <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-gray-50">
+            <X className="w-4 h-4 text-gray-400" />
+          </button>
+        </div>
+        <div className="px-5 pt-3 pb-2 bg-gray-50 border-b border-gray-100 text-[12px] text-gray-600 italic line-clamp-2">
+          “{message.message || message.file_url || ""}”
+        </div>
+        <div className="px-5 pt-3 pb-2">
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
+            <input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search threads…"
+              className="w-full pl-9 pr-3 py-2 rounded-lg bg-gray-50 border border-gray-200 text-[12.5px] focus:outline-none focus:ring-2 focus:ring-blue-100"
+            />
+          </div>
+        </div>
+        {error && (
+          <div className="mx-5 mb-2 rounded-lg bg-rose-50 border border-rose-200 text-rose-700 text-[11.5px] px-3 py-2">
+            {error}
+          </div>
+        )}
+        <div className="flex-1 overflow-y-auto px-2 pb-4">
+          {filtered.length === 0 ? (
+            <p className="text-center text-[12px] text-gray-400 py-8">No threads yet. Create a department first.</p>
+          ) : (
+            <ul className="space-y-0.5">
+              {filtered.map((t) => (
+                <li key={t.id}>
+                  <button
+                    onClick={() => forward(t.id)}
+                    disabled={busy}
+                    className="w-full text-left px-3 py-2.5 rounded-lg hover:bg-gray-50 flex items-center gap-2.5 disabled:opacity-50"
+                  >
+                    <div className="w-7 h-7 rounded-lg bg-[#0A4FE8]/10 text-[#0A4FE8] flex items-center justify-center text-[11px] font-bold">
+                      {(t.name || "?").charAt(0).toUpperCase()}
+                    </div>
+                    <span className="text-[13px] text-[#0D1B39] truncate flex-1">{t.name || "Untitled"}</span>
+                    {busy && <Loader2 className="w-3.5 h-3.5 animate-spin text-gray-300" />}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
       </div>
     </div>
   );

@@ -12,6 +12,7 @@ import FinanceShell, { glassCard } from "@/components/finance/FinanceShell";
 import StatCard from "@/components/finance/StatCard";
 import ModalHeader from "@/components/finance/ModalHeader";
 import { CURRENCIES, Currency, formatMoney } from "@/lib/finance/types";
+import { appAlert, appConfirm, appPrompt } from "@/lib/app-notify";
 
 interface Sub {
   id: string; project_id: string | null; name: string; category: string | null;
@@ -56,7 +57,7 @@ export default function SubscriptionsPage() {
     const url = editing ? `/api/admin/finance/subscriptions/${editing.id}` : "/api/admin/finance/subscriptions";
     const method = editing ? "PATCH" : "POST";
     const r = await fetch(url, { method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
-    if (r.ok) { setOpen(false); load(); } else alert("Failed");
+    if (r.ok) { setOpen(false); load(); } else appAlert("Failed");
   };
 
   const toggle = async (s: Sub) => {
@@ -64,7 +65,7 @@ export default function SubscriptionsPage() {
     load();
   };
   const remove = async (id: string) => {
-    if (!confirm("Delete this subscription?")) return;
+    if (!(await appConfirm("Delete this subscription?"))) return;
     await fetch(`/api/admin/finance/subscriptions/${id}`, { method: "DELETE" });
     load();
   };

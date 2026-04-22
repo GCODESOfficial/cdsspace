@@ -5,8 +5,17 @@ const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY
 
-// Create a Supabase client for browser-side usage
-export const supabase = createClient<Database>(supabaseUrl, supabaseAnonKey)
+// Query-only anon client. Session handling is delegated to the SSR client in
+// `@/lib/supabase/client.ts`, so this instance does NOT persist or refresh — if
+// it did, it would compete with the SSR client for the same auth-token Web Lock
+// and you'd see "Lock broken by another request with the 'steal' option".
+export const supabase = createClient<Database>(supabaseUrl, supabaseAnonKey, {
+  auth: {
+    persistSession: false,
+    autoRefreshToken: false,
+    storageKey: "sb-anon-readonly",
+  },
+})
 
 // Create a Supabase admin client with service role key for server-side operations
 export const supabaseAdmin = supabaseServiceRoleKey

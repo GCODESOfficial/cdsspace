@@ -6,6 +6,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import { Calendar, Mail, Phone, Building2, DollarSign, MessageSquare, Paperclip, Trash2, Search } from "lucide-react";
+import { appAlert, appConfirm, appPrompt } from "@/lib/app-notify";
 
 interface Consultation {
   id: string;
@@ -54,7 +55,7 @@ export default function ConsultationsPage() {
     await fetch(`/api/admin/consultations/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ notes }) });
   };
   const remove = async (id: string) => {
-    if (!confirm("Delete this consultation request?")) return;
+    if (!(await appConfirm("Delete this consultation request?"))) return;
     await fetch(`/api/admin/consultations/${id}`, { method: "DELETE" });
     setActive(null); load();
   };

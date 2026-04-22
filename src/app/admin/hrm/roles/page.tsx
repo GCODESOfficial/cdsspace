@@ -4,6 +4,8 @@ import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { useToast } from "@/hooks/use-toast";
 import { Trash2, Loader2, Plus, Pencil, Save, X, Briefcase, MapPin, ToggleLeft, ToggleRight, Eye, ExternalLink, Copy, Check } from "lucide-react";
+import { AIAssistButton } from "@/components/ai/AIAssistButton";
+import { appAlert, appConfirm, appPrompt } from "@/lib/app-notify";
 
 interface OpenRole {
   id: string;
@@ -137,7 +139,7 @@ export default function OpenRolesAdmin() {
   }
 
   async function handleDelete(id: string) {
-    if (!confirm("Delete this role?")) return;
+    if (!(await appConfirm("Delete this role?"))) return;
     await supabase.from("open_roles").delete().eq("id", id);
     fetchRoles();
   }
@@ -176,9 +178,36 @@ export default function OpenRolesAdmin() {
               <Field label="Location" value={location} onChange={setLocation} placeholder="e.g. Remote / Uyo, Nigeria" />
               <Field label="External Application Link" value={applicationLink} onChange={setApplicationLink} placeholder="https://..." />
             </div>
-            <Textarea label="Description *" value={description} onChange={setDescription} rows={4} placeholder="What the role is about, day-to-day responsibilities..." />
-            <Textarea label="Requirements *" value={requirements} onChange={setRequirements} rows={4} placeholder="Skills, experience, qualifications..." />
-            <Textarea label="Role-specific Perks" value={perks} onChange={setPerks} rows={2} placeholder="(Optional) Benefits unique to this role" />
+            <div className="relative">
+              <Textarea label="Description *" value={description} onChange={setDescription} rows={4} placeholder="What the role is about, day-to-day responsibilities..." />
+              <div className="absolute top-0 right-0">
+                <AIAssistButton
+                  kind="role_description"
+                  input={{ title, role_type: roleType, location, notes: description }}
+                  onAccept={setDescription}
+                />
+              </div>
+            </div>
+            <div className="relative">
+              <Textarea label="Requirements *" value={requirements} onChange={setRequirements} rows={4} placeholder="Skills, experience, qualifications..." />
+              <div className="absolute top-0 right-0">
+                <AIAssistButton
+                  kind="role_requirements"
+                  input={{ title, role_type: roleType, description }}
+                  onAccept={setRequirements}
+                />
+              </div>
+            </div>
+            <div className="relative">
+              <Textarea label="Role-specific Perks" value={perks} onChange={setPerks} rows={2} placeholder="(Optional) Benefits unique to this role" />
+              <div className="absolute top-0 right-0">
+                <AIAssistButton
+                  kind="role_perks"
+                  input={{ title, description }}
+                  onAccept={setPerks}
+                />
+              </div>
+            </div>
 
             <div className="flex gap-2">
               <button type="submit" disabled={isLoading}

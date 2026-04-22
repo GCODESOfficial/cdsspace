@@ -9,6 +9,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import BankPicker from "@/components/finance/BankPicker";
 import { Check, AlertCircle } from "lucide-react";
+import { appAlert, appConfirm, appPrompt } from "@/lib/app-notify";
 
 export default function ContractorOnboardPage({ params }: { params: Promise<{ token: string }> }) {
   const { token } = use(params);
@@ -28,7 +29,7 @@ export default function ContractorOnboardPage({ params }: { params: Promise<{ to
   }, [token]);
 
   const submit = async () => {
-    if (!form.name) { alert("Please enter your name"); return; }
+    if (!form.name) { appAlert("Please enter your name"); return; }
     setState("submitting");
     const r = await fetch(`/api/finance/contractor-onboard/${token}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(form) });
     if (r.ok) setState("done");

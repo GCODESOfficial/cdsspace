@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import Image from "next/image";
 import Link from "next/link";
+import { appAlert, appConfirm, appPrompt } from "@/lib/app-notify";
 
 export default function LetsBuildYourBrand() {
   const [openQuote, setOpenQuote] = useState(false);
@@ -53,7 +54,7 @@ const handleQuoteSubmit = async (e: React.FormEvent) => {
     const data = await res.json();
 
     if (data.success) {
-      alert("Quote request sent!");
+      appAlert("Quote request sent!");
       setOpenQuote(false);
       setQuoteForm({
         firstName: "",
@@ -66,11 +67,11 @@ const handleQuoteSubmit = async (e: React.FormEvent) => {
         description: "",
       });
     } else {
-      alert("Failed to send form.");
+      appAlert("Failed to send form.");
     }
   } catch (err) {
     console.error("Error sending quote:", err);
-    alert("Something went wrong.");
+    appAlert("Something went wrong.");
   }
 };
 
@@ -108,7 +109,7 @@ const handleQuoteSubmit = async (e: React.FormEvent) => {
     const data = await res.json();
 
     if (data.success) {
-      alert("Consultation request sent!");
+      appAlert("Consultation request sent!");
       setOpenConsult(false);
       setConsultForm({
         projectName: "",
@@ -124,11 +125,11 @@ const handleQuoteSubmit = async (e: React.FormEvent) => {
         contactPhone: "",
       });
     } else {
-      alert("Failed to send form.");
+      appAlert("Failed to send form.");
     }
   } catch (err) {
     console.error("Error sending form:", err);
-    alert("Something went wrong.");
+    appAlert("Something went wrong.");
   }
 };
 

@@ -6,6 +6,7 @@ import { useToast } from "@/hooks/use-toast";
 import { Trash2, Loader2, Plus, Pencil, Save, X, Building2, Search, Mail, Phone, Filter } from "lucide-react";
 import BulkActionBar from "@/components/admin/BulkActionBar";
 import { INDUSTRY_CATEGORIES } from "@/lib/industry-categories";
+import { appAlert, appConfirm, appPrompt } from "@/lib/app-notify";
 
 interface Client {
   id: string;
@@ -18,6 +19,7 @@ interface Client {
   contact_person: string | null;
   notes: string | null;
   status: string;
+  birthday: string | null;
   created_at: string;
 }
 
@@ -50,6 +52,7 @@ export default function ClientsListPage() {
   const [contactPerson, setContactPerson] = useState("");
   const [notes, setNotes] = useState("");
   const [status, setStatus] = useState("active");
+  const [birthday, setBirthday] = useState("");
 
   useEffect(() => { fetchClients(); }, []);
 
@@ -63,6 +66,7 @@ export default function ClientsListPage() {
   function resetForm() {
     setName(""); setBrandName(""); setEmail(""); setPhone(""); setWhatsapp("");
     setIndustry(""); setContactPerson(""); setNotes(""); setStatus("active");
+    setBirthday("");
     setEditId(null);
   }
 
@@ -77,6 +81,7 @@ export default function ClientsListPage() {
     setContactPerson(c.contact_person || "");
     setNotes(c.notes || "");
     setStatus(c.status);
+    setBirthday(c.birthday ? c.birthday.slice(0, 10) : "");
     setShowForm(true);
   }
 
@@ -98,6 +103,7 @@ export default function ClientsListPage() {
       contact_person: contactPerson.trim() || null,
       notes: notes.trim() || null,
       status,
+      birthday: birthday || null,
     };
 
     const { error } = editId
@@ -116,13 +122,13 @@ export default function ClientsListPage() {
   }
 
   async function handleDelete(id: string) {
-    if (!confirm("Delete this client?")) return;
+    if (!(await appConfirm("Delete this client?"))) return;
     await supabase.from("clients").delete().eq("id", id);
     fetchClients();
   }
 
   async function handleBulkDelete() {
-    if (!confirm(`Delete ${selected.size} clients?`)) return;
+    if (!(await appConfirm(`Delete ${selected.size} clients?`))) return;
     await supabase.from("clients").delete().in("id", Array.from(selected));
     setSelected(new Set());
     fetchClients();
@@ -181,6 +187,7 @@ export default function ClientsListPage() {
             <Field label="Email" type="email" value={email} onChange={setEmail} placeholder="email@..." />
             <Field label="Phone" value={phone} onChange={setPhone} placeholder="+1 555..." />
             <Field label="WhatsApp" value={whatsapp} onChange={setWhatsapp} placeholder="+1 555..." />
+            <Field label="Birthday" type="date" value={birthday} onChange={setBirthday} />
             <div>
               <label className="block text-xs font-medium text-gray-500 mb-1.5">Status</label>
               <select value={status} onChange={(e) => setStatus(e.target.value)}
