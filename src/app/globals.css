@@ -268,3 +268,14 @@ body {
   height: auto;
   border-radius: 8px;
 }
+
+/* Chat message input: internal scroll (up to max-height) without a
+   visible scrollbar. Keeps the textbox clean while still letting the
+   user scroll through a long draft. */
+.chat-textarea {
+  scrollbar-width: none;           /* Firefox */
+  -ms-overflow-style: none;         /* IE / legacy Edge */
+}
+.chat-textarea::-webkit-scrollbar {
+  display: none;                    /* Chrome / Safari / new Edge */
+}

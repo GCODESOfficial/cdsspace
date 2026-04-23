@@ -203,19 +203,58 @@ export function TeamChatPanel({ initialThreadId }: { initialThreadId?: string | 
     fetchThreads();
   }, []);
 
+  // Mark the current thread as read and zero the local unread badge
+  // immediately so the sidebar stops showing a count the moment you open
+  // it — we don't wait for the next fetchThreads poll.
+  const markThreadRead = useCallback(async (threadId: string) => {
+    if (viewer?.kind !== "team") return;
+    setThreads((prev) =>
+      prev.map((t) => (t.id === threadId ? { ...t, unread_count: 0 } : t)),
+    );
+    try {
+      await fetch("/api/team/chat/read", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ threadId }),
+      });
+    } catch {
+      /* ignore — the optimistic zero is already applied */
+    }
+  }, [viewer?.kind]);
+
+  // Remember which thread we last rendered, so on a thread switch we can
+  // snap to the bottom instantly instead of smooth-scrolling from the top.
+  const lastRenderedThreadRef = useRef<string | null>(null);
+
   useEffect(() => {
     if (!selectedThread) {
       setMessages([]);
       return;
     }
+    // New thread opened: reset the scroll anchor and mark it read.
+    lastRenderedThreadRef.current = null;
     fetchMessages();
-    const iv = setInterval(fetchMessages, 4000);
+    markThreadRead(selectedThread);
+    // Each polled fetch also counts as a read so active conversations
+    // don't accumulate an unread badge on refresh.
+    const iv = setInterval(() => {
+      fetchMessages();
+      markThreadRead(selectedThread);
+    }, 4000);
     return () => clearInterval(iv);
-  }, [selectedThread, fetchMessages]);
+  }, [selectedThread, fetchMessages, markThreadRead]);
 
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages.length]);
+    if (!selectedThread) return;
+    const justOpened = lastRenderedThreadRef.current !== selectedThread;
+    // On thread open: instant jump to the latest message so the user
+    // lands where the conversation left off, not at ancient history.
+    messagesEndRef.current?.scrollIntoView({
+      behavior: justOpened ? "auto" : "smooth",
+      block: "end",
+    });
+    if (messages.length > 0) lastRenderedThreadRef.current = selectedThread;
+  }, [messages.length, selectedThread]);
 
   async function send(overrideBody?: string) {
     if (!selectedThread || (sending && !overrideBody)) return;
@@ -715,16 +754,31 @@ export function TeamChatPanel({ initialThreadId }: { initialThreadId?: string | 
                   <textarea
                     rows={1}
                     value={input}
-                    onChange={(e) => setInput(e.target.value)}
+                    onChange={(e) => {
+                      setInput(e.target.value);
+                      // Auto-grow: reset to a single line, then expand to
+                      // scrollHeight up to a 6-row cap (~160px). Past the
+                      // cap the textarea scrolls internally — the CSS
+                      // below hides the bar so it reads as a clean,
+                      // content-tall input.
+                      const el = e.currentTarget;
+                      el.style.height = "auto";
+                      const maxH = 160;
+                      el.style.height = `${Math.min(el.scrollHeight, maxH)}px`;
+                      el.style.overflowY = el.scrollHeight > maxH ? "auto" : "hidden";
+                    }}
                     onKeyDown={(e) => {
                       if (e.key === "Enter" && !e.shiftKey) {
                         e.preventDefault();
                         send();
+                        // Reset height on send so the next message starts
+                        // at the base row again.
+                        e.currentTarget.style.height = "auto";
                       }
                     }}
                     placeholder="Type a message..."
-                    className="w-full pl-4 pr-12 py-3 rounded-2xl bg-gray-50 border border-transparent text-[13px] focus:outline-none focus:ring-2 focus:ring-blue-100 focus:bg-white focus:border-blue-200 transition-all resize-none overflow-hidden"
-                    style={{ lineHeight: '1.5' }}
+                    className="chat-textarea w-full pl-4 pr-12 py-3 rounded-2xl bg-gray-50 border border-transparent text-[13px] focus:outline-none focus:ring-2 focus:ring-blue-100 focus:bg-white focus:border-blue-200 transition-all resize-none"
+                    style={{ lineHeight: "1.5", maxHeight: "160px" }}
                   />
                   <div className="absolute right-2 flex items-center gap-1">
                     {input.trim() && (

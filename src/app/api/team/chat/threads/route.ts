@@ -1,7 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { NextResponse } from "next/server";
-import { supabaseAdmin } from "@/lib/supabase";
 import { getChatViewer } from "@/lib/team-chat-auth";
+import { describeTeamMessage, getTeamChatDb, getViewerPayload } from "@/lib/team-chat-server";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -11,10 +11,10 @@ export const dynamic = "force-dynamic";
 //   - Sub-Admin / Team Member: only sees threads they're an explicit participant in, plus broadcasts.
 export async function GET() {
   const viewer = await getChatViewer();
-  if (!viewer || !supabaseAdmin) {
+  const db = getTeamChatDb();
+  if (!viewer || !db) {
     return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
   }
-  const db = supabaseAdmin as any;
 
   const isSuperAdmin = viewer.kind === "admin" && viewer.role === "super_admin";
   let threadIdFilter: string[] | null = null;
@@ -45,7 +45,7 @@ export async function GET() {
       return NextResponse.json({ 
         ok: true, 
         threads: [], 
-        viewer: { kind: viewer.kind, id: viewer.kind === "team" ? viewer.session.id : null } 
+        viewer: getViewerPayload(viewer),
       });
     }
   } else {
@@ -79,7 +79,7 @@ export async function GET() {
   if (threadIds.length) {
     const [lastMsgsRes, partsRes] = await Promise.all([
       db.from("team_chat_messages")
-        .select("id, thread_id, body, sender_id, sender_is_admin, created_at")
+        .select("id, thread_id, body, attachment_url, sticker_key, deleted_at, sender_id, sender_is_admin, created_at")
         .in("thread_id", threadIds)
         .order("created_at", { ascending: false }),
       db.from("team_chat_participants")
@@ -139,6 +139,7 @@ export async function GET() {
     ...t,
     name: t.name || participantNames[t.id] || null,
     last_message: latest[t.id] || null,
+    last_message_preview: latest[t.id] ? describeTeamMessage(latest[t.id]) : "No messages yet",
     unread_count: unread[t.id] || 0,
   }));
 
@@ -152,14 +153,15 @@ export async function GET() {
   return NextResponse.json({ 
     ok: true, 
     threads: hydrated, 
-    viewer: { kind: viewer.kind, id: viewer.kind === "team" ? viewer.session.id : null } 
+    viewer: getViewerPayload(viewer),
   });
 }
 
 // POST — unchanged
 export async function POST(req: Request) {
   const viewer = await getChatViewer();
-  if (!viewer || !supabaseAdmin) {
+  const db = getTeamChatDb();
+  if (!viewer || !db) {
     return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
   }
   const { kind, name, participant_ids } = await req.json().catch(() => ({}));
@@ -186,7 +188,6 @@ export async function POST(req: Request) {
     return NextResponse.json({ ok: false, error: "Pick at least one participant" }, { status: 400 });
   }
 
-  const db = supabaseAdmin as any;
   const hasAdmin = participant_ids.includes("admin");
   const realUserIds = participant_ids.filter((id: any) => id !== "admin");
 
