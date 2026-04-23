@@ -271,7 +271,39 @@ export function TeamChatPanel({ initialThreadId }: { initialThreadId?: string | 
 
   async function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
-    if (!file || !selectedThread) return;
+    if (!file || !selectedThread) {
+      if (fileInputRef.current) fileInputRef.current.value = "";
+      return;
+    }
+
+    // Size limits: 5MB for images, 20MB for PDFs, reject anything else.
+    const isImage = file.type.startsWith("image/");
+    const isPdf = file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf");
+    if (!isImage && !isPdf) {
+      alert("Only images and PDFs are supported.");
+      if (fileInputRef.current) fileInputRef.current.value = "";
+      return;
+    }
+    const maxBytes = isPdf ? 20 * 1024 * 1024 : 5 * 1024 * 1024;
+    if (file.size > maxBytes) {
+      alert(
+        isPdf
+          ? "PDFs must be 20 MB or smaller."
+          : "Images must be 5 MB or smaller.",
+      );
+      if (fileInputRef.current) fileInputRef.current.value = "";
+      return;
+    }
+
+    // For images, ask whether to show inline (embedded) or as a file pill.
+    // PDFs always render as an attachment pill.
+    let displayMode: "inline" | "file" = "file";
+    if (isImage) {
+      const asInline = window.confirm(
+        "Show this image inline in the chat?\n\nOK = display as image\nCancel = send as file attachment",
+      );
+      displayMode = asInline ? "inline" : "file";
+    }
 
     setUploading(true);
     try {
@@ -285,13 +317,19 @@ export function TeamChatPanel({ initialThreadId }: { initialThreadId?: string | 
       const json = await res.json();
       if (!res.ok || !json.ok) throw new Error(json.error || "Upload failed");
 
-      // Send the message with attachment
+      // Send the message. Inline images use a [[image]] body marker the
+      // renderer can pick up; file attachments keep the legacy "Sent an
+      // attachment: ..." copy so existing history still looks right.
+      const body =
+        displayMode === "inline"
+          ? `[[image:${file.name}]]`
+          : `Sent an attachment: ${file.name}`;
       await fetch("/api/team/chat/messages", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           threadId: selectedThread,
-          body: `Sent an attachment: ${file.name}`,
+          body,
           attachmentUrl: json.publicUrl,
         }),
       });
@@ -526,8 +564,30 @@ export function TeamChatPanel({ initialThreadId }: { initialThreadId?: string | 
                                 </span>
                               </div>
                             )}
-                            <div className="whitespace-pre-wrap break-words">{m.body}</div>
-                            {m.attachment_url && (() => {
+                            {(() => {
+                              // Inline-image body marker: sender chose "show
+                              // inline" during upload. Render the attached
+                              // image full-width and skip the usual body text.
+                              const inlineImage = /^\[\[image:([^\]]+)\]\]$/.exec(m.body || "");
+                              if (inlineImage && m.attachment_url) {
+                                return (
+                                  <a
+                                    href={m.attachment_url}
+                                    target="_blank"
+                                    rel="noreferrer"
+                                    className="block -m-1"
+                                  >
+                                    <img
+                                      src={m.attachment_url}
+                                      alt={inlineImage[1]}
+                                      className="max-h-72 max-w-full rounded-lg object-contain bg-black/5"
+                                    />
+                                  </a>
+                                );
+                              }
+                              return <div className="whitespace-pre-wrap break-words">{m.body}</div>;
+                            })()}
+                            {!/^\[\[image:/.test(m.body || "") && m.attachment_url && (() => {
                               // Attachments expire after 7 days — the file may still live
                               // in storage but we stop linking to it so the UX matches the
                               // retention policy communicated to team members.
@@ -594,21 +654,26 @@ export function TeamChatPanel({ initialThreadId }: { initialThreadId?: string | 
               <div ref={messagesEndRef} />
             </div>
 
-            {/* AI Suggestions Row */}
+            {/* AI Suggestions Row — clicking fills the input so the user can
+                edit before sending. Previously these auto-sent, which led to
+                drafts being published verbatim without review. */}
             {suggestions.length > 0 && (
               <div className="bg-[#fafbfd] px-3 sm:px-5 py-2 flex flex-wrap gap-2 animate-in slide-in-from-bottom-2 duration-300">
                  {suggestions.map((s, idx) => (
                    <button
                      key={idx}
-                     onClick={() => send(s.body)}
-                     disabled={sending}
+                     onClick={() => {
+                       setInput(s.body);
+                       setSuggestions([]);
+                     }}
                      className="px-3.5 py-1.5 rounded-full bg-white border border-blue-100 text-[11.5px] font-medium text-[#0A4FE8] shadow-xs hover:bg-blue-50 hover:border-blue-200 transition-all flex items-center gap-1.5"
+                     title="Insert into message box"
                    >
                      <Wand2 className="w-3 h-3" />
                      {s.label}
                    </button>
                  ))}
-                 <button 
+                 <button
                   onClick={() => setSuggestions([])}
                   className="p-1.5 text-gray-300 hover:text-gray-500"
                  >
@@ -633,14 +698,19 @@ export function TeamChatPanel({ initialThreadId }: { initialThreadId?: string | 
                   className="hidden"
                   accept="image/*,.pdf"
                 />
-                <button
-                  onClick={() => fileInputRef.current?.click()}
-                  disabled={uploading}
-                  className="p-3 rounded-xl text-gray-400 hover:text-[#0A4FE8] hover:bg-blue-50 transition border border-transparent hover:border-blue-100/50"
-                  title="Upload image or PDF"
-                >
-                  {uploading ? <Loader2 className="w-5 h-5 animate-spin" /> : <Paperclip className="w-5 h-5" />}
-                </button>
+                {/* Attachments: team-to-team threads are text-only per policy.
+                    Admins can always attach; team members can only attach in
+                    threads that include an admin participant. */}
+                {(viewer?.kind === "admin" || currentThread?.includes_admin) && (
+                  <button
+                    onClick={() => fileInputRef.current?.click()}
+                    disabled={uploading}
+                    className="p-3 rounded-xl text-gray-400 hover:text-[#0A4FE8] hover:bg-blue-50 transition border border-transparent hover:border-blue-100/50"
+                    title="Upload image (≤5MB) or PDF (≤20MB)"
+                  >
+                    {uploading ? <Loader2 className="w-5 h-5 animate-spin" /> : <Paperclip className="w-5 h-5" />}
+                  </button>
+                )}
                 <div className="flex-1 relative flex items-center">
                   <textarea
                     rows={1}
@@ -696,6 +766,7 @@ export function TeamChatPanel({ initialThreadId }: { initialThreadId?: string | 
 
       {showingNewChat && (
         <NewChatRoomDialog
+          viewerKind={viewer?.kind || "team"}
           onClose={() => setShowingNewChat(false)}
           onCreated={(threadId) => {
             setShowingNewChat(false);
@@ -887,11 +958,14 @@ function ForwardDialog({
 function NewChatRoomDialog({
   onClose,
   onCreated,
+  viewerKind,
 }: {
   onClose: () => void;
   onCreated: (id: string) => void;
+  viewerKind: "admin" | "team";
 }) {
   const [loading, setLoading] = useState(false);
+  const canCreateGroup = viewerKind === "admin";
   const [kind, setKind] = useState<"direct" | "group">("direct");
   const [name, setName] = useState("");
   const [members, setMembers] = useState<any[]>([]);
@@ -982,15 +1056,17 @@ function NewChatRoomDialog({
             >
               Direct Message
             </button>
-            <button
-              onClick={() => setKind("group")}
-              className={cn(
-                "flex-1 py-2.5 text-[12px] font-bold uppercase tracking-wider rounded-xl transition",
-                kind === "group" ? "bg-white text-[#0A4FE8] shadow-sm" : "text-gray-400 hover:text-gray-600"
-              )}
-            >
-              Group Chat
-            </button>
+            {canCreateGroup && (
+              <button
+                onClick={() => setKind("group")}
+                className={cn(
+                  "flex-1 py-2.5 text-[12px] font-bold uppercase tracking-wider rounded-xl transition",
+                  kind === "group" ? "bg-white text-[#0A4FE8] shadow-sm" : "text-gray-400 hover:text-gray-600"
+                )}
+              >
+                Group Chat
+              </button>
+            )}
           </div>
 
           {kind === "group" && (

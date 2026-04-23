@@ -196,7 +196,13 @@ export class CMeetClient {
     }
 
     if (lastError) {
-      throw new Error(`Couldn't connect to the meeting (${lastError}). Make sure Realtime is enabled on this Supabase project, then refresh and try again.`);
+      const friendly =
+        lastError === "CHANNEL_ERROR"
+          ? "Couldn't connect to the meeting. The realtime channel was rejected — your Supabase project is missing the cmeet broadcast policies. Run the 20260501_cmeet_realtime_broadcast migration, then refresh."
+          : lastError === "TIMED_OUT"
+            ? "Couldn't reach the realtime server. Check your internet connection and refresh."
+            : `Couldn't connect to the meeting (${lastError}). Refresh and try again.`;
+      throw new Error(friendly);
     }
 
     // Announce ourselves. Existing peers will reply with their own "join"

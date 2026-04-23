@@ -171,7 +171,14 @@ export async function POST(req: Request) {
   if (kind === "admin_broadcast" && !isSuperAdmin) {
     return NextResponse.json({ ok: false, error: "Only super admin can broadcast" }, { status: 403 });
   }
-  
+
+  // Group creation (and by extension adding members to a group) is
+  // admin-only. Team members can only start direct messages; groups must
+  // be orchestrated by an admin so the roster stays intentional.
+  if (kind === "group" && viewer.kind !== "admin") {
+    return NextResponse.json({ ok: false, error: "Only admins can create group chats" }, { status: 403 });
+  }
+
   if (kind === "group" && !name?.trim()) {
     return NextResponse.json({ ok: false, error: "Group name is required" }, { status: 400 });
   }
