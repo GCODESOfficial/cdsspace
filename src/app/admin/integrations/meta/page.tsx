@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Loader2, Facebook, Instagram, Link2, AlertCircle, CheckCircle2, Clock } from "lucide-react";
+import { cn } from "@/lib/utils";
 
 type Platform = "facebook" | "instagram";
 
@@ -70,7 +71,20 @@ export default function MetaIntegrationPage() {
         </p>
       </div>
 
-      <div className="mb-6 bg-blue-50 border border-blue-100 rounded-xl p-4 text-[12.5px] text-[#0D1B39]">
+      {(integrations.some(i => i.id.startsWith('env'))) && (
+        <div className="mb-8 p-4 bg-emerald-50 border border-emerald-100 rounded-2xl text-emerald-800 text-[13px] flex items-start gap-3">
+          <CheckCircle2 className="w-5 h-5 mt-0.5" />
+          <div>
+            <p className="font-bold">Secure Environment Mode Active</p>
+            <p className="mt-0.5 opacity-90">
+              Your Meta integrations are currently configured via environment variables in the <code>.env</code> file.
+              Manual editing is disabled to ensure your secrets remain secure.
+            </p>
+          </div>
+        </div>
+      )}
+
+      <div className={cn("space-y-6", integrations.some(i => i.id.startsWith('env')) && "opacity-60 pointer-events-none")}>
         <div className="flex items-center gap-2 mb-1 font-semibold">
           <Link2 className="w-3.5 h-3.5" /> Webhook URL
         </div>

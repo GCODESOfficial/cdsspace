@@ -298,7 +298,7 @@ export default function AdminTeamMembersPage() {
                   <span className="text-[#0A4FE8]/60 font-medium">({pendingInvites.length})</span>
                 </p>
                 <p className="text-[12px] text-[#0A4FE8]/80 mt-0.5">
-                  Each link lets a teammate fill in their own name, email, username and password. Expires in 14 days.
+                  Each link lets a teammate fill in their own name, email, username, password, role, department and phone. Expires in 14 days.
                 </p>
               </div>
               {pendingInvites.length > 1 && (
@@ -477,7 +477,7 @@ function MemberRow({
   const [showShare, setShowShare] = useState(false);
   const inviteUrl =
     typeof window !== "undefined" && m.invite_token
-      ? `${window.location.origin}/team/login?invite=${m.invite_token}`
+      ? `${window.location.origin}/team/invite/${m.invite_token}`
       : null;
 
   return (
@@ -709,7 +709,7 @@ function InlineShare({
   fullName: string;
 }) {
   const [copied, setCopied] = useState(false);
-  const msg = `Welcome to CDS Space, ${fullName}! Sign in here (pre-filled): ${url}`;
+  const msg = `You've been invited to join CDS Space, ${fullName}. Set up your account here: ${url}`;
 
   return (
     <div className="mt-2 rounded-xl bg-blue-50/60 border border-[#0A4FE8]/15 p-3 flex items-center gap-2 flex-wrap">
@@ -779,6 +779,80 @@ function AddMemberForm({
   const [send_invite, setSendInvite] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Role picker
+  const [roles, setRoles] = useState<{ id: string; name: string; description: string | null; permissions: string[] }[]>([]);
+  const [selectedRoleId, setSelectedRoleId] = useState<string>("");
+  const [showNewRole, setShowNewRole] = useState(false);
+  const [newRoleName, setNewRoleName] = useState("");
+  const [newRoleDesc, setNewRoleDesc] = useState("");
+  const [newRolePerms, setNewRolePerms] = useState<string[]>([]);
+  const [savingRole, setSavingRole] = useState(false);
+
+  async function refreshRoles() {
+    try {
+      const r = await fetch("/api/admin/roles");
+      const d = await r.json();
+      if (r.ok) setRoles(d.roles ?? []);
+    } catch { /* no-op */ }
+  }
+
+  const [availableDepartments, setAvailableDepartments] = useState<{ id: string; name: string }[]>([]);
+  async function refreshDepartments() {
+    try {
+      const r = await fetch("/api/admin/departments");
+      const d = await r.json();
+      if (r.ok) setAvailableDepartments(d.departments ?? []);
+    } catch { /* no-op */ }
+  }
+
+  useEffect(() => { 
+    refreshRoles(); 
+    refreshDepartments();
+  }, []);
+
+  function pickRole(id: string) {
+    setSelectedRoleId(id);
+    if (!id) {
+      setIsSubAdmin(false);
+      setPermissions([]);
+      return;
+    }
+    const role = roles.find((r) => r.id === id);
+    if (role) {
+      setIsSubAdmin(true);
+      setPermissions(role.permissions ?? []);
+    }
+  }
+
+  async function createRoleInline(e: React.FormEvent) {
+    e.preventDefault();
+    e.stopPropagation();
+    const name = newRoleName.trim();
+    if (!name) { setError("Role name is required."); return; }
+    setSavingRole(true);
+    try {
+      const r = await fetch("/api/admin/roles", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name,
+          description: newRoleDesc.trim() || null,
+          permissions: newRolePerms,
+        }),
+      });
+      const d = await r.json();
+      if (!r.ok) { setError(d.error || "Couldn't create role."); return; }
+      await refreshRoles();
+      pickRole(d.role.id);
+      setShowNewRole(false);
+      setNewRoleName("");
+      setNewRoleDesc("");
+      setNewRolePerms([]);
+    } finally {
+      setSavingRole(false);
+    }
+  }
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -863,25 +937,62 @@ function AddMemberForm({
               </button>
             </div>
           </div>
-          <Field label="Role / Title" value={role_title} onChange={setRoleTitle} />
-          <Field label="Department" value={department} onChange={setDepartment} />
-          <Field label="Phone" value={phone} onChange={setPhone} />
+          <Field label="Role / Title" value={role_title} onChange={setRoleTitle} placeholder="e.g. Creative Director" />
+          
+          <div className="flex flex-col gap-1.5">
+            <label className="block text-xs font-medium text-gray-500">Department</label>
+            <select
+              value={department}
+              onChange={(e) => setDepartment(e.target.value)}
+              className="w-full px-4 py-2.5 rounded-xl bg-gray-50 border border-gray-200 text-[13px] focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-300 transition"
+            >
+              <option value="">Select a department</option>
+              {availableDepartments.map((d) => (
+                <option key={d.id} value={d.name}>
+                  {d.name}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <Field label="Phone" value={phone} onChange={setPhone} placeholder="+234..." />
+        </div>
+
+        {/* Role picker (replaces the old "Grant sub-admin access" checkbox) */}
+        <div className="pt-2">
+          <label className="block text-xs font-medium text-gray-500 mb-1.5">
+            Role <span className="text-gray-300">(pick a role to grant sub-admin access with its permissions)</span>
+          </label>
+          <div className="flex items-center gap-2 flex-wrap">
+            <select
+              value={selectedRoleId}
+              onChange={(e) => pickRole(e.target.value)}
+              className="flex-1 min-w-[240px] px-4 py-2.5 rounded-xl bg-gray-50 border border-gray-200 text-[13px] text-[#0D1B39] focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-300 transition"
+            >
+              <option value="">— No role (regular team member) —</option>
+              {roles.map((r) => (
+                <option key={r.id} value={r.id}>
+                  {r.name} ({r.permissions.length} perm{r.permissions.length === 1 ? "" : "s"})
+                </option>
+              ))}
+            </select>
+            <button
+              type="button"
+              onClick={() => setShowNewRole(true)}
+              className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-xl border border-[#0A4FE8]/30 bg-white text-[#0A4FE8] text-[13px] font-semibold hover:bg-blue-50 transition"
+            >
+              <Plus className="w-3.5 h-3.5" /> Create role
+            </button>
+          </div>
+          {selectedRoleId && (
+            <p className="text-[11.5px] text-gray-500 mt-1.5">
+              Permissions below are pre-filled from <strong>{roles.find((r) => r.id === selectedRoleId)?.name}</strong>.
+              Tweak anything before saving.
+            </p>
+          )}
         </div>
 
         <div className="flex items-center gap-6 pt-2 flex-wrap">
-          <label className="inline-flex items-center gap-2 text-[13px] text-[#0D1B39] cursor-pointer">
-            <input
-              type="checkbox"
-              checked={is_sub_admin}
-              onChange={(e) => {
-                setIsSubAdmin(e.target.checked);
-                if (!e.target.checked) setPermissions([]);
-                else if (permissions.length === 0) setPermissions(["dashboard"]);
-              }}
-              className="w-4 h-4 rounded border-gray-300 text-[#0A4FE8]"
-            />
-            Grant sub-admin access
-          </label>
           <label className="inline-flex items-center gap-2 text-[13px] text-[#0D1B39] cursor-pointer">
             <input
               type="checkbox"
@@ -896,6 +1007,76 @@ function AddMemberForm({
         {is_sub_admin && (
           <div className="rounded-2xl border border-[#0A4FE8]/20 bg-blue-50/40 p-4 mt-2">
             <SubAdminPermissionsPicker value={permissions} onChange={setPermissions} />
+          </div>
+        )}
+
+        {showNewRole && (
+          <div
+            className="fixed inset-0 z-50 bg-black/40 backdrop-blur-sm flex items-center justify-center p-4"
+            onClick={() => !savingRole && setShowNewRole(false)}
+          >
+            <div
+              onClick={(e) => e.stopPropagation()}
+              className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-hidden flex flex-col"
+            >
+              <div className="px-6 py-5 border-b border-gray-100 flex items-center justify-between">
+                <div>
+                  <h3 className="text-lg font-bold text-[#0D1B39]">Create role</h3>
+                  <p className="text-[12px] text-gray-500">
+                    Bundle permissions now so you can reuse them on future team members.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => !savingRole && setShowNewRole(false)}
+                  className="p-1.5 rounded-lg text-gray-400 hover:bg-gray-100"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+              <div className="flex-1 overflow-y-auto px-6 py-5 space-y-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-medium text-gray-500 mb-1.5">Role name</label>
+                    <input
+                      value={newRoleName}
+                      onChange={(e) => setNewRoleName(e.target.value)}
+                      placeholder="e.g. Finance Manager"
+                      className="w-full px-4 py-2.5 rounded-xl bg-gray-50 border border-gray-200 text-[13px] focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-300 transition"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-gray-500 mb-1.5">Description</label>
+                    <input
+                      value={newRoleDesc}
+                      onChange={(e) => setNewRoleDesc(e.target.value)}
+                      placeholder="Short internal note"
+                      className="w-full px-4 py-2.5 rounded-xl bg-gray-50 border border-gray-200 text-[13px] focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-300 transition"
+                    />
+                  </div>
+                </div>
+                <SubAdminPermissionsPicker value={newRolePerms} onChange={setNewRolePerms} />
+              </div>
+              <div className="px-6 py-4 border-t border-gray-100 flex justify-end gap-2 bg-gray-50/50">
+                <button
+                  type="button"
+                  disabled={savingRole}
+                  onClick={() => setShowNewRole(false)}
+                  className="px-5 py-2 rounded-xl text-sm font-medium text-gray-600 hover:bg-gray-100 transition disabled:opacity-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  disabled={savingRole}
+                  onClick={createRoleInline}
+                  className="inline-flex items-center gap-2 px-5 py-2 rounded-xl bg-[#0A4FE8] text-white text-sm font-semibold hover:bg-[#083EC0] transition disabled:opacity-50"
+                >
+                  {savingRole ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
+                  {savingRole ? "Creating…" : "Create role & apply"}
+                </button>
+              </div>
+            </div>
           </div>
         )}
 
@@ -945,6 +1126,67 @@ function PromoteMemberModal({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // --- Role management (Added) ---
+  const [roles, setRoles] = useState<{ id: string; name: string; description: string | null; permissions: string[] }[]>([]);
+  const [selectedRoleId, setSelectedRoleId] = useState<string>("");
+  const [showNewRole, setShowNewRole] = useState(false);
+  const [newRoleName, setNewRoleName] = useState("");
+  const [newRoleDesc, setNewRoleDesc] = useState("");
+  const [newRolePerms, setNewRolePerms] = useState<string[]>([]);
+  const [savingRole, setSavingRole] = useState(false);
+
+  async function refreshRoles() {
+    try {
+      const r = await fetch("/api/admin/roles");
+      const d = await r.json();
+      if (r.ok) setRoles(d.roles ?? []);
+    } catch { /* no-op */ }
+  }
+  useEffect(() => { refreshRoles(); }, []);
+
+  function pickRole(id: string) {
+    setSelectedRoleId(id);
+    if (!id) {
+      if (isSubAdmin) setPermissions(["dashboard"]);
+      return;
+    }
+    const role = roles.find((r) => r.id === id);
+    if (role) {
+      setIsSubAdmin(true);
+      setPermissions(role.permissions ?? []);
+    }
+  }
+
+  async function createRoleInline(e: React.FormEvent) {
+    e.preventDefault();
+    e.stopPropagation();
+    const name = newRoleName.trim();
+    if (!name) { setError("Role name is required."); return; }
+    setSavingRole(true);
+    try {
+      const r = await fetch("/api/admin/roles", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name,
+          description: newRoleDesc.trim() || null,
+          permissions: newRolePerms,
+        }),
+      });
+      const d = await r.json();
+      if (!r.ok) { setError(d.error || "Couldn't create role."); return; }
+      await refreshRoles();
+      pickRole(d.role.id);
+      setShowNewRole(false);
+      setNewRoleName("");
+      setNewRoleDesc("");
+      setNewRolePerms([]);
+    } finally {
+      setSavingRole(false);
+    }
+  }
+  // --- End Role management ---
+
   async function save() {
     setError(null);
     if (isSubAdmin && permissions.length === 0) {
@@ -990,8 +1232,12 @@ function PromoteMemberModal({
               checked={isSubAdmin}
               onChange={(e) => {
                 setIsSubAdmin(e.target.checked);
-                if (!e.target.checked) setPermissions([]);
-                else if (permissions.length === 0) setPermissions(["dashboard"]);
+                if (!e.target.checked) {
+                  setPermissions([]);
+                  setSelectedRoleId("");
+                } else if (permissions.length === 0) {
+                  setPermissions(["dashboard"]);
+                }
               }}
               className="w-4 h-4 rounded border-gray-300 text-[#0A4FE8]"
             />
@@ -1000,7 +1246,114 @@ function PromoteMemberModal({
           </label>
 
           {isSubAdmin && (
-            <SubAdminPermissionsPicker value={permissions} onChange={setPermissions} />
+            <div className="space-y-4 pt-1">
+              <div>
+                <label className="block text-[11px] font-bold text-gray-400 uppercase tracking-tight mb-1.5">
+                  Assign a role
+                </label>
+                <div className="flex items-center gap-2">
+                  <select
+                    value={selectedRoleId}
+                    onChange={(e) => pickRole(e.target.value)}
+                    className="flex-1 px-4 py-2.5 rounded-xl bg-gray-50 border border-gray-200 text-[13px] focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-300 transition"
+                  >
+                    <option value="">— Manual permissions —</option>
+                    {roles.map((r) => (
+                      <option key={r.id} value={r.id}>
+                        {r.name} ({r.permissions.length} perms)
+                      </option>
+                    ))}
+                  </select>
+                  <button
+                    type="button"
+                    onClick={() => setShowNewRole(true)}
+                    className="p-2.5 rounded-xl border border-gray-200 text-[#0A4FE8] hover:bg-white transition shadow-sm"
+                    title="Create new role"
+                  >
+                    <Plus className="w-4 h-4" />
+                  </button>
+                </div>
+                {selectedRoleId && (
+                  <p className="text-[11px] text-gray-500 mt-1.5 px-1 truncate">
+                    Settings permissions for <strong>{roles.find(r => r.id === selectedRoleId)?.name}</strong>
+                  </p>
+                )}
+              </div>
+
+              <div className="rounded-2xl border border-gray-100 bg-gray-50/30 p-4">
+                <SubAdminPermissionsPicker value={permissions} onChange={setPermissions} />
+              </div>
+            </div>
+          )}
+
+          {showNewRole && (
+            <div
+              className="fixed inset-0 z-[60] bg-black/40 backdrop-blur-sm flex items-center justify-center p-4"
+              onClick={() => !savingRole && setShowNewRole(false)}
+            >
+              <div
+                onClick={(e) => e.stopPropagation()}
+                className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-hidden flex flex-col"
+              >
+                <div className="px-6 py-5 border-b border-gray-100 flex items-center justify-between">
+                  <div>
+                    <h3 className="text-lg font-bold text-[#0D1B39]">Create role</h3>
+                    <p className="text-[12px] text-gray-500">
+                      Bundle permissions for reuse.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => !savingRole && setShowNewRole(false)}
+                    className="p-1.5 rounded-lg text-gray-400 hover:bg-gray-100"
+                  >
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
+                <div className="flex-1 overflow-y-auto px-6 py-5 space-y-4">
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-xs font-medium text-gray-500 mb-1.5">Role name</label>
+                      <input
+                        value={newRoleName}
+                        onChange={(e) => setNewRoleName(e.target.value)}
+                        placeholder="e.g. Content Manager"
+                        className="w-full px-4 py-2.5 rounded-xl bg-gray-50 border border-gray-200 text-[13px] focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-300 transition"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-gray-500 mb-1.5">Description</label>
+                      <input
+                        value={newRoleDesc}
+                        onChange={(e) => setNewRoleDesc(e.target.value)}
+                        placeholder="Optional note"
+                        className="w-full px-4 py-2.5 rounded-xl bg-gray-50 border border-gray-200 text-[13px] focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-300 transition"
+                      />
+                    </div>
+                  </div>
+                  <SubAdminPermissionsPicker value={newRolePerms} onChange={setNewRolePerms} />
+                </div>
+                <div className="px-6 py-4 border-t border-gray-100 flex justify-end gap-2 bg-gray-50">
+                  <button
+                    type="button"
+                    disabled={savingRole}
+                    onClick={() => setShowNewRole(false)}
+                    className="px-5 py-2 rounded-xl text-sm font-medium text-gray-600 hover:bg-gray-100 transition"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    disabled={savingRole}
+                    onClick={createRoleInline}
+                    className="inline-flex items-center gap-2 px-5 py-2 rounded-xl bg-[#0A4FE8] text-white text-sm font-semibold hover:bg-[#083EC0] transition shadow-lg shadow-blue-500/20"
+                  >
+                    {savingRole ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
+                    Create and apply
+                  </button>
+                </div>
+              </div>
+            </div>
           )}
 
           {error && (

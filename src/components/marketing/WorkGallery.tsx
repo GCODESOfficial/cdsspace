@@ -165,6 +165,7 @@ export const ProjectCard = ({
                         src={work.cover_image}
                         alt={work.title}
                         fill
+                        quality={90}
                         sizes="(min-width: 1024px) 480px, (min-width: 768px) 50vw, 100vw"
                         className="object-cover transform transition-transform duration-700 group-hover:scale-105"
                     />

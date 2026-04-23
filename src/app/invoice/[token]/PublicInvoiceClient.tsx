@@ -7,6 +7,7 @@ import InvoiceDocument from "@/components/finance/InvoiceDocument";
 import { Button } from "@/components/ui/button";
 import { Download, Share2 } from "lucide-react";
 import type { FinanceInvoice, FinanceInvoiceItem } from "@/lib/finance/types";
+import { exportInvoiceToPdf } from "@/lib/invoice-pdf";
 
 export default function PublicInvoiceClient({ token }: { token: string }) {
   const sp = useSearchParams();
@@ -30,38 +31,12 @@ export default function PublicInvoiceClient({ token }: { token: string }) {
 
   const handleDownload = async () => {
     if (!invoice) return;
-    const element = document.getElementById("invoice-capture");
-    if (!element) return;
-    
     setIsDownloading(true);
     try {
-      const html2canvas = (await import("html2canvas")).default;
-      const jsPDF = (await import("jspdf")).default;
-      
-      // Capture the element
-      const canvas = await html2canvas(element, {
-        scale: 2, // High resolution
-        useCORS: true,
-        backgroundColor: "#ffffff",
-        logging: false,
-      });
-      
-      const imgData = canvas.toDataURL("image/png");
-      const pdfW = 210; // A4 mm
-      const pdfH = (canvas.height * pdfW) / canvas.width;
-      
-      // Create PDF with custom height for "single page" feel
-      const doc = new jsPDF({
-        orientation: "p",
-        unit: "mm",
-        format: [pdfW, pdfH]
-      });
-      
-      doc.addImage(imgData, "PNG", 0, 0, pdfW, pdfH);
-      doc.save(`Invoice-${invoice.invoice_number}.pdf`);
+      // Direct jsPDF render — no html2canvas, no CORS image loads, no hangs.
+      exportInvoiceToPdf(invoice, items);
     } catch (error) {
       console.error("Failed to generate PDF:", error);
-      // Fallback to print if library fails
       window.print();
     } finally {
       setIsDownloading(false);

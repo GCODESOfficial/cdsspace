@@ -26,6 +26,58 @@ export interface MetaIntegration {
 }
 
 export async function getMetaIntegration(platform: MetaPlatform): Promise<MetaIntegration | null> {
+  // 1. Try Environment Variables first
+  if (platform === "facebook" && process.env.FB_PAGE_ACCESS_TOKEN) {
+    return {
+      id: "env_fb",
+      platform: "facebook",
+      is_active: true,
+      page_id: process.env.FB_PAGE_ID || null,
+      page_name: process.env.FB_PAGE_NAME || "Facebook Page",
+      page_access_token: process.env.FB_PAGE_ACCESS_TOKEN,
+      ig_business_id: null,
+      ig_username: null,
+      verify_token: process.env.FB_VERIFY_TOKEN || null,
+      app_secret: process.env.FB_APP_SECRET || null,
+      scopes: null,
+      backfill_status: "idle",
+      backfill_cursor: null,
+      backfill_since: null,
+      backfill_until: null,
+      backfill_messages_ingested: 0,
+      backfill_conversations_seen: 0,
+      backfill_last_error: null,
+      backfill_started_at: null,
+      backfill_finished_at: null,
+    };
+  }
+
+  if (platform === "instagram" && process.env.IG_ACCESS_TOKEN) {
+    return {
+      id: "env_ig",
+      platform: "instagram",
+      is_active: true,
+      page_id: process.env.IG_PAGE_ID || null,
+      page_name: process.env.IG_PAGE_NAME || "Instagram Business",
+      page_access_token: process.env.IG_ACCESS_TOKEN,
+      ig_business_id: process.env.IG_BUSINESS_ID || null,
+      ig_username: process.env.IG_USERNAME || null,
+      verify_token: process.env.IG_VERIFY_TOKEN || null,
+      app_secret: process.env.IG_APP_SECRET || null,
+      scopes: null,
+      backfill_status: "idle",
+      backfill_cursor: null,
+      backfill_since: null,
+      backfill_until: null,
+      backfill_messages_ingested: 0,
+      backfill_conversations_seen: 0,
+      backfill_last_error: null,
+      backfill_started_at: null,
+      backfill_finished_at: null,
+    };
+  }
+
+  // 2. Fallback to DB
   const supabase = getSupabaseAdmin();
   const { data } = await supabase
     .from("meta_integrations")

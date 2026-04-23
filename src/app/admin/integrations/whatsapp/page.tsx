@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback, useRef } from "react";
 import { Loader2, QrCode, Cloud, CheckCircle2, AlertCircle, Link2, RefreshCw } from "lucide-react";
+import { cn } from "@/lib/utils";
 
 type Mode = "cloud_api" | "web_qr";
 
@@ -167,6 +168,9 @@ export default function WhatsAppIntegrationPage() {
       ? `${window.location.origin}/api/webhooks/whatsapp`
       : "";
 
+  const isSecure = !!(process.env.NEXT_PUBLIC_WHATSAPP_CLOUD_ACCESS_TOKEN || // checking both for client-side visibility if needed, but let's just use a simple check
+    integrations.some(i => i.id === 'env'));
+
   return (
     <div className="p-8 max-w-[1000px]">
       <div className="mb-6">
@@ -177,8 +181,21 @@ export default function WhatsAppIntegrationPage() {
         </p>
       </div>
 
+      {(integrations.some(i => i.id === 'env')) && (
+        <div className="mb-8 p-4 bg-emerald-50 border border-emerald-100 rounded-2xl text-emerald-800 text-[13px] flex items-start gap-3">
+          <CheckCircle2 className="w-5 h-5 mt-0.5" />
+          <div>
+            <p className="font-bold">Secure Environment Mode Active</p>
+            <p className="mt-0.5 opacity-90">
+              The WhatsApp integration is currently configured via environment variables in the <code>.env</code> file.
+              Manual editing is disabled to ensure your secrets remain secure.
+            </p>
+          </div>
+        </div>
+      )}
+
       {/* Mode toggle */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-8">
+      <div className={cn("grid grid-cols-1 md:grid-cols-2 gap-4 mb-8", integrations.some(i => i.id === 'env') && "opacity-60 pointer-events-none")}>
         <ModeCard
           title="Meta Cloud API"
           blurb="Official WhatsApp Business Cloud API. Requires an approved Meta business. Works on Vercel."

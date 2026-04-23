@@ -10,7 +10,6 @@ export const metadata: Metadata = {
         description: "Professional banner design and production. Rollup banners, digital banners, and event backdrops.",
         url: "https://cdsspace.pro/banners",
         type: "website",
-        images: [{ url: "/navbar/CDS Logo.svg", width: 1200, height: 630, alt: "CDS Space Banner Design" }],
     },
 };
 

@@ -35,6 +35,7 @@ export default function TeamInvitePage() {
   const [departmentName, setDepartmentName] = useState("");
   const [phone, setPhone] = useState("");
   const [bio, setBio] = useState("");
+  const [availableDepartments, setAvailableDepartments] = useState<{ id: string; name: string }[]>([]);
 
   const [saving, setSaving] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
@@ -51,6 +52,7 @@ export default function TeamInvitePage() {
         return;
       }
       setInvite(json.invite);
+      if (json.departments) setAvailableDepartments(json.departments);
       if (json.invite.suggested_full_name) setFullName(json.invite.suggested_full_name);
       if (json.invite.suggested_email) setEmail(json.invite.suggested_email);
       if (json.invite.suggested_username) setUsername(json.invite.suggested_username);
@@ -88,7 +90,24 @@ export default function TeamInvitePage() {
       setSubmitError(json.error || "Failed to create your account");
       return;
     }
-    router.replace("/team");
+
+    // Hand off to the team login screen with the just-chosen credentials
+    // pre-filled. We do this instead of bouncing straight to /team because the
+    // fresh session cookie the API just set isn't always visible to the router
+    // prefetch (users landed on a blank /team/login and had to guess their own
+    // creds). Passing via sessionStorage keeps the password out of the URL.
+    try {
+      if (typeof window !== "undefined") {
+        sessionStorage.setItem(
+          "cds_team_invite_prefill",
+          JSON.stringify({ username, password, full_name: fullName }),
+        );
+      }
+    } catch {
+      // sessionStorage blocked (private mode) — login page will render blank
+      // and user can type their freshly-chosen credentials manually.
+    }
+    router.replace("/team/login?welcome=invite");
   }
 
   if (loading) {
@@ -141,7 +160,7 @@ export default function TeamInvitePage() {
           onSubmit={submit}
           className="bg-white rounded-2xl border border-gray-100 shadow-sm p-6 md:p-8 space-y-5"
         >
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-5">
             <Field label="Full name *" value={fullName} onChange={setFullName} required />
             <Field label="Email *" type="email" value={email} onChange={setEmail} required />
             <Field
@@ -152,12 +171,28 @@ export default function TeamInvitePage() {
               placeholder="e.g. jane.doe"
               hint="Lowercase, numbers, . _ - only"
             />
-            <div />
+            <div className="hidden md:block" />
             <Field label="Password *" type="password" value={password} onChange={setPassword} required hint="Min 8 characters" />
             <Field label="Confirm password *" type="password" value={confirm} onChange={setConfirm} required />
-            <Field label="Role / Title" value={roleTitle} onChange={setRoleTitle} />
-            <Field label="Department" value={departmentName} onChange={setDepartmentName} />
-            <Field label="Phone" value={phone} onChange={setPhone} />
+            <Field label="Role / Title" value={roleTitle} onChange={setRoleTitle} placeholder="e.g. Creative Director" />
+            
+            <div className="flex flex-col gap-1.5">
+              <label className="block text-xs font-medium text-gray-500">Department</label>
+              <select
+                value={departmentName}
+                onChange={(e) => setDepartmentName(e.target.value)}
+                className="w-full px-4 py-2.5 rounded-xl bg-gray-50 border border-gray-200 text-[13px] focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-300 transition"
+              >
+                <option value="">Select a department</option>
+                {availableDepartments.map((d) => (
+                  <option key={d.id} value={d.name}>
+                    {d.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <Field label="Phone" value={phone} onChange={setPhone} placeholder="+234..." />
           </div>
 
           <div>

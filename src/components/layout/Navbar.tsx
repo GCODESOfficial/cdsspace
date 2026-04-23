@@ -48,21 +48,21 @@ export const Navbar = () => {
     }, [isMobileMenuOpen]);
 
     return (
-        <header className="fixed top-4 md:top-6 left-0 right-0 z-50 flex justify-center pointer-events-none">
-            <div className="w-full max-w-[920px] xl:max-w-[1080px] 2xl:max-w-[1140px] px-4 md:px-6 pointer-events-auto relative">
+        <header className="fixed top-3 sm:top-4 md:top-6 left-0 right-0 z-50 flex justify-center pointer-events-none">
+            <div className="w-full max-w-[920px] xl:max-w-[1080px] 2xl:max-w-[1140px] px-3 sm:px-4 md:px-6 pointer-events-auto relative">
                 <nav
                     className={cn(
-                        "w-full h-[62px] md:h-[68px] 2xl:h-[74px] bg-white/95 backdrop-blur-md flex items-center justify-between px-3 md:px-5 2xl:px-6 py-[10px] rounded-[18px] md:rounded-[24px] shadow-[0_18px_48px_rgba(4,11,55,0.12)] border border-white/80 relative z-50 transition-all duration-300",
+                        "w-full h-[58px] sm:h-[62px] md:h-[68px] 2xl:h-[74px] bg-white/95 backdrop-blur-md flex items-center justify-between px-3 sm:px-3.5 md:px-5 2xl:px-6 py-[10px] rounded-[18px] md:rounded-[24px] shadow-[0_18px_48px_rgba(4,11,55,0.12)] border border-white/80 relative z-50 transition-all duration-300",
                         isMobileMenuOpen && "rounded-b-none border-b-0 shadow-none"
                     )}
                     data-node-id="5360:811"
                 >
                     {/* CDS Logo - Scaled for Mobile/Desktop */}
-                    <Link href="/" className="shrink-0 ml-2 md:ml-1 2xl:ml-2" onClick={() => setIsMobileMenuOpen(false)}>
+                    <Link href="/" className="shrink-0 ml-1.5 md:ml-1 2xl:ml-2" onClick={() => setIsMobileMenuOpen(false)}>
                         <img
                             src="/navbar/CDS Logo.svg"
                             alt="CDS Logo"
-                            className="w-[60px] md:w-[68px] 2xl:w-[81.4px] h-[24px] md:h-[26px] 2xl:h-[32px] object-contain"
+                            className="w-[56px] sm:w-[60px] md:w-[68px] 2xl:w-[81.4px] h-[22px] sm:h-[24px] md:h-[26px] 2xl:h-[32px] object-contain"
                         />
                     </Link>
 
@@ -119,8 +119,9 @@ export const Navbar = () => {
 
                     {/* Mobile Menu Toggle */}
                     <button
-                        className="md:hidden p-2 text-[#040b37] transition-colors focus:outline-none"
+                        className="md:hidden flex h-10 w-10 items-center justify-center rounded-full text-[#040b37] transition-colors hover:bg-brand-bg focus:outline-none"
                         onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
+                        aria-label={isMobileMenuOpen ? "Close menu" : "Open menu"}
                     >
                         {isMobileMenuOpen ? <X size={24} /> : <Menu size={24} />}
                     </button>
@@ -142,22 +143,22 @@ export const Navbar = () => {
                     {isMobileMenuOpen && (
                         <motion.div
                             initial={{ opacity: 0, height: 0 }}
-                            animate={{ opacity: 1, height: "calc(100vh - 78px)" }}
+                            animate={{ opacity: 1, height: "calc(100dvh - 70px)" }}
                             exit={{ opacity: 0, height: 0 }}
                             transition={{ duration: 0.3, ease: "easeInOut" }}
-                            className="absolute top-[62px] left-4 right-4 bg-white/95 backdrop-blur-md border-x border-b border-brand-stroke/20 rounded-b-[24px] shadow-2xl md:hidden overflow-hidden origin-top z-40"
+                            className="absolute top-[58px] sm:top-[62px] left-0 right-0 bg-white/95 backdrop-blur-md border-x border-b border-brand-stroke/20 rounded-b-[24px] shadow-2xl md:hidden overflow-hidden origin-top z-40"
                         >
                             <div className="flex flex-col h-full">
                                 {/* Scrollable nav area — keeps the CTA pinned at the bottom */}
-                                <div className="flex-1 overflow-y-auto px-6 pt-6">
-                                    <div className="space-y-4">
+                                <div className="flex-1 overflow-y-auto px-5 sm:px-6 pt-5 sm:pt-6">
+                                    <div className="space-y-3.5">
                                         {navLinks.map((link) => (
                                             <Link
                                                 key={link.name}
                                                 href={link.href}
                                                 onClick={() => setIsMobileMenuOpen(false)}
                                                 className={cn(
-                                                    "block text-2xl font-semibold tracking-[-0.5px] transition-colors",
+                                                    "block text-[1.5rem] sm:text-2xl font-semibold tracking-[-0.5px] transition-colors",
                                                     pathname === link.href ? "text-brand-blue" : "text-[#4b5563]"
                                                 )}
                                             >
@@ -170,11 +171,11 @@ export const Navbar = () => {
                                 </div>
 
                                 {/* Mobile CTA — pinned */}
-                                <div className="shrink-0 px-6 pt-4 pb-6 border-t border-brand-stroke/10 bg-white/95">
+                                <div className="shrink-0 px-5 sm:px-6 pt-4 pb-5 sm:pb-6 border-t border-brand-stroke/10 bg-white/95">
                                     <Link
                                         href={accountHref}
                                         onClick={() => setIsMobileMenuOpen(false)}
-                                        className="flex items-center justify-center gap-3 w-full py-4 rounded-full text-lg font-semibold text-white transition-opacity hover:opacity-90"
+                                        className="flex items-center justify-center gap-3 w-full py-3.5 sm:py-4 rounded-full text-base sm:text-lg font-semibold text-white transition-opacity hover:opacity-90"
                                         style={{ background: 'var(--color-brand-gradient)' }}
                                     >
                                         My Account

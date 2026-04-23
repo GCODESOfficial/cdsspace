@@ -10,7 +10,6 @@ export const metadata: Metadata = {
         description: "Get expert branding advice. Schedule a consultation with our team of brand strategists and designers.",
         url: "https://cdsspace.pro/consultation",
         type: "website",
-        images: [{ url: "/navbar/CDS Logo.svg", width: 1200, height: 630, alt: "CDS Space Consultation" }],
     },
 };
 

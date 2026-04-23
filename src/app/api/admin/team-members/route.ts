@@ -29,7 +29,7 @@ export async function GET() {
   const { data, error } = await db
     .from("team_members")
     .select(
-      "id, full_name, email, username, avatar_url, role_title, department, phone, is_active, is_sub_admin, permissions, invite_token, invite_filled, joined_at, created_at"
+      "id, full_name, email, username, avatar_url, role_title, department, phone, is_active, is_sub_admin, permissions, invite_token, invite_filled, joined_at, created_at, bank_name, bank_code, account_number, account_name, base_salary, salary_currency, pay_cycle"
     )
     .order("created_at", { ascending: false });
 

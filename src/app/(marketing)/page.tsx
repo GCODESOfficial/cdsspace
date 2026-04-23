@@ -32,13 +32,11 @@ export const metadata: Metadata = {
     description: "From strategy to execution, we design digital brands that scale, convert, and stay consistent. Brand identity, UI/UX, web development, and industrial print.",
     url: "https://cdsspace.pro",
     type: "website",
-    images: [{ url: "/navbar/CDS Logo.svg", width: 1200, height: 630, alt: "CDS Space Branding Agency" }],
   },
   twitter: {
     card: "summary_large_image",
     title: "CDS Space — Full-Service Branding Agency",
     description: "Brand identity, UI/UX, web development, and industrial print production services.",
-    images: ["/navbar/CDS Logo.svg"],
   },
 };
 

@@ -1,238 +1,198 @@
+/**
+ * Invoice OG card. Uses the same Metadata-bg.png plate + CDS wordmark lockup
+ * as the rest of the brand metadata, then layers invoice-specific info:
+ *   - Status pill top-right ("Sent", "Paid", etc.)
+ *   - "INVOICE-XXXX" title
+ *   - "Client: <name>" subtitle
+ *   - Globe footer with cdsspace.com | cdsspace.pro
+ *
+ * Sized for the canonical 1.91:1 Meta/WhatsApp spec — see brand-card.tsx
+ * for the reasoning. All pixel values are tuned for 1200×630 and must be
+ * kept in sync with renderBrandCard.
+ */
 import type { ReactElement } from "react";
+import { getMetadataBgDataUri, getCdsLogoDataUri, OG_SIZE } from "./brand-card";
 
 export interface InvoiceCardProps {
-  invoiceNumber: string;
-  clientName: string;
-  status: "draft" | "sent" | "paid" | "overdue" | "cancelled";
-  issueDate: string;
-  dueDate?: string | null;
-  total: number;
-  currency: string;
+    invoiceNumber: string;
+    clientName: string;
+    status: "draft" | "sent" | "paid" | "overdue" | "cancelled";
+    issueDate: string;
+    dueDate?: string | null;
+    total: number;
+    currency: string;
 }
 
-const STATUS_STYLES: Record<InvoiceCardProps["status"], { bg: string; border: string; text: string; label: string }> = {
-  draft:     { bg: "rgba(148,163,184,0.22)", border: "rgba(203,213,225,0.5)",  text: "#e2e8f0", label: "DRAFT" },
-  sent:      { bg: "rgba(59,130,246,0.22)",  border: "rgba(147,197,253,0.6)",  text: "#dbeafe", label: "SENT" },
-  paid:      { bg: "rgba(16,185,129,0.25)",  border: "rgba(134,239,172,0.7)",  text: "#d1fae5", label: "PAID" },
-  overdue:   { bg: "rgba(239,68,68,0.25)",   border: "rgba(252,165,165,0.7)",  text: "#fecaca", label: "OVERDUE" },
-  cancelled: { bg: "rgba(100,116,139,0.25)", border: "rgba(203,213,225,0.5)",  text: "#cbd5e1", label: "CANCELLED" },
+const STATUS_STYLES: Record<
+    InvoiceCardProps["status"],
+    { bg: string; fg: string; label: string }
+> = {
+    draft: { bg: "#e2e8f0", fg: "#0D1B39", label: "Draft" },
+    sent: { bg: "#eef2ff", fg: "#0D1B39", label: "Sent" },
+    paid: { bg: "#d1fae5", fg: "#065f46", label: "Paid" },
+    overdue: { bg: "#fee2e2", fg: "#991b1b", label: "Overdue" },
+    cancelled: { bg: "#e2e8f0", fg: "#475569", label: "Cancelled" },
 };
 
-const CURRENCY_SYMBOLS: Record<string, string> = { NGN: "₦", USD: "$", RWF: "FRw " };
-
-function formatMoney(total: number, currency: string) {
-  const symbol = CURRENCY_SYMBOLS[currency] ?? "";
-  return `${symbol}${Number(total || 0).toLocaleString(undefined, {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  })}`;
-}
-
-function formatDate(iso: string | null | undefined) {
-  if (!iso) return "—";
-  try {
-    const d = new Date(iso);
-    return d.toLocaleDateString("en-US", { year: "numeric", month: "short", day: "numeric" });
-  } catch {
-    return iso;
-  }
-}
+const GLOBE_ICON =
+    "data:image/svg+xml;base64," +
+    Buffer.from(
+        `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#ffffff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="10"/>
+            <line x1="2" y1="12" x2="22" y2="12"/>
+            <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/>
+        </svg>`,
+        "utf8",
+    ).toString("base64");
 
 export function renderInvoiceCard(p: InvoiceCardProps): ReactElement {
-  const status = STATUS_STYLES[p.status] ?? STATUS_STYLES.sent;
+    const bgDataUri = getMetadataBgDataUri();
+    const logoDataUri = getCdsLogoDataUri();
+    const status = STATUS_STYLES[p.status] ?? STATUS_STYLES.sent;
+    const number = p.invoiceNumber.toUpperCase();
+    const titleSize = number.length > 22 ? 65 : number.length > 16 ? 80 : 95;
 
-  return (
-    <div
-      style={{
-        width: "100%",
-        height: "100%",
-        display: "flex",
-        flexDirection: "column",
-        position: "relative",
-        background: "linear-gradient(135deg, #040b37 0%, #081149 55%, #0a1a6b 100%)",
-        color: "#ffffff",
-        fontFamily: "Inter, system-ui, -apple-system, sans-serif",
-        padding: "64px 72px",
-        overflow: "hidden",
-      }}
-    >
-      {/* Starlight glows */}
-      <div
-        style={{
-          position: "absolute",
-          top: -260,
-          right: -180,
-          width: 760,
-          height: 760,
-          borderRadius: "50%",
-          background:
-            "radial-gradient(circle at center, #3f7dffcc 0%, #3f7dff55 35%, transparent 70%)",
-          filter: "blur(20px)",
-          display: "flex",
-        }}
-      />
-      <div
-        style={{
-          position: "absolute",
-          bottom: -200,
-          left: -140,
-          width: 520,
-          height: 520,
-          borderRadius: "50%",
-          background:
-            "radial-gradient(circle at center, #5ba8ff33 0%, transparent 70%)",
-          filter: "blur(30px)",
-          display: "flex",
-        }}
-      />
-
-      {/* Logo row */}
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", zIndex: 2 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
-          <div
+    return (
+        <div
             style={{
-              width: 44,
-              height: 44,
-              borderRadius: 12,
-              background: "linear-gradient(135deg, #5ba8ff 0%, #0a4fe8 60%, #0035c1 100%)",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              fontWeight: 800,
-              fontSize: 22,
-              boxShadow: "0 8px 24px rgba(10,79,232,0.45)",
+                width: OG_SIZE.width,
+                height: OG_SIZE.height,
+                position: "relative",
+                display: "flex",
+                flexDirection: "column",
+                justifyContent: "space-between",
+                color: "#ffffff",
+                fontFamily: "Inter, system-ui, -apple-system, sans-serif",
+                padding: "65px 72px",
+                background: "#040b37",
             }}
-          >
-            C
-          </div>
-          <div
-            style={{
-              fontSize: 24,
-              fontWeight: 700,
-              letterSpacing: 1.5,
-              display: "flex",
-            }}
-          >
-            CDS SPACE
-          </div>
-        </div>
-        <div
-          style={{
-            padding: "10px 20px",
-            borderRadius: 999,
-            background: status.bg,
-            border: `1px solid ${status.border}`,
-            color: status.text,
-            fontSize: 18,
-            fontWeight: 700,
-            letterSpacing: 3,
-            display: "flex",
-          }}
         >
-          {status.label}
-        </div>
-      </div>
+            {/* Gradient baseline so even if satori can't inline the PNG
+                we still land on navy rather than a blank white plate. */}
+            <div
+                style={{
+                    position: "absolute",
+                    top: 0,
+                    left: 0,
+                    width: OG_SIZE.width,
+                    height: OG_SIZE.height,
+                    display: "flex",
+                    background: "linear-gradient(135deg, #040b37 0%, #081149 55%, #0a1a6b 100%)",
+                }}
+            />
+            {bgDataUri ? (
+                /* Render the PNG at 2× canvas size and offset so only the
+                   bright glow quadrant (bottom-right of the source PNG) is
+                   visible. Without this the top-left of the canvas renders
+                   the dark navy portion of the source and looks empty. */
+                /* eslint-disable-next-line @next/next/no-img-element */
+                <img
+                    src={bgDataUri}
+                    alt=""
+                    width={OG_SIZE.width * 2}
+                    height={OG_SIZE.height * 2}
+                    style={{
+                        position: "absolute",
+                        top: -OG_SIZE.height,
+                        left: -OG_SIZE.width,
+                        width: OG_SIZE.width * 2,
+                        height: OG_SIZE.height * 2,
+                    }}
+                />
+            ) : null}
 
-      {/* Spacer */}
-      <div style={{ flex: 1, display: "flex" }} />
+            {/* Logo + status pill */}
+            <div
+                style={{
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    zIndex: 2,
+                }}
+            >
+                {logoDataUri ? (
+                    /* eslint-disable-next-line @next/next/no-img-element */
+                    <img
+                        src={logoDataUri}
+                        alt="CDS Space — Branding Agency"
+                        width={160}
+                        height={72}
+                        style={{ display: "block" }}
+                    />
+                ) : (
+                    <div style={{ fontSize: 26, fontWeight: 800, color: "#ffffff", display: "flex" }}>
+                        CDS SPACE
+                    </div>
+                )}
 
-      {/* Main */}
-      <div style={{ display: "flex", flexDirection: "column", zIndex: 2 }}>
-        <div
-          style={{
-            fontSize: 18,
-            fontWeight: 600,
-            letterSpacing: 3,
-            textTransform: "uppercase",
-            color: "#7fb5ff",
-            marginBottom: 14,
-            display: "flex",
-          }}
-        >
-          Invoice
-        </div>
-        <div
-          style={{
-            fontSize: 80,
-            fontWeight: 800,
-            lineHeight: 1,
-            letterSpacing: -2,
-            color: "#ffffff",
-            display: "flex",
-          }}
-        >
-          {p.invoiceNumber}
-        </div>
-        <div
-          style={{
-            fontSize: 34,
-            fontWeight: 600,
-            lineHeight: 1.2,
-            color: "#dbeaff",
-            marginTop: 18,
-            display: "flex",
-          }}
-        >
-          {p.clientName}
-        </div>
-      </div>
+                <div
+                    style={{
+                        padding: "12px 26px",
+                        borderRadius: 999,
+                        background: status.bg,
+                        color: status.fg,
+                        fontSize: 22,
+                        fontWeight: 700,
+                        letterSpacing: 0.5,
+                        display: "flex",
+                    }}
+                >
+                    {status.label}
+                </div>
+            </div>
 
-      {/* Stats row */}
-      <div
-        style={{
-          marginTop: 36,
-          display: "flex",
-          alignItems: "flex-end",
-          justifyContent: "space-between",
-          gap: 30,
-          zIndex: 2,
-        }}
-      >
-        <div style={{ display: "flex", gap: 40 }}>
-          <Stat label="ISSUED" value={formatDate(p.issueDate)} />
-          <Stat label="DUE" value={formatDate(p.dueDate)} />
-          <Stat label="TOTAL" value={formatMoney(p.total, p.currency)} strong />
-        </div>
-        <div
-          style={{
-            fontSize: 15,
-            color: "#9fb8ff",
-            fontWeight: 500,
-            display: "flex",
-          }}
-        >
-          cdsspace.pro · invoice
-        </div>
-      </div>
-    </div>
-  );
-}
+            {/* Title + client */}
+            <div
+                style={{
+                    display: "flex",
+                    flexDirection: "column",
+                    zIndex: 2,
+                    maxWidth: 1000,
+                }}
+            >
+                <div
+                    style={{
+                        fontSize: titleSize,
+                        fontWeight: 800,
+                        lineHeight: 1.05,
+                        letterSpacing: -1.5,
+                        color: "#ffffff",
+                        textShadow: "0 4px 40px rgba(4,11,55,0.45)",
+                        display: "flex",
+                    }}
+                >
+                    {number}
+                </div>
+                <div
+                    style={{
+                        fontSize: 27,
+                        fontWeight: 500,
+                        lineHeight: 1.35,
+                        color: "#ffffff",
+                        opacity: 0.88,
+                        marginTop: 20,
+                        display: "flex",
+                    }}
+                >
+                    Client: {p.clientName}
+                </div>
+            </div>
 
-function Stat({ label, value, strong }: { label: string; value: string; strong?: boolean }) {
-  return (
-    <div style={{ display: "flex", flexDirection: "column" }}>
-      <div
-        style={{
-          fontSize: 13,
-          letterSpacing: 2.5,
-          color: "#8ea5da",
-          fontWeight: 600,
-          marginBottom: 6,
-          display: "flex",
-        }}
-      >
-        {label}
-      </div>
-      <div
-        style={{
-          fontSize: strong ? 30 : 24,
-          fontWeight: strong ? 800 : 600,
-          color: "#ffffff",
-          display: "flex",
-        }}
-      >
-        {value}
-      </div>
-    </div>
-  );
+            {/* Globe + domain */}
+            <div
+                style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 12,
+                    zIndex: 2,
+                }}
+            >
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={GLOBE_ICON} alt="" width={30} height={30} />
+                <div style={{ fontSize: 25, fontWeight: 600, color: "#ffffff", opacity: 0.92, display: "flex" }}>
+                    cdsspace.com | cdsspace.pro
+                </div>
+            </div>
+        </div>
+    );
 }

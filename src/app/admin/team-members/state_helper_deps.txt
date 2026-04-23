@@ -1,0 +1,21 @@
+  async function refreshRoles() {
+    try {
+      const r = await fetch("/api/admin/roles");
+      const d = await r.json();
+      if (r.ok) setRoles(d.roles ?? []);
+    } catch { /* no-op */ }
+  }
+
+  const [availableDepartments, setAvailableDepartments] = useState<{ id: string; name: string }[]>([]);
+  async function refreshDepartments() {
+    try {
+      const r = await fetch("/api/admin/departments");
+      const d = await r.json();
+      if (r.ok) setAvailableDepartments(d.departments ?? []);
+    } catch { /* no-op */ }
+  }
+
+  useEffect(() => { 
+    refreshRoles(); 
+    refreshDepartments();
+  }, []);

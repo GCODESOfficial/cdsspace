@@ -6,11 +6,10 @@ import Image from "next/image";
 import { usePathname, useRouter } from "next/navigation";
 import { useAdminSession } from "@/hooks/use-admin-session";
 import { hasPermission } from "@/lib/admin-permissions";
+import { AnimatePresence, motion } from "framer-motion";
 import {
   LayoutDashboard,
   Upload,
-  KeyRound,
-  Eye,
   Users,
   MessageSquare,
   ShoppingBag,
@@ -42,20 +41,19 @@ import {
   LayoutGrid,
   ArrowRightLeft,
   Brain,
-  Plug,
+  X,
 } from "lucide-react";
 
 const topLevelItems = [
   { label: "Dashboard", href: "/admin", icon: LayoutDashboard, permission: "dashboard" },
   { label: "Upload Works", href: "/admin/upload-works", icon: Upload, permission: "upload_works" },
   { label: "Client Conversation", href: "/admin/messages", icon: MessageSquare, permission: "messages" },
-  { label: "WhatsApp", href: "/admin/integrations/whatsapp", icon: Plug, permission: "messages" },
-  { label: "FB & Instagram", href: "/admin/integrations/meta", icon: Plug, permission: "messages" },
   { label: "Team Chat", href: "/admin/chat", icon: MessageSquare, permission: "team_chat" },
   { label: "Consultations", href: "/admin/consultations", icon: Calendar, permission: "consultations" },
   { label: "Portfolio", href: "/admin/portfolio-designs", icon: ImagePlus, permission: "dashboard" },
   { label: "FAQs", href: "/admin/faqs", icon: HelpCircle, permission: "dashboard" },
   { label: "Legal Documents", href: "/admin/legal", icon: Scale, permission: "legal" },
+  { label: "Brand Briefs", href: "/admin/brand-briefs", icon: FileText, permission: "dashboard" },
 ];
 
 const workspaceNavItems = [
@@ -71,9 +69,7 @@ const hrmNavItems = [
   { label: "Overview", href: "/admin/hrm", icon: BarChart3, permission: "applicants" },
   { label: "Team Members", href: "/admin/team-members", icon: UserPlus, permission: "team_members" },
   { label: "Departments", href: "/admin/departments", icon: Building2, permission: "departments" },
-  // Sub-admins page is super-admin only. Listed so super-admins see it;
-  // it won't render for any sub-admin because they never carry "all".
-  { label: "Sub-admins", href: "/admin/sub-admins", icon: ShieldCheck, permission: "super_admin_only" },
+  { label: "Sub-admins", href: "/admin/sub-admins", icon: ShieldCheck, permission: "sub_admins" },
   { label: "Applications", href: "/admin/applications", icon: Users, permission: "applicants" },
   { label: "Open Roles", href: "/admin/hrm/roles", icon: BriefcaseIcon, permission: "applicants" },
   { label: "Certifications", href: "/admin/hrm/certifications", icon: Award, permission: "applicants" },
@@ -81,24 +77,24 @@ const hrmNavItems = [
 
 const financeNavItems = [
   { label: "Overview", href: "/admin/finance", icon: BarChart3, permission: "finance" },
-  { label: "Invoice", href: "/admin/finance/invoices", icon: FileText, permission: "finance" },
-  { label: "Pricelist", href: "/admin/finance/price-list", icon: Tag, permission: "finance" },
-  { label: "Expenditure", href: "/admin/finance/expenditures", icon: Receipt, permission: "finance" },
-  { label: "Payroll", href: "/admin/finance/payroll", icon: Wallet, permission: "finance" },
+  { label: "Invoice", href: "/admin/finance/invoices", icon: FileText, permission: "finance_invoices" },
+  { label: "Pricelist", href: "/admin/finance/price-list", icon: Tag, permission: "finance_pricelist" },
+  { label: "Expenditure", href: "/admin/finance/expenditures", icon: Receipt, permission: "finance_expenditures" },
+  { label: "Payroll", href: "/admin/finance/payroll", icon: Wallet, permission: "finance_payroll" },
   { label: "Team Payroll", href: "/admin/team-payroll", icon: Wallet, permission: "team_payroll" },
-  { label: "Financial Audit", href: "/admin/finance/audit", icon: ClipboardCheck, permission: "finance" },
+  { label: "Financial Audit", href: "/admin/finance/audit", icon: ClipboardCheck, permission: "finance_audit" },
 ];
 
 const projectsNavItems = [
-  { label: "Overview", href: "/admin/projects", icon: BarChart3, permission: "finance" },
-  { label: "Projects", href: "/admin/projects/list", icon: Briefcase, permission: "finance" },
-  { label: "Sub-contractors", href: "/admin/projects/contractors", icon: UserCog, permission: "finance" },
-  { label: "Subscriptions", href: "/admin/projects/subscriptions", icon: Repeat, permission: "finance" },
+  { label: "Overview", href: "/admin/projects", icon: BarChart3, permission: "projects" },
+  { label: "Projects", href: "/admin/projects/list", icon: Briefcase, permission: "projects" },
+  { label: "Sub-contractors", href: "/admin/projects/contractors", icon: UserCog, permission: "projects" },
+  { label: "Subscriptions", href: "/admin/projects/subscriptions", icon: Repeat, permission: "projects" },
 ];
 
 const clientsNavItems = [
-  { label: "Overview", href: "/admin/clients", icon: BarChart3, permission: "orders" },
-  { label: "Client / Brand List", href: "/admin/clients/list", icon: Building2, permission: "orders" },
+  { label: "Overview", href: "/admin/clients", icon: BarChart3, permission: "clients" },
+  { label: "Client / Brand List", href: "/admin/clients/list", icon: Building2, permission: "clients" },
   { label: "Client Orders", href: "/admin/orders", icon: ShoppingBag, permission: "orders" },
   { label: "Testimonials", href: "/admin/testimonials", icon: Quote, permission: "testimonials" },
 ];
@@ -117,9 +113,10 @@ interface NavGroupProps {
   pathname: string | null;
   permissions: string[];
   isSuperAdmin: boolean;
+  onNavigate?: () => void;
 }
 
-function NavGroup({ label, icon: GroupIcon, items, pathname, permissions, isSuperAdmin }: NavGroupProps) {
+function NavGroup({ label, icon: GroupIcon, items, pathname, permissions, isSuperAdmin, onNavigate }: NavGroupProps) {
   const exactRoutes = ["/admin/finance", "/admin/projects", "/admin/clients", "/admin/hrm"];
 
   // Filter sub-items by per-item permission. "super_admin_only" is a
@@ -164,6 +161,7 @@ function NavGroup({ label, icon: GroupIcon, items, pathname, permissions, isSupe
               <Link
                 key={sub.href}
                 href={sub.href}
+                onClick={onNavigate}
                 className={`flex items-center gap-2.5 px-3 py-2 rounded-lg text-[12.5px] font-medium transition-all ${
                   isActive
                     ? "bg-[#0A4FE8] text-white shadow-sm shadow-blue-200"
@@ -181,7 +179,12 @@ function NavGroup({ label, icon: GroupIcon, items, pathname, permissions, isSupe
   );
 }
 
-export default function AdminSidebar() {
+interface AdminSidebarProps {
+  mobileOpen?: boolean;
+  onMobileClose?: () => void;
+}
+
+export default function AdminSidebar({ mobileOpen = false, onMobileClose }: AdminSidebarProps) {
   const pathname = usePathname();
   const router = useRouter();
   const { session } = useAdminSession();
@@ -192,22 +195,33 @@ export default function AdminSidebar() {
   const signOut = async () => {
     await fetch("/api/admin-logout", { method: "POST" });
     router.push("/admin/login");
+    onMobileClose?.();
   };
 
   const visibleTopLevel = topLevelItems.filter(
     (item) => isSuperAdmin || hasPermission(permissions, item.permission)
   );
 
-  return (
-    <aside className="fixed left-0 top-0 h-screen w-[230px] bg-white border-r border-gray-100 flex flex-col z-40">
-      {/* Logo */}
-      <div className="px-6 pt-7 pb-4">
-        <Image src="/images/cds-logo.svg" alt="CDS Space" width={100} height={36} className="brightness-0" />
+  const SidebarContent = ({ mobile = false }: { mobile?: boolean }) => (
+    <div className="flex h-full flex-col bg-white">
+      <div className={`border-b border-gray-100 ${mobile ? "px-4 py-4" : "px-6 pt-7 pb-4"}`}>
+        <div className="flex items-center justify-between gap-3">
+          <Image src="/images/cds-logo.svg" alt="CDS Space" width={100} height={36} className="brightness-0" />
+          {mobile && (
+            <button
+              type="button"
+              onClick={onMobileClose}
+              className="flex h-10 w-10 items-center justify-center rounded-full text-gray-500 transition hover:bg-gray-100 hover:text-gray-900"
+              aria-label="Close navigation"
+            >
+              <X className="h-5 w-5" />
+            </button>
+          )}
+        </div>
       </div>
 
-      {/* Role badge */}
       {session && (
-        <div className="px-6 pb-4">
+        <div className={mobile ? "px-4 pb-4 pt-4" : "px-6 pb-4"}>
           <div className={`px-3 py-1.5 rounded-lg text-[11px] font-medium inline-flex items-center gap-1.5 ${
             isSuperAdmin ? "bg-amber-50 text-amber-600" : "bg-blue-50 text-[#0A4FE8]"
           }`}>
@@ -217,9 +231,7 @@ export default function AdminSidebar() {
         </div>
       )}
 
-      {/* Nav */}
-      <nav className="flex-1 px-3 space-y-0.5 overflow-y-auto pb-4">
-        {/* Top-level items */}
+      <nav className={`flex-1 space-y-0.5 overflow-y-auto pb-4 ${mobile ? "px-3" : "px-3"}`}>
         {visibleTopLevel.map((item) => {
           const isActive = item.href === "/admin"
             ? pathname === "/admin"
@@ -228,6 +240,7 @@ export default function AdminSidebar() {
             <Link
               key={item.href}
               href={item.href}
+              onClick={onMobileClose}
               className={`flex items-center gap-3 px-4 py-2.5 rounded-xl text-[13.5px] font-medium transition-all ${
                 isActive
                   ? "bg-[#0A4FE8] text-white shadow-md shadow-blue-200"
@@ -240,25 +253,10 @@ export default function AdminSidebar() {
           );
         })}
 
-        {/* ACCESS Group — Generate/View Codes */}
-        <NavGroup
-          label="Generate Codes"
-          icon={KeyRound}
-          items={[
-            { label: "New Code", href: "/admin/generate-code", icon: KeyRound, permission: "generate_codes" },
-            { label: "View Codes", href: "/admin/viewcodes", icon: Eye, permission: "view_codes" },
-          ]}
-          pathname={pathname}
-          permissions={permissions}
-          isSuperAdmin={isSuperAdmin}
-        />
-
-        {/* Section divider */}
         <div className="pt-4 pb-1 px-4">
           <p className="text-[10px] font-bold text-gray-300 uppercase tracking-[0.12em]">Operations</p>
         </div>
 
-        {/* FINANCE Group */}
         <NavGroup
           label="Finance"
           icon={Wallet}
@@ -266,9 +264,8 @@ export default function AdminSidebar() {
           pathname={pathname}
           permissions={permissions}
           isSuperAdmin={isSuperAdmin}
+          onNavigate={onMobileClose}
         />
-
-        {/* PROJECTS Group */}
         <NavGroup
           label="Projects"
           icon={Boxes}
@@ -276,9 +273,8 @@ export default function AdminSidebar() {
           pathname={pathname}
           permissions={permissions}
           isSuperAdmin={isSuperAdmin}
+          onNavigate={onMobileClose}
         />
-
-        {/* CLIENTS Group */}
         <NavGroup
           label="Clients"
           icon={Building2}
@@ -286,9 +282,8 @@ export default function AdminSidebar() {
           pathname={pathname}
           permissions={permissions}
           isSuperAdmin={isSuperAdmin}
+          onNavigate={onMobileClose}
         />
-
-        {/* HRM Group */}
         <NavGroup
           label="HRM"
           icon={UserPlus}
@@ -296,9 +291,8 @@ export default function AdminSidebar() {
           pathname={pathname}
           permissions={permissions}
           isSuperAdmin={isSuperAdmin}
+          onNavigate={onMobileClose}
         />
-
-        {/* WORKSPACE Group — cDocs, cSign, cMeet, cResume, Protect Docs */}
         <NavGroup
           label="Workspace"
           icon={LayoutGrid}
@@ -306,13 +300,14 @@ export default function AdminSidebar() {
           pathname={pathname}
           permissions={permissions}
           isSuperAdmin={isSuperAdmin}
+          onNavigate={onMobileClose}
         />
       </nav>
 
-      {/* Switch to Team Portal + Logout */}
       <div className="px-3 pb-6 pt-2 border-t border-gray-50 space-y-1">
         <Link
           href="/team"
+          onClick={onMobileClose}
           className="group flex items-center gap-3 px-4 py-2.5 rounded-xl text-[13.5px] font-semibold text-white transition-all w-full shadow-[0_6px_18px_rgba(28,78,209,0.18)]"
           style={{ backgroundImage: "linear-gradient(146.28deg, #0035C1 8.83%, #0575FF 86.3%)" }}
           title="Switch to the Team Portal"
@@ -328,6 +323,39 @@ export default function AdminSidebar() {
           Logout
         </button>
       </div>
-    </aside>
+    </div>
+  );
+
+  return (
+    <>
+      <aside className="fixed left-0 top-0 hidden h-screen w-[230px] border-r border-gray-100 bg-white z-40 lg:block">
+        <SidebarContent />
+      </aside>
+
+      <AnimatePresence>
+        {mobileOpen && (
+          <>
+            <motion.button
+              type="button"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={onMobileClose}
+              className="fixed inset-0 z-40 bg-[#040B37]/30 backdrop-blur-[2px] lg:hidden"
+              aria-label="Close navigation overlay"
+            />
+            <motion.aside
+              initial={{ x: "-100%" }}
+              animate={{ x: 0 }}
+              exit={{ x: "-100%" }}
+              transition={{ type: "spring", damping: 28, stiffness: 260 }}
+              className="fixed inset-y-0 left-0 z-50 w-[86vw] max-w-[320px] border-r border-gray-100 bg-white shadow-2xl lg:hidden"
+            >
+              <SidebarContent mobile />
+            </motion.aside>
+          </>
+        )}
+      </AnimatePresence>
+    </>
   );
 }

@@ -172,7 +172,7 @@ export function ChatWidget() {
       {/* Floating Button */}
       <button
         onClick={() => setIsOpen((prev) => !prev)}
-        className="fixed bottom-6 right-6 z-50 w-14 h-14 rounded-full bg-[#08129C] text-white shadow-lg hover:bg-[#0a18c0] transition-colors flex items-center justify-center"
+        className="fixed bottom-4 right-4 sm:bottom-6 sm:right-6 z-50 w-[52px] h-[52px] sm:w-14 sm:h-14 rounded-full bg-[#08129C] text-white shadow-lg hover:bg-[#0a18c0] transition-colors flex items-center justify-center"
       >
         <MessageSquare className="w-6 h-6" />
         {unreadCount > 0 && (
@@ -190,7 +190,7 @@ export function ChatWidget() {
             animate={{ y: 0, opacity: 1 }}
             exit={{ y: "100%", opacity: 0 }}
             transition={{ type: "spring", damping: 25, stiffness: 300 }}
-            className="fixed bottom-24 right-6 z-50 w-[400px] h-[500px] bg-white rounded-2xl shadow-2xl flex flex-col overflow-hidden border border-gray-200"
+            className="fixed left-3 right-3 bottom-20 sm:left-auto sm:right-6 sm:bottom-24 z-50 w-auto sm:w-[400px] max-w-[calc(100vw-24px)] h-[min(32rem,calc(100dvh-6rem))] sm:h-[500px] bg-white rounded-2xl shadow-2xl flex flex-col overflow-hidden border border-gray-200"
           >
             {/* Header */}
             <div className="flex items-center justify-between px-5 py-4 bg-[#08129C] text-white shrink-0">

@@ -39,8 +39,8 @@ export const MapSection = () => {
     };
 
     return (
-        <section className="w-full h-[600px] md:h-[840px] relative group">
-            <div className="max-w-[1408px] mx-auto h-full px-6 relative">
+        <section className="w-full h-[560px] sm:h-[600px] md:h-[840px] relative group">
+            <div className="max-w-[1408px] mx-auto h-full px-4 sm:px-6 relative">
                 <div className="w-full h-full rounded-[40px] overflow-hidden border border-brand-stroke-ii shadow-2xl relative">
 
                     {/* MAPBOX ENGINE */}
@@ -92,11 +92,11 @@ export const MapSection = () => {
                         <motion.div
                             initial={{ opacity: 0, y: 20 }}
                             animate={{ opacity: 1, y: 0 }}
-                            className="absolute bottom-8 left-8 right-8 md:right-auto md:w-[420px] bg-[#1E1E1E]/90 backdrop-blur-xl border border-white/10 rounded-[32px] p-6 text-white shadow-2xl overflow-hidden"
+                            className="absolute bottom-4 left-4 right-4 md:bottom-8 md:left-8 md:right-auto md:w-[420px] bg-[#1E1E1E]/90 backdrop-blur-xl border border-white/10 rounded-[24px] md:rounded-[32px] p-4 sm:p-5 md:p-6 text-white shadow-2xl overflow-hidden"
                         >
-                            <div className="flex items-center justify-between mb-6">
+                            <div className="flex items-center justify-between mb-5 md:mb-6 gap-3">
                                 <div>
-                                    <h3 className="text-xl font-bold tracking-tight">My Location</h3>
+                                    <h3 className="text-lg md:text-xl font-bold tracking-tight">My Location</h3>
                                     <p className="text-sm text-white/40">Near General Edet Akpan Avenue</p>
                                 </div>
                                 <div className="w-10 h-10 rounded-full bg-white/5 flex items-center justify-center cursor-pointer hover:bg-white/10 transition-colors">
@@ -108,7 +108,7 @@ export const MapSection = () => {
                                 <div className="bg-white/5 rounded-2xl p-4 relative group/addr">
                                     <p className="text-xs text-white/30 uppercase font-bold tracking-widest mb-2">Details</p>
                                     <div className="flex items-start justify-between">
-                                        <div className="text-sm space-y-1 font-medium">
+                                        <div className="text-sm space-y-1 font-medium min-w-0">
                                             <p className="text-white">General Edet Akpan Avenue</p>
                                             <p className="text-white/60">Uyo</p>
                                             <p className="text-white/60">Akwa Ibom</p>
@@ -116,7 +116,7 @@ export const MapSection = () => {
                                         </div>
                                         <button
                                             onClick={handleGetDirections}
-                                            className="w-10 h-10 rounded-xl bg-brand-blue flex items-center justify-center shadow-lg hover:scale-110 transition-transform cursor-pointer"
+                                            className="w-10 h-10 sm:w-11 sm:h-11 rounded-xl bg-brand-blue flex items-center justify-center shadow-lg hover:scale-110 transition-transform cursor-pointer shrink-0"
                                         >
                                             <Navigation size={20} className="text-white" fill="white" />
                                         </button>

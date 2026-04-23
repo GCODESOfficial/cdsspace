@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useCallback } from "react";
 import { usePathname, useRouter } from "next/navigation";
-import { Loader2, Search } from "lucide-react";
+import { Loader2, Menu, Search } from "lucide-react";
 import { I18nProvider, useTranslation } from "@/lib/i18n/context";
 import { TeamSidebar } from "@/components/team/TeamSidebar";
 import { NotificationBell } from "@/components/team/NotificationBell";
@@ -34,41 +34,61 @@ function TeamLayoutInner({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const [member, setMember] = useState<Member | null>(null);
   const [checking, setChecking] = useState(true);
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const { t } = useTranslation();
 
-  const isLoginPage = pathname === "/team/login";
+  const isLoginPage = pathname === "/team/login" || pathname?.includes("/login");
+  const isInvitePage = pathname?.includes("/team/invite") || pathname?.includes("/invite/");
 
   const loadSession = useCallback(async () => {
+    // Never load session or redirect if we are obviously on an auth/invite page
+    if (isLoginPage || isInvitePage) {
+      setChecking(false);
+      return;
+    }
+
     try {
       const res = await fetch("/api/team/session", { credentials: "include" });
       if (!res.ok) {
-        if (!isLoginPage) router.replace("/team/login");
+        // Double check we haven't navigated to an invite page while the fetch was in flight
+        if (!window.location.pathname.includes("/login") && !window.location.pathname.includes("/invite")) {
+          router.replace("/team/login");
+        }
         setChecking(false);
         return;
       }
       const json = await res.json();
       setMember(json.member);
     } catch {
-      if (!isLoginPage) router.replace("/team/login");
+      if (!window.location.pathname.includes("/login") && !window.location.pathname.includes("/invite")) {
+        router.replace("/team/login");
+      }
     } finally {
       setChecking(false);
     }
-  }, [isLoginPage, router]);
+  }, [isInvitePage, isLoginPage, router]);
 
   useEffect(() => {
-    if (isLoginPage) {
+    if (!pathname) return; // Wait for pathname to settle
+    
+    if (isLoginPage || isInvitePage) {
       setChecking(false);
       return;
     }
     loadSession();
-  }, [isLoginPage, loadSession]);
+
+    // Listen for custom "refresh-team-session" events from sub-pages
+    const handleRefresh = () => loadSession();
+    window.addEventListener("refresh-team-session", handleRefresh);
+    return () => window.removeEventListener("refresh-team-session", handleRefresh);
+  }, [isInvitePage, isLoginPage, loadSession]);
 
   const handleLogout = useCallback(async () => {
     await fetch("/api/team/logout", { method: "POST", credentials: "include" });
     router.replace("/team/login");
   }, [router]);
 
-  if (isLoginPage) return <>{children}</>;
+  if (isLoginPage || isInvitePage) return <>{children}</>;
 
   if (checking) {
     return (
@@ -82,14 +102,22 @@ function TeamLayoutInner({ children }: { children: React.ReactNode }) {
 
   return (
     <div className="min-h-screen bg-brand-bg flex">
-      <TeamSidebar member={member} onLogout={handleLogout} />
+      <TeamSidebar member={member} onLogout={handleLogout} mobileOpen={mobileNavOpen} onClose={() => setMobileNavOpen(false)} />
 
       <div className="flex-1 min-w-0 flex flex-col">
         {/* Topbar */}
         <header className="sticky top-0 z-30 bg-brand-bg/80 backdrop-blur-md border-b border-brand-stroke/30">
-          <div className="flex items-center justify-between px-6 lg:px-8 py-4">
-            <div className="flex items-center gap-3 flex-1 max-w-md">
-              <div className="relative w-full">
+          <div className="flex flex-wrap items-center justify-between gap-3 px-4 sm:px-6 lg:px-8 py-3 sm:py-4">
+            <div className="flex items-center gap-3 flex-1 min-w-0 w-full sm:w-auto sm:flex-[1_1_18rem] lg:max-w-md">
+              <button
+                type="button"
+                onClick={() => setMobileNavOpen(true)}
+                className="flex h-10 w-10 items-center justify-center rounded-full bg-white text-brand-navy shadow-sm transition hover:bg-brand-bg lg:hidden"
+                aria-label="Open navigation"
+              >
+                <Menu className="w-5 h-5" />
+              </button>
+              <div className="relative w-full min-w-0">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-brand-body/40" />
                 <input
                   type="text"
@@ -99,7 +127,7 @@ function TeamLayoutInner({ children }: { children: React.ReactNode }) {
               </div>
             </div>
 
-            <div className="flex items-center gap-3">
+            <div className="flex items-center gap-2 sm:gap-3 ml-auto">
               <LanguageSwitcher compact />
               <NotificationBell />
               <div className="hidden md:flex flex-col text-right">
@@ -113,7 +141,7 @@ function TeamLayoutInner({ children }: { children: React.ReactNode }) {
         </header>
 
         {/* Content */}
-        <main className="flex-1 px-6 lg:px-8 py-6 lg:py-8">{children}</main>
+        <main className="flex-1 px-4 sm:px-6 lg:px-8 py-5 sm:py-6 lg:py-8">{children}</main>
       </div>
     </div>
   );

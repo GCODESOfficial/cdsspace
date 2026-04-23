@@ -67,8 +67,42 @@ export const Comparison = () => {
                     </motion.p>
                 </div>
 
+                <div className="w-full md:hidden space-y-4">
+                    {comparisonData.map((row, idx) => (
+                        <motion.div
+                            key={row.feature}
+                            initial={{ opacity: 0, y: 10 }}
+                            whileInView={{ opacity: 1, y: 0 }}
+                            viewport={{ once: true }}
+                            transition={{ duration: 0.35, delay: idx * 0.05 }}
+                            className="rounded-[24px] border border-brand-stroke-ii/40 bg-white p-4 shadow-[0_12px_30px_rgba(4,11,55,0.04)]"
+                        >
+                            <p className="text-base font-semibold text-brand-navy tracking-[-0.02em]">
+                                {row.feature}
+                            </p>
+                            <div className="mt-4 grid grid-cols-3 gap-3">
+                                {[
+                                    { label: "CDS", active: row.cds },
+                                    { label: "Full-time", active: row.fullTime },
+                                    { label: "Agency", active: row.otherAgency },
+                                ].map((item) => (
+                                    <div
+                                        key={item.label}
+                                        className="rounded-2xl bg-brand-bg px-3 py-3 text-center flex flex-col items-center gap-2"
+                                    >
+                                        <span className="text-[11px] font-semibold uppercase tracking-[0.08em] text-brand-body">
+                                            {item.label}
+                                        </span>
+                                        <StatusIcon active={item.active} />
+                                    </div>
+                                ))}
+                            </div>
+                        </motion.div>
+                    ))}
+                </div>
+
                 {/* Table Container with Horizontal Scroll fallback */}
-                <div className="w-full overflow-x-auto scrollbar-hide pb-4 lg:px-20 xl:px-0">
+                <div className="hidden md:block w-full overflow-x-auto scrollbar-hide pb-4 lg:px-20 xl:px-0">
                     <div className="min-w-[700px] flex flex-col">
 
                         {/* Table Header Row */}

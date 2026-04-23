@@ -26,8 +26,8 @@ export default function DashboardLayout({
             <div className="flex-1 flex flex-col min-w-0">
                 <NavbarDashboard onMenuClick={() => setIsSidebarOpen(true)} />
 
-                <main className="flex-1 p-4 lg:p-5 2xl:p-6 overflow-hidden">
-                    <div className="w-full h-full bg-white/70 backdrop-blur-xl rounded-2xl lg:rounded-3xl shadow-[0_10px_40px_rgba(15,40,90,0.06)] border border-white/70 overflow-y-auto relative premium-scrollbar">
+                <main className="flex-1 p-2.5 sm:p-4 lg:p-5 2xl:p-6 overflow-hidden">
+                    <div className="w-full h-full bg-white/70 backdrop-blur-xl rounded-[20px] lg:rounded-3xl shadow-[0_10px_40px_rgba(15,40,90,0.06)] border border-white/70 overflow-y-auto relative premium-scrollbar">
                         {children}
                     </div>
                 </main>

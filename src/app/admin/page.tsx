@@ -66,22 +66,22 @@ export default function AdminDashboard() {
 	const last7Total = last7days.reduce((acc, day) => acc + day.count, 0);
 
 	return (
-		<div className="p-8 max-w-[1400px]">
+		<div className="p-4 sm:p-6 lg:p-8 max-w-[1400px]">
 			{/* Top Bar */}
-			<div className="flex items-center justify-between mb-8">
-				<div>
+			<div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between mb-8">
+				<div className="min-w-0">
 					<p className="text-[#0A4FE8] text-sm font-semibold">Welcome back, {session?.name || "Admin"}!</p>
 					<h1 className="text-[28px] font-bold text-[#0D1B39] tracking-tight">Dashboard</h1>
 				</div>
-				<div className="flex items-center gap-3">
-					<div className="relative">
+				<div className="flex w-full sm:w-auto items-center gap-3">
+					<div className="relative flex-1 sm:flex-none">
 						<Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
 						<input
 							type="text"
 							placeholder="Search..."
 							value={searchQuery}
 							onChange={(e) => setSearchQuery(e.target.value)}
-							className="pl-9 pr-4 py-2 w-56 rounded-xl bg-white border border-gray-200 text-sm text-gray-700 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-300 transition"
+							className="pl-9 pr-4 py-2 w-full sm:w-56 rounded-xl bg-white border border-gray-200 text-sm text-gray-700 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-300 transition"
 						/>
 					</div>
 					<AdminNotificationBell />
@@ -92,7 +92,7 @@ export default function AdminDashboard() {
 			</div>
 
 			{/* Stats */}
-			<div className="grid grid-cols-4 gap-5 mb-8">
+			<div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-5 mb-8">
 				<StatCard
 					icon={<FolderOpen className="w-5 h-5 text-[#0A4FE8]" />}
 					label="Total Works"
@@ -143,9 +143,9 @@ export default function AdminDashboard() {
 			</div>
 
 			{/* Content Grid */}
-			<div className="grid grid-cols-3 gap-6">
+			<div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
 				{/* Works Table */}
-				<div className="col-span-2 bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
+				<div className="xl:col-span-2 bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
 					<UploadedWorksTable
 						searchQuery={searchQuery}
 						onSearchChange={(q) => setSearchQuery(q)}

@@ -34,6 +34,33 @@ export function StaffSignInForm({ initialTab = "admin" }: { initialTab?: Tab }) 
   const [inviteMessage, setInviteMessage] = useState<string | null>(null);
   const [inviteProcessed, setInviteProcessed] = useState(false);
 
+  // Pre-fill from a just-redeemed team invite that walked the user through
+  // /team/invite/[token]. The setup form stashes { username, password } in
+  // sessionStorage and bounces here so the invitee can manually sign in.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (initialTab !== "team") return;
+    const raw = sessionStorage.getItem("cds_team_invite_prefill");
+    if (!raw) return;
+    try {
+      const { username, password: pw, full_name } = JSON.parse(raw) as {
+        username?: string;
+        password?: string;
+        full_name?: string;
+      };
+      if (username) setIdentifier(username);
+      if (pw) setPassword(pw);
+      setInviteStatus("ready");
+      setInviteMessage(
+        `Welcome${full_name ? `, ${full_name.split(" ")[0]}` : ""}. Your account is ready — press Sign In to continue.`,
+      );
+    } catch {
+      // ignore malformed payload
+    } finally {
+      sessionStorage.removeItem("cds_team_invite_prefill");
+    }
+  }, [initialTab]);
+
   useEffect(() => {
     if (typeof window === "undefined" || inviteProcessed) return;
     const params = new URLSearchParams(window.location.search);

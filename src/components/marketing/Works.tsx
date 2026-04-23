@@ -123,6 +123,7 @@ function WorkCard({ work, index, onOpen }: { work: Work; index: number; onOpen: 
                         src={work.cover_image}
                         alt={work.title}
                         fill
+                        quality={90}
                         sizes="(min-width: 1024px) 400px, (min-width: 768px) 50vw, 100vw"
                         className="object-cover transform transition-transform duration-700 group-hover:scale-105"
                     />

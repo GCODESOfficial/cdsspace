@@ -109,14 +109,14 @@ export const ConsultationForm = () => {
     }, []);
 
     return (
-        <section className="w-full bg-brand-bg relative pb-32">
-            <div className="max-w-[1232px] mx-auto border-l border-r border-dashed border-brand-stroke-ii px-6">
+        <section className="w-full bg-brand-bg relative pb-20 sm:pb-24 md:pb-32">
+            <div className="max-w-[1232px] mx-auto sm:border-l sm:border-r border-dashed border-brand-stroke-ii px-4 sm:px-6">
 
                 <motion.div
                     initial={{ opacity: 0, y: 20 }}
                     whileInView={{ opacity: 1, y: 0 }}
                     viewport={{ once: true }}
-                    className="max-w-[900px] mx-auto bg-white rounded-[40px] border border-brand-stroke-ii p-8 md:p-12 shadow-sm"
+                    className="max-w-[900px] mx-auto bg-white rounded-[28px] sm:rounded-[40px] border border-brand-stroke-ii p-5 sm:p-8 md:p-12 shadow-sm"
                 >
                     {submitted && (
                         <div className="mb-6 flex items-start gap-3 rounded-2xl bg-emerald-50 border border-emerald-200 p-4">
@@ -130,8 +130,8 @@ export const ConsultationForm = () => {
                     {errorMsg && (
                         <div className="mb-6 rounded-2xl bg-red-50 border border-red-200 p-4 text-sm text-red-800">{errorMsg}</div>
                     )}
-                    <form className="space-y-8" onSubmit={submit}>
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                    <form className="space-y-6 sm:space-y-8" onSubmit={submit}>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 sm:gap-8">
                             <div className="space-y-3">
                                 <label className="text-brand-navy text-base font-bold tracking-tight uppercase">Full name</label>
                                 <input
@@ -139,7 +139,7 @@ export const ConsultationForm = () => {
                                     value={form.full_name}
                                     onChange={(e) => setForm({ ...form, full_name: e.target.value })}
                                     placeholder="Enter your full name"
-                                    className="w-full bg-[#F4F6FB] border border-transparent focus:border-brand-blue/30 rounded-2xl px-6 py-4 outline-none transition-all placeholder:text-brand-body/40 text-brand-navy font-medium"
+                                    className="w-full bg-[#F4F6FB] border border-transparent focus:border-brand-blue/30 rounded-2xl px-4 sm:px-6 py-3.5 sm:py-4 outline-none transition-all placeholder:text-brand-body/40 text-brand-navy font-medium"
                                 />
                             </div>
 
@@ -150,12 +150,12 @@ export const ConsultationForm = () => {
                                     value={form.email}
                                     onChange={(e) => setForm({ ...form, email: e.target.value })}
                                     placeholder="Enter your email"
-                                    className="w-full bg-[#F4F6FB] border border-transparent focus:border-brand-blue/30 rounded-2xl px-6 py-4 outline-none transition-all placeholder:text-brand-body/40 text-brand-navy font-medium"
+                                    className="w-full bg-[#F4F6FB] border border-transparent focus:border-brand-blue/30 rounded-2xl px-4 sm:px-6 py-3.5 sm:py-4 outline-none transition-all placeholder:text-brand-body/40 text-brand-navy font-medium"
                                 />
                             </div>
                         </div>
 
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 sm:gap-8">
                             <div className="space-y-3">
                                 <label className="text-brand-navy text-base font-bold tracking-tight uppercase">Company / Brand</label>
                                 <input
@@ -163,7 +163,7 @@ export const ConsultationForm = () => {
                                     value={form.company}
                                     onChange={(e) => setForm({ ...form, company: e.target.value })}
                                     placeholder="Your company or brand name"
-                                    className="w-full bg-[#F4F6FB] border border-transparent focus:border-brand-blue/30 rounded-2xl px-6 py-4 outline-none transition-all placeholder:text-brand-body/40 text-brand-navy font-medium"
+                                    className="w-full bg-[#F4F6FB] border border-transparent focus:border-brand-blue/30 rounded-2xl px-4 sm:px-6 py-3.5 sm:py-4 outline-none transition-all placeholder:text-brand-body/40 text-brand-navy font-medium"
                                 />
                             </div>
 
@@ -174,7 +174,7 @@ export const ConsultationForm = () => {
                                     value={form.budget_range}
                                     onChange={(e) => setForm({ ...form, budget_range: e.target.value })}
                                     placeholder="Estimated budget ($)"
-                                    className="w-full bg-[#F4F6FB] border border-transparent focus:border-brand-blue/30 rounded-2xl px-6 py-4 outline-none transition-all placeholder:text-brand-body/40 text-brand-navy font-medium"
+                                    className="w-full bg-[#F4F6FB] border border-transparent focus:border-brand-blue/30 rounded-2xl px-4 sm:px-6 py-3.5 sm:py-4 outline-none transition-all placeholder:text-brand-body/40 text-brand-navy font-medium"
                                 />
                             </div>
                         </div>
@@ -186,7 +186,7 @@ export const ConsultationForm = () => {
                                 value={form.message}
                                 onChange={(e) => setForm({ ...form, message: e.target.value })}
                                 placeholder="Tell us briefly about your project or idea"
-                                className="w-full bg-brand-bg border border-transparent focus:border-brand-blue/30 rounded-2xl px-6 py-4 outline-none transition-all placeholder:text-brand-body/40 text-brand-navy font-medium resize-none"
+                                className="w-full bg-brand-bg border border-transparent focus:border-brand-blue/30 rounded-2xl px-4 sm:px-6 py-3.5 sm:py-4 outline-none transition-all placeholder:text-brand-body/40 text-brand-navy font-medium resize-none"
                             ></textarea>
                         </div>
 
@@ -199,7 +199,7 @@ export const ConsultationForm = () => {
                                 onDrop={handleDrop}
                                 onClick={() => fileInputRef.current?.click()}
                                 className={cn(
-                                    "w-full min-h-[160px] bg-brand-bg border-2 border-dashed rounded-[24px] flex flex-col items-center justify-center p-8 transition-all cursor-pointer group relative overflow-hidden",
+                                    "w-full min-h-[160px] bg-brand-bg border-2 border-dashed rounded-[24px] flex flex-col items-center justify-center p-6 sm:p-8 transition-all cursor-pointer group relative overflow-hidden",
                                     isDragging ? "border-brand-blue bg-brand-blue/5 scale-[1.01]" : "border-brand-stroke-ii hover:bg-white hover:border-brand-blue/30"
                                 )}
                             >
@@ -216,14 +216,14 @@ export const ConsultationForm = () => {
                                         <div className="w-16 h-16 rounded-full bg-brand-blue/5 flex items-center justify-center mb-4 group-hover:scale-110 transition-transform duration-500">
                                             <UploadCloud className="text-brand-blue opacity-40 group-hover:opacity-100 transition-opacity" size={32} />
                                         </div>
-                                        <p className="text-brand-navy font-bold text-lg">
+                                        <p className="text-brand-navy font-bold text-base sm:text-lg text-center">
                                             <span className="text-brand-blue">Click to upload</span> or drag and drop
                                         </p>
-                                        <p className="text-brand-body/40 text-sm mt-1">PDF, PNG, JPG or SVG (max. 10MB per file)</p>
+                                        <p className="text-brand-body/40 text-sm mt-1 text-center">PDF, PNG, JPG or SVG (max. 10MB per file)</p>
                                     </>
                                 ) : (
                                     <div className="w-full space-y-4">
-                                        <div className="flex items-center justify-between border-b border-brand-stroke-ii pb-4">
+                                        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-brand-stroke-ii pb-4">
                                             <p className="text-brand-navy font-bold text-base">{uploadedFiles.length} file(s) selected</p>
                                             <button className="text-brand-blue text-sm font-bold hover:underline">Add more</button>
                                         </div>
@@ -277,11 +277,11 @@ export const ConsultationForm = () => {
                                 value={form.how_heard}
                                 onChange={(e) => setForm({ ...form, how_heard: e.target.value })}
                                 placeholder="X, referral, search, friend..."
-                                className="w-full bg-brand-bg border border-transparent focus:border-brand-blue/30 rounded-2xl px-6 py-4 outline-none transition-all placeholder:text-brand-body/40 text-brand-navy font-medium"
+                                className="w-full bg-brand-bg border border-transparent focus:border-brand-blue/30 rounded-2xl px-4 sm:px-6 py-3.5 sm:py-4 outline-none transition-all placeholder:text-brand-body/40 text-brand-navy font-medium"
                             />
                         </div>
 
-                        <button type="submit" disabled={submitting} className="w-full text-white font-bold py-5 rounded-full text-lg shadow-lg hover:shadow-xl active:scale-[0.98] transition-all cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed" style={{ background: 'var(--color-brand-gradient)' }}>
+                        <button type="submit" disabled={submitting} className="w-full text-white font-bold py-4 sm:py-5 rounded-full text-base sm:text-lg shadow-lg hover:shadow-xl active:scale-[0.98] transition-all cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed" style={{ background: 'var(--color-brand-gradient)' }}>
                             {submitting ? "Sending…" : "Schedule a call"}
                         </button>
                     </form>

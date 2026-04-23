@@ -5,7 +5,8 @@ import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Copy, Download, Trash2, ExternalLink, Truck, Rocket, Zap, Clock as ClockIcon, Check, Share2 } from "lucide-react";
+import { Copy, Download, Trash2, ExternalLink, Truck, Rocket, Zap, Clock as ClockIcon, Check, Share2, Pencil } from "lucide-react";
+import { exportInvoiceToPdf } from "@/lib/invoice-pdf";
 import FinanceShell, { glassCard } from "@/components/finance/FinanceShell";
 import InvoiceDocument from "@/components/finance/InvoiceDocument";
 import { DELIVERY_SPEEDS, type DeliverySpeed, type FinanceInvoice, type FinanceInvoiceItem } from "@/lib/finance/types";
@@ -20,6 +21,7 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
   const [savedTerms, setSavedTerms] = useState(false);
   const [pendingSpeed, setPendingSpeed] = useState<DeliverySpeed | null>(null);
   const [shareOpen, setShareOpen] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   const onSpeedClick = (value: DeliverySpeed) => {
     if (invoice?.delivery_speed === value) return;
@@ -47,9 +49,28 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
   };
 
   const load = async () => {
-    const r = await fetch(`/api/admin/finance/invoices/${id}`);
-    const d = await r.json();
-    setInvoice(d.invoice); setItems(d.items ?? []);
+    setLoadError(null);
+    try {
+      const r = await fetch(`/api/admin/finance/invoices/${id}`);
+      if (!r.ok) {
+        let msg = `Couldn't load invoice (${r.status}).`;
+        try {
+          const d = await r.json();
+          if (d?.error) msg = d.error;
+        } catch {}
+        setLoadError(msg);
+        return;
+      }
+      const d = await r.json();
+      if (!d?.invoice) {
+        setLoadError("Invoice not found.");
+        return;
+      }
+      setInvoice(d.invoice);
+      setItems(d.items ?? []);
+    } catch (e) {
+      setLoadError(e instanceof Error ? e.message : "Network error");
+    }
   };
   useEffect(() => { load(); }, [id]);
 
@@ -79,6 +100,27 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
     setTimeout(() => setCopied(false), 1500);
   };
 
+  if (loadError) {
+    return (
+      <FinanceShell title="Invoice" back={{ href: "/admin/finance/invoices", label: "Invoices" }}>
+        <div className={`${glassCard} p-8`}>
+          <h3 className="text-lg font-semibold text-gray-900 mb-2">Couldn't open this invoice</h3>
+          <p className="text-gray-600 text-sm mb-4">{loadError}</p>
+          <div className="flex gap-2">
+            <Button onClick={load} className="h-10 px-4 rounded-xl">Retry</Button>
+            <Button
+              variant="outline"
+              onClick={() => (window.location.href = "/admin/finance/invoices")}
+              className="h-10 px-4 rounded-xl"
+            >
+              Back to invoices
+            </Button>
+          </div>
+        </div>
+      </FinanceShell>
+    );
+  }
+
   if (!invoice) {
     return <FinanceShell title="Loading…"><div className={`${glassCard} p-10 text-gray-500`}>Loading invoice…</div></FinanceShell>;
   }
@@ -100,7 +142,14 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
               <SelectItem value="cancelled">Cancelled</SelectItem>
             </SelectContent>
           </Select>
-          <Button variant="outline" className="h-11 px-4 rounded-xl" onClick={() => window.open(`/invoice/${invoice.public_token}?print=1`, "_blank")}>
+          <Button variant="outline" className="h-11 px-4 rounded-xl" onClick={() => window.location.href = `/admin/finance/invoices/new?draft=${id}`}>
+            <Pencil className="w-4 h-4 mr-1.5" /> Edit
+          </Button>
+          <Button
+            variant="outline"
+            className="h-11 px-4 rounded-xl"
+            onClick={() => invoice && exportInvoiceToPdf(invoice, items)}
+          >
             <Download className="w-4 h-4 mr-1.5" /> PDF
           </Button>
           <Button variant="outline" className="h-11 px-4 rounded-xl" onClick={remove}><Trash2 className="w-4 h-4 text-red-600" /></Button>

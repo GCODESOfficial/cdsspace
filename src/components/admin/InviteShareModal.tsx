@@ -41,7 +41,7 @@ export function InviteShareModal({
 }) {
   if (!open || !payload) return null;
 
-  const inviteUrl = `${payload.origin}/team/login?invite=${payload.invite_token}`;
+  const inviteUrl = `${payload.origin}/team/invite/${payload.invite_token}`;
   return (
     <div
       className="fixed inset-0 z-50 bg-black/55 backdrop-blur-sm flex items-center justify-center p-4"
@@ -132,8 +132,8 @@ export function InviteShareModal({
 
         {/* Footer */}
         <div className="px-6 py-4 bg-gray-50 border-t border-gray-100 text-[11px] text-gray-500 leading-relaxed">
-          The invite link auto-fills the teammate&apos;s username & password on sign-in. It
-          becomes single-use the moment they click it.
+          The invite link takes the teammate to a setup form to fill their details and set a password. 
+          It becomes single-use the moment they complete the setup.
         </div>
       </div>
     </div>

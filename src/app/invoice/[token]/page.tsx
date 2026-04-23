@@ -9,11 +9,20 @@ type Params = Promise<{ token: string }>;
 async function fetchInvoiceMeta(token: string) {
   try {
     const sb = financeDb();
-    const { data } = await sb
+    const columns = "invoice_number, client_name, status, issue_date, due_date, total, currency, public_token";
+    let { data } = await sb
       .from("finance_invoices")
-      .select("invoice_number, client_name, status, issue_date, due_date, total, currency")
+      .select(columns)
       .eq("public_token", token)
       .maybeSingle();
+    if (!data) {
+      const { data: byNumber } = await sb
+        .from("finance_invoices")
+        .select(columns)
+        .ilike("invoice_number", token)
+        .maybeSingle();
+      data = byNumber;
+    }
     return data as
       | {
           invoice_number: string;
@@ -23,6 +32,7 @@ async function fetchInvoiceMeta(token: string) {
           due_date: string | null;
           total: number;
           currency: string;
+          public_token: string;
         }
       | null;
   } catch {

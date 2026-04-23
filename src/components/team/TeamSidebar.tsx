@@ -4,6 +4,7 @@ import Link from "next/link";
 import Image from "next/image";
 import { usePathname } from "next/navigation";
 import { useTranslation } from "@/lib/i18n/context";
+import { AnimatePresence, motion } from "framer-motion";
 import {
   LayoutDashboard,
   Briefcase,
@@ -13,10 +14,10 @@ import {
   FileText,
   PenLine,
   UserRound,
-  Wallet,
   Settings,
   LogOut,
   ExternalLink,
+  X,
 } from "lucide-react";
 
 interface TeamSidebarProps {
@@ -27,9 +28,11 @@ interface TeamSidebarProps {
     is_sub_admin: boolean;
   };
   onLogout: () => void;
+  mobileOpen?: boolean;
+  onClose?: () => void;
 }
 
-export function TeamSidebar({ member, onLogout }: TeamSidebarProps) {
+export function TeamSidebar({ member, onLogout, mobileOpen = false, onClose }: TeamSidebarProps) {
   const pathname = usePathname();
   const { t } = useTranslation();
 
@@ -42,23 +45,32 @@ export function TeamSidebar({ member, onLogout }: TeamSidebarProps) {
     { label: t("nav.cdocs"), href: "/team/cdocs", icon: FileText },
     { label: t("nav.csign"), href: "/team/csign", icon: PenLine },
     { label: t("nav.cresume"), href: "/team/cresume", icon: UserRound },
-    { label: t("nav.payroll"), href: "/team/payroll", icon: Wallet },
   ];
 
-  return (
-    <aside className="w-[260px] shrink-0 h-screen sticky top-0 bg-white border-r border-brand-stroke/30 flex flex-col">
-      {/* Logo */}
-      <div className="px-6 py-6 border-b border-brand-stroke/20 flex items-center gap-2.5">
-        <Image src="/navbar/CDS Logo.svg" alt="CDS Space" width={36} height={36} />
-        <div>
-          <p className="text-[15px] font-bold text-brand-navy tracking-tight">CDS Space</p>
-          <p className="text-[10px] uppercase tracking-[0.15em] text-brand-body/50 font-semibold">
-            Team Portal
-          </p>
+  const SidebarInner = ({ mobile = false }: { mobile?: boolean }) => (
+    <div className="flex h-full flex-col bg-white">
+      <div className="px-5 sm:px-6 py-5 sm:py-6 border-b border-brand-stroke/20 flex items-center justify-between gap-3">
+        <div className="flex items-center gap-2.5">
+          <Image src="/navbar/CDS Logo.svg" alt="CDS Space" width={36} height={36} />
+          <div>
+            <p className="text-[15px] font-bold text-brand-navy tracking-tight">CDS Space</p>
+            <p className="text-[10px] uppercase tracking-[0.15em] text-brand-body/50 font-semibold">
+              Team Portal
+            </p>
+          </div>
         </div>
+        {mobile && (
+          <button
+            type="button"
+            onClick={onClose}
+            className="flex h-10 w-10 items-center justify-center rounded-full text-brand-body transition hover:bg-brand-bg"
+            aria-label="Close navigation"
+          >
+            <X className="h-5 w-5" />
+          </button>
+        )}
       </div>
 
-      {/* Nav */}
       <nav className="flex-1 overflow-y-auto px-3 py-4 space-y-0.5">
         {mainItems.map((item) => {
           const Icon = item.icon;
@@ -69,6 +81,7 @@ export function TeamSidebar({ member, onLogout }: TeamSidebarProps) {
             <Link
               key={item.href}
               href={item.href}
+              onClick={onClose}
               className={`flex items-center gap-3 px-3 py-2.5 rounded-xl text-[13.5px] transition ${
                 active
                   ? "bg-brand-blue text-white font-semibold shadow-[0_6px_18px_rgba(28,78,209,0.25)]"
@@ -90,6 +103,7 @@ export function TeamSidebar({ member, onLogout }: TeamSidebarProps) {
             </div>
             <a
               href="/admin"
+              onClick={onClose}
               className="flex items-center justify-between gap-3 px-3 py-2.5 rounded-xl text-[13.5px] text-brand-body hover:bg-brand-bg/70 hover:text-brand-navy transition"
             >
               <span className="inline-flex items-center gap-3">
@@ -102,10 +116,10 @@ export function TeamSidebar({ member, onLogout }: TeamSidebarProps) {
         )}
       </nav>
 
-      {/* Footer: profile + settings + logout */}
       <div className="p-3 border-t border-brand-stroke/20 space-y-1">
         <Link
           href="/team/settings"
+          onClick={onClose}
           className={`flex items-center gap-3 px-3 py-2.5 rounded-xl text-[13.5px] transition ${
             pathname?.startsWith("/team/settings")
               ? "bg-brand-bg text-brand-navy font-semibold"
@@ -116,7 +130,10 @@ export function TeamSidebar({ member, onLogout }: TeamSidebarProps) {
           {t("nav.settings")}
         </Link>
         <button
-          onClick={onLogout}
+          onClick={() => {
+            onClose?.();
+            onLogout();
+          }}
           className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-[13.5px] text-rose-600 hover:bg-rose-50 transition"
         >
           <LogOut className="w-[18px] h-[18px]" />
@@ -146,6 +163,39 @@ export function TeamSidebar({ member, onLogout }: TeamSidebarProps) {
           </div>
         </div>
       </div>
-    </aside>
+    </div>
+  );
+
+  return (
+    <>
+      <aside className="hidden lg:flex w-[260px] shrink-0 h-screen sticky top-0 bg-white border-r border-brand-stroke/30 flex-col">
+        <SidebarInner />
+      </aside>
+
+      <AnimatePresence>
+        {mobileOpen && (
+          <>
+            <motion.button
+              type="button"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={onClose}
+              className="fixed inset-0 z-40 bg-[#040B37]/25 backdrop-blur-[2px] lg:hidden"
+              aria-label="Close navigation overlay"
+            />
+            <motion.aside
+              initial={{ x: "-100%" }}
+              animate={{ x: 0 }}
+              exit={{ x: "-100%" }}
+              transition={{ type: "spring", damping: 28, stiffness: 260 }}
+              className="fixed inset-y-0 left-0 z-50 w-[86vw] max-w-[320px] border-r border-brand-stroke/30 bg-white shadow-2xl lg:hidden"
+            >
+              <SidebarInner mobile />
+            </motion.aside>
+          </>
+        )}
+      </AnimatePresence>
+    </>
   );
 }

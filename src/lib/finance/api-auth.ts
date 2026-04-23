@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getAdminSession } from "@/app/api/admin-check/route";
+import { getAdminSession, getAdminSessionAsync } from "@/app/api/admin-check/route";
 import { hasPermission } from "@/lib/admin-permissions";
 import { getSupabaseAdmin } from "@/lib/supabase";
 
@@ -14,14 +14,28 @@ export function financeDb(): any {
 }
 
 /**
- * Gate a finance API route. Returns null if authorized,
- * or a NextResponse to return immediately if not.
+ * Synchronous guard (admin-cookie only). Kept for routes that haven't been
+ * migrated to the async team-session bridge.
  */
 export function requireFinanceAdmin(req: NextRequest) {
   const session = getAdminSession(req);
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   if (session.role === "super_admin") return null;
   if (!hasPermission(session.permissions, "finance")) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
+  return null;
+}
+
+/**
+ * Async guard that also accepts a team-portal session for team members with
+ * sub-admin access. Use this for any NEW admin API route going forward.
+ */
+export async function requireFinanceAdminAsync(req: NextRequest, permissionKey = "finance") {
+  const session = await getAdminSessionAsync(req);
+  if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  if (session.role === "super_admin") return null;
+  if (!hasPermission(session.permissions, permissionKey)) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
   return null;

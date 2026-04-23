@@ -34,7 +34,7 @@ export default function InvoiceDocument({ invoice, items }: { invoice: Invoice; 
       {/* Header */}
       <div className="flex items-start justify-between pb-8 border-b border-gray-100">
         <div className="flex items-center gap-3">
-          <Image src="/navbar/CDS Logo.svg" alt="CDS Space" width={64} height={64} />
+          <img src="/navbar/CDS Logo.svg" alt="CDS Space" width={64} height={64} />
           <div>
             <div className="text-xl font-bold tracking-tight">CDS Space</div>
             <div className="text-xs text-gray-500">Branding & Digital Agency</div>
@@ -100,13 +100,12 @@ export default function InvoiceDocument({ invoice, items }: { invoice: Invoice; 
       {/* Totals + seal */}
       <div className="mt-6 flex items-end justify-between gap-8">
         <div className="shrink-0">
-          <Image
+          <img
             src="/CDS_Seal.png"
             alt="CDS Space official seal"
             width={108}
             height={108}
             className="w-[108px] h-[108px] object-contain opacity-90 select-none"
-            priority={false}
           />
         </div>
         <div className="w-72 space-y-2 text-sm">
@@ -145,7 +144,7 @@ export default function InvoiceDocument({ invoice, items }: { invoice: Invoice; 
               <div key={b.bank} className="flex items-start gap-3">
                 {b.logo ? (
                   <div className="shrink-0 w-14 h-14 rounded-xl bg-white border border-white/20 p-2 flex items-center justify-center overflow-hidden" style={{ WebkitPrintColorAdjust: 'exact', printColorAdjust: 'exact' } as any}>
-                    <Image src={b.logo} alt={b.bank} width={48} height={48} className="object-contain" />
+                    <img src={b.logo} alt={b.bank} width={48} height={48} className="object-contain" />
                   </div>
                 ) : (
                   <div

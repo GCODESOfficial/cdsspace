@@ -12,6 +12,7 @@ import { Plus, Receipt, Trash2, Repeat, Zap } from "lucide-react";
 import FinanceShell, { glassCard } from "@/components/finance/FinanceShell";
 import StatCard from "@/components/finance/StatCard";
 import ModalHeader from "@/components/finance/ModalHeader";
+import { SuggestionInput } from "@/components/finance/SuggestionInput";
 import { CURRENCIES, Currency, FinanceExpenditure, formatMoney } from "@/lib/finance/types";
 import { appAlert, appConfirm, appPrompt } from "@/lib/app-notify";
 
@@ -70,9 +71,23 @@ export default function ExpendituresPage() {
           <DialogContent className="bg-white max-w-xl rounded-2xl border-0 shadow-2xl p-7">
             <ModalHeader icon={Receipt} title="New Expenditure" subtitle="Track outgoing spend, one-time or recurring" accent="from-rose-500 to-red-500" />
             <div className="space-y-4 mt-2">
-              <Field label="Title"><Input className="h-11 rounded-xl" value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} /></Field>
+              <Field label="Title">
+                <SuggestionInput
+                  field="title"
+                  value={form.title}
+                  onChange={(v) => setForm({ ...form, title: v })}
+                  placeholder="Start typing — Fuel, Food, Transport…"
+                />
+              </Field>
               <div className="grid grid-cols-2 gap-4">
-                <Field label="Category"><Input className="h-11 rounded-xl" value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })} placeholder="Office, Travel…" /></Field>
+                <Field label="Category">
+                  <SuggestionInput
+                    field="category"
+                    value={form.category}
+                    onChange={(v) => setForm({ ...form, category: v })}
+                    placeholder="Office, Travel, Utility…"
+                  />
+                </Field>
                 <Field label="Date"><Input type="date" className="h-11 rounded-xl" value={form.spent_on} onChange={(e) => setForm({ ...form, spent_on: e.target.value })} /></Field>
               </div>
               <div className="grid grid-cols-2 gap-4">

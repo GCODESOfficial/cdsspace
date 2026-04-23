@@ -33,28 +33,6 @@ export async function GET() {
     recent_work = works || [];
   }
 
-  // Next payment + YTD
-  const { data: nextPay } = await db
-    .from("team_payroll_entries")
-    .select("net_amount, currency, scheduled_for")
-    .eq("team_member_id", session.id)
-    .in("status", ["pending", "approved"])
-    .order("scheduled_for", { ascending: true })
-    .limit(1)
-    .maybeSingle();
-
-  const yearStart = new Date(new Date().getFullYear(), 0, 1).toISOString();
-  const { data: ytdRows } = await db
-    .from("team_payroll_entries")
-    .select("net_amount")
-    .eq("team_member_id", session.id)
-    .eq("status", "paid")
-    .gte("paid_on", yearStart);
-  const payroll_ytd = (ytdRows || []).reduce(
-    (sum: number, r: any) => sum + Number(r.net_amount || 0),
-    0
-  );
-
   // Unread messages count
   const { data: unreadNotifs } = await db
     .from("team_notifications")
@@ -89,16 +67,8 @@ export async function GET() {
       member: { full_name: session.full_name, role_title: session.role_title },
       stats: {
         assigned_work: workIds.length,
-        next_payment: nextPay
-          ? {
-              amount: Number(nextPay.net_amount || 0),
-              currency: nextPay.currency || "NGN",
-              scheduled_for: nextPay.scheduled_for,
-            }
-          : null,
         unread_messages,
         upcoming_meetings: upcoming_meetings.length,
-        payroll_ytd,
       },
       recent_work,
       upcoming_meetings,

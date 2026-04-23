@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -23,9 +23,22 @@ import Link from "next/link";
 interface Row { name: string; description: string; quantity: string; unit_price: string; isNew: boolean; }
 interface ProjectLite { id: string; name: string; client: string; currency: Currency; }
 interface MilestoneLite { id: string; description: string; budget: number; }
+interface ClientLite {
+  id: string;
+  name: string;
+  brand_name: string | null;
+  email: string | null;
+  phone: string | null;
+  address: string | null;
+  industry?: string | null;
+  contact_person?: string | null;
+}
 
 export default function NewInvoicePage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const editDraftId = searchParams.get("draft");
+  const [hydrating, setHydrating] = useState<boolean>(!!editDraftId);
   const [projects, setProjects] = useState<ProjectLite[]>([]);
   const [milestones, setMilestones] = useState<MilestoneLite[]>([]);
   const [priceItems, setPriceItems] = useState<FinancePriceItem[]>([]);
@@ -45,6 +58,11 @@ export default function NewInvoicePage() {
   const [draftId, setDraftId] = useState<string | null>(null);
   const [lastSaved, setLastSaved] = useState<Date | null>(null);
   const [isOffline, setIsOffline] = useState(false);
+
+  // Client directory autocomplete
+  const [clientMatches, setClientMatches] = useState<ClientLite[]>([]);
+  const [clientMenuOpen, setClientMenuOpen] = useState(false);
+  const [clientQuery, setClientQuery] = useState("");
 
   // Payment terms + delivery
   const [paymentTerms, setPaymentTerms] = useState(DEFAULT_PAYMENT_TERMS);
@@ -82,6 +100,60 @@ export default function NewInvoicePage() {
     fetch("/api/admin/finance/price-list").then((r) => r.json()).then((d) => setPriceItems(d.items ?? []));
   }, []);
 
+  // Debounced lookup into the client/brand directory based on whatever the
+  // admin is typing into the Client Name field.
+  useEffect(() => {
+    if (hydrating) return;
+    const q = clientQuery.trim();
+    if (q.length < 1) { setClientMatches([]); return; }
+    const t = setTimeout(async () => {
+      try {
+        const r = await fetch(`/api/admin/clients/lookup?q=${encodeURIComponent(q)}&limit=8`);
+        if (!r.ok) { setClientMatches([]); return; }
+        const d = await r.json();
+        setClientMatches(Array.isArray(d.clients) ? d.clients : []);
+      } catch {
+        setClientMatches([]);
+      }
+    }, 200);
+    return () => clearTimeout(t);
+  }, [clientQuery, hydrating]);
+
+  const applyClient = (c: ClientLite) => {
+    setClient({
+      name: c.name,
+      email: c.email ?? "",
+      address: c.address ?? "",
+    });
+    setClientQuery("");
+    setClientMenuOpen(false);
+  };
+
+  // Inline "Add new client" from the invoice form. Saves to the `clients`
+  // admin directory and immediately fills in the Bill-To block.
+  const [creatingClient, setCreatingClient] = useState(false);
+  const createNewClient = async () => {
+    const name = (clientQuery || client.name || "").trim();
+    if (!name) { appAlert("Type a client name first."); return; }
+    setCreatingClient(true);
+    try {
+      const r = await fetch("/api/admin/clients/lookup", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name,
+          email: client.email || null,
+          address: client.address || null,
+        }),
+      });
+      const d = await r.json();
+      if (!r.ok) { appAlert(d.error || "Couldn't save client."); return; }
+      applyClient(d.client as ClientLite);
+    } finally {
+      setCreatingClient(false);
+    }
+  };
+
   useEffect(() => {
     if (!projectId) { setMilestones([]); return; }
     fetch(`/api/admin/finance/projects/${projectId}`).then((r) => r.json()).then((d) => {
@@ -105,8 +177,74 @@ export default function NewInvoicePage() {
     };
   }, []);
 
-  // Recovery from LocalStorage
+  // Hydrate from an existing draft when arriving via ?draft={id} (e.g. the
+  // "Generate Invoice" flow from brand briefs). This takes priority over the
+  // localStorage recovery so a specific invoice is always the source of truth.
   useEffect(() => {
+    if (!editDraftId) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const r = await fetch(`/api/admin/finance/invoices/${editDraftId}`);
+        if (!r.ok) {
+          setHydrating(false);
+          return;
+        }
+        const d = await r.json();
+        if (cancelled || !d?.invoice) return;
+        const inv = d.invoice;
+        // Wipe any stale LS draft so the autosave effect doesn't race us.
+        localStorage.removeItem("pending_invoice");
+        setScope((inv.scope as typeof scope) || "custom");
+        setProjectId(inv.project_id || "");
+        setMilestoneId(inv.milestone_id || "");
+        setPeriodMonth(inv.period_month || "");
+        setClient({
+          name: inv.client_name || "",
+          email: inv.client_email || "",
+          address: inv.client_address || "",
+        });
+        setCurrency((inv.currency as Currency) || "NGN");
+        setIssueDate(inv.issue_date || new Date().toISOString().slice(0, 10));
+        setDueDate(inv.due_date || "");
+        setTaxRate(String(inv.tax_rate ?? "0"));
+        setDiscount(String(inv.discount ?? "0"));
+        setNotes(inv.notes || "");
+        setPaymentTerms(inv.payment_terms || DEFAULT_PAYMENT_TERMS);
+        setRevisionsNote(inv.revisions_note || DEFAULT_REVISIONS_NOTE);
+        setWorkingHours(inv.working_hours || DEFAULT_WORKING_HOURS);
+        setDeliverySpeed((inv.delivery_speed as DeliverySpeed) || "standard");
+        setDeliveryPeriod(inv.delivery_period || "");
+        const items = (d.items ?? []) as Array<{
+          name: string;
+          description: string | null;
+          quantity: number;
+          unit_price: number;
+        }>;
+        if (items.length) {
+          setRows(
+            items.map((it) => ({
+              name: it.name ?? "",
+              description: it.description ?? "",
+              quantity: String(it.quantity ?? 1),
+              unit_price: String(it.unit_price ?? 0),
+              isNew: false,
+            })),
+          );
+        }
+        setDraftId(inv.id);
+      } catch (e) {
+        console.error("Failed to hydrate draft", e);
+      } finally {
+        if (!cancelled) setHydrating(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [editDraftId]);
+
+  // Recovery from LocalStorage — only when we're NOT hydrating a specific draft.
+  useEffect(() => {
+    if (editDraftId) return;
     const saved = localStorage.getItem("pending_invoice");
     if (saved) {
       try {
@@ -131,10 +269,11 @@ export default function NewInvoicePage() {
         if (d.draftId) setDraftId(d.draftId);
       } catch (e) { console.error("Failed to restore draft", e); }
     }
-  }, []);
+  }, [editDraftId]);
 
   // Auto-save Persistence
   useEffect(() => {
+    if (hydrating) return;
     const state = {
       scope, projectId, milestoneId, periodMonth, client, currency,
       issueDate, dueDate, taxRate, discount, notes, rows,
@@ -179,6 +318,7 @@ export default function NewInvoicePage() {
 
     return () => clearTimeout(timeout);
   }, [
+    hydrating,
     scope, projectId, milestoneId, periodMonth, client, currency,
     issueDate, dueDate, taxRate, discount, notes, rows,
     paymentTerms, revisionsNote, workingHours, deliverySpeed, deliveryPeriod,
@@ -187,11 +327,12 @@ export default function NewInvoicePage() {
 
   // Auto-fill from milestone
   useEffect(() => {
+    if (hydrating) return;
     if (scope === "milestone" && milestoneId) {
       const m = milestones.find((x) => x.id === milestoneId);
       if (m) setRows([{ name: m.description, description: "", quantity: "1", unit_price: String(m.budget), isNew: false }]);
     }
-  }, [milestoneId, scope, milestones]);
+  }, [hydrating, milestoneId, scope, milestones]);
 
   const updateRow = (i: number, patch: Partial<Row>) => setRows((rs) => rs.map((r, idx) => idx === i ? { ...r, ...patch } : r));
   const addRow = () => setRows((rs) => [...rs, { name: "", description: "", quantity: "1", unit_price: "0", isNew: true }]);
@@ -211,11 +352,23 @@ export default function NewInvoicePage() {
   const total = subtotal - Number(discount || 0) + taxAmt;
 
   const save = async () => {
-    if (!client.name || rows.length === 0) { appAlert("Client name and at least one item required"); return; }
+    const cleanItems = rows
+      .filter((r) => r.name.trim())
+      .map((r) => ({
+        name: r.name.trim(),
+        description: r.description,
+        quantity: Number(r.quantity) || 0,
+        unit_price: Number(r.unit_price) || 0,
+        isNew: r.isNew,
+      }));
+
+    if (!client.name.trim()) { appAlert("Client name is required."); return; }
+    if (cleanItems.length === 0) { appAlert("Add at least one item with a name."); return; }
+
     setSaving(true);
     const payload = {
       project_id: projectId || null, milestone_id: milestoneId || null,
-      client_name: client.name, client_email: client.email, client_address: client.address,
+      client_name: client.name.trim(), client_email: client.email, client_address: client.address,
       currency, tax_rate: Number(taxRate), discount: Number(discount),
       scope, period_month: scope === "monthly" ? periodMonth : null,
       issue_date: issueDate, due_date: dueDate || null, notes,
@@ -225,26 +378,55 @@ export default function NewInvoicePage() {
       delivery_speed: deliverySpeed,
       delivery_period: deliveryPeriod.trim() || null,
       status: "sent", // finalize as sent
-      items: rows.map((r) => ({
-        name: r.name, description: r.description, quantity: Number(r.quantity), unit_price: Number(r.unit_price), isNew: r.isNew,
-      })),
+      items: cleanItems,
     };
 
     const url = draftId ? `/api/admin/finance/invoices/${draftId}` : "/api/admin/finance/invoices";
     const method = draftId ? "PATCH" : "POST";
 
-    const r = await fetch(url, {
-      method, headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    });
-    setSaving(false);
-    if (r.ok) {
+    try {
+      const r = await fetch(url, {
+        method, headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      setSaving(false);
+
+      if (!r.ok) {
+        let message = `Create failed (${r.status})`;
+        try {
+          const d = await r.json();
+          if (d?.error) message = d.error;
+        } catch {}
+        // If we were PATCHing a stale draft that no longer exists, retry as fresh POST.
+        if (r.status === 404 && draftId) {
+          setDraftId(null);
+          const retry = await fetch("/api/admin/finance/invoices", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+          });
+          if (retry.ok) {
+            const d = await retry.json();
+            localStorage.removeItem("pending_invoice");
+            router.push(`/admin/finance/invoices/${d.invoice.id}`);
+            return;
+          }
+        }
+        appAlert(message);
+        return;
+      }
+
       const d = await r.json();
       localStorage.removeItem("pending_invoice");
-      router.push(`/admin/finance/invoices/${d.invoice.id || draftId}`);
-    } else {
-      const d = await r.json();
-      appAlert(d.error || "Failed");
+      const targetId = d?.invoice?.id || draftId;
+      if (!targetId) {
+        appAlert("Invoice created but no id was returned.");
+        return;
+      }
+      router.push(`/admin/finance/invoices/${targetId}`);
+    } catch (e) {
+      setSaving(false);
+      appAlert(e instanceof Error ? e.message : "Network error");
     }
   };
 
@@ -305,7 +487,59 @@ export default function NewInvoicePage() {
           <div className={`${glassCard} p-6`}>
             <h3 className="font-semibold text-gray-900 mb-4">Bill To</h3>
             <div className="space-y-4">
-              <Field label="Client Name"><Input className="h-11 rounded-xl" value={client.name} onChange={(e) => setClient({ ...client, name: e.target.value })} /></Field>
+              <Field label="Client Name">
+                <div className="relative">
+                  <Input
+                    className="h-11 rounded-xl"
+                    placeholder="Type to search existing clients, or enter a new name"
+                    value={client.name}
+                    onChange={(e) => {
+                      setClient({ ...client, name: e.target.value });
+                      setClientQuery(e.target.value);
+                      setClientMenuOpen(true);
+                    }}
+                    onFocus={() => setClientMenuOpen(true)}
+                    onBlur={() => setTimeout(() => setClientMenuOpen(false), 150)}
+                    autoComplete="off"
+                  />
+                  {clientMenuOpen && (clientMatches.length > 0 || clientQuery.trim().length > 0) && (
+                    <div className="absolute left-0 right-0 top-full mt-1 z-40 rounded-xl border border-gray-200 bg-white shadow-xl overflow-hidden">
+                      {clientMatches.map((c) => (
+                        <button
+                          key={c.id}
+                          type="button"
+                          onMouseDown={(e) => { e.preventDefault(); applyClient(c); }}
+                          className="w-full text-left px-3 py-2 hover:bg-gray-50 transition"
+                        >
+                          <div className="text-[13.5px] font-semibold text-[#0D1B39] truncate">
+                            {c.name}
+                            {c.brand_name && c.brand_name !== c.name ? (
+                              <span className="text-[11.5px] font-normal text-gray-400"> · {c.brand_name}</span>
+                            ) : null}
+                          </div>
+                          <div className="text-[11.5px] text-gray-400 truncate">
+                            {[c.email, c.phone].filter(Boolean).join("  •  ") || (c.industry ?? "—")}
+                          </div>
+                        </button>
+                      ))}
+                      {clientQuery.trim().length > 0 &&
+                        !clientMatches.some((c) => c.name.toLowerCase() === clientQuery.trim().toLowerCase()) && (
+                        <button
+                          type="button"
+                          disabled={creatingClient}
+                          onMouseDown={(e) => { e.preventDefault(); createNewClient(); }}
+                          className="w-full flex items-center gap-2 px-3 py-2.5 text-left border-t border-gray-100 bg-blue-50/40 hover:bg-blue-50 transition disabled:opacity-60"
+                        >
+                          <Plus className="w-3.5 h-3.5 text-[#0A4FE8]" />
+                          <span className="text-[13px] text-[#0D1B39] font-medium truncate">
+                            {creatingClient ? "Saving…" : `Add “${clientQuery.trim()}” as a new client`}
+                          </span>
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </Field>
               <div className="grid grid-cols-2 gap-4">
                 <Field label="Email"><Input className="h-11 rounded-xl" value={client.email} onChange={(e) => setClient({ ...client, email: e.target.value })} /></Field>
                 <Field label="Address"><Input className="h-11 rounded-xl" value={client.address} onChange={(e) => setClient({ ...client, address: e.target.value })} /></Field>
@@ -322,8 +556,9 @@ export default function NewInvoicePage() {
             <div className="space-y-3">
               {rows.map((r, i) => (
                 <div key={i} className="rounded-xl bg-white/60 border border-white/80 p-3">
-                  <div className="grid grid-cols-12 gap-2 items-start">
-                    <div className="col-span-12 md:col-span-5">
+                  <div className="flex flex-col md:flex-row md:items-start gap-2">
+                    {/* Name + description */}
+                    <div className="flex-1 min-w-0 md:basis-[40%]">
                       <input
                         list={`pl-${i}`}
                         value={r.name}
@@ -350,11 +585,32 @@ export default function NewInvoicePage() {
                         </div>
                       </div>
                     </div>
-                    <div className="col-span-3 md:col-span-2"><input type="number" value={r.quantity} onChange={(e) => updateRow(i, { quantity: e.target.value })} className="w-full h-10 px-3 rounded-lg border border-gray-200 text-sm bg-white" placeholder="Qty" /></div>
-                    <div className="col-span-5 md:col-span-3"><input type="number" value={r.unit_price} onChange={(e) => updateRow(i, { unit_price: e.target.value })} className="w-full h-10 px-3 rounded-lg border border-gray-200 text-sm bg-white" placeholder="Unit price" /></div>
-                    <div className="col-span-3 md:col-span-1 text-right text-sm font-semibold pt-2.5">{formatMoney(Number(r.quantity || 0) * Number(r.unit_price || 0), currency)}</div>
-                    <div className="col-span-1 text-right">
-                      <button onClick={() => removeRow(i)} className="w-9 h-9 rounded-lg hover:bg-red-50 grid place-items-center text-gray-400 hover:text-red-600"><Trash2 className="w-4 h-4" /></button>
+                    {/* Qty / unit / amount / delete — wraps on mobile, stays tight on desktop */}
+                    <div className="flex items-start gap-2 md:flex-none md:w-auto">
+                      <input
+                        type="number"
+                        value={r.quantity}
+                        onChange={(e) => updateRow(i, { quantity: e.target.value })}
+                        className="w-16 md:w-20 h-10 px-3 rounded-lg border border-gray-200 text-sm bg-white shrink-0"
+                        placeholder="Qty"
+                      />
+                      <input
+                        type="number"
+                        value={r.unit_price}
+                        onChange={(e) => updateRow(i, { unit_price: e.target.value })}
+                        className="w-24 md:w-28 h-10 px-3 rounded-lg border border-gray-200 text-sm bg-white shrink-0"
+                        placeholder="Unit price"
+                      />
+                      <div className="min-w-[110px] md:min-w-[130px] text-right text-sm font-semibold pt-2.5 whitespace-nowrap shrink-0 tabular-nums">
+                        {formatMoney(Number(r.quantity || 0) * Number(r.unit_price || 0), currency)}
+                      </div>
+                      <button
+                        onClick={() => removeRow(i)}
+                        aria-label="Remove item"
+                        className="shrink-0 w-9 h-9 rounded-lg hover:bg-red-50 grid place-items-center text-gray-400 hover:text-red-600"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
                     </div>
                   </div>
                 </div>

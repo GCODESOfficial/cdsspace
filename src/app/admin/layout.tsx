@@ -3,9 +3,10 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
-import { useIsMobile } from '@/hooks/use-mobile';
+import Image from 'next/image';
 import AdminSidebar from '@/components/admin/AdminSidebar';
 import { getPermissionForRoute, hasPermission } from '@/lib/admin-permissions';
+import { Menu } from 'lucide-react';
 
 interface SessionData {
   authenticated: boolean;
@@ -14,21 +15,16 @@ interface SessionData {
 }
 
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
-  const isMobile = useIsMobile();
   const router = useRouter();
   const pathname = usePathname();
   const [isChecking, setIsChecking] = useState(true);
   const [isAuthed, setIsAuthed] = useState(false);
   const [denied, setDenied] = useState(false);
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
 
   const isLoginPage = pathname === '/admin/login';
 
   useEffect(() => {
-    if (isMobile) {
-      router.replace('/mobile-blocked');
-      return;
-    }
-
     if (isLoginPage) {
       setIsChecking(false);
       setIsAuthed(true);
@@ -52,9 +48,16 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
 
         // Sub-admin route check
         const requiredPerm = getPermissionForRoute(pathname || "");
-        // Sub-admins page is super-admin only
+        // Sub-admins page is super-admin only. `team_members.promote`
+        // (granted via a role) also unlocks role management for delegated
+        // admins who need to create new team members.
         if (pathname === "/admin/sub-admins") {
-          setDenied(true);
+          setDenied(
+            !(
+              data.permissions.includes("all") ||
+              data.permissions.includes("team_members.promote")
+            ),
+          );
           return;
         }
         if (requiredPerm && !hasPermission(data.permissions, requiredPerm)) {
@@ -69,19 +72,32 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
       .finally(() => {
         setIsChecking(false);
       });
-  }, [isMobile, pathname, router, isLoginPage]);
+  }, [pathname, router, isLoginPage]);
 
-  if (isMobile) return null;
   if (isChecking) return null;
   if (!isAuthed) return null;
   if (isLoginPage) return <>{children}</>;
 
   return (
     <div className="min-h-screen bg-[#F0F5FF]">
-      <AdminSidebar />
-      <main className="ml-[230px] min-h-screen">
-        {denied ? (
-          <div className="flex items-center justify-center min-h-screen">
+      <AdminSidebar mobileOpen={isSidebarOpen} onMobileClose={() => setIsSidebarOpen(false)} />
+      <div className="min-h-screen lg:pl-[230px]">
+        <header className="sticky top-0 z-30 flex items-center justify-between border-b border-white/60 bg-[#F0F5FF]/95 px-4 py-3 backdrop-blur-lg lg:hidden">
+          <button
+            type="button"
+            onClick={() => setIsSidebarOpen(true)}
+            className="flex h-10 w-10 items-center justify-center rounded-full bg-white text-[#0D1B39] shadow-sm transition hover:bg-blue-50"
+            aria-label="Open navigation"
+          >
+            <Menu className="h-5 w-5" />
+          </button>
+          <Image src="/images/cds-logo.svg" alt="CDS Space" width={92} height={32} className="brightness-0" />
+          <div className="w-10" aria-hidden="true" />
+        </header>
+
+        <main className="min-h-[calc(100dvh-64px)]">
+          {denied ? (
+            <div className="flex items-center justify-center min-h-[calc(100dvh-64px)] px-4">
             <div className="text-center">
               <div className="w-16 h-16 rounded-2xl bg-red-50 flex items-center justify-center mx-auto mb-4">
                 <svg className="w-8 h-8 text-red-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -97,9 +113,10 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
                 Go to Dashboard
               </button>
             </div>
-          </div>
-        ) : children}
-      </main>
+            </div>
+          ) : children}
+        </main>
+      </div>
     </div>
   );
 }

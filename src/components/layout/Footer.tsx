@@ -81,7 +81,7 @@ export const Footer = () => {
     ];
 
     return (
-        <footer className="w-full bg-brand-bg relative pt-16 md:pt-0 pb-0 overflow-hidden px-6" id="footer">
+        <footer className="w-full bg-brand-bg relative pt-12 md:pt-0 pb-0 overflow-hidden px-4 sm:px-6" id="footer">
             <div className="w-full flex flex-col">
 
                 {/* 1. "Let's Build Your Brand" Upper Section - Node 5909:29862 */}
@@ -89,7 +89,7 @@ export const Footer = () => {
                     initial={{ opacity: 0, y: 20 }}
                     whileInView={{ opacity: 1, y: 0 }}
                     viewport={{ once: true }}
-                    className="relative w-full overflow-hidden rounded-t-[24px] bg-[#040B37] min-h-[420px] md:min-h-[640px] flex flex-col items-center justify-center text-center py-12 px-6 md:p-8 lg:p-12 border-b border-white/5"
+                    className="relative w-full overflow-hidden rounded-t-[24px] bg-[#040B37] min-h-[360px] sm:min-h-[420px] md:min-h-[640px] flex flex-col items-center justify-center text-center py-12 px-5 sm:px-6 md:p-8 lg:p-12 border-b border-white/5"
                 >
                     {/* Background Glow */}
                     <div
@@ -110,15 +110,15 @@ export const Footer = () => {
                         />
                     </div>
 
-                    <div className="relative z-20 flex flex-col items-center gap-8 md:gap-10">
-                        <h2 className="text-4xl md:text-5xl lg:text-[64px] font-semibold text-white leading-[1.1] tracking-[-1.28px] max-w-3xl">
+                    <div className="relative z-20 flex flex-col items-center gap-6 sm:gap-8 md:gap-10">
+                        <h2 className="text-[2rem] sm:text-4xl md:text-5xl lg:text-[64px] font-semibold text-white leading-[1.08] tracking-[-1px] max-w-3xl">
                             Let’s Build Your Brand
                         </h2>
 
                         <div className="relative group">
                             {/* Animated Cursor */}
                             <motion.div
-                                className="absolute z-30 pointer-events-none select-none"
+                                className="absolute z-30 pointer-events-none select-none hidden md:block"
                                 animate={{
                                     x: [100, 140, 100, 60, 100],
                                     y: [-20, 40, 100, 40, -20],
@@ -144,26 +144,27 @@ export const Footer = () => {
                                 </div>
                             </motion.div>
 
-                            <motion.button
-                                whileHover={{ scale: 1.02 }}
-                                whileTap={{ scale: 0.98 }}
-                                className="group relative p-px rounded-full border border-[#648efc]/40 flex items-center justify-center transition-all duration-300 hover:border-[#648efc]"
-                            >
-                                <div
-                                    className="px-10 py-5 md:px-[40px] md:py-[20px] rounded-full text-brand-white text-lg md:text-[20px] font-medium tracking-[-0.2px] transition-all duration-300 shadow-[0_0_40px_rgba(5,117,255,0.3)]"
-                                    style={{
-                                        background: "linear-gradient(153.896deg, #0035C1 8.8345%, #0575FF 86.298%)"
-                                    }}
+                            <motion.div whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}>
+                                <Link
+                                    href="/consultation"
+                                    className="group relative p-px rounded-full border border-[#648efc]/40 flex items-center justify-center transition-all duration-300 hover:border-[#648efc]"
                                 >
-                                    Book a Consultation
-                                </div>
-                            </motion.button>
+                                    <div
+                                        className="px-7 py-4 sm:px-10 sm:py-5 md:px-[40px] md:py-[20px] rounded-full text-brand-white text-base sm:text-lg md:text-[20px] font-medium tracking-[-0.2px] transition-all duration-300 shadow-[0_0_40px_rgba(5,117,255,0.3)]"
+                                        style={{
+                                            background: "linear-gradient(153.896deg, #0035C1 8.8345%, #0575FF 86.298%)"
+                                        }}
+                                    >
+                                        Book a Consultation
+                                    </div>
+                                </Link>
+                            </motion.div>
                         </div>
                     </div>
                 </motion.div>
 
                 {/* 2. Main Footer Down Section */}
-                <div className="relative w-full bg-[#040B37] rounded-b-[24px] overflow-hidden pt-12 md:pt-20 lg:pt-24 px-6 md:px-12 lg:px-24 xl:px-32 pb-12 min-h-[457px]">
+                <div className="relative w-full bg-[#040B37] rounded-b-[24px] overflow-hidden pt-10 sm:pt-12 md:pt-20 lg:pt-24 px-4 sm:px-6 md:px-12 lg:px-24 xl:px-32 pb-12 min-h-[457px]">
 
                     {/* Background SVG Decorations */}
                     <div className="absolute bottom-0 left-0 w-[400px] md:w-[659px] h-[320px] md:h-[530px] pointer-events-none opacity-20 md:opacity-30 select-none mix-blend-color-dodge">
@@ -186,7 +187,7 @@ export const Footer = () => {
                     </div>
 
                     <div className="relative z-10 flex flex-col h-full">
-                        <div className="grid grid-cols-1 lg:grid-cols-[1.5fr_1px_3fr] gap-12 mb-16 md:mb-24 grow">
+                        <div className="grid grid-cols-1 lg:grid-cols-[1.5fr_1px_3fr] gap-10 sm:gap-12 mb-14 md:mb-24 grow">
                             {/* Company Branding */}
                             <div className="flex flex-col gap-6 w-full">
                                 <Link href="/" className="inline-block w-fit">
@@ -207,27 +208,27 @@ export const Footer = () => {
                             <div className="hidden lg:block w-px h-[360px] bg-white opacity-10 self-center" />
 
                             {/* Links columns */}
-                            <div className="grid grid-cols-2 md:grid-cols-4 gap-x-4 lg:gap-x-8 xl:gap-x-12 gap-y-10">
+                            <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-x-4 lg:gap-x-8 xl:gap-x-12 gap-y-8 sm:gap-y-10">
                                 {footerNavigation.map((section) => (
                                     <div key={section.title} className="flex flex-col gap-4 col-span-1">
                                         <h3 className="text-white text-lg font-semibold tracking-[-0.18px] mb-2 py-[10.5px]">{section.title}</h3>
                                         <ul className={`flex flex-col ${section.title === 'Offices' ? 'gap-4' : 'gap-1'}`}>
                                             {section.links.map((link, idx) => (
-                                                <li key={idx} className="whitespace-nowrap">
+                                                <li key={idx} className="min-w-0">
                                                     {link.isStatic ? (
                                                         link.hasMap ? (
                                                             <button
                                                                 type="button"
                                                                 onClick={() => setMapOpen(true)}
-                                                                className="group py-[4px] text-left"
+                                                                className="group py-[4px] text-left w-full"
                                                             >
-                                                                <span className="text-brand-mute group-hover:text-white transition-colors text-base font-medium tracking-[-0.16px] underline-offset-4 group-hover:underline">
+                                                                <span className="text-brand-mute group-hover:text-white transition-colors text-base font-medium tracking-[-0.16px] underline-offset-4 group-hover:underline break-words">
                                                                     {link.label}
                                                                 </span>
                                                             </button>
                                                         ) : (
-                                                            <div className="flex items-center gap-2 py-[4px]">
-                                                                <p className="text-brand-mute text-base font-medium tracking-[-0.16px]">
+                                                            <div className="flex flex-wrap items-center gap-2 py-[4px]">
+                                                                <p className="text-brand-mute text-base font-medium tracking-[-0.16px] break-words">
                                                                     {link.label}
                                                                 </p>
                                                                 {link.badge && (
@@ -244,7 +245,7 @@ export const Footer = () => {
                                                             href={link.href || "#"}
                                                             target={link.href?.startsWith('http') ? "_blank" : undefined}
                                                             rel={link.href?.startsWith('http') ? "noopener noreferrer" : undefined}
-                                                            className="inline-block py-[10.5px] text-brand-mute hover:text-white transition-colors text-base font-medium tracking-[-0.16px]"
+                                                            className="inline-block py-[10.5px] text-brand-mute hover:text-white transition-colors text-base font-medium tracking-[-0.16px] break-words"
                                                         >
                                                             {link.label}
                                                         </Link>
@@ -258,11 +259,11 @@ export const Footer = () => {
                         </div>
 
                         {/* Bottom Copyright Section */}
-                        <div className="pt-10 border-t border-white/5 flex flex-col md:flex-row justify-between items-center gap-8 md:gap-4 mt-auto">
+                        <div className="pt-10 border-t border-white/5 flex flex-col md:flex-row justify-between items-center gap-6 md:gap-4 mt-auto">
                             <p className="text-[#8E8E8E] text-[14px] font-medium tracking-[-0.14px] text-center md:text-left">
                                 &copy; {year} CDS Space | Branding Agency. All rights reserved
                             </p>
-                            <div className="flex items-center gap-8 md:gap-12">
+                            <div className="flex flex-wrap items-center justify-center gap-5 sm:gap-8 md:gap-12">
                                 <Link href="/privacy" className="text-brand-mute hover:text-white text-[14px] font-medium tracking-[-0.14px] transition-colors">Privacy Policy</Link>
                                 <Link href="/terms" className="text-brand-mute hover:text-white text-[14px] font-medium tracking-[-0.14px] transition-colors">Terms of Service</Link>
                             </div>

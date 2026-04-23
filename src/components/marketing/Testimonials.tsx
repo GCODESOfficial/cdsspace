@@ -22,6 +22,8 @@ const TestimonialCard = ({ testimonial }: { testimonial: Testimonial }) => (
                         src={testimonial.picture_url}
                         alt={testimonial.name}
                         fill
+                        quality={90}
+                        sizes="44px"
                         className="object-cover"
                     />
                 ) : (

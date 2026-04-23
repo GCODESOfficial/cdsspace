@@ -11,20 +11,11 @@ export const metadata: Metadata = {
     description: "Reach out for world-class branding and digital services.",
     url: "https://cdsspace.pro/contact",
     type: "website",
-    images: [
-      {
-        url: "/images/Contact.jpg",
-        width: 1200,
-        height: 630,
-        alt: "Contact CDSSpace",
-      },
-    ],
   },
   twitter: {
     card: "summary_large_image",
     title: "Contact CDSSpace",
     description: "Reach out for world-class branding and digital services.",
-    images: ["/images/Contact.jpg"],
   },
 };
 

@@ -4,12 +4,10 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import {
   Briefcase,
-  Wallet,
   MessageSquare,
   Video,
   ArrowUpRight,
   Clock,
-  TrendingUp,
 } from "lucide-react";
 import { useTranslation } from "@/lib/i18n/context";
 
@@ -17,10 +15,8 @@ interface OverviewData {
   member: { full_name: string; role_title: string | null };
   stats: {
     assigned_work: number;
-    next_payment: { amount: number; currency: string; scheduled_for: string | null } | null;
     unread_messages: number;
     upcoming_meetings: number;
-    payroll_ytd: number;
   };
   recent_work: { id: number; title: string; category: string | null; cover_image: string | null }[];
   upcoming_meetings: { id: string; title: string; scheduled_for: string | null; room_code: string }[];
@@ -78,20 +74,6 @@ export default function TeamOverviewPage() {
           value={String(stats.assigned_work)}
           accent="bg-blue-50 text-brand-blue"
           href="/team/work"
-        />
-        <StatCard
-          icon={Wallet}
-          label={t("overview.nextPayment")}
-          value={
-            stats.next_payment
-              ? `${currencySymbol(stats.next_payment.currency)}${formatNum(
-                  stats.next_payment.amount
-                )}`
-              : "—"
-          }
-          subtext={stats.next_payment?.scheduled_for ? formatDate(stats.next_payment.scheduled_for) : "No scheduled payment"}
-          accent="bg-emerald-50 text-emerald-600"
-          href="/team/payroll"
         />
         <StatCard
           icon={MessageSquare}
@@ -186,26 +168,6 @@ export default function TeamOverviewPage() {
         </div>
       </div>
 
-      {/* Payroll YTD */}
-      <div className="bg-white rounded-2xl border border-brand-stroke/30 p-6 flex items-center gap-4">
-        <div className="w-12 h-12 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center">
-          <TrendingUp className="w-5 h-5" />
-        </div>
-        <div className="flex-1">
-          <p className="text-[11px] uppercase tracking-[0.15em] font-semibold text-brand-body/50">
-            Paid to you this year
-          </p>
-          <p className="text-[20px] font-bold text-brand-navy tracking-tight">
-            ₦{formatNum(stats.payroll_ytd)}
-          </p>
-        </div>
-        <Link
-          href="/team/payroll"
-          className="px-4 py-2 rounded-xl bg-brand-navy text-white text-[12px] font-semibold hover:bg-brand-navy/90 transition"
-        >
-          View payroll
-        </Link>
-      </div>
     </div>
   );
 }
@@ -256,16 +218,6 @@ function OverviewSkeleton() {
   );
 }
 
-function currencySymbol(c: string) {
-  if (c === "NGN") return "₦";
-  if (c === "USD") return "$";
-  if (c === "EUR") return "€";
-  if (c === "GBP") return "£";
-  return c + " ";
-}
-function formatNum(n: number) {
-  return n.toLocaleString(undefined, { maximumFractionDigits: 2 });
-}
 function formatDate(s: string) {
   const d = new Date(s);
   return d.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });

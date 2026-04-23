@@ -100,6 +100,8 @@ export const HelpingBrands = () => {
                                             src={asset.src}
                                             alt={`${service.title} asset ${aIdx}`}
                                             fill
+                                            quality={90}
+                                            sizes="(max-width: 640px) 50vw, (max-width: 1024px) 33vw, 260px"
                                             className="object-cover"
                                         />
                                     </motion.div>

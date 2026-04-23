@@ -36,5 +36,11 @@ export async function PUT(req: Request) {
   const db = supabaseAdmin as any;
   const { data, error } = await db.from("team_resumes").update(patch).eq("team_member_id", actor.id).select("*").single();
   if (error) return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
+  
+  // Also sync avatar_url to the main team_members table if it changed
+  if (patch.avatar_url !== undefined) {
+    await db.from("team_members").update({ avatar_url: patch.avatar_url }).eq("id", actor.id);
+  }
+
   return NextResponse.json({ ok: true, resume: data });
 }

@@ -10,7 +10,6 @@ export const metadata: Metadata = {
         description: "High-quality custom merchandise and branded products for businesses. T-shirts, banners, packaging, and more.",
         url: "https://cdsspace.pro/merch",
         type: "website",
-        images: [{ url: "/navbar/CDS Logo.svg", width: 1200, height: 630, alt: "CDS Space Custom Merch" }],
     },
 };
 

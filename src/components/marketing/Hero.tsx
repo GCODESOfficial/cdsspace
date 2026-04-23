@@ -27,24 +27,24 @@ export const Hero = () => {
     const accountHref = isLoggedIn ? "/dashboard" : "/login";
 
     return (
-        <section className="relative w-full pt-[140px] md:pt-[174px] pb-[140px] md:pb-[174px] overflow-hidden bg-brand-bg">
+        <section className="relative w-full pt-[116px] sm:pt-[132px] md:pt-[174px] pb-[88px] sm:pb-[120px] md:pb-[174px] overflow-hidden bg-brand-bg">
             {/* Background Decorative Elements - Exact Positioning from Figma Layers */}
             <div
-                className="absolute left-[-106px] top-[109px] w-[190px] h-[190px] bg-brand-blue/10 rounded-full blur-[80px] pointer-events-none"
+                className="absolute left-[-72px] top-[88px] w-[140px] h-[140px] sm:left-[-106px] sm:top-[109px] sm:w-[190px] sm:h-[190px] bg-brand-blue/10 rounded-full blur-[80px] pointer-events-none"
                 aria-hidden="true"
             />
             <div
-                className="absolute left-[329px] top-[328px] w-[118px] h-[118px] bg-brand-blue/5 rounded-full blur-[60px] pointer-events-none"
+                className="absolute hidden sm:block left-[329px] top-[328px] w-[118px] h-[118px] bg-brand-blue/5 rounded-full blur-[60px] pointer-events-none"
                 aria-hidden="true"
             />
 
-            <div className="w-full max-w-[1440px] mx-auto px-6 md:px-10 flex flex-col items-center">
+            <div className="w-full max-w-[1440px] mx-auto px-4 sm:px-5 md:px-10 flex flex-col items-center">
                 {/* Main Content Container - Centered fluidly */}
                 <div className="w-full max-w-[1200px] flex flex-col items-center">
 
                     {/* 1. Status Badge - Node 5379:854 (y=104px) */}
                     <div
-                        className="flex items-center gap-2 px-3 py-2 bg-[#e6ebf7] border border-white rounded-[8px] animate-reveal opacity-0"
+                        className="flex flex-wrap items-center justify-center gap-2 px-3 py-2 bg-[#e6ebf7] border border-white rounded-[8px] animate-reveal opacity-0"
                         style={{ animationDelay: '0.1s' }}
                         data-node-id="5379:854"
                     >
@@ -62,7 +62,7 @@ export const Hero = () => {
 
                     {/* 2. Main Headline - Node 5371:839 (y=171px, gap=32px) */}
                     <h1
-                        className="mt-6 md:mt-8 text-[32px] sm:text-[40px] md:text-[48px] lg:text-[56px] font-semibold text-[#040B37] text-center leading-[1.2] md:leading-[1.24] tracking-[-0.8px] md:tracking-[-1.12px] max-w-[784px] animate-reveal opacity-0"
+                        className="mt-6 md:mt-8 text-[29px] sm:text-[40px] md:text-[48px] lg:text-[56px] font-semibold text-[#040B37] text-center leading-[1.15] md:leading-[1.24] tracking-[-0.8px] md:tracking-[-1.12px] max-w-[784px] animate-reveal opacity-0 text-balance"
                         style={{ animationDelay: '0.2s' }}
                         data-node-id="5371:839"
                     >
@@ -71,7 +71,7 @@ export const Hero = () => {
 
                     {/* 3. Sub-headline - Node 5367:837 (y=341px, gap=32px) */}
                     <p
-                        className="mt-6 md:mt-8 text-[15px] sm:text-[18px] lg:text-[20px] font-medium text-[#4B5563] text-center leading-[1.4] tracking-[-0.2px] max-w-[580px] animate-reveal opacity-0 px-2"
+                        className="mt-5 md:mt-8 text-[15px] sm:text-[18px] lg:text-[20px] font-medium text-[#4B5563] text-center leading-[1.5] tracking-[-0.2px] max-w-[580px] animate-reveal opacity-0 px-1 sm:px-2 text-pretty"
                         style={{ animationDelay: '0.3s' }}
                         data-node-id="5367:837"
                     >
@@ -80,7 +80,7 @@ export const Hero = () => {
 
                     {/* 4. CTA Button Group - Node 5808:4936 (y=421px, gap=32px) */}
                     <div
-                        className="mt-8 p-[2px] bg-[#F4F6FB] border border-[#648EFC] rounded-[100px] animate-reveal opacity-0 w-full sm:w-auto flex justify-center"
+                        className="mt-8 p-[2px] bg-[#F4F6FB] border border-[#648EFC] rounded-[100px] animate-reveal opacity-0 w-full max-w-[340px] sm:w-auto sm:max-w-none flex justify-center"
                         style={{ animationDelay: '0.4s' }}
                         data-node-id="5808:4936"
                     >
@@ -96,7 +96,7 @@ export const Hero = () => {
 
                 {/* 5. Video Section - Cinematic Reel Overlay Implementation */}
                 <div
-                    className="mt-16 md:mt-[104px] w-full max-w-[1408px] aspect-[1408/981] rounded-[16px] md:rounded-[24px] bg-[#040B37] relative overflow-hidden animate-reveal opacity-0 shadow-[0_12px_24px_rgba(4,11,55,0.1),0_32px_64px_rgba(4,11,55,0.15)] group cursor-pointer"
+                    className="mt-14 sm:mt-16 md:mt-[104px] w-full max-w-[1408px] aspect-[370/290] sm:aspect-[1408/981] rounded-[16px] md:rounded-[24px] bg-[#040B37] relative overflow-hidden animate-reveal opacity-0 shadow-[0_12px_24px_rgba(4,11,55,0.1),0_32px_64px_rgba(4,11,55,0.15)] group cursor-pointer"
                     style={{ animationDelay: '0.5s' }}
                     data-node-id="5272:37295"
                     onClick={() => {
@@ -133,9 +133,9 @@ export const Hero = () => {
                             {/* Watch Reel Circle - Exactly from Figma 10/10 Fidelity */}
                             <motion.div
                                 whileHover={{ scale: 1.1 }}
-                                className="w-[120px] h-[120px] md:w-[160px] md:h-[160px] bg-black rounded-full flex items-center justify-center shadow-2xl z-20"
+                                className="w-[92px] h-[92px] sm:w-[120px] sm:h-[120px] md:w-[160px] md:h-[160px] bg-black rounded-full flex items-center justify-center shadow-2xl z-20"
                             >
-                                <span className="text-white text-center font-semibold text-[14px] md:text-[18px] leading-tight flex flex-col">
+                                <span className="text-white text-center font-semibold text-[11px] sm:text-[14px] md:text-[18px] leading-tight flex flex-col">
                                     <span>WATCH</span>
                                     <span>REEL</span>
                                 </span>
@@ -162,4 +162,3 @@ export const Hero = () => {
         </section>
     );
 };
-

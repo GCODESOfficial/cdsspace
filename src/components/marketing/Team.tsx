@@ -127,7 +127,7 @@ const TeamCard = ({ member, index }: { member: TeamMember, index: number }) => {
                     {/* Background Gradient - Node 5992:1525 style */}
                     <div className="absolute inset-0 bg-gradient-to-t from-[#5BA8FF] via-white/20 to-white z-0" />
 
-                    <div className="absolute inset-0 z-10 p-4 flex items-center justify-center">
+                    <div className="absolute inset-0 z-10 flex items-end justify-center">
                         {member.image === "placeholder-female" ? (
                             <div className="w-full h-full flex items-center justify-center bg-[#F4F6FB] rounded-full">
                                 <svg width="120" height="120" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" className="text-[#C8D1E0]">
@@ -138,12 +138,18 @@ const TeamCard = ({ member, index }: { member: TeamMember, index: number }) => {
                                 </svg>
                             </div>
                         ) : (
+                            // object-contain + bottom anchor so the subject's head stays fully
+                            // inside the card on narrow mobile widths (was object-cover object-top
+                            // which cropped the forehead on portrait sources). High quality +
+                            // explicit sizes keep the face crisp on retina mobile.
                             <Image
                                 src={member.image}
                                 alt={member.name}
                                 fill
                                 priority={index < 3}
-                                className="object-cover object-top transition-transform duration-700 group-hover:scale-105"
+                                quality={95}
+                                sizes="(max-width: 768px) 90vw, (max-width: 1024px) 45vw, 320px"
+                                className="object-contain object-bottom transition-transform duration-700 group-hover:scale-105"
                             />
                         )}
                     </div>

@@ -10,6 +10,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Plus, Trash2, Edit2, Wallet, TrendingUp, Clock } from "lucide-react";
 import { Currency, formatMoney, FinanceProject, FinanceMilestone } from "@/lib/finance/types";
 import FinanceShell, { glassCard } from "@/components/finance/FinanceShell";
+import { ProjectCollaborationPanel } from "@/components/finance/ProjectCollaborationPanel";
 import { appAlert, appConfirm, appPrompt } from "@/lib/app-notify";
 
 const STATUS_PILL: Record<string, string> = {
@@ -227,6 +228,11 @@ export default function ProjectDetail({ params }: { params: Promise<{ id: string
           })}
         </div>
       )}
+
+      {/* Collaboration: team assignments, docs, chat, meetings */}
+      <div className="mt-10">
+        <ProjectCollaborationPanel projectId={id} />
+      </div>
     </FinanceShell>
   );
 }

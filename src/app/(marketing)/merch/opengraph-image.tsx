@@ -1,5 +1,6 @@
 import { ImageResponse } from "next/og";
 import { renderBrandCard, OG_SIZE, OG_CONTENT_TYPE } from "@/lib/og/brand-card";
+import { getOgFonts } from "@/lib/og/fonts";
 
 export const runtime = "nodejs";
 export const alt = "CDS Space Merch";
@@ -7,8 +8,9 @@ export const size = OG_SIZE;
 export const contentType = OG_CONTENT_TYPE;
 
 export default async function Image() {
+  const fonts = getOgFonts();
   return new ImageResponse(
-    renderBrandCard({
+    await renderBrandCard({
       eyebrow: "Merch",
       title: "Wear the Movement",
       description:
@@ -16,6 +18,6 @@ export default async function Image() {
       tags: ["Apparel", "Print", "Drops"],
       domainPath: "/merch",
     }),
-    { ...size },
+    { ...size, fonts },
   );
 }

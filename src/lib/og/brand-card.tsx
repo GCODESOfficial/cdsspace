@@ -1,523 +1,461 @@
 /**
- * Shared "starlight" OG card used by every opengraph-image.tsx route segment
- * under this app. Renders a 1200×630 PNG via Next.js's ImageResponse (Satori).
+ * Shared OG card used by every `opengraph-image.tsx` in this app.
  *
- * Visual language matches the homepage starlight section:
- *   - Deep navy → indigo gradient background
- *   - Soft radial blue glow top-right (the "star")
- *   - Scattered highlight dots (stars)
- *   - CDS Space wordmark top-left
- *   - Page title + description + tag chips
- *   - URL / domain bottom-left
+ * Template (matches the sample screenshot + brand system):
+ *   - /public/Metadata-bg.png full-bleed background
+ *   - CDS Space wordmark top-left (full "CDS + Branding Agency" lockup,
+ *     recoloured white so it reads on the navy plate)
+ *   - Optional status / eyebrow pill top-right
+ *   - Huge bold title left-centre
+ *   - Subtitle / client line under the title
+ *   - Globe-cursor icon + "cdsspace.com" bottom-left
+ *
+ * Typography: Inter 400 / 700 / 800 via `src/lib/og/fonts.ts`. Title uses 800.
  */
 import type { ReactElement } from "react";
+import fs from "node:fs";
+import path from "node:path";
 
+// Canonical Facebook / WhatsApp / Meta OG size. Staying at 1.91:1 avoids
+// the white letterboxing WhatsApp/Meta apply when the source is 16:9.
 export const OG_SIZE = { width: 1200, height: 630 } as const;
 export const OG_CONTENT_TYPE = "image/png" as const;
 export const SITE_URL = "https://cdsspace.pro";
 
-interface BrandCardProps {
-  title: string;
-  description?: string;
-  tags?: string[];
-  eyebrow?: string;           // small uppercase label above the title
-  domainPath?: string;        // e.g. "/about" — shown bottom-left
-  accentColor?: string;       // override the default blue glow colour
-  coverImageUrl?: string;     // optional dark overlay hero image (used for /work/[id])
+/**
+ * Read /public/Metadata-bg.png as a base64 data URI.
+ *
+ * Reads are resolved at request time against the relative path from this
+ * source file rather than `process.cwd()/public/...`. Static path literals
+ * like `new URL("../../...", import.meta.url)` are picked up by Next.js's
+ * build tracer, so the PNG is reliably copied into the serverless bundle.
+ * If tracing still misses the file (older Vercel runtimes), the card
+ * falls back to the navy gradient defined in `Background`.
+ */
+/**
+ * Try each candidate path in order until one works. Next.js / Turbopack
+ * sometimes resolves `new URL("...", import.meta.url)` to a path that
+ * doesn't exist at runtime, and `process.cwd()` isn't always the project
+ * root on Vercel serverless — so we try both.
+ */
+/**
+ * Load a /public asset at module-evaluation time and cache the base64
+ * data URI. Satori inlines data URIs directly so there's no runtime fetch —
+ * which means the same rendering works at build time (static prerender)
+ * and at request time (serverless lambda) without any network dependency.
+ * We try both the ESM `import.meta.url` anchor and the traditional
+ * `process.cwd()` path to survive Turbopack / Webpack differences.
+ */
+/**
+ * Read a file from /public. IMPORTANT: use only `process.cwd()` as the
+ * anchor. An earlier version also tried `new URL(..., import.meta.url)` —
+ * Next.js's build tracer interprets that pattern as a dynamic asset
+ * reference and pulls the ENTIRE /public/ tree (videos, high-res SVGs)
+ * into every serverless function, which blows past the 300MB Vercel cap.
+ */
+function readPublicAsset(_relFromHere: string, relFromCwd: string): Buffer | null {
+    try {
+        return fs.readFileSync(path.join(process.cwd(), relFromCwd));
+    } catch {
+        return null;
+    }
 }
 
-/**
- * Purpose-built OG card for /work/[id] — cover image is the hero, CDS chrome
- * sits as a subtle pill top-left, title + tags anchor at the bottom with a
- * navy gradient wash for readability.
- */
-export function renderWorkCard({
-  title,
-  description,
-  tags = [],
-  category,
-  coverImageUrl,
-  workId,
-}: {
-  title: string;
-  description?: string;
-  tags?: string[];
-  category?: string | null;
-  coverImageUrl?: string | null;
-  workId: number | string;
-}): ReactElement {
-  return (
-    <div
-      style={{
-        width: "100%",
-        height: "100%",
-        position: "relative",
-        display: "flex",
-        flexDirection: "column",
-        background: "linear-gradient(135deg, #040b37 0%, #0a1a6b 100%)",
-        color: "#ffffff",
-        fontFamily: "Inter, system-ui, -apple-system, sans-serif",
-      }}
-    >
-      {coverImageUrl && (
+// Lazy lookups — DO NOT eagerly evaluate these at module load. Baking the
+// ~374KB base64 PNG into a top-level const caused Vercel's tracer to
+// duplicate the bytes into every transitive consumer, blowing past the
+// 300MB function-size cap. Instead each OG render calls the getter on
+// demand and caches the result in a local let for subsequent renders in
+// the same lambda instance.
+let bgDataUriCache: string | null = null;
+export function getMetadataBgDataUri(): string {
+    if (bgDataUriCache !== null) return bgDataUriCache;
+    const buf = readPublicAsset(
+        "../../../public/Metadata-bg.png",
+        "public/Metadata-bg.png",
+    );
+    bgDataUriCache = buf ? `data:image/png;base64,${buf.toString("base64")}` : "";
+    return bgDataUriCache;
+}
+
+let logoDataUriCache: string | null = null;
+export function getCdsLogoDataUri(): string {
+    if (logoDataUriCache !== null) return logoDataUriCache;
+    const buf = readPublicAsset(
+        "../../../public/navbar/CDS Logo.svg",
+        "public/navbar/CDS Logo.svg",
+    );
+    if (!buf) {
+        logoDataUriCache = "";
+        return logoDataUriCache;
+    }
+    let svg = buf.toString("utf8");
+    svg = svg.replace(/fill="#040B37"/gi, 'fill="#ffffff"');
+    svg = svg.replace(/fill="black"/gi, 'fill="#ffffff"');
+    svg = svg.replace(/stroke="#040B37"/gi, 'stroke="#ffffff"');
+    svg = svg.replace(/stroke="black"/gi, 'stroke="#ffffff"');
+    logoDataUriCache = `data:image/svg+xml;base64,${Buffer.from(svg, "utf8").toString("base64")}`;
+    return logoDataUriCache;
+}
+
+// Back-compat shims for any callsite that still imports the constants.
+export const METADATA_BG_DATA_URI = "";
+export const CDS_LOGO_DATA_URI = "";
+
+/** Simple globe-cursor SVG used in the bottom-left of every card. */
+const GLOBE_ICON =
+    "data:image/svg+xml;base64," +
+    Buffer.from(
+        `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#ffffff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="10"/>
+            <line x1="2" y1="12" x2="22" y2="12"/>
+            <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/>
+        </svg>`,
+        "utf8",
+    ).toString("base64");
+
+/* ---------- Shared building blocks ---------- */
+
+function Background({ bgDataUri, overlay }: { bgDataUri: string; overlay?: string | null }) {
+    return (
+        <>
+            {/* Fallback gradient always rendered behind so even if satori
+                can't load the PNG data URI we still land on navy, not white. */}
+            <div
+                style={{
+                    position: "absolute",
+                    top: 0,
+                    left: 0,
+                    width: OG_SIZE.width,
+                    height: OG_SIZE.height,
+                    display: "flex",
+                    background: "linear-gradient(135deg, #040b37 0%, #081149 55%, #0a1a6b 100%)",
+                }}
+            />
+            {bgDataUri ? (
+                /* Render the PNG at 2× canvas size and offset so only the
+                   bright glow quadrant (bottom-right of the source PNG) is
+                   visible. Without this the top-left of the canvas renders
+                   the dark navy portion of the source and looks empty. */
+                /* eslint-disable-next-line @next/next/no-img-element */
+                <img
+                    src={bgDataUri}
+                    alt=""
+                    width={OG_SIZE.width * 2}
+                    height={OG_SIZE.height * 2}
+                    style={{
+                        position: "absolute",
+                        top: -OG_SIZE.height,
+                        left: -OG_SIZE.width,
+                        width: OG_SIZE.width * 2,
+                        height: OG_SIZE.height * 2,
+                    }}
+                />
+            ) : null}
+            {overlay ? (
+                <div
+                    style={{
+                        position: "absolute",
+                        top: 0,
+                        left: 0,
+                        width: OG_SIZE.width,
+                        height: OG_SIZE.height,
+                        background: overlay,
+                        display: "flex",
+                    }}
+                />
+            ) : null}
+        </>
+    );
+}
+
+function LogoLockup({ logoDataUri }: { logoDataUri: string }) {
+    if (!logoDataUri) {
+        return (
+            <div
+                style={{
+                    fontSize: 42,
+                    fontWeight: 800,
+                    color: "#ffffff",
+                    letterSpacing: 2,
+                    display: "flex",
+                }}
+            >
+                CDS SPACE
+            </div>
+        );
+    }
+    return (
         // eslint-disable-next-line @next/next/no-img-element
         <img
-          src={coverImageUrl}
-          alt=""
-          style={{
-            position: "absolute",
-            inset: 0,
-            width: "100%",
-            height: "100%",
-            objectFit: "cover",
-          }}
+            src={logoDataUri}
+            alt="CDS Space — Branding Agency"
+            width={160}
+            height={72}
+            style={{ display: "block" }}
         />
-      )}
-      {/* Navy gradient from top-middle to bottom so bottom text is readable */}
-      <div
-        style={{
-          position: "absolute",
-          inset: 0,
-          background:
-            "linear-gradient(180deg, rgba(4,11,55,0.15) 0%, rgba(4,11,55,0.55) 45%, rgba(4,11,55,0.96) 100%)",
-          display: "flex",
-        }}
-      />
+    );
+}
 
-      {/* CDS chrome pill top-left */}
-      <div
-        style={{
-          position: "absolute",
-          top: 40,
-          left: 48,
-          display: "flex",
-          alignItems: "center",
-          gap: 10,
-          padding: "10px 16px 10px 12px",
-          background: "rgba(4,11,55,0.7)",
-          border: "1px solid rgba(127,181,255,0.35)",
-          borderRadius: 999,
-          backdropFilter: "blur(8px)",
-        }}
-      >
+function StatusPill({ label }: { label: string }) {
+    return (
         <div
-          style={{
-            width: 28,
-            height: 28,
-            borderRadius: 8,
-            background:
-              "linear-gradient(135deg, #5ba8ff 0%, #0a4fe8 70%, #0035c1 100%)",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            fontWeight: 800,
-            fontSize: 16,
-            color: "#ffffff",
-          }}
-        >
-          C
-        </div>
-        <div
-          style={{
-            fontSize: 16,
-            fontWeight: 700,
-            letterSpacing: 1.2,
-            display: "flex",
-          }}
-        >
-          CDS SPACE
-        </div>
-      </div>
-
-      {/* Category badge top-right */}
-      {category && (
-        <div
-          style={{
-            position: "absolute",
-            top: 40,
-            right: 48,
-            padding: "8px 14px",
-            background: "rgba(91,168,255,0.22)",
-            border: "1px solid rgba(127,181,255,0.45)",
-            borderRadius: 999,
-            color: "#dbeaff",
-            fontSize: 14,
-            fontWeight: 600,
-            letterSpacing: 2,
-            textTransform: "uppercase",
-            display: "flex",
-          }}
-        >
-          {category}
-        </div>
-      )}
-
-      {/* Bottom content block */}
-      <div style={{ flex: 1, display: "flex" }} />
-      <div
-        style={{
-          position: "relative",
-          padding: "0 64px 56px 64px",
-          display: "flex",
-          flexDirection: "column",
-          zIndex: 2,
-          maxWidth: 1080,
-        }}
-      >
-        <div
-          style={{
-            fontSize: title.length > 50 ? 58 : 72,
-            fontWeight: 800,
-            lineHeight: 1.05,
-            letterSpacing: -1.5,
-            color: "#ffffff",
-            textShadow: "0 4px 30px rgba(0,0,0,0.5)",
-            display: "flex",
-          }}
-        >
-          {title}
-        </div>
-
-        {description && (
-          <div
             style={{
-              fontSize: 22,
-              fontWeight: 400,
-              lineHeight: 1.45,
-              color: "#dbeaff",
-              marginTop: 18,
-              maxWidth: 960,
-              display: "flex",
+                padding: "12px 26px",
+                borderRadius: 999,
+                background: "#ffffff",
+                color: "#0D1B39",
+                fontSize: 22,
+                fontWeight: 700,
+                letterSpacing: 0.5,
+                display: "flex",
             }}
-          >
-            {description}
-          </div>
-        )}
-
-        <div
-          style={{
-            marginTop: 26,
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-          }}
         >
-          {tags.length > 0 ? (
-            <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
-              {tags.slice(0, 4).map((t) => (
-                <div
-                  key={t}
-                  style={{
-                    padding: "8px 16px",
-                    borderRadius: 999,
-                    background: "rgba(255,255,255,0.12)",
-                    border: "1px solid rgba(255,255,255,0.22)",
+            {label}
+        </div>
+    );
+}
+
+function FooterDomain() {
+    return (
+        <div
+            style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 12,
+                zIndex: 2,
+            }}
+        >
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={GLOBE_ICON} alt="" width={30} height={30} />
+            <div
+                style={{
+                    fontSize: 25,
+                    fontWeight: 600,
                     color: "#ffffff",
-                    fontSize: 15,
-                    fontWeight: 500,
+                    opacity: 0.92,
                     display: "flex",
-                  }}
-                >
-                  {t}
-                </div>
-              ))}
+                }}
+            >
+                cdsspace.com | cdsspace.pro
             </div>
-          ) : (
-            <div style={{ display: "flex" }} />
-          )}
-          <div
-            style={{
-              fontSize: 16,
-              color: "#a7bcff",
-              fontWeight: 500,
-              display: "flex",
-            }}
-          >
-            cdsspace.pro/work/{workId}
-          </div>
         </div>
-      </div>
-    </div>
-  );
+    );
+}
+
+/* ---------- Public renderers ---------- */
+
+interface BrandCardProps {
+    title: string;
+    description?: string;
+    tags?: string[];         // kept in the API for back-compat — not rendered
+    eyebrow?: string;        // shown as the status pill top-right
+    domainPath?: string;     // kept for back-compat; footer always shows cdsspace.com
 }
 
 /**
- * Deterministic pseudo-random — keeps star placement identical across renders
- * so the CDN can cache the resulting PNG.
+ * Marketing / dashboard pages. Title + one-line subtitle on the brand plate.
  */
-function starDots(seed: number, count: number) {
-  const dots: { x: number; y: number; r: number; o: number }[] = [];
-  let s = seed;
-  for (let i = 0; i < count; i++) {
-    s = (s * 9301 + 49297) % 233280;
-    const x = (s / 233280) * 1200;
-    s = (s * 9301 + 49297) % 233280;
-    const y = (s / 233280) * 630;
-    s = (s * 9301 + 49297) % 233280;
-    const r = 1 + (s / 233280) * 2.5;
-    s = (s * 9301 + 49297) % 233280;
-    const o = 0.25 + (s / 233280) * 0.55;
-    dots.push({ x, y, r, o });
-  }
-  return dots;
+export function renderBrandCard({
+    title,
+    description,
+    eyebrow,
+}: BrandCardProps): ReactElement {
+    const bgDataUri = getMetadataBgDataUri();
+    const logoDataUri = getCdsLogoDataUri();
+    const titleSize = title.length > 40 ? 65 : title.length > 24 ? 80 : 95;
+    return (
+        <div
+            style={{
+                width: OG_SIZE.width,
+                height: OG_SIZE.height,
+                position: "relative",
+                display: "flex",
+                flexDirection: "column",
+                justifyContent: "space-between",
+                color: "#ffffff",
+                fontFamily: "Inter, system-ui, -apple-system, sans-serif",
+                padding: "65px 72px",
+                background: "#ffffff",
+            }}
+        >
+            <Background bgDataUri={bgDataUri} />
+
+            {/* Top row: logo + optional status pill */}
+            <div
+                style={{
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    zIndex: 2,
+                }}
+            >
+                <LogoLockup logoDataUri={logoDataUri} />
+                {eyebrow ? <StatusPill label={eyebrow} /> : <div style={{ display: "flex" }} />}
+            </div>
+
+            {/* Title block — centered vertically between logo row and footer */}
+            <div
+                style={{
+                    display: "flex",
+                    flexDirection: "column",
+                    zIndex: 2,
+                    maxWidth: 1000,
+                }}
+            >
+                <div
+                    style={{
+                        fontSize: titleSize,
+                        fontWeight: 800,
+                        lineHeight: 1.05,
+                        letterSpacing: -1.5,
+                        color: "#ffffff",
+                        textShadow: "0 4px 40px rgba(4,11,55,0.45)",
+                        display: "flex",
+                    }}
+                >
+                    {title}
+                </div>
+                {description ? (
+                    <div
+                        style={{
+                            fontSize: 26,
+                            fontWeight: 500,
+                            lineHeight: 1.35,
+                            color: "#ffffff",
+                            opacity: 0.88,
+                            marginTop: 21,
+                            maxWidth: 925,
+                            display: "flex",
+                        }}
+                    >
+                        {description}
+                    </div>
+                ) : null}
+            </div>
+
+            {/* Footer */}
+            <FooterDomain />
+        </div>
+    );
 }
 
-export function renderBrandCard({
-  title,
-  description,
-  tags = [],
-  eyebrow,
-  domainPath = "/",
-  accentColor = "#3f7dff",
-  coverImageUrl,
-}: BrandCardProps): ReactElement {
-  const dots = starDots(7, 42);
-
-  return (
-    <div
-      style={{
-        width: "100%",
-        height: "100%",
-        display: "flex",
-        flexDirection: "column",
-        position: "relative",
-        background:
-          "linear-gradient(135deg, #040b37 0%, #081149 50%, #0a1a6b 100%)",
-        color: "#ffffff",
-        fontFamily: "Inter, system-ui, -apple-system, sans-serif",
-        padding: "64px 72px",
-        overflow: "hidden",
-      }}
-    >
-      {/* Radial starlight glow top-right */}
-      <div
-        style={{
-          position: "absolute",
-          top: -240,
-          right: -200,
-          width: 780,
-          height: 780,
-          borderRadius: "50%",
-          background: `radial-gradient(circle at center, ${accentColor}cc 0%, ${accentColor}55 35%, transparent 70%)`,
-          filter: "blur(20px)",
-          display: "flex",
-        }}
-      />
-      {/* Softer counter-glow bottom-left */}
-      <div
-        style={{
-          position: "absolute",
-          bottom: -180,
-          left: -120,
-          width: 500,
-          height: 500,
-          borderRadius: "50%",
-          background:
-            "radial-gradient(circle at center, #5ba8ff33 0%, transparent 70%)",
-          filter: "blur(30px)",
-          display: "flex",
-        }}
-      />
-      {/* Scattered stars */}
-      {dots.map((d, i) => (
+/**
+ * Work detail cards — the cover image IS the card. Minimal brand chrome so
+ * the project visual reads cleanly. Kept for back-compat; /work/[slug] now
+ * sends the raw cover URL as `og:image` rather than building this card.
+ */
+export function renderWorkCard({
+    title,
+    description,
+    category,
+    coverImageUrl,
+}: {
+    title: string;
+    description?: string;
+    tags?: string[];
+    category?: string | null;
+    coverImageUrl?: string | null;
+    workSlug?: string;
+    workId?: number | string;
+}): ReactElement {
+    const bgDataUri = getMetadataBgDataUri();
+    const logoDataUri = getCdsLogoDataUri();
+    const titleSize = title.length > 40 ? 60 : title.length > 24 ? 76 : 92;
+    return (
         <div
-          key={i}
-          style={{
-            position: "absolute",
-            left: d.x,
-            top: d.y,
-            width: d.r * 2,
-            height: d.r * 2,
-            borderRadius: "50%",
-            background: "#dbeaff",
-            opacity: d.o,
-            display: "flex",
-          }}
-        />
-      ))}
-
-      {/* Cover image overlay (used for /work/[id]) */}
-      {coverImageUrl && (
-        <>
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
-            src={coverImageUrl}
-            alt=""
             style={{
-              position: "absolute",
-              inset: 0,
-              width: "100%",
-              height: "100%",
-              objectFit: "cover",
-              opacity: 0.35,
+                width: OG_SIZE.width,
+                height: OG_SIZE.height,
+                position: "relative",
+                display: "flex",
+                flexDirection: "column",
+                justifyContent: "space-between",
+                color: "#ffffff",
+                fontFamily: "Inter, system-ui, -apple-system, sans-serif",
+                padding: "65px 72px",
+                background: "#040b37",
             }}
-          />
-          <div
-            style={{
-              position: "absolute",
-              inset: 0,
-              background:
-                "linear-gradient(180deg, rgba(4,11,55,0.35) 0%, rgba(4,11,55,0.95) 100%)",
-              display: "flex",
-            }}
-          />
-        </>
-      )}
-
-      {/* Logo wordmark */}
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          gap: 14,
-          zIndex: 2,
-        }}
-      >
-        <div
-          style={{
-            width: 44,
-            height: 44,
-            borderRadius: 12,
-            background:
-              "linear-gradient(135deg, #5ba8ff 0%, #0a4fe8 60%, #0035c1 100%)",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            fontWeight: 800,
-            fontSize: 22,
-            letterSpacing: -0.5,
-            boxShadow: "0 8px 24px rgba(10,79,232,0.45)",
-          }}
         >
-          C
-        </div>
-        <div
-          style={{
-            fontSize: 26,
-            fontWeight: 700,
-            letterSpacing: 1.5,
-            color: "#ffffff",
-            display: "flex",
-          }}
-        >
-          CDS SPACE
-        </div>
-      </div>
+            {coverImageUrl ? (
+                <>
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                        src={coverImageUrl}
+                        alt=""
+                        width={OG_SIZE.width}
+                        height={OG_SIZE.height}
+                        style={{
+                            position: "absolute",
+                            top: 0,
+                            left: 0,
+                            width: OG_SIZE.width,
+                            height: OG_SIZE.height,
+                            objectFit: "cover",
+                        }}
+                    />
+                    <div
+                        style={{
+                            position: "absolute",
+                            top: 0,
+                            left: 0,
+                            width: OG_SIZE.width,
+                            height: OG_SIZE.height,
+                            background:
+                                "linear-gradient(180deg, rgba(4,11,55,0.15) 0%, rgba(4,11,55,0.55) 45%, rgba(4,11,55,0.96) 100%)",
+                            display: "flex",
+                        }}
+                    />
+                </>
+            ) : (
+                <Background bgDataUri={bgDataUri} />
+            )}
 
-      {/* Spacer */}
-      <div style={{ flex: 1, display: "flex" }} />
-
-      {/* Main content */}
-      <div style={{ display: "flex", flexDirection: "column", zIndex: 2, maxWidth: 1000 }}>
-        {eyebrow && (
-          <div
-            style={{
-              fontSize: 16,
-              fontWeight: 600,
-              letterSpacing: 3,
-              color: "#7fb5ff",
-              textTransform: "uppercase",
-              marginBottom: 16,
-              display: "flex",
-            }}
-          >
-            {eyebrow}
-          </div>
-        )}
-
-        <div
-          style={{
-            fontSize: title.length > 60 ? 60 : 72,
-            fontWeight: 800,
-            lineHeight: 1.05,
-            letterSpacing: -1.5,
-            color: "#ffffff",
-            textShadow: "0 4px 30px rgba(5,14,70,0.6)",
-            display: "flex",
-          }}
-        >
-          {title}
-        </div>
-
-        {description && (
-          <div
-            style={{
-              fontSize: 24,
-              fontWeight: 400,
-              lineHeight: 1.45,
-              color: "#c3d3ff",
-              marginTop: 22,
-              maxWidth: 900,
-              display: "flex",
-            }}
-          >
-            {description}
-          </div>
-        )}
-
-        {tags.length > 0 && (
-          <div
-            style={{
-              display: "flex",
-              flexWrap: "wrap",
-              gap: 10,
-              marginTop: 28,
-            }}
-          >
-            {tags.slice(0, 5).map((t) => (
-              <div
-                key={t}
+            <div
                 style={{
-                  padding: "8px 16px",
-                  borderRadius: 999,
-                  background: "rgba(91,168,255,0.14)",
-                  border: "1px solid rgba(127,181,255,0.38)",
-                  color: "#dbeaff",
-                  fontSize: 16,
-                  fontWeight: 500,
-                  display: "flex",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    zIndex: 2,
                 }}
-              >
-                {t}
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
+            >
+                <LogoLockup logoDataUri={logoDataUri} />
+                {category ? <StatusPill label={category.toUpperCase()} /> : <div style={{ display: "flex" }} />}
+            </div>
 
-      {/* Footer URL */}
-      <div
-        style={{
-          marginTop: 36,
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          zIndex: 2,
-        }}
-      >
-        <div
-          style={{
-            fontSize: 18,
-            color: "#9fb8ff",
-            fontWeight: 500,
-            display: "flex",
-          }}
-        >
-          cdsspace.pro{domainPath === "/" ? "" : domainPath}
+            <div style={{ display: "flex", flexDirection: "column", zIndex: 2, maxWidth: 1000 }}>
+                <div
+                    style={{
+                        fontSize: titleSize,
+                        fontWeight: 800,
+                        lineHeight: 1.05,
+                        letterSpacing: -1.25,
+                        color: "#ffffff",
+                        textShadow: "0 4px 40px rgba(4,11,55,0.6)",
+                        display: "flex",
+                    }}
+                >
+                    {title}
+                </div>
+                {description ? (
+                    <div
+                        style={{
+                            fontSize: 24,
+                            fontWeight: 500,
+                            lineHeight: 1.35,
+                            color: "#dbeaff",
+                            opacity: 0.9,
+                            marginTop: 18,
+                            maxWidth: 925,
+                            display: "flex",
+                        }}
+                    >
+                        {description}
+                    </div>
+                ) : null}
+            </div>
+
+            <FooterDomain />
         </div>
-        <div
-          style={{
-            fontSize: 14,
-            color: "#6a82c7",
-            letterSpacing: 2,
-            textTransform: "uppercase",
-            fontWeight: 600,
-            display: "flex",
-          }}
-        >
-          Branding · Design · Build
-        </div>
-      </div>
-    </div>
-  );
+    );
 }

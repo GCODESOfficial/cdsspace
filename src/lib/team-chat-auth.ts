@@ -3,7 +3,7 @@ import { cookies } from "next/headers";
 import { getTeamSession, type TeamSession } from "@/lib/team-auth";
 
 export type ChatViewer =
-  | { kind: "admin"; email: string; name: string }
+  | { kind: "admin"; email: string; name: string; role: "super_admin" | "sub_admin" }
   | { kind: "team"; session: TeamSession };
 
 /**
@@ -18,7 +18,12 @@ export async function getChatViewer(): Promise<ChatViewer | null> {
     try {
       const s = JSON.parse(rawAdmin);
       if (s.role === "super_admin" || s.role === "sub_admin") {
-        return { kind: "admin", email: s.email, name: s.name || "Admin" };
+        return { 
+          kind: "admin", 
+          email: s.email, 
+          name: s.name || "Admin",
+          role: s.role 
+        };
       }
     } catch {
       /* fallthrough */

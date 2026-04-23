@@ -23,6 +23,12 @@ export async function GET(_req: Request, ctx: { params: Promise<{ token: string 
   }
   const db = supabaseAdmin as any;
 
+  // Fetch all departments to populate the dropdown
+  const { data: allDepartments } = await db
+    .from("departments")
+    .select("id, name")
+    .order("name");
+
   // 1) Blank self-serve invite
   const { data, error } = await db
     .from("team_invites")
@@ -40,15 +46,11 @@ export async function GET(_req: Request, ctx: { params: Promise<{ token: string 
     }
     let suggested_department: { id: string; name: string } | null = null;
     if (data.suggested_department_id) {
-      const { data: dept } = await db
-        .from("departments")
-        .select("id, name")
-        .eq("id", data.suggested_department_id)
-        .maybeSingle();
-      if (dept) suggested_department = dept;
+      suggested_department = (allDepartments || []).find((d: any) => d.id === data.suggested_department_id) || null;
     }
     return NextResponse.json({
       ok: true,
+      departments: allDepartments || [],
       invite: {
         token: data.token,
         kind: "blank" as const,
@@ -79,14 +81,14 @@ export async function GET(_req: Request, ctx: { params: Promise<{ token: string 
 
   let suggested_department: { id: string; name: string } | null = null;
   if (member.department_id) {
-    const { data: dept } = await db.from("departments").select("id, name").eq("id", member.department_id).maybeSingle();
-    if (dept) suggested_department = dept;
+    suggested_department = (allDepartments || []).find((d: any) => d.id === member.department_id) || null;
   } else if (member.department) {
     suggested_department = { id: "", name: member.department };
   }
 
   return NextResponse.json({
     ok: true,
+    departments: allDepartments || [],
     invite: {
       token,
       kind: "member" as const,

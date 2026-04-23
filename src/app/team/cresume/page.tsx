@@ -80,7 +80,11 @@ export default function CResumeEditor() {
     });
     const j = await r.json();
     setSaving(false);
-    if (j.ok) setSavedAt(new Date().toISOString());
+    if (j.ok) {
+      setSavedAt(new Date().toISOString());
+      // Refresh the sidebar & main layout session info
+      window.dispatchEvent(new CustomEvent("refresh-team-session"));
+    }
   }
 
   function set<K extends keyof Resume>(key: K, val: Resume[K]) { if (resume) setResume({ ...resume, [key]: val }); }

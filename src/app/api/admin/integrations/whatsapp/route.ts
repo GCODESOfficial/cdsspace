@@ -10,6 +10,25 @@ export async function GET() {
   if (!admin) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const supabase = getSupabaseAdmin();
+
+  // 1. Check Env first
+  if (process.env.WHATSAPP_CLOUD_ACCESS_TOKEN) {
+    const envInteg = {
+      id: "env",
+      mode: (process.env.WHATSAPP_MODE || "cloud_api") as WhatsAppMode,
+      is_active: true,
+      cloud_phone_number_id: process.env.WHATSAPP_CLOUD_PHONE_NUMBER_ID || null,
+      cloud_waba_id: process.env.WHATSAPP_CLOUD_WABA_ID || null,
+      cloud_access_token: `••••${String(process.env.WHATSAPP_CLOUD_ACCESS_TOKEN).slice(-4)}`,
+      cloud_access_token_set: true,
+      cloud_verify_token: process.env.WHATSAPP_CLOUD_VERIFY_TOKEN || null,
+      cloud_business_phone: process.env.WHATSAPP_CLOUD_BUSINESS_PHONE || null,
+      cloud_app_id: process.env.WHATSAPP_CLOUD_APP_ID || null,
+      updated_at: new Date().toISOString(),
+    };
+    return NextResponse.json({ integrations: [envInteg] });
+  }
+
   const { data, error } = await supabase
     .from("whatsapp_integrations")
     .select("*")

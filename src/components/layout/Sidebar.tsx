@@ -80,7 +80,7 @@ export const Sidebar = ({ isOpen = false, onClose }: SidebarProps) => {
                     <div className={cn("shrink-0 flex items-center justify-center", isMobile ? "w-6 h-6" : "w-5 h-5 2xl:w-6 2xl:h-6")}>
                         <Icon className="w-full h-full text-[#8E99B7]" strokeWidth={1.8} />
                     </div>
-                    <span className={cn("font-medium tracking-[-0.01em] whitespace-nowrap text-[#4A5578]", isMobile ? "text-[14px]" : "text-[13px] 2xl:text-[15px]")}>
+                    <span className={cn("font-medium tracking-[-0.01em] text-[#4A5578]", isMobile ? "text-[14px]" : "text-[13px] 2xl:text-[15px] whitespace-nowrap")}>
                         {item.name}
                     </span>
                     <span className="ml-auto text-[9px] 2xl:text-[10px] font-semibold uppercase tracking-[0.08em] text-[#8E99B7] bg-[#F4F6FB] border border-[#E3E8F4] rounded-full px-2 py-[2px]">
@@ -112,8 +112,8 @@ export const Sidebar = ({ isOpen = false, onClose }: SidebarProps) => {
                     )} strokeWidth={1.8} />
                 </div>
                 <span className={cn(
-                    "font-medium tracking-[-0.01em] transition-colors duration-300 whitespace-nowrap",
-                    isMobile ? "text-[14px]" : "text-[13px] 2xl:text-[15px]",
+                    "font-medium tracking-[-0.01em] transition-colors duration-300",
+                    isMobile ? "text-[14px]" : "text-[13px] 2xl:text-[15px] whitespace-nowrap",
                     isActive ? "text-white" : "text-[#4A5578] group-hover:text-brand-navy"
                 )}>
                     {item.name}
@@ -186,8 +186,8 @@ export const Sidebar = ({ isOpen = false, onClose }: SidebarProps) => {
                             isMobile ? "w-6 h-6" : "w-5 h-5 2xl:w-6 2xl:h-6"
                         )} strokeWidth={1.8} />
                         <span className={cn(
-                            "font-medium text-[#B0B9D1] group-hover:text-red-500 transition-colors whitespace-nowrap",
-                            isMobile ? "text-[14px]" : "text-[13px] 2xl:text-[15px]"
+                            "font-medium text-[#B0B9D1] group-hover:text-red-500 transition-colors",
+                            isMobile ? "text-[14px]" : "text-[13px] 2xl:text-[15px] whitespace-nowrap"
                         )}>
                             Log out
                         </span>
@@ -222,10 +222,10 @@ export const Sidebar = ({ isOpen = false, onClose }: SidebarProps) => {
                 {isOpen && (
                     <>
                         <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={onClose}
-                            className="fixed inset-0 bg-black/20 backdrop-blur-xs z-100 lg:hidden" />
+                            className="fixed inset-0 bg-black/20 backdrop-blur-xs z-[100] lg:hidden" />
                         <motion.div initial={{ x: "-100%" }} animate={{ x: 0 }} exit={{ x: "-100%" }}
                             transition={{ type: "spring", damping: 25, stiffness: 200 }}
-                            className="fixed inset-y-0 left-0 w-full max-w-[300px] bg-white z-101 lg:hidden shadow-2xl">
+                            className="fixed inset-y-0 left-0 w-[86vw] max-w-[320px] bg-white z-[101] lg:hidden shadow-2xl">
                             <SidebarContent isMobile />
                         </motion.div>
                     </>
