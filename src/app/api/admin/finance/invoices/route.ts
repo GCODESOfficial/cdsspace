@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { financeDb, requireFinanceAdmin } from "@/lib/finance/api-auth";
 import { generateInvoiceNumber, randomToken } from "@/lib/finance/types";
 import { isMissingInvoiceExtensionColumn, stripInvoiceExtensionFields } from "@/lib/finance/invoice-schema-fallback";
+import { logActivity } from "@/lib/activity-log";
 
 export async function GET(req: NextRequest) {
   const denied = requireFinanceAdmin(req); if (denied) return denied;
@@ -86,6 +87,15 @@ export async function POST(req: NextRequest) {
       }));
     if (toSave.length > 0) await sb.from("finance_price_items").insert(toSave);
   }
+
+  await logActivity({
+    action: "invoice.create",
+    page: "finance/invoices",
+    resource_type: "invoice",
+    resource_id: invoice.id,
+    resource_label: `${invoice.invoice_number} · ${client_name}`,
+    metadata: { total: invoice.total, currency: invoice.currency, status: invoice.status },
+  });
 
   return NextResponse.json({ invoice });
 }

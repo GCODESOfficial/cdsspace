@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { financeDb, requireFinanceAdmin } from "@/lib/finance/api-auth";
+import { logActivity } from "@/lib/activity-log";
+import { notifyTeamMember, notifyMany } from "@/lib/notify-team";
 
 /**
  * Project assignments — who can see this project in the team portal.
@@ -49,6 +51,15 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     const { data: dup } = await dupQuery;
     if (dup) return NextResponse.json({ error: "That assignment already exists." }, { status: 409 });
 
+    // Grab project name up-front so both the log row and notifications can
+    // carry a readable label without another round-trip.
+    const { data: projectMeta } = await sb
+        .from("finance_projects")
+        .select("id, name")
+        .eq("id", id)
+        .maybeSingle();
+    const projectName = projectMeta?.name || `Project ${id.slice(0, 8)}`;
+
     const { data, error } = await sb
         .from("project_assignments")
         .insert({ project_id: id, team_member_id, department, role })
@@ -57,5 +68,50 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
         )
         .single();
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+
+    const assignedMember = Array.isArray(data?.team_members)
+        ? (data.team_members as unknown[])[0] as { full_name?: string; email?: string } | undefined
+        : (data?.team_members as { full_name?: string; email?: string } | null);
+    const targetLabel = team_member_id
+        ? assignedMember?.full_name || assignedMember?.email || "Team member"
+        : `Department: ${department}`;
+
+    await logActivity({
+        action: "project.assign",
+        page: "finance/projects",
+        resource_type: "project",
+        resource_id: id,
+        resource_label: `${projectName} → ${targetLabel}${role ? ` (${role})` : ""}`,
+        metadata: { team_member_id, department, role },
+    });
+
+    // Notify the assignee(s). For a specific member, one notification.
+    // For a department assignment, notify every active member of that dept.
+    if (team_member_id) {
+        await notifyTeamMember({
+            recipient_id: team_member_id,
+            kind: "project_assigned",
+            title: `Added to project: ${projectName}`,
+            body: role ? `Your role: ${role}` : "Check the project details in the team portal.",
+            link: `/team/work`,
+            actor_is_admin: true,
+        });
+    } else if (department) {
+        const { data: deptMembers } = await sb
+            .from("team_members")
+            .select("id")
+            .eq("department", department)
+            .eq("is_active", true);
+        const rows = (deptMembers || []).map((m: { id: string }) => ({
+            recipient_id: m.id,
+            kind: "project_assigned",
+            title: `${department} added to project: ${projectName}`,
+            body: role ? `Department role: ${role}` : "Check the project details in the team portal.",
+            link: "/team/work",
+            actor_is_admin: true,
+        }));
+        if (rows.length) await notifyMany(rows);
+    }
+
     return NextResponse.json({ assignment: data });
 }

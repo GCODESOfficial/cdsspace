@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { financeDb, requireFinanceAdmin } from "@/lib/finance/api-auth";
 import { isMissingInvoiceExtensionColumn, stripInvoiceExtensionFields } from "@/lib/finance/invoice-schema-fallback";
+import { logActivity } from "@/lib/activity-log";
 
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const denied = requireFinanceAdmin(req); if (denied) return denied;
@@ -67,6 +68,20 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     await sb.from("finance_invoice_items").insert(itemRows);
   }
 
+  const action = patch.status === "paid"
+    ? "invoice.mark_paid"
+    : patch.status === "sent"
+      ? "invoice.send"
+      : "invoice.update";
+  await logActivity({
+    action,
+    page: "finance/invoices",
+    resource_type: "invoice",
+    resource_id: id,
+    resource_label: `${data?.invoice_number || id} · ${data?.client_name || ""}`.trim(),
+    metadata: { patch },
+  });
+
   return NextResponse.json({ invoice: data });
 }
 
@@ -74,7 +89,21 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
   const denied = requireFinanceAdmin(req); if (denied) return denied;
   const { id } = await params;
   const sb = financeDb();
+  const { data: before } = await sb
+    .from("finance_invoices")
+    .select("invoice_number, client_name")
+    .eq("id", id)
+    .maybeSingle();
   const { error } = await sb.from("finance_invoices").delete().eq("id", id);
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+
+  await logActivity({
+    action: "invoice.delete",
+    page: "finance/invoices",
+    resource_type: "invoice",
+    resource_id: id,
+    resource_label: `${before?.invoice_number || id} · ${before?.client_name || ""}`.trim(),
+  });
+
   return NextResponse.json({ ok: true });
 }

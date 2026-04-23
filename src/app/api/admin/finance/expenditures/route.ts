@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { financeDb, requireFinanceAdmin } from "@/lib/finance/api-auth";
+import { logActivity } from "@/lib/activity-log";
 
 export async function GET(req: NextRequest) {
   const denied = requireFinanceAdmin(req); if (denied) return denied;
@@ -42,6 +43,15 @@ export async function POST(req: NextRequest) {
     bumpSuggestion("finance_expenditure_titles", String(title).trim()),
     category ? bumpSuggestion("finance_expenditure_categories", String(category).trim()) : Promise.resolve(),
   ]);
+
+  await logActivity({
+    action: "expenditure.create",
+    page: "finance/expenditures",
+    resource_type: "expenditure",
+    resource_id: data?.id,
+    resource_label: `${title} · ${currency} ${Number(amount).toLocaleString()}`,
+    metadata: { category, recurring },
+  });
 
   return NextResponse.json({ expenditure: data });
 }

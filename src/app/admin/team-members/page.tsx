@@ -28,6 +28,7 @@ import {
 } from "@/components/admin/InviteShareModal";
 import { SubAdminPermissionsPicker } from "@/components/admin/SubAdminPermissionsPicker";
 import BulkActionBar from "@/components/admin/BulkActionBar";
+import ActivityPanel from "@/components/admin/ActivityPanel";
 import { appAlert, appConfirm, appPrompt } from "@/lib/app-notify";
 
 interface TeamMember {
@@ -467,6 +468,8 @@ export default function AdminTeamMembersPage() {
           }}
         />
       )}
+
+      <ActivityPanel page="team-members" title="Team member activity" />
     </div>
   );
 }

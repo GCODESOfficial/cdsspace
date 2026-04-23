@@ -4,6 +4,8 @@ import { cookies } from "next/headers";
 import { supabaseAdmin } from "@/lib/supabase";
 import { hashPassword, generateSalt, generateInviteToken } from "@/lib/team-auth";
 import { isReservedUsername } from "@/lib/reserved-usernames";
+import { logActivity } from "@/lib/activity-log";
+import { notifyTeamMember } from "@/lib/notify-team";
 
 export const runtime = "nodejs";
 
@@ -108,6 +110,28 @@ export async function POST(req: Request) {
 
   if (error) return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
 
+  await logActivity({
+    action: is_sub_admin ? "team_member.create_sub_admin" : "team_member.create",
+    page: "team-members",
+    resource_type: "team_member",
+    resource_id: data.id,
+    resource_label: full_name.trim(),
+    metadata: { email: email.trim().toLowerCase(), role_title, department, sent_invite: !!send_invite },
+  });
+
+  // Sub-admin promotion creates a notification for the new member so they
+  // know the scope granted and where to go next.
+  if (is_sub_admin) {
+    await notifyTeamMember({
+      recipient_id: data.id,
+      kind: "sub_admin_granted",
+      title: "You've been made a sub-admin",
+      body: `You now have admin access with permissions: ${(Array.isArray(permissions) ? permissions : []).join(", ") || "—"}. Check the admin dashboard.`,
+      link: "/admin",
+      actor_is_admin: true,
+    });
+  }
+
   return NextResponse.json({
     ok: true,
     id: data.id,
@@ -141,8 +165,86 @@ export async function PATCH(req: Request) {
   for (const k of allowed) if (k in patch) updates[k] = patch[k];
 
   const db = supabaseAdmin as any;
+
+  // Fetch the pre-update row so we can detect meaningful transitions
+  // (suspend ↔ reactivate, sub-admin promotion) for logging + notify.
+  const { data: before } = await db
+    .from("team_members")
+    .select("id, full_name, email, is_active, is_sub_admin, permissions")
+    .eq("id", id)
+    .maybeSingle();
+
   const { error } = await db.from("team_members").update(updates).eq("id", id);
   if (error) return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
+
+  if (before) {
+    const label = before.full_name || before.email;
+
+    // Suspend / unsuspend
+    if ("is_active" in updates && updates.is_active !== before.is_active) {
+      await logActivity({
+        action: updates.is_active ? "team_member.unsuspend" : "team_member.suspend",
+        page: "team-members",
+        resource_type: "team_member",
+        resource_id: id,
+        resource_label: label,
+      });
+    }
+
+    // Sub-admin promotion (newly granted) — log + notify recipient
+    const promoted = !before.is_sub_admin && updates.is_sub_admin === true;
+    const demoted = before.is_sub_admin && updates.is_sub_admin === false;
+    if (promoted) {
+      await logActivity({
+        action: "team_member.promote",
+        page: "team-members",
+        resource_type: "team_member",
+        resource_id: id,
+        resource_label: label,
+        metadata: { permissions: updates.permissions ?? before.permissions ?? [] },
+      });
+      await notifyTeamMember({
+        recipient_id: id,
+        kind: "sub_admin_granted",
+        title: "You've been made a sub-admin",
+        body: `You now have admin access with permissions: ${(Array.isArray(updates.permissions) ? updates.permissions : before.permissions || []).join(", ") || "—"}. Check the admin dashboard.`,
+        link: "/admin",
+        actor_is_admin: true,
+      });
+    } else if (demoted) {
+      await logActivity({
+        action: "team_member.demote",
+        page: "team-members",
+        resource_type: "team_member",
+        resource_id: id,
+        resource_label: label,
+      });
+    } else if ("permissions" in updates || ("is_sub_admin" in updates && updates.is_sub_admin)) {
+      await logActivity({
+        action: "team_member.update_permissions",
+        page: "team-members",
+        resource_type: "team_member",
+        resource_id: id,
+        resource_label: label,
+        metadata: { permissions: updates.permissions ?? [] },
+      });
+    }
+
+    // Any other profile edit
+    const profileKeys = ["full_name", "role_title", "department", "phone"];
+    const editedProfile = profileKeys.some((k) => k in updates);
+    if (editedProfile && !("is_active" in updates) && !promoted && !demoted) {
+      await logActivity({
+        action: "team_member.update",
+        page: "team-members",
+        resource_type: "team_member",
+        resource_id: id,
+        resource_label: label,
+        metadata: Object.fromEntries(profileKeys.filter((k) => k in updates).map((k) => [k, updates[k]])),
+      });
+    }
+  }
+
   return NextResponse.json({ ok: true });
 }
 
@@ -156,7 +258,22 @@ export async function DELETE(req: Request) {
   if (!id) return NextResponse.json({ ok: false, error: "Missing id" }, { status: 400 });
 
   const db = supabaseAdmin as any;
+  const { data: before } = await db
+    .from("team_members")
+    .select("full_name, email")
+    .eq("id", id)
+    .maybeSingle();
+
   const { error } = await db.from("team_members").delete().eq("id", id);
   if (error) return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
+
+  await logActivity({
+    action: "team_member.delete",
+    page: "team-members",
+    resource_type: "team_member",
+    resource_id: id,
+    resource_label: before?.full_name || before?.email || id,
+  });
+
   return NextResponse.json({ ok: true });
 }

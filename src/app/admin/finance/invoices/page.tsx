@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Plus, FileText, Search, CheckCircle2, Clock, Send, Trash2, X, Check, Copy, Share2 } from "lucide-react";
 import FinanceShell, { glassCard } from "@/components/finance/FinanceShell";
 import StatCard from "@/components/finance/StatCard";
+import ActivityPanel from "@/components/admin/ActivityPanel";
 import { Currency, formatMoney } from "@/lib/finance/types";
 import { appAlert, appConfirm, appPrompt } from "@/lib/app-notify";
 
@@ -268,6 +269,7 @@ export default function InvoicesPage() {
               </tbody>
             </table>
           </div>
+          <ActivityPanel page="finance/invoices" title="Invoice activity" />
         </>
       )}
     </FinanceShell>

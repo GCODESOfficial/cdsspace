@@ -11,6 +11,7 @@ import { Switch } from "@/components/ui/switch";
 import { Plus, Receipt, Trash2, Repeat, Zap } from "lucide-react";
 import FinanceShell, { glassCard } from "@/components/finance/FinanceShell";
 import StatCard from "@/components/finance/StatCard";
+import ActivityPanel from "@/components/admin/ActivityPanel";
 import ModalHeader from "@/components/finance/ModalHeader";
 import { SuggestionInput } from "@/components/finance/SuggestionInput";
 import { CURRENCIES, Currency, FinanceExpenditure, formatMoney } from "@/lib/finance/types";
@@ -194,6 +195,7 @@ export default function ExpendituresPage() {
           </table>
         </div>
       )}
+      <ActivityPanel page="finance/expenditures" title="Expenditure activity" />
     </FinanceShell>
   );
 }
