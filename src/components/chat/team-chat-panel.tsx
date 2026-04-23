@@ -22,6 +22,8 @@ import {
   BrainCircuit,
   MessageSquarePlus,
   Wand2,
+  Phone,
+  Video,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -84,6 +86,7 @@ export function TeamChatPanel({ initialThreadId }: { initialThreadId?: string | 
   const [viewer, setViewer] = useState<ViewerInfo | null>(null);
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
+  const [starting, setStarting] = useState<"voice" | "video" | null>(null);
   const [mobileShowThread, setMobileShowThread] = useState(!!initialThreadId);
   const [forwarding, setForwarding] = useState<Message | null>(null);
   const [showingNewChat, setShowingNewChat] = useState(false);
@@ -238,6 +241,34 @@ export function TeamChatPanel({ initialThreadId }: { initialThreadId?: string | 
     }
   }
 
+  // Voice / video call. Spins up a cMeet room, drops the join link into the
+  // thread as a message, and opens the room in a new tab for the caller.
+  async function startCall(kind: "voice" | "video") {
+    if (!currentThread || starting) return;
+    setStarting(kind);
+    try {
+      const title =
+        kind === "voice"
+          ? `Voice call — ${threadLabel(currentThread)}`
+          : `Video call — ${threadLabel(currentThread)}`;
+      const res = await fetch("/api/cmeet", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title, audio_only: kind === "voice" }),
+      });
+      const json = await res.json();
+      const roomCode = json?.meeting?.room_code;
+      if (!res.ok || !json.ok || !roomCode) throw new Error(json.error || "Couldn't start call");
+      const link = `${window.location.origin}/team/cmeet/${roomCode}`;
+      await send(kind === "voice" ? `📞 Voice call started — join: ${link}` : `🎥 Video call started — join: ${link}`);
+      window.open(link, "_blank");
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setStarting(null);
+    }
+  }
+
   async function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file || !selectedThread) return;
@@ -292,7 +323,7 @@ export function TeamChatPanel({ initialThreadId }: { initialThreadId?: string | 
   }
 
   return (
-    <div className="flex h-[calc(100vh-160px)] min-h-[600px] bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
+    <div className="flex h-[calc(100dvh-15rem)] min-h-[460px] md:h-[calc(100vh-160px)] md:min-h-[600px] bg-white rounded-[24px] border border-gray-100 shadow-sm overflow-hidden">
       {/* Sidebar */}
       <aside
         className={cn(
@@ -300,7 +331,7 @@ export function TeamChatPanel({ initialThreadId }: { initialThreadId?: string | 
           mobileShowThread && "hidden md:flex"
         )}
       >
-        <div className="px-5 py-4 border-b border-gray-100 flex items-center justify-between">
+        <div className="px-4 sm:px-5 py-4 border-b border-gray-100 flex items-center justify-between">
           <div>
             <h2 className="text-[15px] font-semibold text-[#0D1B39]">Team chat</h2>
             <p className="text-[11.5px] text-gray-400">
@@ -335,7 +366,7 @@ export function TeamChatPanel({ initialThreadId }: { initialThreadId?: string | 
                       setSuggestions([]);
                     }}
                     className={cn(
-                      "w-full text-left px-5 py-3.5 flex items-start gap-3 transition relative group",
+                      "w-full text-left px-4 sm:px-5 py-3.5 flex items-start gap-3 transition relative group",
                       selectedThread === t.id ? "bg-white" : "hover:bg-white/60"
                     )}
                   >
@@ -385,7 +416,7 @@ export function TeamChatPanel({ initialThreadId }: { initialThreadId?: string | 
           </div>
         ) : (
           <>
-            <header className="px-6 py-4 border-b border-gray-100 flex items-center justify-between bg-white z-10">
+            <header className="px-4 sm:px-6 py-4 border-b border-gray-100 flex items-center justify-between bg-white z-10">
               <div className="flex items-center gap-3 overflow-hidden">
                 <button
                   onClick={() => setMobileShowThread(false)}
@@ -396,7 +427,7 @@ export function TeamChatPanel({ initialThreadId }: { initialThreadId?: string | 
                 <div className="w-10 h-10 rounded-xl bg-[#0A4FE8]/5 text-[#0A4FE8] flex items-center justify-center shrink-0">
                   {currentThread ? threadIcon(currentThread) : <User className="w-5 h-5" />}
                 </div>
-                <div className="min-w-0">
+                <div className="min-w-0 flex-1">
                   <h2 className="text-[15px] font-bold text-[#0D1B39] truncate">
                     {currentThread ? threadLabel(currentThread) : "Chat"}
                   </h2>
@@ -407,10 +438,30 @@ export function TeamChatPanel({ initialThreadId }: { initialThreadId?: string | 
                     {currentThread?.kind === "direct" && "Direct message"}
                   </p>
                 </div>
+                {currentThread && (
+                  <div className="flex items-center gap-1 shrink-0">
+                    <button
+                      onClick={() => startCall("voice")}
+                      disabled={starting !== null}
+                      className="p-2 rounded-lg text-gray-500 hover:text-[#0A4FE8] hover:bg-blue-50 transition disabled:opacity-50"
+                      title="Start voice call"
+                    >
+                      {starting === "voice" ? <Loader2 className="w-4 h-4 animate-spin" /> : <Phone className="w-4 h-4" />}
+                    </button>
+                    <button
+                      onClick={() => startCall("video")}
+                      disabled={starting !== null}
+                      className="p-2 rounded-lg text-gray-500 hover:text-[#0A4FE8] hover:bg-blue-50 transition disabled:opacity-50"
+                      title="Start video call"
+                    >
+                      {starting === "video" ? <Loader2 className="w-4 h-4 animate-spin" /> : <Video className="w-4 h-4" />}
+                    </button>
+                  </div>
+                )}
               </div>
             </header>
 
-            <div className="flex-1 overflow-y-auto px-5 py-6 bg-[#fafbfd] relative">
+            <div className="flex-1 overflow-y-auto px-3 sm:px-5 py-5 sm:py-6 bg-[#fafbfd] relative">
               {messagesLoading && messages.length === 0 ? (
                 <div className="flex justify-center pt-10">
                   <Loader2 className="w-5 h-5 animate-spin text-[#0A4FE8]" />
@@ -442,7 +493,7 @@ export function TeamChatPanel({ initialThreadId }: { initialThreadId?: string | 
                             )}
                           </div>
                         )}
-                        <div className={cn("max-w-[75%] group", mine && "items-end flex flex-col")}>
+                        <div className={cn("max-w-[88%] sm:max-w-[75%] group", mine && "items-end flex flex-col")}>
                           {!mine && (
                             <p className="text-[10.5px] font-semibold text-gray-400 mb-1 px-1 flex items-center gap-1.5">
                               {m.sender_name}
@@ -476,35 +527,52 @@ export function TeamChatPanel({ initialThreadId }: { initialThreadId?: string | 
                               </div>
                             )}
                             <div className="whitespace-pre-wrap break-words">{m.body}</div>
-                            {m.attachment_url && (
-                              <div className={cn(
-                                "mt-2.5 p-2 rounded-lg flex items-center gap-3 border",
-                                mine ? "bg-white/10 border-white/20" : "bg-blue-50/50 border-blue-100/50"
-                              )}>
+                            {m.attachment_url && (() => {
+                              // Attachments expire after 7 days — the file may still live
+                              // in storage but we stop linking to it so the UX matches the
+                              // retention policy communicated to team members.
+                              const ageMs = Date.now() - new Date(m.created_at).getTime();
+                              const expired = ageMs > 7 * 24 * 60 * 60 * 1000;
+                              return (
                                 <div className={cn(
-                                  "w-8 h-8 rounded-lg flex items-center justify-center shrink-0",
-                                  mine ? "bg-white/20 text-white" : "bg-white text-[#0A4FE8] shadow-xs"
+                                  "mt-2.5 p-2 rounded-lg flex items-center gap-3 border",
+                                  mine ? "bg-white/10 border-white/20" : "bg-blue-50/50 border-blue-100/50",
+                                  expired && "opacity-60"
                                 )}>
-                                  <Paperclip className="w-4 h-4" />
-                                </div>
-                                <div className="flex-1 min-w-0">
-                                  <p className={cn("text-[11px] font-medium truncate", mine ? "text-white" : "text-[#0D1B39]")}>
-                                    File Attachment
-                                  </p>
-                                  <a
-                                    href={m.attachment_url}
-                                    target="_blank"
-                                    rel="noreferrer"
-                                    className={cn(
-                                      "text-[10px] font-bold uppercase tracking-wider hover:opacity-80 transition flex items-center gap-1 mt-0.5",
-                                      mine ? "text-white/80" : "text-[#0A4FE8]"
+                                  <div className={cn(
+                                    "w-8 h-8 rounded-lg flex items-center justify-center shrink-0",
+                                    mine ? "bg-white/20 text-white" : "bg-white text-[#0A4FE8] shadow-xs"
+                                  )}>
+                                    <Paperclip className="w-4 h-4" />
+                                  </div>
+                                  <div className="flex-1 min-w-0">
+                                    <p className={cn("text-[11px] font-medium truncate", mine ? "text-white" : "text-[#0D1B39]")}>
+                                      {expired ? "Attachment expired" : "File Attachment"}
+                                    </p>
+                                    {expired ? (
+                                      <p className={cn(
+                                        "text-[10px] italic mt-0.5",
+                                        mine ? "text-white/70" : "text-gray-500"
+                                      )}>
+                                        Files are available in-app for 7 days.
+                                      </p>
+                                    ) : (
+                                      <a
+                                        href={m.attachment_url}
+                                        target="_blank"
+                                        rel="noreferrer"
+                                        className={cn(
+                                          "text-[10px] font-bold uppercase tracking-wider hover:opacity-80 transition flex items-center gap-1 mt-0.5",
+                                          mine ? "text-white/80" : "text-[#0A4FE8]"
+                                        )}
+                                      >
+                                        Download / View
+                                      </a>
                                     )}
-                                  >
-                                    Download / View
-                                  </a>
+                                  </div>
                                 </div>
-                              </div>
-                            )}
+                              );
+                            })()}
                           </div>
                           <div className={cn("mt-1.5 flex items-center gap-3 px-1", mine && "flex-row-reverse")}>
                             <span className="text-[10px] text-gray-300 font-medium tracking-tight">
@@ -528,7 +596,7 @@ export function TeamChatPanel({ initialThreadId }: { initialThreadId?: string | 
 
             {/* AI Suggestions Row */}
             {suggestions.length > 0 && (
-              <div className="bg-[#fafbfd] px-5 py-2 flex flex-wrap gap-2 animate-in slide-in-from-bottom-2 duration-300">
+              <div className="bg-[#fafbfd] px-3 sm:px-5 py-2 flex flex-wrap gap-2 animate-in slide-in-from-bottom-2 duration-300">
                  {suggestions.map((s, idx) => (
                    <button
                      key={idx}
@@ -549,9 +617,9 @@ export function TeamChatPanel({ initialThreadId }: { initialThreadId?: string | 
               </div>
             )}
 
-            <div className="border-t border-gray-100 p-4 bg-white relative">
+            <div className="border-t border-gray-100 p-3 sm:p-4 bg-white relative">
               {suggestionsLoading && (
-                <div className="absolute -top-8 left-6 flex items-center gap-2 bg-white/80 backdrop-blur-md border border-blue-50 px-3 py-1 rounded-full shadow-xs">
+                <div className="absolute -top-8 left-3 sm:left-6 flex items-center gap-2 bg-white/80 backdrop-blur-md border border-blue-50 px-3 py-1 rounded-full shadow-xs">
                    <Loader2 className="w-3 h-3 animate-spin text-[#0A4FE8]" />
                    <span className="text-[10px] font-bold text-[#0A4FE8] uppercase tracking-widest">AI Thinking...</span>
                 </div>

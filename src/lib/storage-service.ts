@@ -103,23 +103,22 @@ export async function uploadFile(file: File, folder: string): Promise<string> {
 
 export async function deleteFile(url: string): Promise<void> {
 	try {
-		// Extract the path from the URL
-		const urlObj = new URL(url);
-		const pathParts = urlObj.pathname.split("/");
-		const bucketName = pathParts[1];
-		const filePath = pathParts.slice(2).join("/");
-
-		if (bucketName && filePath) {
-			const { error } = await supabase.storage
-				.from(bucketName)
-				.remove([filePath]);
-			if (error) {
-				throw error;
-			}
-		}
+		// Supabase public URLs follow /storage/v1/object/public/<bucket>/<path>
+		// (and signed URLs use /storage/v1/object/sign/<bucket>/<path>).
+		// The previous parser read `pathname[1]` and tried to delete from a
+		// bucket called "storage" — which silently succeeded as a no-op and
+		// left the row undeletable whenever callers awaited its success.
+		const match = new URL(url).pathname.match(
+			/\/storage\/v1\/object\/(?:public|sign|authenticated)\/([^/]+)\/(.+)$/,
+		);
+		if (!match) return;
+		const [, bucketName, filePath] = match;
+		const { error } = await supabase.storage.from(bucketName).remove([filePath]);
+		if (error) throw error;
 	} catch (error) {
 		console.error("Error deleting file:", error);
-		throw new Error("Failed to delete file");
+		// Don't block the caller — a stale/missing file shouldn't prevent
+		// the DB row from being deleted. The DB is the source of truth.
 	}
 }
 

@@ -72,6 +72,7 @@ export default function AdminTeamMembersPage() {
   const [lastGeneratedId, setLastGeneratedId] = useState<string | null>(null);
 
   const [promotingMember, setPromotingMember] = useState<TeamMember | null>(null);
+  const [viewingMember, setViewingMember] = useState<TeamMember | null>(null);
 
   // Selection state
   const [selectedMemberIds, setSelectedMemberIds] = useState<Set<string>>(new Set());
@@ -429,6 +430,7 @@ export default function AdminTeamMembersPage() {
                 onToggleActive={() => toggleActive(m)}
                 onPromote={() => setPromotingMember(m)}
                 onDelete={() => remove(m)}
+                onView={() => setViewingMember(m)}
               />
             ))}
           </div>
@@ -453,6 +455,18 @@ export default function AdminTeamMembersPage() {
           }}
         />
       )}
+
+      {/* Full-profile viewer — also exposes suspend / unsuspend */}
+      {viewingMember && (
+        <MemberProfileModal
+          member={viewingMember}
+          onClose={() => setViewingMember(null)}
+          onSuspend={async () => {
+            await toggleActive(viewingMember);
+            setViewingMember(null);
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -466,6 +480,7 @@ function MemberRow({
   onToggleActive,
   onPromote,
   onDelete,
+  onView,
 }: {
   m: TeamMember;
   selected: boolean;
@@ -473,6 +488,7 @@ function MemberRow({
   onToggleActive: () => void;
   onPromote: () => void;
   onDelete: () => void;
+  onView: () => void;
 }) {
   const [showShare, setShowShare] = useState(false);
   const inviteUrl =
@@ -553,6 +569,13 @@ function MemberRow({
           </button>
         )}
         <button
+          onClick={onView}
+          className="p-2 rounded-lg text-gray-400 hover:text-[#0A4FE8] hover:bg-blue-50 transition"
+          title="View full profile"
+        >
+          <Eye className="w-4 h-4" />
+        </button>
+        <button
           onClick={onPromote}
           className={`p-2 rounded-lg transition ${
             m.is_sub_admin
@@ -566,9 +589,9 @@ function MemberRow({
         <button
           onClick={onToggleActive}
           className={`p-2 rounded-lg transition ${
-            m.is_active ? "text-emerald-500 hover:bg-emerald-50" : "text-gray-300 hover:bg-gray-100"
+            m.is_active ? "text-emerald-500 hover:bg-emerald-50" : "text-amber-500 hover:bg-amber-50"
           }`}
-          title={m.is_active ? "Deactivate" : "Activate"}
+          title={m.is_active ? "Suspend / lock account" : "Unsuspend account"}
         >
           {m.is_active ? <ToggleRight className="w-5 h-5" /> : <ToggleLeft className="w-5 h-5" />}
         </button>
@@ -1415,6 +1438,116 @@ function Field({
         className="w-full px-4 py-2.5 rounded-xl bg-gray-50 border border-gray-200 text-[13px] focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-300 transition"
       />
       {hint && <p className="text-[10.5px] text-gray-400 mt-1">{hint}</p>}
+    </div>
+  );
+}
+
+/* ----- Member profile viewer ----- */
+
+function MemberProfileModal({
+  member,
+  onClose,
+  onSuspend,
+}: {
+  member: TeamMember;
+  onClose: () => void;
+  onSuspend: () => void | Promise<void>;
+}) {
+  const fields: Array<{ label: string; value: string | null | undefined }> = [
+    { label: "Full name", value: member.full_name },
+    { label: "Username", value: `@${member.username}` },
+    { label: "Email", value: member.email },
+    { label: "Phone", value: member.phone },
+    { label: "Role", value: member.role_title },
+    { label: "Department", value: member.department },
+    { label: "Joined", value: member.joined_at ? new Date(member.joined_at).toLocaleDateString() : null },
+    { label: "Created", value: member.created_at ? new Date(member.created_at).toLocaleString() : null },
+  ];
+
+  const status = !member.is_active
+    ? { label: "Suspended", cls: "bg-amber-50 text-amber-700 border-amber-100" }
+    : member.is_sub_admin
+      ? { label: "Sub-admin", cls: "bg-blue-50 text-[#0A4FE8] border-blue-100" }
+      : { label: "Active", cls: "bg-emerald-50 text-emerald-700 border-emerald-100" };
+
+  return (
+    <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4" onClick={onClose}>
+      <div
+        className="bg-white w-full max-w-lg rounded-2xl shadow-2xl overflow-hidden"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="px-6 py-5 border-b border-gray-100 flex items-center gap-4">
+          {member.avatar_url ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={member.avatar_url}
+              alt={member.full_name}
+              className="w-14 h-14 rounded-full object-cover border border-gray-200"
+            />
+          ) : (
+            <div className="w-14 h-14 rounded-full bg-[#0A4FE8] text-white text-lg font-bold flex items-center justify-center">
+              {member.full_name.charAt(0).toUpperCase()}
+            </div>
+          )}
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-2 flex-wrap">
+              <p className="text-[16px] font-semibold text-[#0D1B39] truncate">{member.full_name}</p>
+              <span className={`text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full border ${status.cls}`}>
+                {status.label}
+              </span>
+            </div>
+            <p className="text-[13px] text-gray-500 truncate">{member.email}</p>
+          </div>
+          <button
+            onClick={onClose}
+            className="p-2 text-gray-400 hover:text-gray-700 hover:bg-gray-50 rounded-lg transition"
+            aria-label="Close"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+
+        <div className="px-6 py-5 grid grid-cols-2 gap-4">
+          {fields.map((f) => (
+            <div key={f.label}>
+              <div className="text-[10px] uppercase tracking-wider text-gray-400 mb-0.5">{f.label}</div>
+              <div className="text-[13px] text-[#0D1B39] break-words">{f.value || "—"}</div>
+            </div>
+          ))}
+        </div>
+
+        {member.is_sub_admin && member.permissions?.length > 0 && (
+          <div className="px-6 pb-5">
+            <div className="text-[10px] uppercase tracking-wider text-gray-400 mb-1">Sub-admin permissions</div>
+            <div className="flex flex-wrap gap-1.5">
+              {member.permissions.map((p) => (
+                <span key={p} className="text-[11px] px-2 py-0.5 rounded-full bg-blue-50 text-[#0A4FE8] border border-blue-100">
+                  {p}
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
+
+        <div className="px-6 py-4 border-t border-gray-100 flex items-center justify-end gap-2 bg-gray-50/60">
+          <button
+            onClick={onClose}
+            className="px-4 py-2 text-sm font-medium text-gray-600 hover:bg-gray-100 rounded-lg transition"
+          >
+            Close
+          </button>
+          <button
+            onClick={onSuspend}
+            className={`px-4 py-2 text-sm font-semibold rounded-lg transition ${
+              member.is_active
+                ? "bg-amber-500 text-white hover:bg-amber-600"
+                : "bg-emerald-500 text-white hover:bg-emerald-600"
+            }`}
+          >
+            {member.is_active ? "Suspend account" : "Unsuspend"}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }

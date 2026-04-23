@@ -22,10 +22,31 @@ export async function GET(req: Request) {
   const url = new URL(req.url);
   const includeArchived = url.searchParams.get("archived") === "true";
   const db = supabaseAdmin as any;
-  let q = db
-    .from("team_meetings")
-    .select("id, room_code, title, created_by, created_by_admin, started_at, ended_at, scheduled_for, audio_only, archived_at, created_at")
-    .order("created_at", { ascending: false });
+
+  const columns =
+    "id, room_code, title, created_by, created_by_admin, started_at, ended_at, scheduled_for, audio_only, archived_at, created_at";
+
+  // Admins see every meeting. Team members only see meetings they either
+  // created or were tagged as participants on — not every historical call.
+  if (actor.kind === "admin") {
+    let q = db.from("team_meetings").select(columns).order("created_at", { ascending: false });
+    if (!includeArchived) q = q.is("archived_at", null);
+    const { data, error } = await q;
+    if (error) return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
+    return NextResponse.json({ ok: true, meetings: data || [] });
+  }
+
+  const { data: parts } = await db
+    .from("team_meeting_participants")
+    .select("meeting_id")
+    .eq("team_member_id", actor.id);
+  const myIds = (parts || []).map((p: any) => p.meeting_id).filter(Boolean);
+
+  const filter = myIds.length
+    ? `created_by.eq.${actor.id},id.in.(${myIds.join(",")})`
+    : `created_by.eq.${actor.id}`;
+
+  let q = db.from("team_meetings").select(columns).or(filter).order("created_at", { ascending: false });
   if (!includeArchived) q = q.is("archived_at", null);
   const { data, error } = await q;
   if (error) return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
