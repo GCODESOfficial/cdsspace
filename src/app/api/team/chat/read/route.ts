@@ -25,5 +25,16 @@ export async function POST(req: Request) {
       { onConflict: "thread_id,team_member_id" }
     );
   if (error) return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
+
+  // Opening a thread is a strong signal the user saw every unread
+  // chat_message notification for it — clear them so the bell badge drops
+  // without waiting for an extra click in the bell itself.
+  await db
+    .from("team_notifications")
+    .update({ read_at: now })
+    .eq("recipient_id", viewer.session.id)
+    .eq("thread_id", threadId)
+    .is("read_at", null);
+
   return NextResponse.json({ ok: true });
 }

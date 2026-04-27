@@ -1,28 +1,20 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { NextResponse } from "next/server";
-import { supabaseAdmin } from "@/lib/supabase";
 import { getChatViewer } from "@/lib/team-chat-auth";
+import {
+  canViewTeamThread,
+  getTeamChatDb,
+  getViewerPayload,
+  hydrateTeamMessages,
+} from "@/lib/team-chat-server";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-async function canViewThread(viewer: Awaited<ReturnType<typeof getChatViewer>>, threadId: string) {
-  if (!viewer) return false;
-  if (viewer.kind === "admin") return true;
-  const db = supabaseAdmin as any;
-  const [{ data: thread }, { data: part }] = await Promise.all([
-    db.from("team_chat_threads").select("kind").eq("id", threadId).maybeSingle(),
-    db.from("team_chat_participants").select("thread_id").eq("thread_id", threadId).eq("team_member_id", viewer.session.id).maybeSingle(),
-  ]);
-  if (!thread) return false;
-  if (part) return true;
-  // Department + broadcast threads are open-read for team members
-  return thread.kind === "department" || thread.kind === "admin_broadcast";
-}
-
 export async function GET(req: Request) {
   const viewer = await getChatViewer();
-  if (!viewer || !supabaseAdmin) {
+  const db = getTeamChatDb();
+  if (!viewer || !db) {
     return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
   }
   const { searchParams } = new URL(req.url);
@@ -30,59 +22,57 @@ export async function GET(req: Request) {
   const limit = parseInt(searchParams.get("limit") || "50", 10);
   if (!threadId) return NextResponse.json({ ok: false, error: "threadId required" }, { status: 400 });
 
-  if (!(await canViewThread(viewer, threadId))) {
+  if (!(await canViewTeamThread(viewer, threadId))) {
     return NextResponse.json({ ok: false, error: "Forbidden" }, { status: 403 });
   }
 
-  const db = supabaseAdmin as any;
   const { data, error } = await db
     .from("team_chat_messages")
-    .select("id, thread_id, sender_id, sender_is_admin, body, attachment_url, forwarded, created_at")
+    .select(
+      "id, thread_id, sender_id, sender_is_admin, body, attachment_url, forwarded, reply_to_message_id, sticker_key, reactions, edited_at, deleted_at, created_at",
+    )
     .eq("thread_id", threadId)
     .order("created_at", { ascending: true })
     .limit(limit);
   if (error) return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
 
-  // Hydrate sender names
-  const ids = Array.from(new Set((data || []).map((m: any) => m.sender_id).filter(Boolean)));
-  const nameById: Record<string, { name: string; avatar: string | null }> = {};
-  if (ids.length) {
-    const { data: members } = await db
-      .from("team_members")
-      .select("id, full_name, avatar_url")
-      .in("id", ids);
-    (members || []).forEach((m: any) => {
-      nameById[m.id] = { name: m.full_name, avatar: m.avatar_url };
-    });
-  }
-
-  const enriched = (data || []).map((m: any) => ({
-    ...m,
-    sender_name: m.sender_is_admin ? "Admin" : nameById[m.sender_id]?.name || "Member",
-    sender_avatar: m.sender_is_admin ? null : nameById[m.sender_id]?.avatar || null,
-  }));
+  const enriched = await hydrateTeamMessages((data || []) as any[]);
 
   return NextResponse.json({
     ok: true,
     messages: enriched,
-    viewer: { kind: viewer.kind, id: viewer.kind === "team" ? viewer.session.id : null },
+    viewer: getViewerPayload(viewer),
   });
 }
 
 export async function POST(req: Request) {
   const viewer = await getChatViewer();
-  if (!viewer || !supabaseAdmin) {
+  const db = getTeamChatDb();
+  if (!viewer || !db) {
     return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
   }
-  const { threadId, body, attachmentUrl } = await req.json().catch(() => ({}));
-  if (!threadId || !(body?.trim() || attachmentUrl)) {
-    return NextResponse.json({ ok: false, error: "threadId and body required" }, { status: 400 });
+  const { threadId, body, attachmentUrl, replyToMessageId, stickerKey } = await req.json().catch(() => ({}));
+  if (!threadId || !(body?.trim() || attachmentUrl || stickerKey)) {
+    return NextResponse.json(
+      { ok: false, error: "threadId and a message body, sticker, or attachment are required" },
+      { status: 400 },
+    );
   }
-  if (!(await canViewThread(viewer, threadId))) {
+  if (!(await canViewTeamThread(viewer, threadId))) {
     return NextResponse.json({ ok: false, error: "Forbidden" }, { status: 403 });
   }
 
-  const db = supabaseAdmin as any;
+  if (replyToMessageId) {
+    const { data: replyMessage } = await db
+      .from("team_chat_messages")
+      .select("id, thread_id")
+      .eq("id", replyToMessageId)
+      .maybeSingle();
+    if (!replyMessage || replyMessage.thread_id !== threadId) {
+      return NextResponse.json({ ok: false, error: "Reply target not found" }, { status: 404 });
+    }
+  }
+
   const { data: msg, error } = await db
     .from("team_chat_messages")
     .insert({
@@ -91,38 +81,54 @@ export async function POST(req: Request) {
       sender_is_admin: viewer.kind === "admin",
       body: body?.trim() || null,
       attachment_url: attachmentUrl || null,
+      reply_to_message_id: replyToMessageId || null,
+      sticker_key: stickerKey || null,
     })
-    .select("id, thread_id, sender_id, sender_is_admin, body, attachment_url, forwarded, created_at")
+    .select(
+      "id, thread_id, sender_id, sender_is_admin, body, attachment_url, forwarded, reply_to_message_id, sticker_key, reactions, edited_at, deleted_at, created_at",
+    )
     .single();
   if (error) return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
 
-  // Notify other participants
+  // Notify other participants. Title now leads with the sender's name so
+  // the bell groups visually by who-said-what-where, e.g.:
+  //   "Emediong · #Family House"
+  //   body: "hey I was thinking we should..."
   const { data: parts } = await db
     .from("team_chat_participants")
     .select("team_member_id")
     .eq("thread_id", threadId);
-  const { data: thread } = await db.from("team_chat_threads").select("name, kind").eq("id", threadId).maybeSingle();
-  const title = thread?.name || (thread?.kind === "direct" ? "Direct message" : "Team chat");
+  const { data: thread } = await db
+    .from("team_chat_threads")
+    .select("name, kind")
+    .eq("id", threadId)
+    .maybeSingle();
+  const threadLabel = thread?.name || (thread?.kind === "direct" ? "Direct message" : "Team chat");
+
+  const senderName =
+    viewer.kind === "admin"
+      ? (viewer.name || "Admin")
+      : (viewer.session.full_name || "A teammate");
+  const senderId = viewer.kind === "team" ? viewer.session.id : null;
+
   const notifRows = (parts || [])
-    .filter((p: any) => p.team_member_id !== (viewer.kind === "team" ? viewer.session.id : null))
+    .filter((p: any) => p.team_member_id !== senderId)
     .map((p: any) => ({
       recipient_id: p.team_member_id,
       kind: "chat_message",
-      title: `New message in ${title}`,
-      body: body?.slice(0, 120) || "Attachment",
+      title: `${senderName} · ${threadLabel}`,
+      body: stickerKey ? "Sticker" : body?.slice(0, 120) || "Attachment",
       link: `/team/chat?thread=${threadId}`,
       thread_id: threadId,
-      actor_member_id: viewer.kind === "team" ? viewer.session.id : null,
+      actor_member_id: senderId,
       actor_is_admin: viewer.kind === "admin",
     }));
   if (notifRows.length) await db.from("team_notifications").insert(notifRows);
 
+  const [message] = await hydrateTeamMessages([msg]);
+
   return NextResponse.json({
     ok: true,
-    message: {
-      ...msg,
-      sender_name: viewer.kind === "admin" ? "Admin" : viewer.session.full_name,
-      sender_avatar: viewer.kind === "admin" ? null : viewer.session.avatar_url,
-    },
+    message,
   });
 }
