@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { supabase } from "@/lib/supabase";
+import FormattedRoleText from "@/components/hrm/FormattedRoleText";
 import {
     Briefcase, MapPin, Clock, ArrowRight, PartyPopper, Users, Wifi, Calendar,
     Heart, Coffee, GraduationCap, Award, Loader2, ExternalLink, X, Check, Plus,
@@ -531,16 +532,16 @@ function RoleDetailModal({ role, onClose }: { role: OpenRole; onClose: () => voi
                         <div className="space-y-6 text-[14px] text-brand-body/80 leading-relaxed">
                             <div>
                                 <h4 className="text-[12px] font-semibold uppercase tracking-wider text-brand-mute mb-2">About the role</h4>
-                                <p className="whitespace-pre-line">{role.description}</p>
+                                <FormattedRoleText value={role.description} />
                             </div>
                             <div>
                                 <h4 className="text-[12px] font-semibold uppercase tracking-wider text-brand-mute mb-2">Requirements</h4>
-                                <p className="whitespace-pre-line">{role.requirements}</p>
+                                <FormattedRoleText value={role.requirements} />
                             </div>
                             {role.perks && (
                                 <div>
                                     <h4 className="text-[12px] font-semibold uppercase tracking-wider text-brand-mute mb-2">Role-specific perks</h4>
-                                    <p className="whitespace-pre-line">{role.perks}</p>
+                                    <FormattedRoleText value={role.perks} />
                                 </div>
                             )}
                         </div>

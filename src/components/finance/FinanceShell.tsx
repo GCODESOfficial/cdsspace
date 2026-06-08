@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Briefcase, Tag, FileText, Repeat, Users, Receipt, Wallet, BarChart3, ArrowLeft } from "lucide-react";
+import { ArrowDownToLine, ArrowLeft, BarChart3, Briefcase, FileText, Receipt, Tag, Users, Wallet } from "lucide-react";
 import { ReactNode } from "react";
 
 const NAV = [
@@ -10,7 +10,7 @@ const NAV = [
   { href: "/admin/finance/projects", label: "Projects", icon: Briefcase },
   { href: "/admin/finance/price-list", label: "Price List", icon: Tag },
   { href: "/admin/finance/invoices", label: "Invoices", icon: FileText },
-  { href: "/admin/finance/subscriptions", label: "Subscriptions", icon: Repeat },
+  { href: "/admin/finance/subscriptions", label: "Inflow", icon: ArrowDownToLine },
   { href: "/admin/finance/contractors", label: "Contractors", icon: Users },
   { href: "/admin/finance/expenditures", label: "Expenditures", icon: Receipt },
   { href: "/admin/finance/payroll", label: "Payroll", icon: Wallet },
@@ -37,7 +37,7 @@ export default function FinanceShell({
       <div className="absolute top-0 right-0 -z-10 h-[420px] w-[420px] rounded-full bg-blue-300/30 blur-3xl" />
       <div className="absolute bottom-0 left-1/3 -z-10 h-[360px] w-[360px] rounded-full bg-indigo-200/30 blur-3xl" />
 
-      <div className="px-8 pt-8 pb-16 max-w-[1500px] mx-auto">
+      <div className="px-4 pt-4 pb-12 sm:px-6 sm:pt-6 lg:px-8 lg:pt-8 lg:pb-16 max-w-[1500px] mx-auto">
         {/* sub-nav pill bar */}
         <nav className="mb-8 flex items-center gap-1.5 overflow-x-auto rounded-2xl bg-white/60 backdrop-blur-xl border border-white/70 shadow-[0_8px_30px_rgba(15,40,90,0.06)] p-1.5">
           {NAV.map((n) => {
@@ -60,17 +60,17 @@ export default function FinanceShell({
         </nav>
 
         {/* header */}
-        <div className="flex items-end justify-between gap-4 mb-8">
+        <div className="flex flex-col gap-4 mb-8 sm:flex-row sm:items-end sm:justify-between">
           <div>
             {back && (
               <Link href={back.href} className="inline-flex items-center gap-1 text-sm text-blue-600 hover:text-blue-800 mb-2">
                 <ArrowLeft className="w-4 h-4" /> {back.label}
               </Link>
             )}
-            <h1 className="text-[34px] leading-tight font-bold text-gray-900 tracking-tight">{title}</h1>
+            <h1 className="text-3xl sm:text-[34px] leading-tight font-bold text-gray-900 tracking-tight">{title}</h1>
             {subtitle && <p className="text-gray-500 mt-1">{subtitle}</p>}
           </div>
-          {actions && <div className="flex items-center gap-2">{actions}</div>}
+          {actions && <div className="flex flex-wrap items-center gap-2">{actions}</div>}
         </div>
 
         {children}

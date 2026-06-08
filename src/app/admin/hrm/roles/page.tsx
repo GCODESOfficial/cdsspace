@@ -1,11 +1,12 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { supabase } from "@/lib/supabase";
 import { useToast } from "@/hooks/use-toast";
-import { Trash2, Loader2, Plus, Pencil, Save, X, Briefcase, MapPin, ToggleLeft, ToggleRight, Eye, ExternalLink, Copy, Check } from "lucide-react";
+import { Trash2, Loader2, Plus, Pencil, Save, X, Briefcase, MapPin, ToggleLeft, ToggleRight, Eye, ExternalLink, Copy, Check, Bold, List, Link2 } from "lucide-react";
 import { AIAssistButton } from "@/components/ai/AIAssistButton";
-import { appAlert, appConfirm, appPrompt } from "@/lib/app-notify";
+import { appConfirm, appPrompt } from "@/lib/app-notify";
+import FormattedRoleText from "@/components/hrm/FormattedRoleText";
 
 interface OpenRole {
   id: string;
@@ -63,6 +64,8 @@ export default function OpenRolesAdmin() {
   const [editId, setEditId] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [viewApps, setViewApps] = useState<OpenRole | null>(null);
+  const [previewOpen, setPreviewOpen] = useState(false);
+  const [roleActive, setRoleActive] = useState(false);
   const { toast } = useToast();
 
   // Form fields
@@ -91,6 +94,7 @@ export default function OpenRolesAdmin() {
   function resetForm() {
     setTitle(""); setRoleType("full-time"); setLocation(""); setDescription("");
     setRequirements(""); setPerks(""); setApplicationLink(""); setEditId(null);
+    setRoleActive(false);
   }
 
   function startEdit(r: OpenRole) {
@@ -102,11 +106,11 @@ export default function OpenRolesAdmin() {
     setRequirements(r.requirements);
     setPerks(r.perks || "");
     setApplicationLink(r.application_link || "");
+    setRoleActive(!!r.is_active);
     setShowForm(true);
   }
 
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault();
+  async function saveRole(publish: boolean) {
     if (!title.trim() || !description.trim() || !requirements.trim()) {
       toast({ title: "Missing fields", description: "Title, description, and requirements are required", variant: "destructive" });
       return;
@@ -120,17 +124,23 @@ export default function OpenRolesAdmin() {
       requirements: requirements.trim(),
       perks: perks.trim() || null,
       application_link: applicationLink.trim() || null,
+      is_active: publish,
     };
     const { error } = editId
       ? await supabase.from("open_roles").update(payload).eq("id", editId)
       : await supabase.from("open_roles").insert(payload);
     if (!error) {
-      toast({ title: editId ? "Updated" : "Created", description: editId ? "Role updated" : "Role posted" });
+      toast({ title: editId ? "Updated" : "Created", description: publish ? "Role is live on careers" : "Role saved as draft" });
       resetForm(); setShowForm(false); fetchRoles();
     } else {
       toast({ title: "Error", description: error.message, variant: "destructive" });
     }
     setIsLoading(false);
+  }
+
+  function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    saveRole(roleActive);
   }
 
   async function toggleActive(r: OpenRole) {
@@ -147,8 +157,8 @@ export default function OpenRolesAdmin() {
   const appCountFor = (roleId: string) => applications.filter(a => a.role_id === roleId).length;
 
   return (
-    <div className="p-8 max-w-[1100px]">
-      <div className="flex items-center justify-between mb-8">
+    <div className="p-4 sm:p-6 lg:p-8 max-w-[1100px]">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between mb-8">
         <div>
           <p className="text-[#0A4FE8] text-sm font-semibold">HRM</p>
           <h1 className="text-[28px] font-bold text-[#0D1B39] tracking-tight">Open Roles</h1>
@@ -164,7 +174,7 @@ export default function OpenRolesAdmin() {
         <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-6 mb-8">
           <h2 className="text-[15px] font-semibold text-[#0D1B39] mb-5">{editId ? "Edit Role" : "New Role"}</h2>
           <form onSubmit={handleSubmit} className="space-y-4">
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid gap-4 md:grid-cols-2">
               <Field label="Job Title *" value={title} onChange={setTitle} placeholder="e.g. Senior Brand Designer" />
               <div>
                 <label className="block text-xs font-medium text-gray-500 mb-1.5">Role Type *</label>
@@ -174,12 +184,12 @@ export default function OpenRolesAdmin() {
                 </select>
               </div>
             </div>
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid gap-4 md:grid-cols-2">
               <Field label="Location" value={location} onChange={setLocation} placeholder="e.g. Remote / Uyo, Nigeria" />
               <Field label="External Application Link" value={applicationLink} onChange={setApplicationLink} placeholder="https://..." />
             </div>
             <div className="relative">
-              <Textarea label="Description *" value={description} onChange={setDescription} rows={4} placeholder="What the role is about, day-to-day responsibilities..." />
+              <RichTextarea label="Description *" value={description} onChange={setDescription} rows={5} placeholder="What the role is about, day-to-day responsibilities..." />
               <div className="absolute top-0 right-0">
                 <AIAssistButton
                   kind="role_description"
@@ -189,7 +199,7 @@ export default function OpenRolesAdmin() {
               </div>
             </div>
             <div className="relative">
-              <Textarea label="Requirements *" value={requirements} onChange={setRequirements} rows={4} placeholder="Skills, experience, qualifications..." />
+              <RichTextarea label="Requirements *" value={requirements} onChange={setRequirements} rows={5} placeholder="Skills, experience, qualifications..." />
               <div className="absolute top-0 right-0">
                 <AIAssistButton
                   kind="role_requirements"
@@ -199,7 +209,7 @@ export default function OpenRolesAdmin() {
               </div>
             </div>
             <div className="relative">
-              <Textarea label="Role-specific Perks" value={perks} onChange={setPerks} rows={2} placeholder="(Optional) Benefits unique to this role" />
+              <RichTextarea label="Role-specific Perks" value={perks} onChange={setPerks} rows={3} placeholder="(Optional) Benefits unique to this role" />
               <div className="absolute top-0 right-0">
                 <AIAssistButton
                   kind="role_perks"
@@ -209,18 +219,76 @@ export default function OpenRolesAdmin() {
               </div>
             </div>
 
-            <div className="flex gap-2">
-              <button type="submit" disabled={isLoading}
+            <div className="flex flex-col gap-3 border-t border-gray-100 pt-4 sm:flex-row sm:items-center sm:justify-between">
+              <label className="flex items-center gap-2 text-sm font-medium text-gray-600">
+                <input
+                  type="checkbox"
+                  checked={roleActive}
+                  onChange={(e) => setRoleActive(e.target.checked)}
+                  className="h-4 w-4 rounded border-gray-300 text-[#0A4FE8] focus:ring-blue-100"
+                />
+                Publish when saved
+              </label>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={() => setPreviewOpen(true)}
+                  className="flex items-center gap-2 px-4 py-2.5 text-sm text-[#0A4FE8] border border-blue-100 rounded-xl hover:bg-blue-50 transition"
+                >
+                  <Eye className="w-4 h-4" /> Preview
+                </button>
+                <button
+                  type="button"
+                  disabled={isLoading}
+                  onClick={() => saveRole(false)}
+                  className="flex items-center gap-2 px-5 py-2.5 text-sm text-gray-600 border border-gray-200 rounded-xl hover:bg-gray-50 transition disabled:opacity-50"
+                >
+                  {isLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                  Save Draft
+                </button>
+                <button type="button" disabled={isLoading} onClick={() => saveRole(true)}
                 className="flex items-center gap-2 px-6 py-2.5 bg-[#0A4FE8] text-white text-sm font-medium rounded-xl hover:bg-[#083EC0] transition disabled:opacity-50">
                 {isLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
-                {editId ? "Save Changes" : "Post Role"}
-              </button>
-              <button type="button" onClick={() => { resetForm(); setShowForm(false); }}
-                className="px-4 py-2.5 text-sm text-gray-500 border border-gray-200 rounded-xl hover:bg-gray-50 transition">
-                Cancel
-              </button>
+                  Publish Live
+                </button>
+                <button type="button" onClick={() => { resetForm(); setShowForm(false); }}
+                  className="px-4 py-2.5 text-sm text-gray-500 border border-gray-200 rounded-xl hover:bg-gray-50 transition">
+                  Cancel
+                </button>
+              </div>
             </div>
           </form>
+        </div>
+      )}
+
+      {previewOpen && (
+        <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl max-w-3xl w-full max-h-[86vh] overflow-hidden flex flex-col shadow-2xl">
+            <div className="px-5 sm:px-6 py-4 border-b border-gray-100 flex items-center justify-between">
+              <div className="min-w-0">
+                <p className="text-[11px] font-semibold text-[#0A4FE8] uppercase tracking-wider">Role Preview</p>
+                <h2 className="text-lg font-bold text-[#0D1B39] truncate">{title || "Untitled role"}</h2>
+              </div>
+              <button onClick={() => setPreviewOpen(false)} className="p-2 rounded-lg hover:bg-gray-100">
+                <X className="w-5 h-5 text-gray-400" />
+              </button>
+            </div>
+            <div className="flex-1 overflow-y-auto p-5 sm:p-6">
+              <div className="flex flex-wrap gap-2 text-xs text-gray-500 mb-5">
+                <span className={`px-2.5 py-1 rounded-md font-medium ${TYPE_COLORS[roleType] || "bg-gray-100 text-gray-600"}`}>{roleType}</span>
+                {location && <span className="inline-flex items-center gap-1"><MapPin className="w-3 h-3" />{location}</span>}
+                <span className={roleActive ? "text-emerald-600" : "text-gray-400"}>{roleActive ? "Live after save" : "Draft after save"}</span>
+              </div>
+              <PreviewSection title="Description" value={description} />
+              <PreviewSection title="Requirements" value={requirements} />
+              {perks.trim() && <PreviewSection title="Perks" value={perks} />}
+              {applicationLink.trim() && (
+                <a href={applicationLink.trim()} target="_blank" rel="noreferrer" className="mt-4 inline-flex items-center gap-2 rounded-xl bg-[#0A4FE8] px-4 py-2.5 text-sm font-semibold text-white">
+                  Application Link <ExternalLink className="w-4 h-4" />
+                </a>
+              )}
+            </div>
+          </div>
         </div>
       )}
 
@@ -428,12 +496,105 @@ function Field({ label, value, onChange, placeholder }: { label: string; value: 
   );
 }
 
-function Textarea({ label, value, onChange, rows, placeholder }: { label: string; value: string; onChange: (v: string) => void; rows: number; placeholder?: string }) {
+function PreviewSection({ title, value }: { title: string; value: string }) {
+  return (
+    <section className="mb-5">
+      <h3 className="text-sm font-semibold text-[#0D1B39]">{title}</h3>
+      <FormattedRoleText value={value} className="mt-2" />
+    </section>
+  );
+}
+
+function RichTextarea({ label, value, onChange, rows, placeholder }: { label: string; value: string; onChange: (v: string) => void; rows: number; placeholder?: string }) {
+  const ref = useRef<HTMLTextAreaElement | null>(null);
+
+  function replaceSelection(nextValue: string, selectionStart?: number, selectionEnd?: number) {
+    onChange(nextValue);
+    requestAnimationFrame(() => {
+      ref.current?.focus();
+      if (selectionStart != null && selectionEnd != null) ref.current?.setSelectionRange(selectionStart, selectionEnd);
+    });
+  }
+
+  function wrapSelection(prefix: string, suffix = prefix) {
+    const textarea = ref.current;
+    if (!textarea) return onChange(`${value}${prefix}${suffix}`);
+    const start = textarea.selectionStart;
+    const end = textarea.selectionEnd;
+    const selected = value.slice(start, end) || "text";
+    const replacement = `${prefix}${selected}${suffix}`;
+    replaceSelection(`${value.slice(0, start)}${replacement}${value.slice(end)}`, start + prefix.length, start + prefix.length + selected.length);
+  }
+
+  function bulletSelection() {
+    const textarea = ref.current;
+    if (!textarea) return onChange(`${value}\n- `);
+    const start = textarea.selectionStart;
+    const end = textarea.selectionEnd;
+    const selected = value.slice(start, end) || "List item";
+    const replacement = selected
+      .split(/\r?\n/)
+      .map((line) => line.trim() ? `- ${line.replace(/^[-*•]\s+/, "")}` : line)
+      .join("\n");
+    replaceSelection(`${value.slice(0, start)}${replacement}${value.slice(end)}`, start, start + replacement.length);
+  }
+
+  async function insertLink() {
+    const href = await appPrompt({
+      title: "Add link",
+      message: "Paste the URL to use in this role section.",
+      placeholder: "https://...",
+      inputType: "url",
+      defaultValue: "https://",
+    });
+    if (href === null) return;
+    const trimmedHref = href.trim();
+    if (!trimmedHref) return;
+    const textarea = ref.current;
+    const start = textarea?.selectionStart ?? value.length;
+    const end = textarea?.selectionEnd ?? value.length;
+    const selected = value.slice(start, end) || "Link text";
+    const replacement = `[${selected}](${trimmedHref})`;
+    replaceSelection(`${value.slice(0, start)}${replacement}${value.slice(end)}`, start + 1, start + 1 + selected.length);
+  }
+
   return (
     <div>
       <label className="block text-xs font-medium text-gray-500 mb-1.5">{label}</label>
-      <textarea value={value} onChange={(e) => onChange(e.target.value)} rows={rows} placeholder={placeholder}
-        className="w-full px-4 py-2.5 rounded-xl bg-gray-50 border border-gray-200 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-300 transition" />
+      <div className="overflow-hidden rounded-xl border border-gray-200 bg-gray-50 focus-within:border-blue-300 focus-within:ring-2 focus-within:ring-blue-100">
+        <div className="flex flex-wrap items-center gap-1 border-b border-gray-200 bg-white/70 px-2 py-1.5">
+          <FormatButton onClick={() => wrapSelection("**")} title="Bold">
+            <Bold className="w-4 h-4" />
+          </FormatButton>
+          <FormatButton onClick={bulletSelection} title="Bullets">
+            <List className="w-4 h-4" />
+          </FormatButton>
+          <FormatButton onClick={insertLink} title="Inline link">
+            <Link2 className="w-4 h-4" />
+          </FormatButton>
+        </div>
+        <textarea
+          ref={ref}
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          rows={rows}
+          placeholder={placeholder}
+          className="w-full resize-none bg-transparent px-4 py-3 text-sm outline-none"
+        />
+      </div>
     </div>
+  );
+}
+
+function FormatButton({ onClick, title, children }: { onClick: () => void; title: string; children: ReactNode }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      title={title}
+      className="grid h-8 w-8 place-items-center rounded-lg text-gray-500 transition hover:bg-blue-50 hover:text-[#0A4FE8]"
+    >
+      {children}
+    </button>
   );
 }

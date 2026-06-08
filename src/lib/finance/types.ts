@@ -132,6 +132,21 @@ export interface FinanceSubscription {
   created_at: string;
 }
 
+export interface FinanceInflow {
+  id: string;
+  project_id: string | null;
+  title: string;
+  source: string | null;
+  amount: number;
+  currency: Currency;
+  received_on: string;
+  payment_method: string | null;
+  reference: string | null;
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface FinanceContractor {
   id: string;
   name: string;
@@ -183,7 +198,8 @@ export interface FinanceExpenditure {
   currency: Currency;
   spent_on: string;
   recurring: boolean;
-  recurrence_cycle: "monthly" | "quarterly" | "yearly" | null;
+  recurrence_cycle: "daily" | "weekly" | "monthly" | "quarterly" | "yearly" | "custom" | null;
+  custom_interval_days?: number | null;
   next_due_date: string | null;
   notes: string | null;
   created_at: string;

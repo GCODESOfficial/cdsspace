@@ -82,6 +82,18 @@ interface ExpenditureRow {
   spent_on: string;
 }
 
+interface InflowRow {
+  id: string;
+  title: string;
+  source: string | null;
+  amount: number;
+  currency: string;
+  received_on: string;
+  payment_method: string | null;
+  reference: string | null;
+  notes: string | null;
+}
+
 interface ContractorPaymentRow {
   id: string;
   amount: number;
@@ -128,6 +140,7 @@ interface LedgerRow {
 
 interface FinancialReport {
   totalRevenue: number;
+  totalInflow: number;
   totalExpenses: number;
   netProfit: number;
   outstandingReceivables: number;
@@ -143,6 +156,7 @@ interface FinancialReport {
   expenseBreakdown: BreakdownPoint[];
   ledgerRows: LedgerRow[];
   invoices: InvoiceRow[];
+  inflows: InflowRow[];
   expenditures: ExpenditureRow[];
   contractorPayments: ContractorPaymentRow[];
   payrollRuns: PayrollRunRow[];
@@ -196,7 +210,7 @@ function periodRange(year: number, period: QuickPeriod) {
 }
 
 function monthKey(date: string) {
-  return date.slice(0, 7);
+  return safeDateKey(date).slice(0, 7);
 }
 
 function monthLabel(key: string) {
@@ -233,6 +247,25 @@ function buildMonthBuckets(start: string, end: string) {
 function percent(n: number) {
   if (!Number.isFinite(n)) return "0%";
   return `${n.toFixed(1)}%`;
+}
+
+function safeDateKey(value: string | null | undefined) {
+  if (!value) return "";
+  if (/^\d{4}-\d{2}-\d{2}/.test(value)) return value.slice(0, 10);
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? "" : parsed.toISOString().slice(0, 10);
+}
+
+function safeFormatDate(value: string | null | undefined) {
+  const key = safeDateKey(value);
+  if (!key) return "-";
+  const parsed = new Date(`${key}T12:00:00`);
+  return Number.isNaN(parsed.getTime()) ? "-" : parsed.toLocaleDateString();
+}
+
+function sortTime(value: string) {
+  const key = safeDateKey(value);
+  return key ? new Date(`${key}T12:00:00`).getTime() : 0;
 }
 
 function formatCompact(n: number) {
@@ -276,6 +309,7 @@ function exportRows(report: FinancialReport, periodLabel: string, taxDetails: Ta
     ["Section", "Metric", "Value", "Debit", "Credit", "Date", "Memo"],
     ["Period", "Selected period", periodLabel, "", "", "", ""],
     ["Profit & Loss", "Revenue", String(report.totalRevenue), "", "", "", ""],
+    ["Profit & Loss", "Recorded inflow", String(report.totalInflow), "", String(report.totalInflow), "", ""],
     ["Profit & Loss", "Operating expenses", String(report.operationsSpend), String(report.operationsSpend), "", "", ""],
     ["Profit & Loss", "Contractor payments", String(report.contractorPay), String(report.contractorPay), "", "", ""],
     ["Profit & Loss", "Payroll", String(report.payroll), String(report.payroll), "", "", ""],
@@ -359,8 +393,8 @@ export default function FinancialAuditPage() {
   const fmt = (n: number) => `₦${n.toLocaleString("en", { maximumFractionDigits: 0 })}`;
 
   const periodLabel = useMemo(() => {
-    const from = new Date(`${startDate}T00:00:00`).toLocaleDateString();
-    const to = new Date(`${endDate}T00:00:00`).toLocaleDateString();
+    const from = safeFormatDate(startDate);
+    const to = safeFormatDate(endDate);
     return `${from} - ${to}`;
   }, [startDate, endDate]);
 
@@ -413,12 +447,17 @@ export default function FinancialAuditPage() {
     const startMonth = monthKey(startDate);
     const endMonth = monthKey(endDate);
 
-    const [invoicesRes, expendituresRes, contractorPayRes, payrollRunsRes, employeeRes] = await Promise.all([
+    const [invoicesRes, inflowsRes, expendituresRes, contractorPayRes, payrollRunsRes, employeeRes] = await Promise.all([
       supabase
         .from("finance_invoices")
         .select("id, invoice_number, client_name, total, subtotal, tax_amount, tax_rate, status, issue_date, due_date")
         .gte("issue_date", startDate)
         .lte("issue_date", endDate),
+      supabase
+        .from("finance_inflows")
+        .select("id, title, source, amount, currency, received_on, payment_method, reference, notes")
+        .gte("received_on", startDate)
+        .lte("received_on", endDate),
       supabase
         .from("finance_expenditures")
         .select("id, title, category, amount, spent_on")
@@ -438,13 +477,16 @@ export default function FinancialAuditPage() {
     ]);
 
     const invoices = (invoicesRes.data || []) as InvoiceRow[];
+    const inflows = (inflowsRes.data || []) as InflowRow[];
     const expenditures = (expendituresRes.data || []) as ExpenditureRow[];
     const contractorPayments = (contractorPayRes.data || []) as ContractorPaymentRow[];
     const payrollRuns = (payrollRunsRes.data || []) as PayrollRunRow[];
     const employees = (employeeRes.data || []) as EmployeeRow[];
 
     const paidInvoices = invoices.filter((invoice) => invoice.status === "paid");
-    const totalRevenue = paidInvoices.reduce((sum, invoice) => sum + Number(invoice.total || 0), 0);
+    const invoiceRevenue = paidInvoices.reduce((sum, invoice) => sum + Number(invoice.total || 0), 0);
+    const totalInflow = inflows.reduce((sum, entry) => sum + Number(entry.amount || 0), 0);
+    const totalRevenue = invoiceRevenue + totalInflow;
     const outstandingReceivables = invoices
       .filter((invoice) => invoice.status === "sent" || invoice.status === "overdue")
       .reduce((sum, invoice) => sum + Number(invoice.total || 0), 0);
@@ -456,6 +498,11 @@ export default function FinancialAuditPage() {
     paidInvoices.forEach((invoice) => {
       const bucket = buckets.get(monthKey(invoice.issue_date));
       if (bucket) bucket.revenue += Number(invoice.total || 0);
+    });
+
+    inflows.forEach((entry) => {
+      const bucket = buckets.get(monthKey(entry.received_on));
+      if (bucket) bucket.revenue += Number(entry.amount || 0);
     });
 
     expenditures.forEach((entry) => {
@@ -514,6 +561,13 @@ export default function FinancialAuditPage() {
         debit: 0,
         credit: Number(invoice.total || 0),
       })),
+      ...inflows.map((entry) => ({
+        date: entry.received_on,
+        account: "Inflow",
+        memo: `${entry.title}${entry.source ? ` - ${entry.source}` : ""}`,
+        debit: 0,
+        credit: Number(entry.amount || 0),
+      })),
       ...expenditures.map((entry) => ({
         date: entry.spent_on,
         account: entry.category || "Operating expense",
@@ -536,11 +590,12 @@ export default function FinancialAuditPage() {
         credit: 0,
       })),
     ]
-      .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
+      .sort((a, b) => sortTime(b.date) - sortTime(a.date))
       .slice(0, 12);
 
     setReport({
       totalRevenue,
+      totalInflow,
       totalExpenses,
       netProfit,
       outstandingReceivables,
@@ -556,6 +611,7 @@ export default function FinancialAuditPage() {
       expenseBreakdown,
       ledgerRows,
       invoices,
+      inflows,
       expenditures,
       contractorPayments,
       payrollRuns,
@@ -1166,6 +1222,7 @@ function ProfitLossReport({ report, fmt, periodLabel }: { report: FinancialRepor
       <p className="text-xs text-gray-400 mb-6">{periodLabel}</p>
       <div className="space-y-3">
         <Row label="Revenue" value={fmt(report.totalRevenue)} bold />
+        <Row label="Recorded Inflow" value={fmt(report.totalInflow)} />
         <Row label="Operating Expenses" value={`-${fmt(report.operationsSpend)}`} />
         <Row label="Contractor Payments" value={`-${fmt(report.contractorPay)}`} />
         <Row label="Payroll" value={`-${fmt(report.payroll)}`} />
@@ -1190,7 +1247,7 @@ function BalanceSheetReport({ report, fmt, periodLabel }: { report: FinancialRep
       <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
         <div>
           <h4 className="text-[12px] font-semibold uppercase tracking-wider text-gray-400 mb-3">Assets</h4>
-          <Row label="Collected Revenue" value={fmt(report.totalRevenue)} />
+          <Row label="Collected Revenue + Inflow" value={fmt(report.totalRevenue)} />
           <Row label="Outstanding Receivables" value={fmt(report.outstandingReceivables)} />
           <Row label="Total Assets" value={fmt(report.totalAssets)} bold />
         </div>
@@ -1226,7 +1283,7 @@ function LedgerReport({ report, fmt, periodLabel }: { report: FinancialReport; f
             <tbody className="divide-y divide-gray-100">
               {report.ledgerRows.map((row, index) => (
                 <tr key={`${row.date}-${row.memo}-${index}`}>
-                  <td className="py-3 pr-4 text-gray-500 whitespace-nowrap">{new Date(`${row.date}T00:00:00`).toLocaleDateString()}</td>
+                  <td className="py-3 pr-4 text-gray-500 whitespace-nowrap">{safeFormatDate(row.date)}</td>
                   <td className="py-3 pr-4 font-medium text-[#0D1B39]">{row.account}</td>
                   <td className="py-3 pr-4 text-gray-500">{row.memo}</td>
                   <td className="py-3 pr-4 text-right tabular-nums">{row.debit ? fmt(row.debit) : "—"}</td>

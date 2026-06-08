@@ -5,7 +5,7 @@ import Link from "next/link";
 import FinanceShell, { glassCard } from "@/components/finance/FinanceShell";
 import { supabase } from "@/lib/supabase";
 import {
-  Briefcase, Tag, FileText, Repeat, Users, Receipt, Wallet, BarChart3, ArrowUpRight,
+  ArrowDownToLine, Briefcase, Tag, FileText, Users, Receipt, Wallet, BarChart3, ArrowUpRight,
   TrendingUp, TrendingDown, DollarSign, Activity, AlertCircle, CheckCircle2, Clock, Loader2,
 } from "lucide-react";
 
@@ -13,7 +13,7 @@ const SECTIONS = [
   { href: "/admin/finance/projects",      label: "Projects",      desc: "Create & manage projects and milestones",    icon: Briefcase, tint: "from-blue-500 to-indigo-500" },
   { href: "/admin/finance/price-list",    label: "Price List",    desc: "Products & services with unit prices",       icon: Tag,       tint: "from-fuchsia-500 to-pink-500" },
   { href: "/admin/finance/invoices",      label: "Invoices",      desc: "Generate, send & track invoices",             icon: FileText,  tint: "from-emerald-500 to-teal-500" },
-  { href: "/admin/finance/subscriptions", label: "Subscriptions", desc: "Recurring tools, servers & services",         icon: Repeat,    tint: "from-amber-500 to-orange-500" },
+  { href: "/admin/finance/subscriptions", label: "Inflow",        desc: "Record positive money received",              icon: ArrowDownToLine, tint: "from-emerald-500 to-teal-500" },
   { href: "/admin/finance/contractors",   label: "Contractors",   desc: "Team & contractor payments",                  icon: Users,     tint: "from-violet-500 to-purple-500" },
   { href: "/admin/finance/expenditures",  label: "Expenditures",  desc: "Track all outgoing spend",                    icon: Receipt,   tint: "from-rose-500 to-red-500" },
   { href: "/admin/finance/payroll",       label: "Payroll",       desc: "Employees & bank payroll exports",            icon: Wallet,    tint: "from-cyan-500 to-sky-500" },
@@ -33,10 +33,11 @@ interface Stats {
   overdueInvoices: number;
   totalContractors: number;
   totalEmployees: number;
-  monthlySubscriptionsCost: number;
+  totalInflow: number;
   outstandingPayables: number;
   recentInvoices: any[];
   recentExpenses: any[];
+  recentInflows: any[];
 }
 
 const formatCurrency = (n: number) => `₦${n.toLocaleString("en", { maximumFractionDigits: 0 })}`;
@@ -54,7 +55,7 @@ export default function FinanceHome() {
           expendituresRes,
           contractorsRes,
           employeesRes,
-          subscriptionsRes,
+          inflowsRes,
           contractorPaymentsRes,
         ] = await Promise.all([
           supabase.from("finance_projects").select("id, status"),
@@ -62,7 +63,7 @@ export default function FinanceHome() {
           supabase.from("finance_expenditures").select("id, amount, currency, title, spent_on").order("spent_on", { ascending: false }),
           supabase.from("finance_contractors").select("id"),
           supabase.from("finance_employees").select("id, base_salary").eq("active", true),
-          supabase.from("finance_subscriptions").select("id, amount, billing_cycle, active").eq("active", true),
+          supabase.from("finance_inflows").select("id, title, source, amount, currency, received_on").order("received_on", { ascending: false }),
           supabase.from("finance_contractor_payments").select("amount"),
         ]);
 
@@ -71,22 +72,16 @@ export default function FinanceHome() {
         const expenditures = expendituresRes.data || [];
         const contractors = contractorsRes.data || [];
         const employees = employeesRes.data || [];
-        const subscriptions = subscriptionsRes.data || [];
+        const inflows = inflowsRes.data || [];
         const contractorPayments = contractorPaymentsRes.data || [];
 
-        const totalRevenue = invoices.filter(i => i.status === "paid").reduce((sum, i) => sum + Number(i.total || 0), 0);
+        const invoiceRevenue = invoices.filter(i => i.status === "paid").reduce((sum, i) => sum + Number(i.total || 0), 0);
+        const totalInflow = inflows.reduce((sum, entry) => sum + Number(entry.amount || 0), 0);
+        const totalRevenue = invoiceRevenue + totalInflow;
         const totalExpenses =
           expenditures.reduce((sum, e) => sum + Number(e.amount || 0), 0) +
           contractorPayments.reduce((sum, c) => sum + Number(c.amount || 0), 0) +
           employees.reduce((sum, e) => sum + Number(e.base_salary || 0), 0);
-
-        const monthlySubscriptionsCost = subscriptions.reduce((sum, s) => {
-          const amt = Number(s.amount || 0);
-          if (s.billing_cycle === "monthly") return sum + amt;
-          if (s.billing_cycle === "quarterly") return sum + amt / 3;
-          if (s.billing_cycle === "yearly") return sum + amt / 12;
-          return sum;
-        }, 0);
 
         const outstandingPayables = invoices
           .filter(i => i.status === "sent" || i.status === "overdue")
@@ -105,10 +100,11 @@ export default function FinanceHome() {
           overdueInvoices: invoices.filter(i => i.status === "overdue").length,
           totalContractors: contractors.length,
           totalEmployees: employees.length,
-          monthlySubscriptionsCost,
+          totalInflow,
           outstandingPayables,
           recentInvoices: invoices.slice(0, 5),
           recentExpenses: expenditures.slice(0, 5),
+          recentInflows: inflows.slice(0, 5),
         });
       } catch (error) {
         console.error("Failed to load finance stats:", error);
@@ -141,7 +137,7 @@ export default function FinanceHome() {
                   <span className="text-[11px] font-semibold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-md">REVENUE</span>
                 </div>
                 <p className="text-3xl font-bold text-gray-900 tabular-nums">{formatCurrency(stats.totalRevenue)}</p>
-                <p className="text-sm text-gray-500 mt-1">Total earnings from paid invoices</p>
+                <p className="text-sm text-gray-500 mt-1">Paid invoices plus recorded inflow</p>
               </div>
             </div>
 
@@ -185,7 +181,7 @@ export default function FinanceHome() {
             <MiniMetric icon={<Briefcase className="w-4 h-4 text-blue-600" />} label="Total Projects" value={stats.totalProjects} sub={`${stats.activeProjects} active · ${stats.completedProjects} done`} bg="bg-blue-50" />
             <MiniMetric icon={<FileText className="w-4 h-4 text-emerald-600" />} label="Invoices" value={stats.totalInvoices} sub={`${stats.paidInvoices} paid · ${stats.pendingInvoices} pending`} bg="bg-emerald-50" />
             <MiniMetric icon={<Users className="w-4 h-4 text-violet-600" />} label="Contractors" value={stats.totalContractors} sub={`${stats.totalEmployees} employees`} bg="bg-violet-50" />
-            <MiniMetric icon={<Repeat className="w-4 h-4 text-amber-600" />} label="Monthly Subs" value={formatCurrency(stats.monthlySubscriptionsCost)} sub="Recurring cost" bg="bg-amber-50" valueIsString />
+            <MiniMetric icon={<ArrowDownToLine className="w-4 h-4 text-emerald-600" />} label="Inflow" value={formatCurrency(stats.totalInflow)} sub="Positive funds" bg="bg-emerald-50" valueIsString />
           </div>
 
           {/* Alerts Row */}

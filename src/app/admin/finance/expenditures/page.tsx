@@ -8,14 +8,14 @@ import { Textarea } from "@/components/ui/textarea";
 import { Dialog, DialogContent, DialogTrigger, DialogFooter } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
-import { Plus, Receipt, Trash2, Repeat, Zap } from "lucide-react";
+import { Pencil, Plus, Receipt, Trash2, Repeat, Zap } from "lucide-react";
 import FinanceShell, { glassCard } from "@/components/finance/FinanceShell";
 import StatCard from "@/components/finance/StatCard";
 import ActivityPanel from "@/components/admin/ActivityPanel";
 import ModalHeader from "@/components/finance/ModalHeader";
 import { SuggestionInput } from "@/components/finance/SuggestionInput";
 import { CURRENCIES, Currency, FinanceExpenditure, formatMoney } from "@/lib/finance/types";
-import { appAlert, appConfirm, appPrompt } from "@/lib/app-notify";
+import { appAlert, appConfirm } from "@/lib/app-notify";
 
 type Cycle = "daily" | "weekly" | "monthly" | "quarterly" | "yearly" | "custom";
 
@@ -34,6 +34,7 @@ export default function ExpendituresPage() {
   const [list, setList] = useState<FinanceExpenditure[]>([]);
   const [loading, setLoading] = useState(true);
   const [open, setOpen] = useState(false);
+  const [editing, setEditing] = useState<FinanceExpenditure | null>(null);
   const [form, setForm] = useState<typeof EMPTY>(EMPTY);
 
   const load = async () => {
@@ -44,10 +45,48 @@ export default function ExpendituresPage() {
   };
   useEffect(() => { load(); }, []);
 
+  const openNew = () => {
+    setEditing(null);
+    setForm({ ...EMPTY, spent_on: new Date().toISOString().slice(0, 10) });
+    setOpen(true);
+  };
+
+  const openEdit = (entry: FinanceExpenditure) => {
+    setEditing(entry);
+    setForm({
+      title: entry.title,
+      category: entry.category ?? "",
+      amount: String(entry.amount),
+      currency: entry.currency,
+      spent_on: entry.spent_on?.slice(0, 10) || new Date().toISOString().slice(0, 10),
+      recurring: !!entry.recurring,
+      recurrence_cycle: (entry.recurrence_cycle as Cycle | null) ?? "monthly",
+      custom_interval_days: String(entry.custom_interval_days ?? ""),
+      next_due_date: entry.next_due_date?.slice(0, 10) || "",
+      notes: entry.notes ?? "",
+    });
+    setOpen(true);
+  };
+
   const save = async () => {
     if (!form.title || !form.amount) return;
-    const r = await fetch("/api/admin/finance/expenditures", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...form, amount: Number(form.amount) }) });
-    if (r.ok) { setOpen(false); setForm(EMPTY); load(); }
+    const payload = {
+      ...form,
+      amount: Number(form.amount),
+      category: form.category.trim() || null,
+      notes: form.notes.trim() || null,
+      recurrence_cycle: form.recurring ? form.recurrence_cycle : null,
+      custom_interval_days: form.recurring && form.recurrence_cycle === "custom" ? Number(form.custom_interval_days || 0) || null : null,
+      next_due_date: form.recurring ? form.next_due_date || null : null,
+    };
+    const url = editing ? `/api/admin/finance/expenditures/${editing.id}` : "/api/admin/finance/expenditures";
+    const method = editing ? "PATCH" : "POST";
+    const r = await fetch(url, { method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+    if (r.ok) { setOpen(false); setEditing(null); setForm(EMPTY); load(); }
+    else {
+      const json = await r.json().catch(() => ({}));
+      appAlert(json.error || "Could not save expenditure.");
+    }
   };
   const remove = async (id: string) => {
     if (!(await appConfirm("Delete this expenditure?"))) return;
@@ -63,14 +102,23 @@ export default function ExpendituresPage() {
       title="Expenditures"
       subtitle="Track every outgoing spend, one-time or recurring."
       actions={
-        <Dialog open={open} onOpenChange={setOpen}>
+        <Dialog
+          open={open}
+          onOpenChange={(next) => {
+            setOpen(next);
+            if (!next) {
+              setEditing(null);
+              setForm(EMPTY);
+            }
+          }}
+        >
           <DialogTrigger asChild>
-            <Button className="h-11 px-5 rounded-xl bg-gradient-to-b from-blue-600 to-blue-700 shadow-lg shadow-blue-600/30">
+            <Button onClick={openNew} className="h-11 px-5 rounded-xl bg-gradient-to-b from-blue-600 to-blue-700 shadow-lg shadow-blue-600/30">
               <Plus className="w-4 h-4 mr-1.5" /> New Expenditure
             </Button>
           </DialogTrigger>
           <DialogContent className="bg-white max-w-xl rounded-2xl border-0 shadow-2xl p-7">
-            <ModalHeader icon={Receipt} title="New Expenditure" subtitle="Track outgoing spend, one-time or recurring" accent="from-rose-500 to-red-500" />
+            <ModalHeader icon={Receipt} title={editing ? "Edit Expenditure" : "New Expenditure"} subtitle="Track outgoing spend, one-time or recurring" accent="from-rose-500 to-red-500" />
             <div className="space-y-4 mt-2">
               <Field label="Title">
                 <SuggestionInput
@@ -187,7 +235,10 @@ export default function ExpendituresPage() {
                     {e.recurring ? <span className="text-[10px] uppercase tracking-wider font-semibold px-2.5 py-1 rounded-full bg-amber-50 text-amber-700">{e.recurrence_cycle}</span> : <span className="text-xs text-gray-400">one-off</span>}
                   </td>
                   <td className="px-5 py-4 text-right">
-                    <button onClick={() => remove(e.id)} className="w-8 h-8 rounded-lg hover:bg-red-50 grid place-items-center text-gray-400 hover:text-red-600"><Trash2 className="w-4 h-4" /></button>
+                    <div className="flex justify-end gap-1">
+                      <button onClick={() => openEdit(e)} className="w-8 h-8 rounded-lg hover:bg-blue-50 grid place-items-center text-gray-400 hover:text-blue-600" aria-label="Edit expenditure"><Pencil className="w-4 h-4" /></button>
+                      <button onClick={() => remove(e.id)} className="w-8 h-8 rounded-lg hover:bg-red-50 grid place-items-center text-gray-400 hover:text-red-600" aria-label="Delete expenditure"><Trash2 className="w-4 h-4" /></button>
+                    </div>
                   </td>
                 </tr>
               ))}

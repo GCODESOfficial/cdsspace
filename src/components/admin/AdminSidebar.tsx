@@ -95,7 +95,7 @@ const projectsNavItems = [
   { label: "Overview", href: "/admin/projects", icon: BarChart3, permission: "projects" },
   { label: "Projects", href: "/admin/projects/list", icon: Briefcase, permission: "projects" },
   { label: "Sub-contractors", href: "/admin/projects/contractors", icon: UserCog, permission: "projects" },
-  { label: "Subscriptions", href: "/admin/projects/subscriptions", icon: Repeat, permission: "projects" },
+  { label: "Inflow", href: "/admin/projects/subscriptions", icon: Repeat, permission: "projects" },
 ];
 
 const clientsNavItems = [
