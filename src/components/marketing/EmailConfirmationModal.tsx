@@ -41,16 +41,16 @@ export const EmailConfirmationModal = ({ isOpen, onClose, email }: EmailConfirma
                     />
 
                     {/* Modal Container */}
-                    <div className="fixed inset-0 z-[201] flex items-center justify-center p-4 pointer-events-none">
+                    <div className="fixed inset-0 z-[201] flex items-end sm:items-center justify-center p-3 sm:p-4 pointer-events-none">
                         <motion.div
                             initial={{ scale: 0.95, opacity: 0, y: 20 }}
                             animate={{ scale: 1, opacity: 1, y: 0 }}
                             exit={{ scale: 0.95, opacity: 0, y: 20 }}
                             transition={{ type: "spring", damping: 25, stiffness: 300 }}
-                            className="w-full max-w-[540px] bg-white border-4 border-[#E3E8F4] rounded-[24px] p-10 relative overflow-hidden pointer-events-auto"
+                            className="w-full max-w-[540px] bg-white border-4 border-[#E3E8F4] rounded-[28px] p-6 sm:p-10 relative overflow-hidden pointer-events-auto max-h-[calc(100dvh-1rem)] overflow-y-auto"
                         >
                             {/* Decorative Confetti Asset (imgCelebrate in Figma) */}
-                            <div className="absolute top-6 left-1/2 -translate-x-1/2 w-[440px] h-[124px] pointer-events-none opacity-80">
+                            <div className="absolute top-6 left-1/2 -translate-x-1/2 w-[280px] sm:w-[440px] h-[124px] pointer-events-none opacity-80">
                                 <Image
                                     src="/auth/Signup/confetti.svg"
                                     alt="Celebrate"
@@ -59,7 +59,7 @@ export const EmailConfirmationModal = ({ isOpen, onClose, email }: EmailConfirma
                                 />
                             </div>
 
-                            <div className="relative z-10 flex flex-col items-center text-center gap-10">
+                            <div className="relative z-10 flex flex-col items-center text-center gap-7 sm:gap-10">
 
                                 {/* Icon Section */}
                                 <div className="flex flex-col items-center gap-6">
@@ -72,10 +72,10 @@ export const EmailConfirmationModal = ({ isOpen, onClose, email }: EmailConfirma
                                     </div>
 
                                     <div className="flex flex-col gap-4">
-                                        <h2 className="text-brand-navy text-[24px] font-semibold tracking-[-0.96px] leading-[1.24]">
+                                        <h2 className="text-brand-navy text-[22px] sm:text-[24px] font-semibold tracking-[-0.96px] leading-[1.24]">
                                             Check Your Email
                                         </h2>
-                                        <p className="text-brand-body text-[16px] font-medium tracking-[-0.16px] leading-normal max-w-[360px]">
+                                        <p className="text-brand-body text-[15px] sm:text-[16px] font-medium tracking-[-0.16px] leading-normal max-w-[360px]">
                                             A one-time sign-in link has been sent to your email{email ? `: ${email}` : ''}. Check your inbox and click the link to continue to CDS Space
                                         </p>
                                     </div>

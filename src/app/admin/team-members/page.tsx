@@ -21,6 +21,9 @@ import {
   MessageCircle,
   Eye,
   EyeOff,
+  Camera,
+  RotateCcw,
+  AlertTriangle,
 } from "lucide-react";
 import {
   InviteShareModal,
@@ -29,7 +32,7 @@ import {
 import { SubAdminPermissionsPicker } from "@/components/admin/SubAdminPermissionsPicker";
 import BulkActionBar from "@/components/admin/BulkActionBar";
 import ActivityPanel from "@/components/admin/ActivityPanel";
-import { appAlert, appConfirm, appPrompt } from "@/lib/app-notify";
+import { appAlert, appConfirm } from "@/lib/app-notify";
 
 interface TeamMember {
   id: string;
@@ -47,6 +50,20 @@ interface TeamMember {
   invite_filled: boolean;
   joined_at: string | null;
   created_at: string;
+  availability_status?: "online" | "offline" | "break";
+  face_review?: {
+    status: string;
+    enrolled_at: string | null;
+    last_verified_at: string | null;
+    enrollment_image_data: string | null;
+    latest_capture_image_data: string | null;
+    latest_capture_at: string | null;
+    latest_match_score: number | string | null;
+    latest_liveness_score: number | string | null;
+    latest_verification_flag: string | null;
+    verification_failures: number | null;
+    reset_requested_at: string | null;
+  } | null;
 }
 
 interface PendingInvite {
@@ -245,6 +262,21 @@ export default function AdminTeamMembersPage() {
       body: JSON.stringify({ id: m.id }),
     });
     fetchMembers();
+  }
+
+  async function resetFaceCapture(m: TeamMember) {
+    if (!(await appConfirm(`Reset face verification for ${m.full_name}? They will need to set up face login again.`))) return;
+    const res = await fetch("/api/admin/team-members", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: m.id, action: "reset_face_capture" }),
+    });
+    const json = await res.json().catch(() => ({}));
+    if (!res.ok || !json.ok) {
+      appAlert(json.error || "Could not reset face capture.");
+      return;
+    }
+    await fetchMembers();
   }
 
   return (
@@ -466,6 +498,10 @@ export default function AdminTeamMembersPage() {
             await toggleActive(viewingMember);
             setViewingMember(null);
           }}
+          onResetFace={async () => {
+            await resetFaceCapture(viewingMember);
+            setViewingMember(null);
+          }}
         />
       )}
 
@@ -526,6 +562,7 @@ function MemberRow({
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2 flex-wrap">
           <p className="text-[14px] font-semibold text-[#0D1B39]">{m.full_name}</p>
+          <MemberStatusBadge status={m.availability_status || "offline"} />
           {m.is_sub_admin && (
             <span className="text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded bg-[#0A4FE8] text-white inline-flex items-center gap-1">
               <ShieldCheck className="w-3 h-3" /> Sub-admin
@@ -606,6 +643,21 @@ function MemberRow({
         </button>
       </div>
     </div>
+  );
+}
+
+function MemberStatusBadge({ status }: { status: "online" | "offline" | "break" }) {
+  const meta = {
+    online: { label: "Online", className: "bg-emerald-50 text-emerald-700 border-emerald-100", dot: "bg-emerald-500" },
+    offline: { label: "Offline", className: "bg-gray-50 text-gray-500 border-gray-100", dot: "bg-gray-400" },
+    break: { label: "Break", className: "bg-amber-50 text-amber-700 border-amber-100", dot: "bg-amber-500" },
+  }[status];
+
+  return (
+    <span className={`inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider ${meta.className}`}>
+      <span className={`h-1.5 w-1.5 rounded-full ${meta.dot}`} />
+      {meta.label}
+    </span>
   );
 }
 
@@ -1445,16 +1497,123 @@ function Field({
   );
 }
 
+function FaceReviewCard({
+  member,
+  onResetFace,
+}: {
+  member: TeamMember;
+  onResetFace: () => void | Promise<void>;
+}) {
+  const review = member.face_review;
+  const flagged = Boolean(review?.latest_verification_flag && review.latest_verification_flag !== "reset_required");
+  const resetRequired = review?.status === "reset_required" || review?.latest_verification_flag === "reset_required";
+  const matchScore = review?.latest_match_score == null ? null : Number(review.latest_match_score);
+  const livenessScore = review?.latest_liveness_score == null ? null : Number(review.latest_liveness_score);
+
+  return (
+    <div className="mx-6 mb-5 rounded-2xl border border-gray-100 bg-gray-50/60 p-4">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <div className="inline-flex items-center gap-2 text-[10px] font-bold uppercase tracking-wider text-gray-400">
+            <Camera className="h-3.5 w-3.5 text-[#0A4FE8]" />
+            Face verification
+          </div>
+          <div className="mt-2 flex flex-wrap items-center gap-2">
+            <span
+              className={`rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider ${
+                resetRequired
+                  ? "border-amber-200 bg-amber-50 text-amber-700"
+                  : flagged
+                    ? "border-rose-200 bg-rose-50 text-rose-700"
+                    : review?.status === "active"
+                      ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                      : "border-gray-200 bg-white text-gray-500"
+              }`}
+            >
+              {resetRequired ? "Reset required" : flagged ? "Mismatch flagged" : review?.status || "Not enrolled"}
+            </span>
+            {review?.verification_failures ? (
+              <span className="text-[11px] font-semibold text-rose-600">
+                {review.verification_failures} failed attempt{review.verification_failures === 1 ? "" : "s"}
+              </span>
+            ) : null}
+          </div>
+        </div>
+        <button
+          type="button"
+          onClick={onResetFace}
+          className="inline-flex h-10 items-center justify-center gap-2 rounded-xl border border-amber-200 bg-white px-3 text-[12px] font-bold text-amber-700 transition hover:bg-amber-50"
+        >
+          <RotateCcw className="h-3.5 w-3.5" />
+          Reset capture
+        </button>
+      </div>
+
+      {flagged && (
+        <div className="mt-3 flex items-start gap-2 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-[12px] leading-5 text-rose-700">
+          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+          Latest login capture did not match the first approved face setup.
+        </div>
+      )}
+
+      <div className="mt-4 grid gap-3 sm:grid-cols-2">
+        <FaceImage title="First setup capture" src={review?.enrollment_image_data || null} date={review?.enrolled_at || null} />
+        <FaceImage title="Latest login capture" src={review?.latest_capture_image_data || null} date={review?.latest_capture_at || review?.last_verified_at || null} />
+      </div>
+
+      <div className="mt-4 grid gap-2 text-[12px] sm:grid-cols-3">
+        <FaceMetric label="Match score" value={matchScore == null ? "—" : matchScore.toFixed(3)} />
+        <FaceMetric label="Liveness" value={livenessScore == null ? "—" : livenessScore.toFixed(3)} />
+        <FaceMetric label="Last verified" value={review?.last_verified_at ? new Date(review.last_verified_at).toLocaleString() : "—"} />
+      </div>
+    </div>
+  );
+}
+
+function FaceImage({ title, src, date }: { title: string; src: string | null; date: string | null }) {
+  return (
+    <div className="overflow-hidden rounded-2xl border border-white bg-white shadow-sm">
+      <div className="aspect-[4/3] bg-gray-100">
+        {src ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={src} alt={title} className="h-full w-full object-cover" />
+        ) : (
+          <div className="flex h-full items-center justify-center text-[12px] font-semibold text-gray-400">
+            No capture
+          </div>
+        )}
+      </div>
+      <div className="px-3 py-2">
+        <p className="text-[12px] font-bold text-[#0D1B39]">{title}</p>
+        <p className="mt-0.5 text-[10.5px] text-gray-400">
+          {date ? new Date(date).toLocaleString() : "Not available"}
+        </p>
+      </div>
+    </div>
+  );
+}
+
+function FaceMetric({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-xl border border-white bg-white px-3 py-2">
+      <p className="text-[10px] font-bold uppercase tracking-wider text-gray-400">{label}</p>
+      <p className="mt-1 break-words text-[12px] font-semibold text-[#0D1B39]">{value}</p>
+    </div>
+  );
+}
+
 /* ----- Member profile viewer ----- */
 
 function MemberProfileModal({
   member,
   onClose,
   onSuspend,
+  onResetFace,
 }: {
   member: TeamMember;
   onClose: () => void;
   onSuspend: () => void | Promise<void>;
+  onResetFace: () => void | Promise<void>;
 }) {
   const fields: Array<{ label: string; value: string | null | undefined }> = [
     { label: "Full name", value: member.full_name },
@@ -1531,6 +1690,8 @@ function MemberProfileModal({
             </div>
           </div>
         )}
+
+        <FaceReviewCard member={member} onResetFace={onResetFace} />
 
         <div className="px-6 py-4 border-t border-gray-100 flex items-center justify-end gap-2 bg-gray-50/60">
           <button

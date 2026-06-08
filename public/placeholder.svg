@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="800" height="600" viewBox="0 0 800 600" role="img" aria-labelledby="title desc">
+  <title id="title">Image placeholder</title>
+  <desc id="desc">A neutral placeholder used when an uploaded image is unavailable.</desc>
+  <rect width="800" height="600" fill="#eef2f8"/>
+  <rect x="64" y="64" width="672" height="472" rx="32" fill="#f8fafc" stroke="#c8d1e0" stroke-width="4"/>
+  <path d="M228 386l102-116 78 86 54-62 110 92H228z" fill="#d6deec"/>
+  <circle cx="548" cy="198" r="42" fill="#c8d1e0"/>
+  <path d="M280 452h240" stroke="#aab7cc" stroke-width="18" stroke-linecap="round"/>
+</svg>

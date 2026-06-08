@@ -61,7 +61,7 @@ export default function AccessPage() {
       {/* 🎬 Fullscreen Video */}
       <video
         ref={videoRef}
-        src="/CDS Space Branding Agency.mp4"
+        src="/home/CDS Space Branding Agency.mp4"
         playsInline
         controls={false}
         onEnded={() => setShowForm(true)}

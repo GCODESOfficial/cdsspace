@@ -1,12 +1,9 @@
 "use client";
 
-/* eslint-disable @next/next/no-img-element */
-
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import Link from "next/link";
-import { Video, Phone, Plus, Loader2, Calendar, Copy, X as XIcon, Trash2, Clock, Search, Check, Archive, ArchiveRestore } from "lucide-react";
-import { appAlert, appConfirm, appPrompt } from "@/lib/app-notify";
+import { Video, Phone, Plus, Loader2, Copy, X as XIcon, Trash2, Clock, Search, Check, Archive, ArchiveRestore } from "lucide-react";
+import { appAlert, appConfirm } from "@/lib/app-notify";
 
 interface Meeting {
   id: string;
@@ -65,10 +62,13 @@ export default function CMeetList({ variant = "team" }: { variant?: "team" | "ad
     router.push(`/meet/${code.trim()}`);
   }
 
+  const canJoinByCode = joinCode.trim().length > 0;
+
   function toggleSelect(id: string) {
     setSelected((p) => {
       const n = new Set(p);
-      n.has(id) ? n.delete(id) : n.add(id);
+      if (n.has(id)) n.delete(id);
+      else n.add(id);
       return n;
     });
   }
@@ -114,27 +114,35 @@ export default function CMeetList({ variant = "team" }: { variant?: "team" | "ad
   }
 
   return (
-    <div className="p-6 md:p-8 max-w-[1200px]">
-      <div className="flex items-center justify-between mb-6">
+    <div className="max-w-[1200px] px-0 py-1 md:p-6 lg:p-8">
+      <div className="mb-6 flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
         <div>
           {variant === "admin" && <p className="text-[#0A4FE8] text-sm font-semibold">Workspace</p>}
           <h1 className="text-[26px] font-bold text-[#0D1B39] tracking-tight">cMeet</h1>
           <p className="text-gray-400 text-[13px] mt-1">Video calls, screen-sharing, in-call chat. Full-mesh peer-to-peer.</p>
         </div>
-        <button onClick={() => setShowCreate(true)} className="inline-flex items-center gap-2 px-5 py-2.5 bg-[#0A4FE8] text-white text-[13px] font-medium rounded-xl hover:bg-[#083EC0]">
+        <button onClick={() => setShowCreate(true)} className="inline-flex w-full md:w-auto items-center justify-center gap-2 px-5 py-3 bg-[#0A4FE8] text-white text-[13px] font-medium rounded-2xl hover:bg-[#083EC0]">
           <Plus className="w-4 h-4" /> New meeting
         </button>
       </div>
 
       {/* Join-by-code card */}
-      <div className="mb-6 bg-white rounded-2xl border border-gray-100 shadow-sm px-5 py-4 flex items-center gap-3">
+      <div className="mb-6 bg-white rounded-2xl border border-gray-100 shadow-sm px-4 sm:px-5 py-4 flex flex-col gap-4 sm:flex-row sm:items-center">
         <Video className="w-5 h-5 text-[#0A4FE8]" />
         <div className="flex-1">
           <p className="text-[12.5px] font-semibold text-[#0D1B39]">Join with a code</p>
           <p className="text-[10.5px] text-gray-400">Paste a room code sent to you</p>
         </div>
-        <input value={joinCode} onChange={(e) => setJoinCode(e.target.value)} placeholder="e.g. quick-bird-42" className="px-3 py-2 rounded-lg bg-gray-50 border border-gray-200 text-[12.5px] w-56" />
-        <button onClick={() => joinCode.trim() && join(joinCode)} className="px-4 py-2 rounded-lg bg-[#0A4FE8] text-white text-[12px] font-medium">Join</button>
+        <div className="flex w-full flex-col gap-2 sm:w-auto sm:min-w-[18rem] sm:flex-row">
+          <input value={joinCode} onChange={(e) => setJoinCode(e.target.value)} placeholder="e.g. quick-bird-42" className="w-full flex-1 px-3 py-2.5 rounded-xl bg-gray-50 border border-gray-200 text-[12.5px]" />
+          <button
+            onClick={() => canJoinByCode && join(joinCode)}
+            disabled={!canJoinByCode}
+            className="w-full sm:w-auto px-4 py-2.5 rounded-xl bg-[#0A4FE8] text-white text-[12px] font-medium transition disabled:cursor-not-allowed disabled:bg-gray-200 disabled:text-gray-400 disabled:shadow-none"
+          >
+            Join
+          </button>
+        </div>
       </div>
 
       {upcoming.length > 0 && (
@@ -159,7 +167,7 @@ export default function CMeetList({ variant = "team" }: { variant?: "team" | "ad
       )}
 
       <section>
-        <div className="flex items-center justify-between mb-2">
+        <div className="mb-2 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex items-center gap-3">
             {recent.length > 0 && (
               <input
@@ -188,7 +196,7 @@ export default function CMeetList({ variant = "team" }: { variant?: "team" | "ad
         </div>
 
         {selected.size > 0 && (
-          <div className="mb-3 rounded-xl bg-[#0A4FE8]/5 border border-[#0A4FE8]/20 px-4 py-2.5 flex items-center gap-3 text-[12.5px]">
+          <div className="mb-3 rounded-xl bg-[#0A4FE8]/5 border border-[#0A4FE8]/20 px-4 py-3 flex flex-wrap items-center gap-3 text-[12.5px]">
             <span className="font-semibold text-[#0A4FE8]">
               {selected.size} selected
             </span>
@@ -221,7 +229,7 @@ export default function CMeetList({ variant = "team" }: { variant?: "team" | "ad
             </button>
             <button
               onClick={() => setSelected(new Set())}
-              className="ml-auto text-gray-400 hover:text-gray-600"
+              className="text-gray-400 hover:text-gray-600 sm:ml-auto"
             >
               Clear
             </button>
@@ -275,35 +283,39 @@ function MeetingRow({
 }) {
   const isLive = m.started_at && !m.ended_at;
   return (
-    <li className={`px-5 py-3.5 flex items-center gap-3 transition ${selected ? "bg-[#0A4FE8]/5" : ""}`}>
-      <input
-        type="checkbox"
-        checked={selected}
-        onChange={onToggleSelect}
-        onClick={(e) => e.stopPropagation()}
-        className="w-4 h-4 rounded border-gray-300 text-[#0A4FE8] cursor-pointer shrink-0"
-      />
-      <div className={`w-9 h-9 rounded-lg flex items-center justify-center shrink-0 ${isLive ? "bg-emerald-100 text-emerald-700" : "bg-[#0A4FE8]/10 text-[#0A4FE8]"}`}>
-        {m.audio_only ? <Phone className="w-4 h-4" /> : <Video className="w-4 h-4" />}
-      </div>
-      <div className="flex-1 min-w-0">
-        <div className="flex items-center gap-2">
-          <p className="text-[13.5px] font-semibold text-[#0D1B39] truncate">{m.title}</p>
-          {isLive && <span className="text-[9.5px] font-bold px-1.5 py-0.5 rounded bg-emerald-500 text-white uppercase">Live</span>}
-          {m.ended_at && <span className="text-[9.5px] font-bold px-1.5 py-0.5 rounded bg-gray-100 text-gray-500 uppercase">Ended</span>}
-          {m.archived_at && <span className="text-[9.5px] font-bold px-1.5 py-0.5 rounded bg-amber-100 text-amber-700 uppercase">Archived</span>}
+    <li className={`px-4 sm:px-5 py-4 flex flex-col gap-3 transition sm:flex-row sm:items-center ${selected ? "bg-[#0A4FE8]/5" : ""}`}>
+      <div className="flex items-start gap-3 min-w-0 flex-1">
+        <input
+          type="checkbox"
+          checked={selected}
+          onChange={onToggleSelect}
+          onClick={(e) => e.stopPropagation()}
+          className="mt-2 w-4 h-4 rounded border-gray-300 text-[#0A4FE8] cursor-pointer shrink-0"
+        />
+        <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${isLive ? "bg-emerald-100 text-emerald-700" : "bg-[#0A4FE8]/10 text-[#0A4FE8]"}`}>
+          {m.audio_only ? <Phone className="w-4 h-4" /> : <Video className="w-4 h-4" />}
         </div>
-        <p className="text-[11px] text-gray-400 flex items-center gap-2 mt-0.5">
-          <Clock className="w-3 h-3" />
-          {m.scheduled_for ? new Date(m.scheduled_for).toLocaleString() : new Date(m.created_at).toLocaleString()}
-          · <span className="font-mono">{m.room_code}</span>
-        </p>
+        <div className="flex-1 min-w-0">
+          <div className="flex flex-wrap items-center gap-2">
+            <p className="text-[13.5px] font-semibold text-[#0D1B39] truncate">{m.title}</p>
+            {isLive && <span className="text-[9.5px] font-bold px-1.5 py-0.5 rounded bg-emerald-500 text-white uppercase">Live</span>}
+            {m.ended_at && <span className="text-[9.5px] font-bold px-1.5 py-0.5 rounded bg-gray-100 text-gray-500 uppercase">Ended</span>}
+            {m.archived_at && <span className="text-[9.5px] font-bold px-1.5 py-0.5 rounded bg-amber-100 text-amber-700 uppercase">Archived</span>}
+          </div>
+          <p className="text-[11px] text-gray-400 flex flex-wrap items-center gap-2 mt-1">
+            <Clock className="w-3 h-3" />
+            {m.scheduled_for ? new Date(m.scheduled_for).toLocaleString() : new Date(m.created_at).toLocaleString()}
+            <span className="font-mono break-all">{m.room_code}</span>
+          </p>
+        </div>
       </div>
-      <button onClick={onCopy} className="p-2 rounded-lg text-gray-400 hover:text-[#0A4FE8] hover:bg-blue-50" title="Copy link"><Copy className="w-4 h-4" /></button>
-      {!m.ended_at && (
-        <button onClick={onJoin} className="px-3 py-1.5 rounded-lg bg-[#0A4FE8] text-white text-[11.5px] font-medium">Join</button>
-      )}
-      <button onClick={onTerminate} className="p-2 rounded-lg text-gray-400 hover:text-rose-600 hover:bg-rose-50" title="Terminate"><Trash2 className="w-4 h-4" /></button>
+      <div className="flex items-center gap-2 sm:shrink-0">
+        <button onClick={onCopy} className="inline-flex flex-1 sm:flex-none items-center justify-center p-2.5 rounded-xl text-gray-400 hover:text-[#0A4FE8] hover:bg-blue-50" title="Copy link"><Copy className="w-4 h-4" /></button>
+        {!m.ended_at && (
+          <button onClick={onJoin} className="inline-flex flex-1 sm:flex-none items-center justify-center px-4 py-2.5 rounded-xl bg-[#0A4FE8] text-white text-[11.5px] font-medium">Join</button>
+        )}
+        <button onClick={onTerminate} className="inline-flex flex-1 sm:flex-none items-center justify-center p-2.5 rounded-xl text-gray-400 hover:text-rose-600 hover:bg-rose-50" title="Terminate"><Trash2 className="w-4 h-4" /></button>
+      </div>
     </li>
   );
 }
@@ -364,7 +376,7 @@ function CreateModal({ onClose, onCreated }: { onClose: () => void; onCreated: (
             </label>
           </div>
           {schedule && (
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className="w-full px-3 py-2.5 rounded-xl bg-gray-50 border border-gray-200 text-[13px]" />
               <input type="time" value={time} onChange={(e) => setTime(e.target.value)} className="w-full px-3 py-2.5 rounded-xl bg-gray-50 border border-gray-200 text-[13px]" />
             </div>
@@ -393,12 +405,12 @@ function CreateModal({ onClose, onCreated }: { onClose: () => void; onCreated: (
             </div>
           </div>
         </div>
-        <div className="px-5 py-4 border-t border-gray-100 flex items-center gap-2">
-          <button onClick={submit} disabled={saving} className="inline-flex items-center gap-1.5 px-5 py-2.5 rounded-xl bg-[#0A4FE8] text-white text-[13px] font-medium hover:bg-[#083EC0] disabled:opacity-50">
+        <div className="px-5 py-4 border-t border-gray-100 flex flex-col-reverse gap-2 sm:flex-row sm:items-center">
+          <button onClick={submit} disabled={saving} className="inline-flex w-full sm:w-auto items-center justify-center gap-1.5 px-5 py-2.5 rounded-xl bg-[#0A4FE8] text-white text-[13px] font-medium hover:bg-[#083EC0] disabled:opacity-50">
             {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
             {schedule ? "Schedule" : "Start now"}
           </button>
-          <button onClick={onClose} className="px-4 py-2.5 text-[13px] text-gray-600 border border-gray-200 rounded-xl hover:bg-gray-50">Cancel</button>
+          <button onClick={onClose} className="w-full sm:w-auto px-4 py-2.5 text-[13px] text-gray-600 border border-gray-200 rounded-xl hover:bg-gray-50">Cancel</button>
         </div>
       </div>
     </div>

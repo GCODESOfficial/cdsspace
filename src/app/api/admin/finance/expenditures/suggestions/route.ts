@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { financeDb, requireFinanceAdmin } from "@/lib/finance/api-auth";
+import { financeDb, requireFinanceAdminAsync } from "@/lib/finance/api-auth";
 
 /**
  * Typeahead suggestions for the expenditure form. Two tables:
@@ -22,7 +22,7 @@ function tableFor(field: string): string | null {
 }
 
 export async function GET(req: NextRequest) {
-    const denied = requireFinanceAdmin(req);
+    const denied = await requireFinanceAdminAsync(req);
     if (denied) return denied;
 
     const url = new URL(req.url);
@@ -49,7 +49,7 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
-    const denied = requireFinanceAdmin(req);
+    const denied = await requireFinanceAdminAsync(req);
     if (denied) return denied;
 
     const body = await req.json().catch(() => ({}));

@@ -8,6 +8,12 @@ import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { ArrowUpRight } from "lucide-react";
 import { WorkDetailOverlay } from "./WorkDetailOverlay";
+import {
+    getWorkCoverShape,
+    measureImage,
+    type WorkCoverShape,
+} from "./work-cover-layout";
+import { WorkMosaicItem } from "./WorkMosaicItem";
 
 interface Work {
     id: number;
@@ -21,6 +27,7 @@ export const Works = () => {
     const [works, setWorks] = useState<Work[]>([]);
     const [loading, setLoading] = useState(true);
     const [openWorkId, setOpenWorkId] = useState<number | null>(null);
+    const [coverShapes, setCoverShapes] = useState<Record<number, WorkCoverShape>>({});
 
     useEffect(() => {
         let cancelled = false;
@@ -42,6 +49,23 @@ export const Works = () => {
         };
     }, []);
 
+    useEffect(() => {
+        let cancelled = false;
+
+        works.forEach((work) => {
+            if (!work.cover_image) return;
+
+            measureImage(work.cover_image).then((shape) => {
+                if (cancelled || !shape) return;
+                setCoverShapes((prev) => (prev[work.id] ? prev : { ...prev, [work.id]: shape }));
+            });
+        });
+
+        return () => {
+            cancelled = true;
+        };
+    }, [works]);
+
     const mainGridProjects = works.slice(0, 6);
 
     return (
@@ -60,16 +84,24 @@ export const Works = () => {
                         <EmptyState />
                     ) : (
                         <>
-                            {/* Main portrait grid (indices 0–5) */}
-                            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-6">
-                                {mainGridProjects.map((work, idx) => (
-                                    <WorkCard
-                                        key={work.id}
-                                        work={work}
-                                        index={idx}
-                                        onOpen={() => setOpenWorkId(work.id)}
-                                    />
-                                ))}
+                            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4 auto-rows-[4px] gap-0 grid-flow-dense mb-6 overflow-hidden rounded-[10px] border border-brand-stroke/60 bg-[#050713]">
+                                {mainGridProjects.map((work, idx) => {
+                                    const shape = coverShapes[work.id];
+
+                                    return (
+                                        <WorkMosaicItem key={work.id} shape={shape} gap={0} rowHeight={4} minRowSpan={42}>
+                                            <WorkCard
+                                                work={work}
+                                                index={idx}
+                                                shape={shape}
+                                                onImageShape={(nextShape) =>
+                                                    setCoverShapes((prev) => ({ ...prev, [work.id]: nextShape }))
+                                                }
+                                                onOpen={() => setOpenWorkId(work.id)}
+                                            />
+                                        </WorkMosaicItem>
+                                    );
+                                })}
                             </div>
                         </>
                     )}
@@ -104,48 +136,77 @@ export const Works = () => {
 /*  Card                                                               */
 /* ------------------------------------------------------------------ */
 
-function WorkCard({ work, index, onOpen }: { work: Work; index: number; onOpen: () => void }) {
+function WorkCard({
+    work,
+    index,
+    onOpen,
+    shape,
+    onImageShape,
+}: {
+    work: Work;
+    index: number;
+    onOpen: () => void;
+    shape?: WorkCoverShape | null;
+    onImageShape?: (shape: WorkCoverShape) => void;
+}) {
+    const [localShape, setLocalShape] = useState<WorkCoverShape | null>(null);
+    const effectiveShape = shape ?? localShape;
+
+    const handleImageLoad = (event: React.SyntheticEvent<HTMLImageElement>) => {
+        const nextShape = getWorkCoverShape(event.currentTarget.naturalWidth, event.currentTarget.naturalHeight);
+        if (!nextShape) return;
+        setLocalShape(nextShape);
+        onImageShape?.(nextShape);
+    };
+
     return (
         <motion.div
             initial={{ opacity: 0, y: 20 }}
             whileInView={{ opacity: 1, y: 0 }}
             transition={{ delay: index * 0.1 }}
             viewport={{ once: true }}
+            className="h-full"
         >
             <button
                 type="button"
                 onClick={onOpen}
                 aria-label={`Open ${work.title}`}
-                className="relative block w-full text-left rounded-[24px] md:rounded-[32px] overflow-hidden group aspect-4/5 border border-brand-stroke/40 bg-brand-stroke/20 cursor-pointer"
+                className="relative block h-full w-full text-left overflow-hidden group bg-[#050713] cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand-blue"
             >
                 {work.cover_image ? (
                     <Image
                         src={work.cover_image}
                         alt={work.title}
                         fill
-                        quality={90}
-                        sizes="(min-width: 1024px) 400px, (min-width: 768px) 50vw, 100vw"
+                        quality={92}
+                        sizes={
+                            effectiveShape?.kind === "wide"
+                                ? "(min-width: 1536px) 700px, (min-width: 768px) 66vw, 100vw"
+                                : "(min-width: 1536px) 360px, (min-width: 1024px) 33vw, (min-width: 640px) 50vw, 100vw"
+                        }
+                        onLoad={handleImageLoad}
                         className="object-cover transform transition-transform duration-700 group-hover:scale-105"
                     />
                 ) : (
                     <div className="absolute inset-0 bg-brand-stroke/30" />
                 )}
 
-                {/* Hover overlay — image alone at rest, dim + text on hover */}
-                <div className="absolute inset-0 bg-black/55 opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
+                <div className="absolute inset-0 bg-black/0 group-hover:bg-black/35 group-focus-visible:bg-black/35 group-active:bg-black/35 transition-colors duration-300 pointer-events-none" />
+                <div className="absolute inset-x-0 bottom-0 h-1/2 bg-gradient-to-t from-black/78 via-black/25 to-transparent opacity-0 transition-opacity duration-300 pointer-events-none group-hover:opacity-100 group-focus-visible:opacity-100 group-active:opacity-100" />
 
-                <div className="absolute inset-0 flex flex-col items-center justify-center text-center px-6 z-10 opacity-0 translate-y-3 group-hover:opacity-100 group-hover:translate-y-0 transition-all duration-300">
-                    <h3 className="text-white text-[22px] md:text-[24px] font-bold tracking-tight drop-shadow-md">
-                        {work.title}
-                    </h3>
+                <div className="absolute inset-x-0 bottom-0 p-5 md:p-6 text-white opacity-0 translate-y-3 transition-all duration-300 group-hover:opacity-100 group-hover:translate-y-0 group-focus-visible:opacity-100 group-focus-visible:translate-y-0 group-active:opacity-100 group-active:translate-y-0">
                     {work.category && (
-                        <p className="mt-1 text-white/85 text-[13px] md:text-[14px] font-medium drop-shadow">
+                        <p className="mb-1 text-[10px] font-medium uppercase tracking-[0.22em] text-white/45">
                             {work.category}
                         </p>
                     )}
-
-                    <div className="mt-5 w-11 h-11 rounded-full bg-white/95 flex items-center justify-center shadow-lg">
-                        <ArrowUpRight className="w-5 h-5 text-[#0035C1]" strokeWidth={2.4} />
+                    <div className="flex items-end justify-between gap-4">
+                        <h3 className="max-w-[calc(100%-56px)] text-[15px] md:text-[17px] font-medium leading-snug tracking-tight drop-shadow-md">
+                            {work.title}
+                        </h3>
+                        <div className="grid h-11 w-11 shrink-0 place-items-center rounded-full border border-white/80 bg-white/5 text-white opacity-100 md:opacity-0 md:translate-y-2 transition-all duration-300 group-hover:opacity-100 group-hover:translate-y-0">
+                            <ArrowUpRight size={21} strokeWidth={2} />
+                        </div>
                     </div>
                 </div>
             </button>
@@ -159,11 +220,13 @@ function WorkCard({ work, index, onOpen }: { work: Work; index: number; onOpen: 
 
 function WorksSkeleton() {
     return (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-6">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4 auto-rows-[4px] gap-0 grid-flow-dense mb-6 overflow-hidden rounded-[10px] border border-brand-stroke/60">
             {Array.from({ length: 6 }).map((_, i) => (
                 <div
                     key={i}
-                    className="rounded-[24px] md:rounded-[32px] aspect-4/5 bg-brand-stroke/30 animate-pulse"
+                    className={`bg-brand-stroke/30 animate-pulse ${
+                        i % 5 === 0 ? "md:col-span-2 [grid-row-end:span_48]" : "[grid-row-end:span_56]"
+                    }`}
                 />
             ))}
         </div>

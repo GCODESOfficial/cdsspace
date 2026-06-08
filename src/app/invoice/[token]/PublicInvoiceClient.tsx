@@ -7,6 +7,7 @@ import InvoiceDocument from "@/components/finance/InvoiceDocument";
 import { Button } from "@/components/ui/button";
 import { Download, Share2 } from "lucide-react";
 import type { FinanceInvoice, FinanceInvoiceItem } from "@/lib/finance/types";
+import { buildInvoiceShareMessage } from "@/lib/finance/share";
 import { exportInvoiceToPdf } from "@/lib/invoice-pdf";
 
 export default function PublicInvoiceClient({ token }: { token: string }) {
@@ -88,15 +89,15 @@ export default function PublicInvoiceClient({ token }: { token: string }) {
           <Button 
             variant="outline"
             onClick={() => {
+              const shareText = buildInvoiceShareMessage(invoice?.invoice_number, window.location.href);
               if (navigator.share) {
                 navigator.share({
                   title: `Invoice ${invoice?.invoice_number || ""}`,
-                  text: `View invoice from CDS Space for ${invoice?.client_name || ""}`,
-                  url: window.location.href,
+                  text: shareText,
                 }).catch(() => {});
               } else {
-                navigator.clipboard.writeText(window.location.href);
-                alert("Link copied to clipboard!");
+                navigator.clipboard.writeText(shareText);
+                alert("Invoice share message copied to clipboard!");
               }
             }}
             className="h-11 px-5 rounded-xl border-blue-200 text-blue-700 hover:bg-blue-50"

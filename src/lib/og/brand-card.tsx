@@ -2,9 +2,8 @@
  * Shared OG card used by every `opengraph-image.tsx` in this app.
  *
  * Template (matches the sample screenshot + brand system):
- *   - /public/Metadata-bg.png full-bleed background
- *   - CDS Space wordmark top-left (full "CDS + Branding Agency" lockup,
- *     recoloured white so it reads on the navy plate)
+ *   - /public/metabg.png full-bleed background
+ *   - /public/mlogo.svg wordmark top-left
  *   - Optional status / eyebrow pill top-right
  *   - Huge bold title left-centre
  *   - Subtitle / client line under the title
@@ -23,7 +22,7 @@ export const OG_CONTENT_TYPE = "image/png" as const;
 export const SITE_URL = "https://cdsspace.pro";
 
 /**
- * Read /public/Metadata-bg.png as a base64 data URI.
+ * Read /public/metabg.png as a base64 data URI.
  *
  * Reads are resolved at request time against the relative path from this
  * source file rather than `process.cwd()/public/...`. Static path literals
@@ -55,7 +54,7 @@ export const SITE_URL = "https://cdsspace.pro";
  */
 function readPublicAsset(_relFromHere: string, relFromCwd: string): Buffer | null {
     try {
-        return fs.readFileSync(path.join(process.cwd(), relFromCwd));
+        return fs.readFileSync(path.join(/*turbopackIgnore: true*/ process.cwd(), relFromCwd));
     } catch {
         return null;
     }
@@ -71,8 +70,8 @@ let bgDataUriCache: string | null = null;
 export function getMetadataBgDataUri(): string {
     if (bgDataUriCache !== null) return bgDataUriCache;
     const buf = readPublicAsset(
-        "../../../public/Metadata-bg.png",
-        "public/Metadata-bg.png",
+        "../../../public/metabg.png",
+        "public/metabg.png",
     );
     bgDataUriCache = buf ? `data:image/png;base64,${buf.toString("base64")}` : "";
     return bgDataUriCache;
@@ -82,18 +81,14 @@ let logoDataUriCache: string | null = null;
 export function getCdsLogoDataUri(): string {
     if (logoDataUriCache !== null) return logoDataUriCache;
     const buf = readPublicAsset(
-        "../../../public/navbar/CDS Logo.svg",
-        "public/navbar/CDS Logo.svg",
+        "../../../public/mlogo.svg",
+        "public/mlogo.svg",
     );
     if (!buf) {
         logoDataUriCache = "";
         return logoDataUriCache;
     }
-    let svg = buf.toString("utf8");
-    svg = svg.replace(/fill="#040B37"/gi, 'fill="#ffffff"');
-    svg = svg.replace(/fill="black"/gi, 'fill="#ffffff"');
-    svg = svg.replace(/stroke="#040B37"/gi, 'stroke="#ffffff"');
-    svg = svg.replace(/stroke="black"/gi, 'stroke="#ffffff"');
+    const svg = buf.toString("utf8");
     logoDataUriCache = `data:image/svg+xml;base64,${Buffer.from(svg, "utf8").toString("base64")}`;
     return logoDataUriCache;
 }
@@ -133,22 +128,18 @@ function Background({ bgDataUri, overlay }: { bgDataUri: string; overlay?: strin
                 }}
             />
             {bgDataUri ? (
-                /* Render the PNG at 2× canvas size and offset so only the
-                   bright glow quadrant (bottom-right of the source PNG) is
-                   visible. Without this the top-left of the canvas renders
-                   the dark navy portion of the source and looks empty. */
                 /* eslint-disable-next-line @next/next/no-img-element */
                 <img
                     src={bgDataUri}
                     alt=""
-                    width={OG_SIZE.width * 2}
-                    height={OG_SIZE.height * 2}
+                    width={OG_SIZE.width}
+                    height={OG_SIZE.height}
                     style={{
                         position: "absolute",
-                        top: -OG_SIZE.height,
-                        left: -OG_SIZE.width,
-                        width: OG_SIZE.width * 2,
-                        height: OG_SIZE.height * 2,
+                        top: 0,
+                        left: 0,
+                        width: OG_SIZE.width,
+                        height: OG_SIZE.height,
                     }}
                 />
             ) : null}
@@ -190,8 +181,8 @@ function LogoLockup({ logoDataUri }: { logoDataUri: string }) {
         <img
             src={logoDataUri}
             alt="CDS Space — Branding Agency"
-            width={160}
-            height={72}
+            width={190}
+            height={73}
             style={{ display: "block" }}
         />
     );
@@ -223,7 +214,6 @@ function FooterDomain() {
                 display: "flex",
                 alignItems: "center",
                 gap: 12,
-                zIndex: 2,
             }}
         >
             {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -287,7 +277,6 @@ export function renderBrandCard({
                     display: "flex",
                     alignItems: "center",
                     justifyContent: "space-between",
-                    zIndex: 2,
                 }}
             >
                 <LogoLockup logoDataUri={logoDataUri} />
@@ -299,7 +288,6 @@ export function renderBrandCard({
                 style={{
                     display: "flex",
                     flexDirection: "column",
-                    zIndex: 2,
                     maxWidth: 1000,
                 }}
             >
@@ -416,14 +404,13 @@ export function renderWorkCard({
                     display: "flex",
                     alignItems: "center",
                     justifyContent: "space-between",
-                    zIndex: 2,
                 }}
             >
                 <LogoLockup logoDataUri={logoDataUri} />
                 {category ? <StatusPill label={category.toUpperCase()} /> : <div style={{ display: "flex" }} />}
             </div>
 
-            <div style={{ display: "flex", flexDirection: "column", zIndex: 2, maxWidth: 1000 }}>
+            <div style={{ display: "flex", flexDirection: "column", maxWidth: 1000 }}>
                 <div
                     style={{
                         fontSize: titleSize,

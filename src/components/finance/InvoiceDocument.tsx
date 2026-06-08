@@ -30,20 +30,22 @@ export default function InvoiceDocument({ invoice, items }: { invoice: Invoice; 
   const deliveryPeriod = invoice.delivery_period || "—";
 
   return (
-    <div className="bg-white text-gray-900 max-w-[820px] mx-auto p-12 print:p-4 shadow-[0_30px_80px_rgba(15,40,90,0.10)] print:shadow-none rounded-2xl print:rounded-none print:max-w-none print:w-full">
+    <div className="bg-white text-gray-900 max-w-[820px] mx-auto p-5 sm:p-12 print:p-4 shadow-[0_30px_80px_rgba(15,40,90,0.10)] print:shadow-none rounded-2xl print:rounded-none print:max-w-none print:w-full">
       {/* Header */}
-      <div className="flex items-start justify-between pb-8 border-b border-gray-100">
+      <div className="flex flex-col gap-5 sm:flex-row sm:items-start sm:justify-between pb-6 sm:pb-8 border-b border-gray-100">
         <div className="flex items-center gap-3">
-          <img src="/navbar/CDS Logo.svg" alt="CDS Space" width={64} height={64} />
+          <img src="/navbar/CDS Logo.svg" alt="CDS Space" width={56} height={56} className="w-12 h-12 sm:w-16 sm:h-16" />
           <div>
-            <div className="text-xl font-bold tracking-tight">CDS Space</div>
+            <div className="text-lg sm:text-xl font-bold tracking-tight">CDS Space</div>
             <div className="text-xs text-gray-500">Branding & Digital Agency</div>
           </div>
         </div>
-        <div className="text-right">
-          <div className="text-[11px] uppercase tracking-wider text-gray-400">Invoice</div>
-          <div className="text-2xl font-bold">{invoice.invoice_number}</div>
-          <div className="mt-2 text-xs">
+        <div className="flex items-center justify-between sm:block sm:text-right">
+          <div>
+            <div className="text-[11px] uppercase tracking-wider text-gray-400">Invoice</div>
+            <div className="text-lg sm:text-2xl font-bold break-all">{invoice.invoice_number}</div>
+          </div>
+          <div className="sm:mt-2 text-xs">
             <span className={`inline-block px-2.5 py-1 rounded-full font-semibold uppercase tracking-wider ${
               invoice.status === "paid" ? "bg-emerald-50 text-emerald-700" :
               invoice.status === "sent" ? "bg-blue-50 text-blue-700" :
@@ -55,51 +57,71 @@ export default function InvoiceDocument({ invoice, items }: { invoice: Invoice; 
       </div>
 
       {/* Bill to / dates */}
-      <div className="grid grid-cols-2 gap-8 py-8">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-5 sm:gap-8 py-6 sm:py-8">
         <div>
           <div className="text-[10px] uppercase tracking-wider text-gray-400 mb-2">Billed To</div>
           <div className="font-semibold text-gray-900">{invoice.client_name}</div>
-          {invoice.client_email && <div className="text-sm text-gray-600">{invoice.client_email}</div>}
+          {invoice.client_email && <div className="text-sm text-gray-600 break-words">{invoice.client_email}</div>}
           {invoice.client_address && <div className="text-sm text-gray-600 whitespace-pre-line">{invoice.client_address}</div>}
         </div>
-        <div className="text-right">
+        <div className="sm:text-right">
           <div className="text-[10px] uppercase tracking-wider text-gray-400 mb-2">Issued / Due</div>
           <div className="text-sm">{new Date(invoice.issue_date).toLocaleDateString()}</div>
           {invoice.due_date && <div className="text-sm text-gray-600">Due {new Date(invoice.due_date).toLocaleDateString()}</div>}
         </div>
       </div>
 
-      {/* Items table — zebra rows for readability */}
-      <table className="w-full border-separate border-spacing-0">
-        <thead>
-          <tr className="text-[10px] uppercase tracking-wider text-gray-400">
-            <th className="text-left py-3 px-3 font-semibold border-b border-gray-100 rounded-tl-lg bg-gray-50/60">Item</th>
-            <th className="text-right py-3 px-3 font-semibold w-20 border-b border-gray-100 bg-gray-50/60">Qty</th>
-            <th className="text-right py-3 px-3 font-semibold w-32 border-b border-gray-100 bg-gray-50/60">Unit Price</th>
-            <th className="text-right py-3 px-3 font-semibold w-32 border-b border-gray-100 rounded-tr-lg bg-gray-50/60">Amount</th>
-          </tr>
-        </thead>
-        <tbody>
-          {items.map((it, i) => (
-            <tr
-              key={i}
-              className={i % 2 === 0 ? "bg-white" : "bg-blue-50/30"}
-            >
-              <td className="py-4 px-3 border-b border-gray-50">
-                <div className="font-medium text-gray-900">{it.name}</div>
-                {it.description && <div className="text-xs text-gray-500 mt-0.5">{it.description}</div>}
-              </td>
-              <td className="text-right py-4 px-3 text-sm border-b border-gray-50">{it.quantity}</td>
-              <td className="text-right py-4 px-3 text-sm border-b border-gray-50">{formatMoney(it.unit_price, invoice.currency)}</td>
-              <td className="text-right py-4 px-3 text-sm font-medium border-b border-gray-50">{formatMoney(it.total, invoice.currency)}</td>
+      {/* Items — table on desktop, card list on mobile */}
+      <div className="hidden sm:block">
+        <table className="w-full border-separate border-spacing-0">
+          <thead>
+            <tr className="text-[10px] uppercase tracking-wider text-gray-400">
+              <th className="text-left py-3 px-3 font-semibold border-b border-gray-100 rounded-tl-lg bg-gray-50/60">Item</th>
+              <th className="text-right py-3 px-3 font-semibold w-20 border-b border-gray-100 bg-gray-50/60">Qty</th>
+              <th className="text-right py-3 px-3 font-semibold w-32 border-b border-gray-100 bg-gray-50/60">Unit Price</th>
+              <th className="text-right py-3 px-3 font-semibold w-32 border-b border-gray-100 rounded-tr-lg bg-gray-50/60">Amount</th>
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {items.map((it, i) => (
+              <tr key={i} className={i % 2 === 0 ? "bg-white" : "bg-blue-50/30"}>
+                <td className="py-4 px-3 border-b border-gray-50">
+                  <div className="font-medium text-gray-900">{it.name}</div>
+                  {it.description && <div className="text-xs text-gray-500 mt-0.5">{it.description}</div>}
+                </td>
+                <td className="text-right py-4 px-3 text-sm border-b border-gray-50">{it.quantity}</td>
+                <td className="text-right py-4 px-3 text-sm border-b border-gray-50">{formatMoney(it.unit_price, invoice.currency)}</td>
+                <td className="text-right py-4 px-3 text-sm font-medium border-b border-gray-50">{formatMoney(it.total, invoice.currency)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      {/* Mobile item cards */}
+      <ul className="sm:hidden space-y-3">
+        {items.map((it, i) => (
+          <li key={i} className="rounded-xl border border-gray-100 bg-gray-50/40 p-3.5">
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0 flex-1">
+                <div className="font-semibold text-gray-900 text-[15px] leading-snug">{it.name}</div>
+                {it.description && <div className="text-xs text-gray-500 mt-1 leading-relaxed">{it.description}</div>}
+              </div>
+              <div className="text-right shrink-0">
+                <div className="text-[15px] font-bold text-gray-900 whitespace-nowrap">{formatMoney(it.total, invoice.currency)}</div>
+              </div>
+            </div>
+            <div className="mt-2.5 pt-2.5 border-t border-gray-200/70 flex items-center justify-between text-xs text-gray-500">
+              <span>Qty <span className="text-gray-800 font-medium">{it.quantity}</span></span>
+              <span>Unit <span className="text-gray-800 font-medium">{formatMoney(it.unit_price, invoice.currency)}</span></span>
+            </div>
+          </li>
+        ))}
+      </ul>
 
       {/* Totals + seal */}
-      <div className="mt-6 flex items-end justify-between gap-8">
-        <div className="shrink-0">
+      <div className="mt-6 flex flex-col-reverse sm:flex-row sm:items-end sm:justify-between gap-6 sm:gap-8">
+        <div className="shrink-0 hidden sm:block">
           <img
             src="/CDS_Seal.png"
             alt="CDS Space official seal"
@@ -108,16 +130,16 @@ export default function InvoiceDocument({ invoice, items }: { invoice: Invoice; 
             className="w-[108px] h-[108px] object-contain opacity-90 select-none"
           />
         </div>
-        <div className="w-72 space-y-2 text-sm">
-          <div className="flex justify-between text-gray-600"><span>Subtotal</span><span>{formatMoney(invoice.subtotal, invoice.currency)}</span></div>
+        <div className="w-full sm:w-72 space-y-2 text-sm">
+          <div className="flex justify-between gap-4 text-gray-600"><span>Subtotal</span><span className="whitespace-nowrap">{formatMoney(invoice.subtotal, invoice.currency)}</span></div>
           {Number(invoice.discount) > 0 && (
-            <div className="flex justify-between text-blue-600"><span>Discount</span><span>− {formatMoney(invoice.discount, invoice.currency)}</span></div>
+            <div className="flex justify-between gap-4 text-blue-600"><span>Discount</span><span className="whitespace-nowrap">− {formatMoney(invoice.discount, invoice.currency)}</span></div>
           )}
           {Number(invoice.tax_rate) > 0 && (
-            <div className="flex justify-between text-gray-600"><span>Tax ({invoice.tax_rate}%)</span><span>{formatMoney(invoice.tax_amount, invoice.currency)}</span></div>
+            <div className="flex justify-between gap-4 text-gray-600"><span>Tax ({invoice.tax_rate}%)</span><span className="whitespace-nowrap">{formatMoney(invoice.tax_amount, invoice.currency)}</span></div>
           )}
-          <div className="flex justify-between pt-3 border-t border-gray-200 text-lg font-bold">
-            <span>Total</span><span>{formatMoney(invoice.total, invoice.currency)}</span>
+          <div className="flex justify-between gap-4 pt-3 border-t border-gray-200 text-lg font-bold">
+            <span>Total</span><span className="whitespace-nowrap">{formatMoney(invoice.total, invoice.currency)}</span>
           </div>
         </div>
       </div>

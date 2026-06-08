@@ -1,11 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
-import { financeDb, requireFinanceAdmin } from "@/lib/finance/api-auth";
+import { financeDb, requireFinanceAdminAsync } from "@/lib/finance/api-auth";
 
 export async function DELETE(
     req: NextRequest,
     { params }: { params: Promise<{ id: string; assignmentId: string }> },
 ) {
-    const denied = requireFinanceAdmin(req);
+    const denied = await requireFinanceAdminAsync(req);
     if (denied) return denied;
     const { assignmentId } = await params;
     const sb = financeDb();

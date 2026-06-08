@@ -8,13 +8,7 @@ function TeamChatInner() {
   const params = useSearchParams();
   const thread = params?.get("thread");
   return (
-    <div className="p-6 md:p-8 max-w-[1400px]">
-      <div className="mb-6">
-        <h1 className="text-[26px] font-bold text-[#0D1B39] tracking-tight">Chat</h1>
-        <p className="text-gray-400 text-[13px] mt-1">
-          Direct messages, department channels, and admin broadcasts.
-        </p>
-      </div>
+    <div className="h-[calc(100dvh-176px)] min-h-0 w-full overflow-hidden sm:h-[calc(100dvh-160px)] md:h-[calc(100dvh-148px)] lg:h-[calc(100dvh-136px)]">
       <TeamChatPanel initialThreadId={thread} />
     </div>
   );

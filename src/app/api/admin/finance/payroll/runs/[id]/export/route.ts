@@ -1,9 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
-import { financeDb, requireFinanceAdmin } from "@/lib/finance/api-auth";
+import { financeDb, requireFinanceAdminAsync } from "@/lib/finance/api-auth";
 
 // Exports payroll items in the format: Account_Number,Amount,Bank_Codes,Narration
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  const denied = requireFinanceAdmin(req); if (denied) return denied;
+  const denied = await requireFinanceAdminAsync(req); if (denied) return denied;
   const { id } = await params;
   const sb = financeDb();
   const { data: items, error } = await sb.from("finance_payroll_items").select("*").eq("payroll_run_id", id);

@@ -20,22 +20,22 @@ const teamMembers: TeamMember[] = [
   {
     name: "Edidiong Emmanuel",
     position: "Managing Director",
-    image: "/images/team-2.png",
+    image: "/images/Team 1.svg",
   },
   {
     name: "Lucy Monday",
     position: "Product Manager",
-    image: "/images/team-3.png",
+    image: "/about/lucy.png",
   },
   {
     name: "Ayomide Ajayi",
     position: "Creative Director",
-    image: "/images/team-4.png",
+    image: "/about/team pfp 1.svg",
   },
   {
     name: "Godsgift  Etuk",
     position: "Web/Blockchain Developer",
-    image: "/images/team-5.png",
+    image: "/about/placeholder.png",
   },
 ]
 

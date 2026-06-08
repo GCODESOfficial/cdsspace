@@ -1,9 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { v4 as uuidv4 } from "uuid";
-import { financeDb, requireFinanceAdmin } from "@/lib/finance/api-auth";
+import { financeDb, requireFinanceAdminAsync } from "@/lib/finance/api-auth";
 
 export async function POST(req: NextRequest) {
-  const denied = requireFinanceAdmin(req); if (denied) return denied;
+  const denied = await requireFinanceAdminAsync(req); if (denied) return denied;
   const form = await req.formData();
   const file = form.get("file") as File | null;
   const folder = (form.get("folder") as string) || "finance";

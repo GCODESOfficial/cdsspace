@@ -45,7 +45,7 @@ export default function TeamSettingsPage() {
   }
 
   return (
-    <div className="max-w-[1000px] space-y-6">
+    <div className="max-w-[1000px] space-y-5 md:space-y-6">
       <div>
         <h1 className="text-[28px] font-bold text-brand-navy tracking-tight">{t("nav.settings")}</h1>
         <p className="text-[13px] text-brand-body/60 mt-1">
@@ -54,7 +54,7 @@ export default function TeamSettingsPage() {
       </div>
 
       {/* Tabs */}
-      <div className="flex gap-1 p-1 bg-white rounded-xl border border-brand-stroke/30 w-fit">
+      <div className="grid grid-cols-1 gap-1 p-1 bg-white rounded-2xl border border-brand-stroke/30 sm:grid-cols-3 sm:w-fit">
         <TabBtn id="profile" active={tab} setActive={setTab} icon={UserRound} label={t("settings.profile")} />
         <TabBtn id="security" active={tab} setActive={setTab} icon={Lock} label={t("settings.security")} />
         <TabBtn id="language" active={tab} setActive={setTab} icon={Globe} label={t("settings.language")} />
@@ -92,7 +92,7 @@ function TabBtn({
   return (
     <button
       onClick={() => setActive(id)}
-      className={`inline-flex items-center gap-2 px-4 py-2 rounded-xl text-[13px] font-medium transition ${
+      className={`inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-[13px] font-medium transition ${
         isActive
           ? "bg-brand-blue text-white shadow-[0_6px_18px_rgba(28,78,209,0.2)]"
           : "text-brand-body hover:bg-brand-bg/60"
@@ -166,7 +166,7 @@ function ProfileForm({ profile, onUpdate }: { profile: Profile; onUpdate: (p: Pr
   return (
     <div className="bg-white rounded-2xl border border-brand-stroke/30 p-6 md:p-8 space-y-6">
       {/* Avatar */}
-      <div className="flex items-center gap-5">
+      <div className="flex flex-col items-start gap-4 sm:flex-row sm:items-center sm:gap-5">
         <div className="relative w-20 h-20">
           {avatar ? (
             // eslint-disable-next-line @next/next/no-img-element
@@ -208,11 +208,11 @@ function ProfileForm({ profile, onUpdate }: { profile: Profile; onUpdate: (p: Pr
         />
       </div>
 
-      <div className="flex items-center gap-3">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
         <button
           onClick={save}
           disabled={saving}
-          className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-brand-blue text-white text-[13px] font-semibold hover:bg-brand-blue/90 transition disabled:opacity-50"
+          className="inline-flex w-full sm:w-auto items-center justify-center gap-2 px-5 py-2.5 rounded-xl bg-brand-blue text-white text-[13px] font-semibold hover:bg-brand-blue/90 transition disabled:opacity-50"
         >
           {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
           Save changes
@@ -267,7 +267,7 @@ function SecurityForm() {
   }
 
   return (
-    <div className="bg-white rounded-2xl border border-brand-stroke/30 p-6 md:p-8 space-y-4 max-w-xl">
+    <div className="bg-white rounded-2xl border border-brand-stroke/30 p-6 md:p-8 space-y-4 sm:max-w-xl">
       <div>
         <h2 className="text-[15px] font-bold text-brand-navy">Change password</h2>
         <p className="text-[12px] text-brand-body/60 mt-0.5">Use at least 8 characters.</p>
@@ -290,7 +290,7 @@ function SecurityForm() {
       <button
         onClick={change}
         disabled={saving || !current || !next || !confirm}
-        className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-brand-navy text-white text-[13px] font-semibold hover:bg-brand-navy/90 transition disabled:opacity-50"
+        className="inline-flex w-full sm:w-auto items-center justify-center gap-2 px-5 py-2.5 rounded-xl bg-brand-navy text-white text-[13px] font-semibold hover:bg-brand-navy/90 transition disabled:opacity-50"
       >
         {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Lock className="w-4 h-4" />}
         Change password
@@ -320,7 +320,7 @@ function LanguageForm({ current, onChange }: { current: string; onChange: (l: st
   }
 
   return (
-    <div className="bg-white rounded-2xl border border-brand-stroke/30 p-6 md:p-8 space-y-4 max-w-xl">
+    <div className="bg-white rounded-2xl border border-brand-stroke/30 p-6 md:p-8 space-y-4 sm:max-w-xl">
       <div>
         <h2 className="text-[15px] font-bold text-brand-navy">Language</h2>
         <p className="text-[12px] text-brand-body/60 mt-0.5">
@@ -346,7 +346,7 @@ function LanguageForm({ current, onChange }: { current: string; onChange: (l: st
       <button
         onClick={save}
         disabled={saving || selected === current}
-        className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-brand-blue text-white text-[13px] font-semibold hover:bg-brand-blue/90 transition disabled:opacity-50"
+        className="inline-flex w-full sm:w-auto items-center justify-center gap-2 px-5 py-2.5 rounded-xl bg-brand-blue text-white text-[13px] font-semibold hover:bg-brand-blue/90 transition disabled:opacity-50"
       >
         {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
         Save language

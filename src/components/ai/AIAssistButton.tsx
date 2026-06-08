@@ -15,7 +15,7 @@ import type { AIKind } from "@/lib/ai/prompts";
  * Drop it beside (or absolutely-position it inside) a textarea/input and pass
  * `onAccept={(txt) => setValue(txt)}`.
  */
-export function AIAssistButton<I extends Record<string, any>>({
+export function AIAssistButton<I extends Record<string, unknown>>({
   kind,
   input,
   label = "AI fill",
@@ -42,16 +42,22 @@ export function AIAssistButton<I extends Record<string, any>>({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ kind, input }),
       });
-      const j = await r.json();
-      if (!r.ok || !j.ok) throw new Error(j.error || "AI request failed");
+      const raw = await r.text();
+      let j: { ok?: boolean; error?: string; text?: string } | null = null;
+      try {
+        j = raw ? JSON.parse(raw) : null;
+      } catch {
+        throw new Error(raw?.slice(0, 160) || `AI request failed (${r.status})`);
+      }
+      if (!r.ok || !j?.ok) throw new Error(j?.error || `AI request failed (${r.status})`);
       const text = (j.text || "").trim();
       if (text) {
         onAccept(text);
         setFilled(true);
         setTimeout(() => setFilled(false), 1800);
       }
-    } catch (e: any) {
-      setError(e.message || "Something went wrong");
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "Something went wrong");
       setTimeout(() => setError(null), 3500);
     } finally {
       setLoading(false);
@@ -87,6 +93,11 @@ export function AIAssistButton<I extends Record<string, any>>({
         >
           <RefreshCw className="w-3 h-3" />
         </button>
+      )}
+      {error && (
+        <span className="absolute right-0 top-full z-20 mt-1 max-w-[min(20rem,80vw)] rounded-lg border border-rose-100 bg-white px-3 py-2 text-[11px] font-medium leading-4 text-rose-600 shadow-lg">
+          {error}
+        </span>
       )}
     </div>
   );

@@ -23,6 +23,7 @@ export interface Notification {
 interface NotificationItemProps {
   notification: Notification;
   onRead: (id: string) => void;
+  onNavigate?: () => void;
   dark?: boolean;
 }
 
@@ -33,9 +34,17 @@ const typeIcons: Record<Notification["type"], React.ElementType> = {
   new_order: ShoppingBag,
 };
 
+const fallbackRoutes: Record<Notification["type"], string> = {
+  order_update: "/dashboard/orders",
+  new_message: "/dashboard/messages",
+  status_change: "/dashboard/orders",
+  new_order: "/dashboard/orders",
+};
+
 export default function NotificationItem({
   notification,
   onRead,
+  onNavigate,
   dark = false,
 }: NotificationItemProps) {
   const router = useRouter();
@@ -43,9 +52,8 @@ export default function NotificationItem({
 
   const handleClick = () => {
     onRead(notification.id);
-    if (notification.link) {
-      router.push(notification.link);
-    }
+    onNavigate?.();
+    router.push(notification.link || fallbackRoutes[notification.type] || "/dashboard");
   };
 
   return (

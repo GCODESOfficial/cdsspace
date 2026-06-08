@@ -7,6 +7,11 @@ export interface AdminSession {
   email: string;
   name: string;
   permissions: string[];
+  source?: "admin_cookie" | "team_cookie";
+  memberId?: string;
+  teamRoleTitle?: string | null;
+  department?: string | null;
+  adminRoleName?: string | null;
 }
 
 export function useAdminSession() {
@@ -23,6 +28,11 @@ export function useAdminSession() {
             email: data.email,
             name: data.name,
             permissions: data.permissions || [],
+            source: data.source,
+            memberId: data.memberId,
+            teamRoleTitle: data.teamRoleTitle ?? null,
+            department: data.department ?? null,
+            adminRoleName: data.adminRoleName ?? null,
           });
         }
       })

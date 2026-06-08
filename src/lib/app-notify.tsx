@@ -167,7 +167,7 @@ export function AppNotifyRoot() {
 
       {/* Toast rail */}
       {snap.toasts.length > 0 && (
-        <div className="fixed top-4 right-4 z-[9999] flex flex-col gap-2 w-[min(92vw,360px)]">
+        <div className="fixed inset-x-3 bottom-3 z-[9999] flex flex-col gap-2 w-auto md:inset-x-auto md:bottom-auto md:top-4 md:right-4 md:w-[min(92vw,360px)]">
           {snap.toasts.map((t) => (
             <ToastCard key={t.id} rec={t} />
           ))}
@@ -199,13 +199,13 @@ function Shell({
 }) {
   return (
     <div
-      className="fixed inset-0 z-[9998] bg-[#040b37]/60 backdrop-blur-sm flex items-center justify-center p-4 animate-fadeIn"
+      className="fixed inset-0 z-[9998] bg-[#040b37]/60 backdrop-blur-sm flex items-end justify-center p-3 sm:items-center sm:p-4 animate-fadeIn"
       onClick={onBackdrop}
     >
       <div
-        className={`bg-white rounded-2xl shadow-[0_28px_60px_rgba(4,11,55,0.28)] ring-1 ring-[${BRAND.line}] w-full ${narrow ? "max-w-sm" : "max-w-md"} overflow-hidden`}
+        className={`bg-white rounded-[24px] shadow-[0_28px_60px_rgba(4,11,55,0.28)] w-full ${narrow ? "max-w-sm" : "max-w-md"} overflow-hidden sm:rounded-2xl`}
         onClick={(e) => e.stopPropagation()}
-        style={{ color: BRAND.navy }}
+        style={{ color: BRAND.navy, boxShadow: "0 28px 60px rgba(4,11,55,0.28)", border: `1px solid ${BRAND.line}` }}
       >
         {children}
       </div>
@@ -243,7 +243,7 @@ function BrandButton({
   autoFocus?: boolean;
 }) {
   const base =
-    "inline-flex items-center justify-center gap-1.5 px-4 py-2 rounded-xl text-[13px] font-semibold transition disabled:opacity-50";
+    "inline-flex w-full sm:w-auto items-center justify-center gap-1.5 px-4 py-2 rounded-xl text-[13px] font-semibold transition disabled:opacity-50";
   const styles =
     variant === "primary"
       ? { background: BRAND.blue, color: "white" }
@@ -292,7 +292,7 @@ function ConfirmModal({ rec }: { rec: ConfirmRec }) {
           {message}
         </p>
       )}
-      <div className="px-5 pb-5 flex justify-end gap-2">
+      <div className="px-5 pb-5 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
         <BrandButton variant="ghost" onClick={() => store.closeConfirm(id, false)}>
           {cancelLabel}
         </BrandButton>
@@ -327,7 +327,7 @@ function AlertModal({ rec }: { rec: AlertRec }) {
           {message}
         </p>
       )}
-      <div className="px-5 pb-5 flex justify-end">
+      <div className="px-5 pb-5 flex">
         <BrandButton onClick={() => store.closeAlert(id)} autoFocus>
           {okLabel}
         </BrandButton>
@@ -374,7 +374,7 @@ function PromptModal({ rec }: { rec: PromptRec }) {
           style={{ borderColor: BRAND.line, background: "#F7F8FB" }}
         />
       </div>
-      <div className="px-5 pb-5 flex justify-end gap-2">
+      <div className="px-5 pb-5 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
         <BrandButton variant="ghost" onClick={() => store.closePrompt(id, null)}>
           {cancelLabel}
         </BrandButton>

@@ -1,77 +1,97 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
 import { NextResponse } from "next/server";
-import { supabaseAdmin } from "@/lib/supabase";
 import { getTeamSession } from "@/lib/team-auth";
+import { glashQuery } from "@/lib/glashdb/postgres";
 
 export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+
+type RecentProject = {
+  id: string;
+  title: string;
+  category: string | null;
+  cover_image: string | null;
+  updated_at: string;
+};
+
+type Meeting = {
+  id: string;
+  title: string;
+  scheduled_for: string | null;
+  room_code: string;
+  status: string;
+};
 
 export async function GET() {
   const session = await getTeamSession();
-  if (!session || !supabaseAdmin) {
+  if (!session) {
     return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
   }
 
-  const db = supabaseAdmin as any;
+  const projects = await glashQuery<RecentProject>(
+    `select distinct p.id,
+            p.name as title,
+            p.category,
+            null::text as cover_image,
+            p.updated_at
+       from public.finance_projects p
+       left join public.project_assignments pa on pa.project_id = p.id
+      where p.status <> 'archived'
+        and (
+          p.project_manager_id = $1
+          or p.department_lead_id = $1
+          or pa.team_member_id = $1
+          or (
+            pa.department is not null
+            and lower(pa.department) = lower(coalesce($2::text, ''))
+          )
+        )
+      order by p.updated_at desc
+      `,
+    [session.id, session.department ?? ""],
+  );
 
-  // Assigned work count + a few recent
-  const { data: assignments } = await db
-    .from("team_work_assignments")
-    .select("work_id")
-    .eq("team_member_id", session.id)
-    .in("status", ["active", "completed"]);
+  const unreadMessages = await glashQuery<{ id: string }>(
+    `select id
+       from public.team_notifications
+      where recipient_id = $1
+        and kind = 'chat_message'
+        and read_at is null`,
+    [session.id],
+  ).catch(() => []);
 
-  const workIds = (assignments || []).map((a: any) => a.work_id).filter(Boolean);
+  const meetingIds = await glashQuery<{ meeting_id: string }>(
+    `select meeting_id
+       from public.team_meeting_participants
+      where team_member_id = $1`,
+    [session.id],
+  ).catch(() => []);
 
-  let recent_work: any[] = [];
-  if (workIds.length > 0) {
-    const { data: works } = await db
-      .from("works")
-      .select("id, title, category, cover_image")
-      .in("id", workIds)
-      .order("created_at", { ascending: false })
-      .limit(5);
-    recent_work = works || [];
+  let upcomingMeetings: Meeting[] = [];
+  if (meetingIds.length) {
+    upcomingMeetings = await glashQuery<Meeting>(
+      `select id, title, scheduled_for, room_code, status
+         from public.team_meetings
+        where id = any($1::uuid[])
+          and status = any($2::text[])
+        order by scheduled_for asc nulls last
+        limit 5`,
+      [meetingIds.map((row) => row.meeting_id), ["scheduled", "live"]],
+    ).catch(() => []);
   }
 
-  // Unread messages count
-  const { data: unreadNotifs } = await db
-    .from("team_notifications")
-    .select("id")
-    .eq("recipient_id", session.id)
-    .eq("kind", "chat_message")
-    .is("read_at", null);
-  const unread_messages = unreadNotifs?.length || 0;
-
-  // Upcoming meetings (scheduled or live) where user is participant
-  const { data: meetingPart } = await db
-    .from("team_meeting_participants")
-    .select("meeting_id")
-    .eq("team_member_id", session.id);
-  const meetingIds = (meetingPart || []).map((m: any) => m.meeting_id);
-
-  let upcoming_meetings: any[] = [];
-  if (meetingIds.length > 0) {
-    const { data: meetings } = await db
-      .from("team_meetings")
-      .select("id, title, scheduled_for, room_code, status")
-      .in("id", meetingIds)
-      .in("status", ["scheduled", "live"])
-      .order("scheduled_for", { ascending: true, nullsFirst: false })
-      .limit(5);
-    upcoming_meetings = meetings || [];
-  }
+  const recentProjects = projects.slice(0, 5);
 
   return NextResponse.json({
     ok: true,
     data: {
       member: { full_name: session.full_name, role_title: session.role_title },
       stats: {
-        assigned_work: workIds.length,
-        unread_messages,
-        upcoming_meetings: upcoming_meetings.length,
+        assigned_work: projects.length,
+        unread_messages: unreadMessages.length,
+        upcoming_meetings: upcomingMeetings.length,
       },
-      recent_work,
-      upcoming_meetings,
+      recent_work: recentProjects,
+      upcoming_meetings: upcomingMeetings,
     },
   });
 }

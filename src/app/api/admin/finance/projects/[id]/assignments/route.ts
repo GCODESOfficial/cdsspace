@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { financeDb, requireFinanceAdmin } from "@/lib/finance/api-auth";
+import { financeDb, requireFinanceAdminAsync } from "@/lib/finance/api-auth";
 import { logActivity } from "@/lib/activity-log";
 import { notifyTeamMember, notifyMany } from "@/lib/notify-team";
 
@@ -12,7 +12,7 @@ import { notifyTeamMember, notifyMany } from "@/lib/notify-team";
  */
 
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-    const denied = requireFinanceAdmin(req);
+    const denied = await requireFinanceAdminAsync(req);
     if (denied) return denied;
     const { id } = await params;
     const sb = financeDb();
@@ -24,11 +24,26 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
         .eq("project_id", id)
         .order("created_at", { ascending: true });
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-    return NextResponse.json({ assignments: data ?? [] });
+    const seen = new Set<string>();
+    const assignments = (data ?? []).filter((assignment: {
+        project_id?: string | null;
+        team_member_id?: string | null;
+        department?: string | null;
+    }) => {
+        const key = [
+            assignment.project_id || id,
+            assignment.team_member_id || "",
+            (assignment.department || "").toLowerCase(),
+        ].join(":");
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+    });
+    return NextResponse.json({ assignments });
 }
 
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-    const denied = requireFinanceAdmin(req);
+    const denied = await requireFinanceAdminAsync(req);
     if (denied) return denied;
     const { id } = await params;
     const body = await req.json().catch(() => ({}));

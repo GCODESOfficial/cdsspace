@@ -5,8 +5,11 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
+    "build:next": "next build",
+    "glash": "glash build",
+    "glash:optimize": "glash optimize public",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "eslint ."
   },
   "dependencies": {
     "@dnd-kit/sortable": "^10.0.0",
@@ -62,6 +65,7 @@
     "dotenv": "^16.5.0",
     "embla-carousel-react": "^8.6.0",
     "framer-motion": "^12.11.1",
+    "glashjs": "^0.0.2",
     "html-to-docx": "^1.8.0",
     "input-otp": "^1.4.2",
     "jspdf": "^4.2.1",
@@ -90,6 +94,7 @@
     "react-resizable-panels": "^2.1.9",
     "react-slick": "^0.30.3",
     "recharts": "^2.15.3",
+    "sharp": "^0.34.5",
     "slick-carousel": "^1.8.1",
     "sonner": "^2.0.3",
     "style-loader": "^4.0.0",
@@ -122,7 +127,7 @@
     "@types/react-slick": "^0.23.13",
     "autoprefixer": "^10.4.21",
     "eslint": "^9",
-    "eslint-config-next": "15.3.1",
+    "eslint-config-next": "^16.2.7",
     "postcss": "^8.5.3",
     "prisma": "^7.4.1",
     "tailwindcss": "^4.1.4",

@@ -48,6 +48,11 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
 
         // Sub-admin route check
         const requiredPerm = getPermissionForRoute(pathname || "");
+        if (pathname === "/admin") {
+          setDenied(false);
+          return;
+        }
+
         // Sub-admins page is super-admin only. `team_members.promote`
         // (granted via a role) also unlocks role management for delegated
         // admins who need to create new team members.

@@ -10,7 +10,7 @@ import {
   Facebook, Linkedin, AtSign, Search, CircleStop, AlertTriangle, Users,
 } from "lucide-react";
 import { CMeetClient, type RemotePeer, type ChatMessage } from "@/lib/cmeet-rtc";
-import { appAlert, appConfirm, appPrompt } from "@/lib/app-notify";
+import { appAlert } from "@/lib/app-notify";
 
 /* ------------------------------------------------------------------ */
 /*  Emoji hinting                                                     */
@@ -32,6 +32,16 @@ function hintEmojis(text: string): string[] {
     if (lower.includes(kw)) em.forEach((e) => out.add(e));
   }
   return Array.from(out);
+}
+
+interface Meeting {
+  title: string;
+  created_by: string | null;
+  created_by_admin: boolean;
+  started_at?: string | null;
+  ended_at?: string | null;
+  scheduled_for?: string | null;
+  audio_only: boolean;
 }
 
 /* ------------------------------------------------------------------ */
@@ -90,7 +100,7 @@ export default function MeetRoomPage() {
   const router = useRouter();
   const code = params?.code;
 
-  const [meeting, setMeeting] = useState<any>(null);
+  const [meeting, setMeeting] = useState<Meeting | null>(null);
   const [me, setMe] = useState<{ id: string; full_name: string } | null>(null);
   const [name, setName] = useState("");
   const [joining, setJoining] = useState(false);
@@ -166,8 +176,10 @@ export default function MeetRoomPage() {
   }, []);
 
   /* -------- Permissions & join -------- */
+  const canJoinMeeting = Boolean(name.trim()) && !joining && !mediaError;
+
   async function joinMeeting() {
-    if (!code || !name.trim() || !meeting || joining) return;
+    if (!code || !name.trim() || !meeting || joining || mediaError) return;
     setJoining(true);
     setMediaError(null);
 
@@ -193,14 +205,15 @@ export default function MeetRoomPage() {
       await client.join(stream);
 
       setJoined(true);
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error(err);
+      const mediaErr = err instanceof DOMException || err instanceof Error ? err : null;
       setMediaError(
-        err?.name === "NotAllowedError"
+        mediaErr?.name === "NotAllowedError"
           ? "Camera or microphone permission was denied. Please allow access and retry."
-          : err?.name === "NotFoundError"
+          : mediaErr?.name === "NotFoundError"
             ? "No camera or microphone found. Check your device."
-            : err?.message || "Couldn't access your camera/microphone."
+            : mediaErr?.message || "Couldn't access your camera/microphone."
       );
     } finally {
       setJoining(false);
@@ -254,7 +267,7 @@ export default function MeetRoomPage() {
     }
 
     try {
-      const disp = await (navigator.mediaDevices as any).getDisplayMedia({ video: true, audio: false });
+      const disp = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: false });
       const shareTrack: MediaStreamTrack = disp.getVideoTracks()[0];
       shareTrack.onended = () => { toggleShare(); };
 
@@ -340,8 +353,11 @@ export default function MeetRoomPage() {
           <label className="block text-[11px] text-white/60 mb-1.5">Your name</label>
           <input
             value={name}
-            onChange={(e) => setName(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && joinMeeting()}
+            onChange={(e) => {
+              setName(e.target.value);
+              if (mediaError) setMediaError(null);
+            }}
+            onKeyDown={(e) => e.key === "Enter" && canJoinMeeting && joinMeeting()}
             placeholder="Alex Doe"
             className="w-full px-3 py-2.5 rounded-xl bg-white/5 border border-white/10 text-[13px] focus:outline-none focus:border-white/20"
           />
@@ -352,7 +368,7 @@ export default function MeetRoomPage() {
           )}
           <button
             onClick={joinMeeting}
-            disabled={!name.trim() || joining}
+            disabled={!canJoinMeeting}
             className="mt-4 w-full px-4 py-3 rounded-xl bg-[#0A4FE8] text-white text-[13px] font-medium disabled:opacity-50 inline-flex items-center justify-center gap-2"
           >
             {joining ? <Loader2 className="w-4 h-4 animate-spin" /> : <Video className="w-4 h-4" />}
@@ -649,7 +665,8 @@ function TagMembersModal({ code, onClose }: { code: string; onClose: () => void 
   function toggle(id: string) {
     setPicked((p) => {
       const n = new Set(p);
-      n.has(id) ? n.delete(id) : n.add(id);
+      if (n.has(id)) n.delete(id);
+      else n.add(id);
       return n;
     });
   }
@@ -749,8 +766,8 @@ function ShareLiveModal({ title, code, onClose }: { title: string; code: string;
   }
   function open(href: string) { window.open(href, "_blank", "noopener,noreferrer,width=640,height=640"); }
   async function nativeShare() {
-    if ((navigator as any).share) {
-      try { await (navigator as any).share({ title, text, url }); } catch {}
+    if (navigator.share) {
+      try { await navigator.share({ title, text, url }); } catch {}
     } else {
       copy();
     }

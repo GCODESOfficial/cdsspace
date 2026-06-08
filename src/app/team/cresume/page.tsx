@@ -167,23 +167,23 @@ export default function CResumeEditor() {
   const publicUrl = `${typeof window !== "undefined" ? window.location.origin : ""}/${username}`;
 
   return (
-    <div className="p-6 md:p-8 max-w-[960px]">
-      <div className="flex items-center justify-between mb-6">
+    <div className="max-w-[960px] px-0 py-1 md:p-6 lg:p-8">
+      <div className="mb-6 flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
         <div>
           <h1 className="text-[26px] font-bold text-[#0D1B39] tracking-tight">cResume</h1>
           <p className="text-gray-400 text-[13px] mt-1">Your public profile — brand yourself with a beautiful one-pager.</p>
         </div>
-        <div className="flex items-center gap-2">
-          <label className="inline-flex items-center gap-2 text-[12.5px] cursor-pointer">
+        <div className="flex w-full flex-col gap-2 sm:flex-row sm:flex-wrap md:w-auto md:justify-end">
+          <label className="inline-flex items-center gap-2 rounded-xl border border-gray-200 bg-white px-3 py-2.5 text-[12.5px] cursor-pointer">
             <input type="checkbox" checked={resume.is_public} onChange={(e) => set("is_public", e.target.checked)} className="w-4 h-4" />
             Public
           </label>
           {resume.is_public && username && (
-            <a href={`/${username}`} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-[#0A4FE8]/30 text-[#0A4FE8] text-[12px] font-medium hover:bg-blue-50">
+            <a href={`/${username}`} target="_blank" rel="noreferrer" className="inline-flex w-full sm:w-auto items-center justify-center gap-1.5 px-3 py-2.5 rounded-xl border border-[#0A4FE8]/30 text-[#0A4FE8] text-[12px] font-medium hover:bg-blue-50">
               <Eye className="w-3.5 h-3.5" /> Preview
             </a>
           )}
-          <button onClick={save} disabled={saving} className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-[#0A4FE8] text-white text-[12.5px] font-medium hover:bg-[#083EC0] disabled:opacity-50">
+          <button onClick={save} disabled={saving} className="inline-flex w-full sm:w-auto items-center justify-center gap-1.5 px-4 py-2.5 rounded-xl bg-[#0A4FE8] text-white text-[12.5px] font-medium hover:bg-[#083EC0] disabled:opacity-50">
             {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
             Save
           </button>
@@ -191,11 +191,11 @@ export default function CResumeEditor() {
       </div>
 
       {resume.is_public && username && (
-        <div className="mb-6 rounded-xl bg-blue-50 border border-blue-100 px-4 py-2.5 flex items-center gap-2 text-[12px]">
+        <div className="mb-6 rounded-xl bg-blue-50 border border-blue-100 px-4 py-3 flex flex-col items-start gap-2 text-[12px] sm:flex-row sm:items-center">
           <Link2 className="w-3.5 h-3.5 text-[#0A4FE8]" />
           <p className="text-gray-600">Public URL:</p>
-          <p className="font-mono text-[11.5px] text-[#0A4FE8]">{publicUrl}</p>
-          <button onClick={() => navigator.clipboard.writeText(publicUrl)} className="ml-auto text-[#0A4FE8] hover:underline">Copy</button>
+          <p className="font-mono break-all text-[11.5px] text-[#0A4FE8]">{publicUrl}</p>
+          <button onClick={() => navigator.clipboard.writeText(publicUrl)} className="text-[#0A4FE8] hover:underline sm:ml-auto">Copy</button>
         </div>
       )}
 
@@ -306,7 +306,7 @@ export default function CResumeEditor() {
           )}
         </div>
 
-        <div className="flex items-start gap-5">
+        <div className="flex flex-col gap-5 sm:flex-row sm:items-start">
           <AvatarPicker url={resume.avatar_url} onChange={(url) => set("avatar_url", url)} />
           <div className="flex-1 grid grid-cols-1 md:grid-cols-2 gap-3">
             <Field label="Headline" value={resume.headline} onChange={(v) => set("headline", v)} placeholder="e.g. Brand designer · Product thinker" />
@@ -356,7 +356,7 @@ export default function CResumeEditor() {
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <section className="mb-5 bg-white rounded-2xl border border-gray-100 shadow-sm p-5">
+    <section className="mb-5 bg-white rounded-2xl border border-gray-100 shadow-sm p-4 sm:p-5">
       <h2 className="text-[13px] font-bold uppercase tracking-wider text-gray-500 mb-3">{title}</h2>
       {children}
     </section>
@@ -387,7 +387,7 @@ function AvatarPicker({ url, onChange }: { url: string | null; onChange: (url: s
   }
 
   return (
-    <div className="shrink-0 text-center">
+    <div className="shrink-0 text-center sm:text-left">
       {url ? (
         <img src={url} alt="Avatar" className="w-20 h-20 rounded-full object-cover border border-gray-200" />
       ) : (
@@ -434,9 +434,9 @@ function SkillsPicker({ value, onChange }: { value: string[]; onChange: (v: stri
           );
         })}
       </div>
-      <div className="mt-3 flex items-center gap-2">
+      <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-center">
         <input value={custom} onChange={(e) => setCustom(e.target.value)} onKeyDown={(e) => e.key === "Enter" && addCustom()} placeholder="Add a custom skill…" className="flex-1 px-3 py-2 rounded-lg bg-gray-50 border border-gray-200 text-[12.5px]" />
-        <button onClick={addCustom} className="px-3 py-2 rounded-lg bg-[#0A4FE8] text-white text-[11.5px] font-medium"><Plus className="w-3.5 h-3.5" /></button>
+        <button onClick={addCustom} className="inline-flex w-full sm:w-auto items-center justify-center px-3 py-2 rounded-lg bg-[#0A4FE8] text-white text-[11.5px] font-medium"><Plus className="w-3.5 h-3.5" /></button>
       </div>
       {value.length > 0 && (
         <div className="mt-3 flex flex-wrap gap-1">
@@ -460,7 +460,7 @@ function RoleRepeater({ value, onChange }: { value: Role[]; onChange: (v: Role[]
     <div className="space-y-3">
       {value.map((r, i) => (
         <div key={i} className="rounded-xl border border-gray-100 p-3">
-          <div className="grid grid-cols-2 gap-2">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
             <Field label="Company" value={r.company} onChange={(v) => onChange(value.map((x, j) => j === i ? { ...x, company: v } : x))} />
             <Field label="Title" value={r.title} onChange={(v) => onChange(value.map((x, j) => j === i ? { ...x, title: v } : x))} />
             <Field label="Start" value={r.start} onChange={(v) => onChange(value.map((x, j) => j === i ? { ...x, start: v } : x))} />
@@ -482,7 +482,7 @@ function ProjectRepeater({ value, onChange }: { value: Project[]; onChange: (v: 
     <div className="space-y-3">
       {value.map((r, i) => (
         <div key={i} className="rounded-xl border border-gray-100 p-3">
-          <div className="grid grid-cols-2 gap-2">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
             <Field label="Project" value={r.name} onChange={(v) => onChange(value.map((x, j) => j === i ? { ...x, name: v } : x))} />
             <Field label="Client" value={r.client} onChange={(v) => onChange(value.map((x, j) => j === i ? { ...x, client: v } : x))} />
             <Field label="Role" value={r.role} onChange={(v) => onChange(value.map((x, j) => j === i ? { ...x, role: v } : x))} />
@@ -504,12 +504,12 @@ function EducationRepeater({ value, onChange }: { value: Education[]; onChange: 
   return (
     <div className="space-y-3">
       {value.map((r, i) => (
-        <div key={i} className="rounded-xl border border-gray-100 p-3 grid grid-cols-2 gap-2">
+        <div key={i} className="rounded-xl border border-gray-100 p-3 grid grid-cols-1 md:grid-cols-2 gap-2">
           <Field label="School" value={r.school} onChange={(v) => onChange(value.map((x, j) => j === i ? { ...x, school: v } : x))} />
           <Field label="Degree" value={r.degree} onChange={(v) => onChange(value.map((x, j) => j === i ? { ...x, degree: v } : x))} />
           <Field label="Start" value={r.start} onChange={(v) => onChange(value.map((x, j) => j === i ? { ...x, start: v } : x))} />
           <Field label="End" value={r.end} onChange={(v) => onChange(value.map((x, j) => j === i ? { ...x, end: v } : x))} />
-          <button onClick={() => onChange(value.filter((_, j) => j !== i))} className="col-span-2 text-[11px] text-rose-600 hover:underline text-left">Remove</button>
+          <button onClick={() => onChange(value.filter((_, j) => j !== i))} className="text-[11px] text-rose-600 hover:underline text-left md:col-span-2">Remove</button>
         </div>
       ))}
       <button onClick={() => onChange([...value, blank])} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-dashed border-gray-300 text-[12px] text-gray-500 hover:text-[#0A4FE8]"><Plus className="w-3 h-3" /> Add education</button>

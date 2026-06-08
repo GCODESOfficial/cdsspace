@@ -38,6 +38,7 @@ export type AIKind =
   // Chat helpers
   | "chat_reply_suggestions"
   | "chat_smart_compose"
+  | "chat_translate"
   // cResume / profile
   | "resume_headline"
   | "resume_about"
@@ -323,6 +324,16 @@ Output only the rewrite.`,
     max_tokens: 180,
     temperature: 0.5,
     buildUser: (i) => `Draft: ${i.draft}`,
+  },
+
+  chat_translate: {
+    system: `${BRAND_VOICE}
+
+Translate the chat message into the requested language. Preserve meaning,
+names, numbers, URLs, formatting, and tone. Output only the translation.`,
+    max_tokens: 500,
+    temperature: 0.2,
+    buildUser: (i) => `Language: ${i.language || "English"}\nMessage:\n${i.text || ""}`,
   },
 
   // ---------------- Resume / profile -----------------

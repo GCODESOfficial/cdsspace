@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import {
     Users,
     Building2,
@@ -84,6 +85,18 @@ interface ProjectMeeting {
     created_at: string;
 }
 
+type DocumentOptionPayload = {
+    data?: { docs?: CDoc[] } | CDoc[];
+    docs?: CDoc[];
+};
+
+function normalizeDocumentOptions(payload: DocumentOptionPayload): CDoc[] {
+    const docs = Array.isArray(payload.data) ? payload.data : payload.data?.docs ?? payload.docs ?? [];
+    return docs
+        .filter((doc): doc is CDoc => Boolean(doc?.id && doc?.title))
+        .map((doc) => ({ id: doc.id, title: doc.title }));
+}
+
 export function ProjectCollaborationPanel({ projectId }: { projectId: string }) {
     const [assignments, setAssignments] = useState<Assignment[]>([]);
     const [members, setMembers] = useState<Member[]>([]);
@@ -147,10 +160,8 @@ export function ProjectCollaborationPanel({ projectId }: { projectId: string }) 
                 fetch("/api/team/cdocs").then((r) => r.ok ? r.json() : { data: [] }).catch(() => ({ data: [] })),
                 fetch("/api/team/protect-docs").then((r) => r.ok ? r.json() : { data: [] }).catch(() => ({ data: [] })),
             ]);
-            const cdList: any[] = cdocsRes?.data?.docs ?? cdocsRes?.docs ?? cdocsRes?.data ?? [];
-            setCdocs(cdList.map((c: any) => ({ id: c.id, title: c.title })));
-            const pdList: any[] = protRes?.data?.docs ?? protRes?.docs ?? protRes?.data ?? [];
-            setProtectedDocs(pdList.map((p: any) => ({ id: p.id, title: p.title })));
+            setCdocs(normalizeDocumentOptions(cdocsRes));
+            setProtectedDocs(normalizeDocumentOptions(protRes));
         })();
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [projectId]);
@@ -207,12 +218,20 @@ export function ProjectCollaborationPanel({ projectId }: { projectId: string }) 
                             will see the project automatically.
                         </p>
                     </div>
-                    <Button
-                        onClick={() => setShowAssign(true)}
-                        className="rounded-xl bg-[#0A4FE8] hover:bg-[#083EC0]"
-                    >
-                        <Plus className="w-4 h-4 mr-1.5" /> Assign
-                    </Button>
+                    <div className="flex flex-wrap items-center justify-end gap-2">
+                        <Link
+                            href={`/admin/announcements?audience=project&projectId=${projectId}`}
+                            className="inline-flex h-10 items-center justify-center rounded-xl border border-blue-100 bg-blue-50 px-4 text-[13px] font-semibold text-[#0A4FE8] transition hover:bg-blue-100"
+                        >
+                            <MessageSquare className="w-4 h-4 mr-1.5" /> Announce
+                        </Link>
+                        <Button
+                            onClick={() => setShowAssign(true)}
+                            className="rounded-xl bg-[#0A4FE8] hover:bg-[#083EC0]"
+                        >
+                            <Plus className="w-4 h-4 mr-1.5" /> Assign
+                        </Button>
+                    </div>
                 </div>
                 {assignments.length === 0 ? (
                     <p className="text-center py-8 text-[12.5px] text-gray-400">

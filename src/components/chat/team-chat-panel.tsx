@@ -33,6 +33,19 @@ import {
   MoreHorizontal,
   CheckCheck,
   ImageIcon,
+  Pin,
+  Star,
+  Bookmark,
+  Languages,
+  CalendarClock,
+  FileStack,
+  ClipboardList,
+  Vote,
+  ShieldCheck,
+  BookOpenText,
+  Mic2,
+  AtSign,
+  Clock3,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Linkified, LinkPreview, firstUrl } from "@/components/chat/message-links";
@@ -50,6 +63,15 @@ interface Thread {
   name: string | null;
   department: string | null;
   includes_admin: boolean;
+  visibility?: "public" | "private" | "invite_only";
+  description?: string | null;
+  rules?: string | null;
+  invite_code?: string | null;
+  is_announcement_only?: boolean;
+  is_voice_room?: boolean;
+  is_voice_channel?: boolean;
+  pinned_message_id?: string | null;
+  project_id?: string | null;
   last_message: {
     id: string;
     body: string | null;
@@ -81,6 +103,20 @@ interface Message {
   reply_to_message_id: string | null;
   sticker_key: string | null;
   reactions: Record<string, string[]>;
+  message_type?: string;
+  delivery_status?: string;
+  pinned_at?: string | null;
+  pinned_by?: string | null;
+  starred_by?: string[];
+  bookmarked_by?: string[];
+  scheduled_for?: string | null;
+  translated?: Record<string, string>;
+  audio_url?: string | null;
+  audio_duration_seconds?: number | null;
+  voice_transcript?: string | null;
+  file_name?: string | null;
+  file_size_bytes?: number | null;
+  mime_type?: string | null;
   edited_at: string | null;
   deleted_at: string | null;
   reply_to: {
@@ -113,8 +149,33 @@ interface AiSuggestion {
   body: string;
 }
 
+interface ChatSearchResult {
+  id: string;
+  body?: string | null;
+  file_name?: string | null;
+  created_at: string;
+}
+
+interface ChatMemberOption {
+  id: string;
+  full_name?: string | null;
+  username?: string | null;
+  avatar_url?: string | null;
+  role_title?: string | null;
+  department?: string | null;
+  status?: "online" | "offline" | "break" | string;
+}
+
+interface ChatProjectOption {
+  id: string;
+  name: string;
+  client?: string | null;
+  status?: string | null;
+}
+
 type ComposerPanel = "emoji" | "stickers" | "background" | null;
 type ChatBackgroundKey = "mist" | "linen" | "ocean" | "midnight";
+type NewChatKind = "self" | "direct" | "group" | "department" | "project";
 
 const CHAT_BG_KEY = "cds_team_chat_bg";
 const REACTION_EMOJIS = ["❤️", "👍", "😂", "😮", "👏", "🔥", "🙏", "🎉"];
@@ -255,6 +316,10 @@ export function TeamChatPanel({ initialThreadId }: { initialThreadId?: string | 
   const [uploading, setUploading] = useState(false);
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
   const [composerPanel, setComposerPanel] = useState<ComposerPanel>(null);
+  const [toolkitOpen, setToolkitOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchResults, setSearchResults] = useState<ChatSearchResult[]>([]);
+  const [searching, setSearching] = useState(false);
   const [reactionPickerFor, setReactionPickerFor] = useState<string | null>(null);
   const [replyingTo, setReplyingTo] = useState<Message | null>(null);
   const [actionMessage, setActionMessage] = useState<Message | null>(null);
@@ -448,6 +513,23 @@ export function TeamChatPanel({ initialThreadId }: { initialThreadId?: string | 
     composerRef.current.style.height = "0px";
     composerRef.current.style.height = `${Math.min(composerRef.current.scrollHeight, 156)}px`;
   }, [input, editingMessageId]);
+
+  useEffect(() => {
+    if (!selectedThread || !input.trim()) return;
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => {
+      fetch("/api/team/chat/typing", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ threadId: selectedThread, typing: true }),
+        signal: controller.signal,
+      }).catch(() => {});
+    }, 350);
+    return () => {
+      window.clearTimeout(timer);
+      controller.abort();
+    };
+  }, [input, selectedThread]);
 
   useEffect(() => {
     if (!reactionPickerFor) return;
@@ -730,6 +812,51 @@ export function TeamChatPanel({ initialThreadId }: { initialThreadId?: string | 
     }
   }
 
+  async function runMessageAction(message: Message, action: "pin" | "unpin" | "star" | "unstar" | "bookmark" | "unbookmark" | "translate") {
+    if (message.id.startsWith("temp_")) return;
+    try {
+      const payload: Record<string, unknown> = { action };
+      if (action === "translate") {
+        const language = window.prompt("Translate this message to which language?", "English");
+        if (!language?.trim()) return;
+        payload.language = language.trim();
+      }
+      const res = await fetch(`/api/team/chat/messages/${message.id}/actions`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const json = await res.json();
+      if (!res.ok || !json.ok) throw new Error(json.error || "Message action failed");
+      if (json.message) updateMessageLocally(json.message);
+      setActionMessage(null);
+      await fetchThreads();
+    } catch (error) {
+      console.error(error);
+    } finally {
+      /* action state is reflected by the updated message payload */
+    }
+  }
+
+  async function runChatSearch() {
+    if (!searchQuery.trim()) {
+      setSearchResults([]);
+      return;
+    }
+    setSearching(true);
+    try {
+      const params = new URLSearchParams({ q: searchQuery.trim(), scope: "team" });
+      if (selectedThread) params.set("threadId", selectedThread);
+      const res = await fetch(`/api/team/chat/search?${params.toString()}`, { cache: "no-store" });
+      const json = await res.json();
+      setSearchResults(json.ok ? json.results || [] : []);
+    } catch {
+      setSearchResults([]);
+    } finally {
+      setSearching(false);
+    }
+  }
+
   async function deleteMessage(messageId: string) {
     try {
       const res = await fetch(`/api/team/chat/messages/${messageId}`, { method: "DELETE" });
@@ -814,7 +941,7 @@ export function TeamChatPanel({ initialThreadId }: { initialThreadId?: string | 
 
   return (
     <div
-      className="flex h-[calc(100dvh-15rem)] min-h-[520px] md:h-[calc(100vh-160px)] md:min-h-[640px] rounded-[28px] border shadow-sm overflow-hidden"
+      className="flex h-full min-h-0 w-full overflow-hidden rounded-2xl border shadow-sm sm:rounded-[24px]"
       style={{
         background: currentTheme.shell,
         borderColor: currentTheme.dark ? "rgba(71,85,105,0.64)" : "rgba(226,232,240,0.8)",
@@ -959,6 +1086,20 @@ export function TeamChatPanel({ initialThreadId }: { initialThreadId?: string | 
               {currentThread && (
                 <div className="flex items-center gap-1 shrink-0">
                   <button
+                    onClick={() => setToolkitOpen((open) => !open)}
+                    className={cn(
+                      "p-2 rounded-xl transition",
+                      toolkitOpen
+                        ? "bg-blue-600 text-white"
+                        : currentTheme.dark
+                        ? "text-slate-300 hover:text-white hover:bg-slate-800/70"
+                        : "text-gray-500 hover:text-[#0A4FE8] hover:bg-blue-50",
+                    )}
+                    title="Advanced chat tools"
+                  >
+                    <ShieldCheck className="w-4 h-4" />
+                  </button>
+                  <button
                     onClick={() => setComposerPanel(composerPanel === "background" ? null : "background")}
                     className={cn(
                       "p-2 rounded-xl transition",
@@ -1002,6 +1143,24 @@ export function TeamChatPanel({ initialThreadId }: { initialThreadId?: string | 
               )}
             </header>
 
+            {toolkitOpen && currentThread && (
+              <AdvancedChatToolkit
+                thread={currentThread}
+                theme={currentTheme}
+                query={searchQuery}
+                results={searchResults}
+                searching={searching}
+                onQueryChange={setSearchQuery}
+                onSearch={runChatSearch}
+                onJump={(messageId) => {
+                  scrollToMessage(messageId);
+                  setToolkitOpen(false);
+                }}
+                onStartCall={startCall}
+                onUpload={() => fileInputRef.current?.click()}
+              />
+            )}
+
             <div className="flex-1 overflow-y-auto px-3 sm:px-5 py-5 sm:py-6 relative" style={{ background: currentTheme.canvas }}>
               {messagesLoading && messages.length === 0 ? (
                 <div className="flex justify-center pt-10">
@@ -1042,6 +1201,9 @@ export function TeamChatPanel({ initialThreadId }: { initialThreadId?: string | 
                           const sticker = getSticker(message.sticker_key);
                           const reactionEntries = Object.entries(message.reactions || {}).filter(([, ids]) => ids.length > 0);
                           const swipeOffset = swipeHint?.id === message.id ? swipeHint.offset : 0;
+                          const starredByMe = !!viewer?.reactionKey && (message.starred_by || []).includes(viewer.reactionKey);
+                          const bookmarkedByMe = !!viewer?.reactionKey && (message.bookmarked_by || []).includes(viewer.reactionKey);
+                          const translatedEntries = Object.entries(message.translated || {});
 
                           return (
                             <li
@@ -1147,6 +1309,31 @@ export function TeamChatPanel({ initialThreadId }: { initialThreadId?: string | 
                                             </div>
                                           )}
 
+                                          {(message.pinned_at || starredByMe || bookmarkedByMe || message.delivery_status === "scheduled") && (
+                                            <div className={cn("mb-2 flex flex-wrap gap-1.5", mine ? "justify-end" : "justify-start")}>
+                                              {message.pinned_at && (
+                                                <span className={cn("inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[9px] font-bold uppercase tracking-[0.18em]", mine ? "bg-white/15 text-white/85" : "bg-blue-50 text-blue-700")}>
+                                                  <Pin className="w-3 h-3" /> Pinned
+                                                </span>
+                                              )}
+                                              {starredByMe && (
+                                                <span className={cn("inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[9px] font-bold uppercase tracking-[0.18em]", mine ? "bg-white/15 text-white/85" : "bg-amber-50 text-amber-700")}>
+                                                  <Star className="w-3 h-3" /> Starred
+                                                </span>
+                                              )}
+                                              {bookmarkedByMe && (
+                                                <span className={cn("inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[9px] font-bold uppercase tracking-[0.18em]", mine ? "bg-white/15 text-white/85" : "bg-emerald-50 text-emerald-700")}>
+                                                  <Bookmark className="w-3 h-3" /> Saved
+                                                </span>
+                                              )}
+                                              {message.delivery_status === "scheduled" && (
+                                                <span className={cn("inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[9px] font-bold uppercase tracking-[0.18em]", mine ? "bg-white/15 text-white/85" : "bg-slate-100 text-slate-600")}>
+                                                  <Clock3 className="w-3 h-3" /> Scheduled
+                                                </span>
+                                              )}
+                                            </div>
+                                          )}
+
                                           {message.deleted_at ? (
                                             <div className={cn("italic flex items-center gap-2", mine ? "text-white/80" : currentTheme.dark ? "text-slate-300" : "text-slate-500")}>
                                               <Trash2 className="w-3.5 h-3.5" />
@@ -1172,6 +1359,20 @@ export function TeamChatPanel({ initialThreadId }: { initialThreadId?: string | 
                                               <div className={cn("whitespace-pre-wrap break-words", mine ? "text-white" : currentTheme.dark ? "text-white" : "text-[#0D1B39]")}>
                                                 <Linkified text={message.body || ""} />
                                               </div>
+                                              {translatedEntries.length > 0 && (
+                                                <div className={cn("mt-3 rounded-2xl border px-3 py-2", mine ? "border-white/15 bg-white/10" : currentTheme.dark ? "border-slate-700 bg-slate-900/60" : "border-blue-100 bg-blue-50/70")}>
+                                                  {translatedEntries.map(([language, translated]) => (
+                                                    <div key={language} className="space-y-1">
+                                                      <p className={cn("text-[9px] font-bold uppercase tracking-[0.22em]", mine ? "text-white/65" : "text-blue-600")}>
+                                                        {language}
+                                                      </p>
+                                                      <p className={cn("text-[12px] leading-[1.55]", mine ? "text-white/88" : currentTheme.dark ? "text-slate-200" : "text-slate-700")}>
+                                                        {translated}
+                                                      </p>
+                                                    </div>
+                                                  ))}
+                                                </div>
+                                              )}
                                               {(() => {
                                                 const linkUrl = firstUrl(message.body);
                                                 if (!linkUrl) return null;
@@ -1348,6 +1549,21 @@ export function TeamChatPanel({ initialThreadId }: { initialThreadId?: string | 
                                     <ContextMenuItem onClick={() => setForwarding(message)}>
                                       <Forward className="w-4 h-4 mr-2" /> Forward
                                     </ContextMenuItem>
+                                    <ContextMenuSeparator />
+                                    <ContextMenuItem onClick={() => runMessageAction(message, message.pinned_at ? "unpin" : "pin")}>
+                                      <Pin className="w-4 h-4 mr-2" /> {message.pinned_at ? "Unpin" : "Pin"} message
+                                    </ContextMenuItem>
+                                    <ContextMenuItem onClick={() => runMessageAction(message, starredByMe ? "unstar" : "star")}>
+                                      <Star className="w-4 h-4 mr-2" /> {starredByMe ? "Unstar" : "Star"} message
+                                    </ContextMenuItem>
+                                    <ContextMenuItem onClick={() => runMessageAction(message, bookmarkedByMe ? "unbookmark" : "bookmark")}>
+                                      <Bookmark className="w-4 h-4 mr-2" /> {bookmarkedByMe ? "Remove bookmark" : "Bookmark"}
+                                    </ContextMenuItem>
+                                    {message.body && (
+                                      <ContextMenuItem onClick={() => runMessageAction(message, "translate")}>
+                                        <Languages className="w-4 h-4 mr-2" /> Translate
+                                      </ContextMenuItem>
+                                    )}
                                     {canDeleteMessage(message) && (
                                       <>
                                         <ContextMenuSeparator />
@@ -1656,6 +1872,22 @@ export function TeamChatPanel({ initialThreadId }: { initialThreadId?: string | 
             setForwarding(actionMessage);
             setActionMessage(null);
           }}
+          onPin={() => runMessageAction(actionMessage, actionMessage.pinned_at ? "unpin" : "pin")}
+          onStar={() =>
+            runMessageAction(
+              actionMessage,
+              viewer?.reactionKey && (actionMessage.starred_by || []).includes(viewer.reactionKey) ? "unstar" : "star",
+            )
+          }
+          onBookmark={() =>
+            runMessageAction(
+              actionMessage,
+              viewer?.reactionKey && (actionMessage.bookmarked_by || []).includes(viewer.reactionKey)
+                ? "unbookmark"
+                : "bookmark",
+            )
+          }
+          onTranslate={actionMessage.body ? () => runMessageAction(actionMessage, "translate") : undefined}
           onJumpToReply={
             actionMessage.reply_to
               ? () => {
@@ -1684,6 +1916,151 @@ export function TeamChatPanel({ initialThreadId }: { initialThreadId?: string | 
   );
 }
 
+function AdvancedChatToolkit({
+  thread,
+  theme,
+  query,
+  results,
+  searching,
+  onQueryChange,
+  onSearch,
+  onJump,
+  onStartCall,
+  onUpload,
+}: {
+  thread: Thread;
+  theme: (typeof CHAT_BACKGROUNDS)[ChatBackgroundKey];
+  query: string;
+  results: ChatSearchResult[];
+  searching: boolean;
+  onQueryChange: (value: string) => void;
+  onSearch: () => void;
+  onJump: (messageId: string) => void;
+  onStartCall: (kind: "voice" | "video") => void;
+  onUpload: () => void;
+}) {
+  const features = [
+    { label: "DMs", icon: AtSign, state: "one-to-one + saved" },
+    { label: "Groups", icon: UsersIcon, state: thread.visibility || "private" },
+    { label: "Files", icon: FileStack, state: "versions + approval" },
+    { label: "Tasks", icon: ClipboardList, state: "due dates + progress" },
+    { label: "Polls", icon: Vote, state: "thread polls" },
+    { label: "Events", icon: CalendarClock, state: "calendar-ready" },
+    { label: "Voice", icon: Mic2, state: "cMeet rooms" },
+    { label: "AI", icon: BrainCircuit, state: "summaries + search" },
+    { label: "Wiki", icon: BookOpenText, state: "knowledge base" },
+    { label: "Security", icon: ShieldCheck, state: "audit + permissions" },
+  ];
+
+  return (
+    <div
+      className="border-b px-3 sm:px-6 py-3 sm:py-4 space-y-3"
+      style={{
+        background: theme.composer,
+        borderColor: theme.dark ? "rgba(71,85,105,0.54)" : "rgba(226,232,240,0.72)",
+      }}
+    >
+      <div className="grid gap-3 lg:grid-cols-[minmax(0,1.1fr)_minmax(280px,0.9fr)]">
+        <div className={cn("rounded-[24px] border p-3", theme.dark ? "border-slate-700 bg-slate-900/55" : "border-slate-200 bg-white/78")}>
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+            <div className="relative flex-1">
+              <Search className={cn("absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4", theme.dark ? "text-slate-500" : "text-slate-400")} />
+              <input
+                value={query}
+                onChange={(event) => onQueryChange(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") onSearch();
+                }}
+                placeholder="Search this conversation"
+                className={cn(
+                  "w-full rounded-2xl border py-3 pl-10 pr-3 text-[13px] outline-none focus:ring-2",
+                  theme.dark
+                    ? "border-slate-700 bg-slate-950/60 text-white placeholder:text-slate-500 focus:ring-sky-500/20"
+                    : "border-slate-200 bg-white text-[#0D1B39] placeholder:text-slate-400 focus:ring-blue-100",
+                )}
+              />
+            </div>
+            <button
+              onClick={onSearch}
+              disabled={searching || query.trim().length < 2}
+              className="h-11 rounded-2xl bg-[#0A4FE8] px-4 text-[12px] font-bold text-white disabled:opacity-50"
+            >
+              {searching ? <Loader2 className="w-4 h-4 animate-spin" /> : "Search"}
+            </button>
+          </div>
+
+          {results.length > 0 && (
+            <div className="mt-3 max-h-44 overflow-y-auto space-y-1.5">
+              {results.map((result) => (
+                <button
+                  key={result.id}
+                  onClick={() => onJump(result.id)}
+                  className={cn(
+                    "w-full rounded-2xl border px-3 py-2 text-left transition",
+                    theme.dark ? "border-slate-700 bg-slate-950/50 hover:bg-slate-900" : "border-slate-200 bg-white/85 hover:bg-blue-50",
+                  )}
+                >
+                  <div className="flex items-center justify-between gap-3">
+                    <p className={cn("truncate text-[12px] font-semibold", theme.dark ? "text-white" : "text-[#0D1B39]")}>
+                      {result.body || result.file_name || "Attachment"}
+                    </p>
+                    <span className={cn("text-[10px]", theme.dark ? "text-slate-500" : "text-slate-400")}>{formatClock(result.created_at)}</span>
+                  </div>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+
+        <div className={cn("rounded-[24px] border p-3", theme.dark ? "border-slate-700 bg-slate-900/55" : "border-slate-200 bg-white/78")}>
+          <div className="grid grid-cols-3 gap-2">
+            <button onClick={() => onStartCall("voice")} className="rounded-2xl bg-[#0A4FE8]/10 px-3 py-3 text-[#0A4FE8] text-[11px] font-bold flex flex-col items-center gap-1">
+              <Phone className="w-4 h-4" /> Voice
+            </button>
+            <button onClick={() => onStartCall("video")} className="rounded-2xl bg-[#0A4FE8]/10 px-3 py-3 text-[#0A4FE8] text-[11px] font-bold flex flex-col items-center gap-1">
+              <Video className="w-4 h-4" /> Video
+            </button>
+            <button onClick={onUpload} className="rounded-2xl bg-[#0A4FE8]/10 px-3 py-3 text-[#0A4FE8] text-[11px] font-bold flex flex-col items-center gap-1">
+              <Paperclip className="w-4 h-4" /> Files
+            </button>
+          </div>
+          <div className="mt-3 grid grid-cols-2 gap-2 text-[11px]">
+            <div className={cn("rounded-2xl px-3 py-2", theme.dark ? "bg-slate-950/60 text-slate-300" : "bg-slate-50 text-slate-600")}>
+              <span className="font-bold text-[#0A4FE8]">Invite</span>
+              <span className="block truncate">{thread.invite_code || "generated"}</span>
+            </div>
+            <div className={cn("rounded-2xl px-3 py-2", theme.dark ? "bg-slate-950/60 text-slate-300" : "bg-slate-50 text-slate-600")}>
+              <span className="font-bold text-[#0A4FE8]">Mode</span>
+              <span className="block capitalize">{thread.is_announcement_only ? "announcements" : thread.visibility || "private"}</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-2 gap-2 sm:grid-cols-5 xl:grid-cols-10">
+        {features.map((feature) => {
+          const Icon = feature.icon;
+          return (
+            <div
+              key={feature.label}
+              className={cn(
+                "rounded-2xl border px-3 py-2.5",
+                theme.dark ? "border-slate-700 bg-slate-900/45" : "border-slate-200 bg-white/68",
+              )}
+            >
+              <div className="flex items-center gap-2">
+                <Icon className="w-4 h-4 text-[#0A4FE8]" />
+                <span className={cn("text-[11px] font-bold", theme.dark ? "text-white" : "text-[#0D1B39]")}>{feature.label}</span>
+              </div>
+              <p className={cn("mt-1 truncate text-[10px]", theme.dark ? "text-slate-500" : "text-slate-400")}>{feature.state}</p>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 function MessageActionSheet({
   message,
   canEdit,
@@ -1694,6 +2071,10 @@ function MessageActionSheet({
   onEdit,
   onDelete,
   onForward,
+  onPin,
+  onStar,
+  onBookmark,
+  onTranslate,
   onJumpToReply,
   onReact,
 }: {
@@ -1706,6 +2087,10 @@ function MessageActionSheet({
   onEdit: () => void;
   onDelete: () => void;
   onForward: () => void;
+  onPin: () => void;
+  onStar: () => void;
+  onBookmark: () => void;
+  onTranslate?: () => void;
   onJumpToReply?: () => void;
   onReact: (emoji: string) => void;
 }) {
@@ -1756,6 +2141,20 @@ function MessageActionSheet({
           <button onClick={onForward} className={cn("w-full rounded-2xl px-4 py-3 flex items-center gap-3", theme.dark ? "bg-slate-900 text-white" : "bg-slate-50 text-[#0D1B39]")}>
             <Forward className="w-4 h-4" /> Forward
           </button>
+          <button onClick={onPin} className={cn("w-full rounded-2xl px-4 py-3 flex items-center gap-3", theme.dark ? "bg-slate-900 text-white" : "bg-slate-50 text-[#0D1B39]")}>
+            <Pin className="w-4 h-4" /> {message.pinned_at ? "Unpin message" : "Pin message"}
+          </button>
+          <button onClick={onStar} className={cn("w-full rounded-2xl px-4 py-3 flex items-center gap-3", theme.dark ? "bg-slate-900 text-white" : "bg-slate-50 text-[#0D1B39]")}>
+            <Star className="w-4 h-4" /> Star message
+          </button>
+          <button onClick={onBookmark} className={cn("w-full rounded-2xl px-4 py-3 flex items-center gap-3", theme.dark ? "bg-slate-900 text-white" : "bg-slate-50 text-[#0D1B39]")}>
+            <Bookmark className="w-4 h-4" /> Bookmark
+          </button>
+          {onTranslate && (
+            <button onClick={onTranslate} className={cn("w-full rounded-2xl px-4 py-3 flex items-center gap-3", theme.dark ? "bg-slate-900 text-white" : "bg-slate-50 text-[#0D1B39]")}>
+              <Languages className="w-4 h-4" /> Translate
+            </button>
+          )}
           {canDelete && (
             <button onClick={onDelete} className="w-full rounded-2xl px-4 py-3 flex items-center gap-3 bg-rose-50 text-rose-600">
               <Trash2 className="w-4 h-4" /> Delete message
@@ -1942,31 +2341,54 @@ function NewChatRoomDialog({
 }) {
   const [loading, setLoading] = useState(false);
   const canCreateGroup = viewerKind === "admin";
-  const [kind, setKind] = useState<"direct" | "group">("direct");
+  const [kind, setKind] = useState<NewChatKind>("direct");
   const [name, setName] = useState("");
-  const [members, setMembers] = useState<any[]>([]);
+  const [department, setDepartment] = useState("");
+  const [projectId, setProjectId] = useState("");
+  const [visibility, setVisibility] = useState<"public" | "private" | "invite_only">("private");
+  const [description, setDescription] = useState("");
+  const [rules, setRules] = useState("");
+  const [announcementOnly, setAnnouncementOnly] = useState(false);
+  const [members, setMembers] = useState<ChatMemberOption[]>([]);
+  const [projects, setProjects] = useState<ChatProjectOption[]>([]);
   const [search, setSearch] = useState("");
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     (async () => {
-      const res = await fetch("/api/admin/team-members");
+      const res = await fetch("/api/team/chat/members", { credentials: "include" });
       const json = await res.json();
       if (json.ok) setMembers(json.members);
     })();
-  }, []);
+    if (viewerKind === "admin") {
+      (async () => {
+        const res = await fetch("/api/admin/finance/projects", { credentials: "include" });
+        const json = await res.json().catch(() => ({}));
+        if (res.ok && Array.isArray(json.projects)) setProjects(json.projects);
+      })().catch(() => {});
+    }
+  }, [viewerKind]);
 
   const filtered = members.filter((member) =>
     (member.full_name || member.username || "").toLowerCase().includes(search.toLowerCase()),
   );
+  const departments = Array.from(new Set(members.map((member) => member.department).filter(Boolean))).sort();
 
   async function create() {
     if (kind === "group" && !name.trim()) {
       setError("Group name is required");
       return;
     }
-    if (selectedIds.length === 0) {
+    if (kind === "department" && !department.trim()) {
+      setError("Select a department");
+      return;
+    }
+    if (kind === "project" && !projectId.trim()) {
+      setError("Select a project");
+      return;
+    }
+    if ((kind === "direct" || kind === "group") && selectedIds.length === 0) {
       setError("Pick at least one person");
       return;
     }
@@ -1978,8 +2400,14 @@ function NewChatRoomDialog({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           kind,
-          name: kind === "group" ? name : null,
+          name: kind === "group" || kind === "project" ? name : null,
+          department: kind === "department" ? department : null,
+          project_id: kind === "project" ? projectId : null,
           participant_ids: selectedIds,
+          visibility,
+          description,
+          rules,
+          is_announcement_only: announcementOnly,
         }),
       });
       const json = await res.json();
@@ -1997,6 +2425,14 @@ function NewChatRoomDialog({
     else setSelectedIds((prev) => (prev.includes(id) ? prev.filter((value) => value !== id) : [...prev, id]));
   }
 
+  function switchKind(next: NewChatKind) {
+    if (next !== "direct" && next !== "self" && !canCreateGroup) return;
+    setKind(next);
+    setError(null);
+    if (next === "direct") setSelectedIds(selectedIds.slice(0, 1));
+    if (next === "self") setSelectedIds([]);
+  }
+
   return (
     <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-sm flex items-center justify-center p-4" onClick={onClose}>
       <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md max-h-[85vh] flex flex-col" onClick={(event) => event.stopPropagation()}>
@@ -2008,47 +2444,154 @@ function NewChatRoomDialog({
         </div>
 
         <div className="p-5 space-y-5 flex-1 overflow-y-auto">
-          <div className="flex bg-gray-50 p-1.5 rounded-2xl">
+          <div className={cn("grid grid-cols-2 gap-1.5 bg-gray-50 p-1.5 rounded-2xl", canCreateGroup ? "sm:grid-cols-5" : "sm:grid-cols-2")}>
             <button
-              onClick={() => {
-                setKind("direct");
-                setSelectedIds(selectedIds.slice(0, 1));
-              }}
+              onClick={() => switchKind("self")}
               className={cn(
-                "flex-1 py-2.5 text-[12px] font-bold uppercase tracking-wider rounded-xl transition",
+                "py-2.5 text-[11px] font-bold uppercase tracking-wider rounded-xl transition",
+                kind === "self" ? "bg-white text-[#0A4FE8] shadow-sm" : "text-gray-400 hover:text-gray-600",
+              )}
+            >
+              Saved
+            </button>
+            <button
+              onClick={() => switchKind("direct")}
+              className={cn(
+                "py-2.5 text-[11px] font-bold uppercase tracking-wider rounded-xl transition",
                 kind === "direct" ? "bg-white text-[#0A4FE8] shadow-sm" : "text-gray-400 hover:text-gray-600",
               )}
             >
-              Direct Message
+              Direct
             </button>
             {canCreateGroup && (
-              <button
-                onClick={() => setKind("group")}
-                className={cn(
-                  "flex-1 py-2.5 text-[12px] font-bold uppercase tracking-wider rounded-xl transition",
-                  kind === "group" ? "bg-white text-[#0A4FE8] shadow-sm" : "text-gray-400 hover:text-gray-600",
-                )}
-              >
-                Group Chat
-              </button>
+              <>
+                <button
+                  onClick={() => switchKind("group")}
+                  className={cn(
+                    "py-2.5 text-[11px] font-bold uppercase tracking-wider rounded-xl transition",
+                    kind === "group" ? "bg-white text-[#0A4FE8] shadow-sm" : "text-gray-400 hover:text-gray-600",
+                  )}
+                >
+                  Group
+                </button>
+                <button
+                  onClick={() => switchKind("department")}
+                  className={cn(
+                    "py-2.5 text-[11px] font-bold uppercase tracking-wider rounded-xl transition",
+                    kind === "department" ? "bg-white text-[#0A4FE8] shadow-sm" : "text-gray-400 hover:text-gray-600",
+                  )}
+                >
+                  Dept
+                </button>
+                <button
+                  onClick={() => switchKind("project")}
+                  className={cn(
+                    "py-2.5 text-[11px] font-bold uppercase tracking-wider rounded-xl transition",
+                    kind === "project" ? "bg-white text-[#0A4FE8] shadow-sm" : "text-gray-400 hover:text-gray-600",
+                  )}
+                >
+                  Project
+                </button>
+              </>
             )}
           </div>
 
-          {kind === "group" && (
+          {(kind === "group" || kind === "project") && (
             <div className="space-y-1.5">
-              <label className="text-[11px] font-bold text-gray-400 uppercase tracking-widest pl-1">Group Name</label>
+              <label className="text-[11px] font-bold text-gray-400 uppercase tracking-widest pl-1">
+                {kind === "project" ? "Channel Name" : "Group Name"}
+              </label>
               <input
                 value={name}
                 onChange={(event) => setName(event.target.value)}
-                placeholder="Marketing Strategy, Project Alpha, etc."
+                placeholder={kind === "project" ? "Optional, defaults to project name" : "Marketing Strategy, Project Alpha, etc."}
                 className="w-full px-4 py-3 rounded-xl bg-gray-50 border border-transparent focus:ring-2 focus:ring-blue-100 focus:bg-white focus:border-blue-200 transition text-[13px]"
               />
             </div>
           )}
 
+          {canCreateGroup && (kind === "group" || kind === "department" || kind === "project") && (
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="space-y-1.5">
+                <label className="text-[11px] font-bold text-gray-400 uppercase tracking-widest pl-1">Visibility</label>
+                <select
+                  value={visibility}
+                  onChange={(event) => setVisibility(event.target.value as "public" | "private" | "invite_only")}
+                  className="w-full px-4 py-3 rounded-xl bg-gray-50 border border-transparent focus:ring-2 focus:ring-blue-100 focus:bg-white focus:border-blue-200 transition text-[13px]"
+                >
+                  <option value="private">Private</option>
+                  <option value="public">Public</option>
+                  <option value="invite_only">Invite-only</option>
+                </select>
+              </div>
+              <label className="flex items-center gap-3 rounded-xl bg-gray-50 px-4 py-3 text-[13px] font-semibold text-[#0D1B39]">
+                <input
+                  type="checkbox"
+                  checked={announcementOnly}
+                  onChange={(event) => setAnnouncementOnly(event.target.checked)}
+                  className="h-4 w-4 rounded border-gray-300"
+                />
+                Announcements
+              </label>
+            </div>
+          )}
+
+          {canCreateGroup && (kind === "group" || kind === "department" || kind === "project") && (
+            <div className="grid gap-3">
+              <textarea
+                value={description}
+                onChange={(event) => setDescription(event.target.value)}
+                placeholder="Group description"
+                rows={2}
+                className="w-full px-4 py-3 rounded-xl bg-gray-50 border border-transparent focus:ring-2 focus:ring-blue-100 focus:bg-white focus:border-blue-200 transition text-[13px] resize-none"
+              />
+              <textarea
+                value={rules}
+                onChange={(event) => setRules(event.target.value)}
+                placeholder="Group rules"
+                rows={2}
+                className="w-full px-4 py-3 rounded-xl bg-gray-50 border border-transparent focus:ring-2 focus:ring-blue-100 focus:bg-white focus:border-blue-200 transition text-[13px] resize-none"
+              />
+            </div>
+          )}
+
+          {kind === "department" && (
+            <div className="space-y-1.5">
+              <label className="text-[11px] font-bold text-gray-400 uppercase tracking-widest pl-1">Department</label>
+              <select
+                value={department}
+                onChange={(event) => setDepartment(event.target.value)}
+                className="w-full px-4 py-3 rounded-xl bg-gray-50 border border-transparent focus:ring-2 focus:ring-blue-100 focus:bg-white focus:border-blue-200 transition text-[13px]"
+              >
+                <option value="">Select department</option>
+                {departments.map((item) => (
+                  <option key={item} value={item}>{item}</option>
+                ))}
+              </select>
+            </div>
+          )}
+
+          {kind === "project" && (
+            <div className="space-y-1.5">
+              <label className="text-[11px] font-bold text-gray-400 uppercase tracking-widest pl-1">Project</label>
+              <select
+                value={projectId}
+                onChange={(event) => setProjectId(event.target.value)}
+                className="w-full px-4 py-3 rounded-xl bg-gray-50 border border-transparent focus:ring-2 focus:ring-blue-100 focus:bg-white focus:border-blue-200 transition text-[13px]"
+              >
+                <option value="">Select project</option>
+                {projects.map((project) => (
+                  <option key={project.id} value={project.id}>{project.name}</option>
+                ))}
+              </select>
+            </div>
+          )}
+
           <div className="space-y-3">
             <label className="text-[11px] font-bold text-gray-400 uppercase tracking-widest pl-1">
-              Select {kind === "direct" ? "Person" : "Participants"}
+              {kind === "department" || kind === "project"
+                ? "Additional Participants"
+                : `Select ${kind === "direct" ? "Person" : "Participants"}`}
             </label>
             <div className="relative">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
@@ -2073,8 +2616,11 @@ function NewChatRoomDialog({
                     {member.full_name?.charAt(0) || member.username.charAt(0)}
                   </div>
                   <div className="flex-1 text-left min-w-0">
-                    <p className="text-[13px] font-semibold text-[#0D1B39] truncate">{member.full_name}</p>
-                    <p className="text-[11px] text-gray-400 truncate">@{member.username}</p>
+                    <div className="flex items-center gap-2">
+                      <p className="min-w-0 truncate text-[13px] font-semibold text-[#0D1B39]">{member.full_name}</p>
+                      <StatusBadge status={member.status} />
+                    </div>
+                    <p className="text-[11px] text-gray-400 truncate">@{member.username} · {member.role_title || member.department || "Team"}</p>
                   </div>
                   {selectedIds.includes(member.id) && (
                     <div className="w-5 h-5 rounded-full bg-[#0A4FE8] flex items-center justify-center">
@@ -2099,5 +2645,28 @@ function NewChatRoomDialog({
         </div>
       </div>
     </div>
+  );
+}
+
+function StatusBadge({ status }: { status?: "online" | "offline" | "break" | string | null }) {
+  const normalized = status === "break" || status === "online" ? status : "offline";
+  const label = normalized === "break" ? "Break" : normalized === "online" ? "Online" : "Offline";
+  const classes =
+    normalized === "online"
+      ? "bg-emerald-50 text-emerald-700 ring-emerald-200"
+      : normalized === "break"
+        ? "bg-amber-50 text-amber-700 ring-amber-200"
+        : "bg-slate-100 text-slate-500 ring-slate-200";
+
+  return (
+    <span className={cn("inline-flex shrink-0 items-center gap-1 rounded-full px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide ring-1", classes)}>
+      <span
+        className={cn(
+          "h-1.5 w-1.5 rounded-full",
+          normalized === "online" ? "bg-emerald-500" : normalized === "break" ? "bg-amber-500" : "bg-slate-400",
+        )}
+      />
+      {label}
+    </span>
   );
 }

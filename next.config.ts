@@ -1,13 +1,34 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
-/** @type {import('next').NextConfig} */
-const nextConfig = {
-  // Generated Supabase types are out of date with the live schema.
+import path from "node:path";
+import type { NextConfig } from "next";
+
+type RemotePattern = NonNullable<NonNullable<NextConfig["images"]>["remotePatterns"]>[number];
+
+function remotePatternFromEnv(value?: string): RemotePattern | null {
+  if (!value) return null;
+  try {
+    const url = new URL(value);
+    if (!["http:", "https:"].includes(url.protocol)) return null;
+    return {
+      protocol: url.protocol.replace(":", "") as "http" | "https",
+      hostname: url.hostname,
+    };
+  } catch {
+    return null;
+  }
+}
+
+const dbImageHost = remotePatternFromEnv(
+  process.env.NEXT_PUBLIC_GLASHDB_URL || process.env.NEXT_PUBLIC_SUPABASE_URL,
+);
+
+const nextConfig: NextConfig = {
+  turbopack: {
+    root: path.resolve(__dirname),
+  },
+  // Generated database types are out of date with the live schema.
   // Don't fail the production build on stale-type errors.
   typescript: {
     ignoreBuildErrors: true,
-  },
-  eslint: {
-    ignoreDuringBuilds: true,
   },
   // Vercel's serverless tracer sees `path.join(process.cwd(), 'public',
   // ...)` inside the OG card loader and conservatively bundles the entire
@@ -41,8 +62,9 @@ const nextConfig = {
     ],
   },
   images: {
+    qualities: [60, 75, 90, 92, 95],
     remotePatterns: [
-      { protocol: "https", hostname: "udorpewvuezxxlzedafo.supabase.co" },
+      ...(dbImageHost ? [dbImageHost] : []),
       { protocol: "https", hostname: "images.unsplash.com" },
       { protocol: "https", hostname: "lh3.googleusercontent.com" },
     ],
@@ -66,4 +88,4 @@ const nextConfig = {
   },
 };
 
-module.exports = nextConfig;
+export default nextConfig;

@@ -4,10 +4,10 @@ import { supabaseAdmin } from "@/lib/supabase";
 import {
   hashPassword,
   generateSalt,
-  generateSessionToken,
   sessionCookieOptions,
   TEAM_SESSION_COOKIE,
 } from "@/lib/team-auth";
+import { createTeamSession } from "@/lib/team-login-security";
 import { isReservedUsername } from "@/lib/reserved-usernames";
 
 export const runtime = "nodejs";
@@ -199,9 +199,6 @@ export async function POST(req: Request, ctx: { params: Promise<{ token: string 
 
   const salt = generateSalt();
   const password_hash = hashPassword(password, salt);
-  const session_token = generateSessionToken();
-  const sessionDays = 30;
-  const session_expires_at = new Date(Date.now() + sessionDays * 24 * 60 * 60 * 1000).toISOString();
 
   let memberId: string;
   let memberName: string;
@@ -225,8 +222,6 @@ export async function POST(req: Request, ctx: { params: Promise<{ token: string 
         invite_token: null,
         invite_filled: true,
         is_active: true,
-        session_token,
-        session_expires_at,
       })
       .eq("id", pendingMember.id)
       .select("id, full_name, email, username")
@@ -263,8 +258,6 @@ export async function POST(req: Request, ctx: { params: Promise<{ token: string 
         permissions: Array.isArray(invite.permissions) ? invite.permissions : [],
         invite_token: null,
         invite_filled: true,
-        session_token,
-        session_expires_at,
       })
       .select("id, full_name, email, username")
       .single();
@@ -288,10 +281,12 @@ export async function POST(req: Request, ctx: { params: Promise<{ token: string 
       .eq("token", token);
   }
 
+  const { sessionToken } = await createTeamSession(memberId, req);
+
   const response = NextResponse.json({
     ok: true,
     member: { id: memberId, full_name: memberName, username: memberUsername },
   });
-  response.cookies.set(TEAM_SESSION_COOKIE, session_token, sessionCookieOptions());
+  response.cookies.set(TEAM_SESSION_COOKIE, sessionToken, sessionCookieOptions());
   return response;
 }

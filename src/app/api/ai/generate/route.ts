@@ -1,10 +1,10 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { NextResponse } from "next/server";
-import { supabaseAdmin } from "@/lib/supabase";
 import { getTeamSession } from "@/lib/team-auth";
 import { getAdminSession } from "@/lib/admin-session";
 import { buildMessages, RECIPES, type AIKind } from "@/lib/ai/prompts";
-import { chatComplete, chatStream } from "@/lib/ai/openai";
+import { chatComplete, chatStream, OpenAIRequestError } from "@/lib/ai/openai";
+import { glashMaybeOne, glashQuery } from "@/lib/glashdb/postgres";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -18,25 +18,27 @@ async function resolveActor() {
 }
 
 async function loadSettings() {
-  if (!supabaseAdmin) return null;
-  const db = supabaseAdmin as any;
-  const { data } = await db.from("ai_settings").select("*").eq("id", 1).maybeSingle();
-  return data;
+  try {
+    return await glashMaybeOne<any>("select * from public.ai_settings where id = 1 limit 1");
+  } catch {
+    return null;
+  }
 }
 
 async function dailyTokensUsed(): Promise<number> {
-  if (!supabaseAdmin) return 0;
-  const db = supabaseAdmin as any;
-  const since = new Date();
-  since.setUTCHours(0, 0, 0, 0);
-  const { data } = await db
-    .from("ai_usage_log")
-    .select("prompt_tokens, completion_tokens")
-    .gte("created_at", since.toISOString());
-  return (data || []).reduce(
-    (s: number, r: any) => s + (r.prompt_tokens || 0) + (r.completion_tokens || 0),
-    0
-  );
+  try {
+    const since = new Date();
+    since.setUTCHours(0, 0, 0, 0);
+    const row = await glashMaybeOne<{ total_tokens: string | number | null }>(
+      `select coalesce(sum(coalesce(prompt_tokens, 0) + coalesce(completion_tokens, 0)), 0) as total_tokens
+       from public.ai_usage_log
+       where created_at >= $1`,
+      [since.toISOString()],
+    );
+    return Number(row?.total_tokens || 0);
+  } catch {
+    return 0;
+  }
 }
 
 async function logUsage(row: {
@@ -52,9 +54,29 @@ async function logUsage(row: {
   input_excerpt?: string;
   output_excerpt?: string;
 }) {
-  if (!supabaseAdmin) return;
-  const db = supabaseAdmin as any;
-  await db.from("ai_usage_log").insert(row);
+  try {
+    await glashQuery(
+      `insert into public.ai_usage_log
+        (kind, actor_kind, actor_id, model, prompt_tokens, completion_tokens, latency_ms,
+         status, error, input_excerpt, output_excerpt)
+       values ($1,$2,$3::uuid,$4,$5,$6,$7,$8,$9,$10,$11)`,
+      [
+        row.kind,
+        row.actor_kind,
+        row.actor_id,
+        row.model || null,
+        row.prompt_tokens ?? null,
+        row.completion_tokens ?? null,
+        row.latency_ms ?? null,
+        row.status || "ok",
+        row.error || null,
+        row.input_excerpt || null,
+        row.output_excerpt || null,
+      ],
+    );
+  } catch {
+    /* Logging must not block AI-assisted form work. */
+  }
 }
 
 function categoriesForKind(kind: AIKind): string[] {
@@ -67,18 +89,17 @@ function categoriesForKind(kind: AIKind): string[] {
 }
 
 async function loadKnowledgeContext(kind: AIKind): Promise<string> {
-  if (!supabaseAdmin) return "";
   try {
-    const db = supabaseAdmin as any;
-    const { data, error } = await db
-      .from("ai_knowledge_documents")
-      .select("title, category, description, tags, content_excerpt")
-      .eq("is_active", true)
-      .in("category", categoriesForKind(kind))
-      .order("updated_at", { ascending: false })
-      .limit(6);
-
-    if (error || !data?.length) return "";
+    const data = await glashQuery<any>(
+      `select title, category, description, tags, content_excerpt
+       from public.ai_knowledge_documents
+       where is_active = true
+         and category = any($1::text[])
+       order by updated_at desc
+       limit 6`,
+      [categoriesForKind(kind)],
+    );
+    if (!data?.length) return "";
 
     let remaining = 4000;
     const parts: string[] = [];
@@ -107,6 +128,8 @@ async function loadKnowledgeContext(kind: AIKind): Promise<string> {
 
 export async function POST(req: Request) {
   const started = Date.now();
+  let actor: Awaited<ReturnType<typeof resolveActor>> = { kind: "public", id: null };
+  let kindForLog = "unknown";
   try {
     const body = await req.json();
     const kind = body?.kind as AIKind | undefined;
@@ -116,6 +139,7 @@ export async function POST(req: Request) {
     if (!kind || !(kind in RECIPES)) {
       return NextResponse.json({ ok: false, error: "Unknown kind" }, { status: 400 });
     }
+    kindForLog = kind;
 
     const recipe = RECIPES[kind];
     const settings = await loadSettings();
@@ -124,7 +148,7 @@ export async function POST(req: Request) {
       return NextResponse.json({ ok: false, error: "AI is disabled for this site" }, { status: 503 });
     }
 
-    const actor = await resolveActor();
+    actor = await resolveActor();
     if (actor.kind === "team" && settings && settings.allow_team === false) {
       return NextResponse.json({ ok: false, error: "AI access is disabled for team" }, { status: 403 });
     }
@@ -210,14 +234,22 @@ export async function POST(req: Request) {
     return NextResponse.json({ ok: true, text: result.text, usage: result });
   } catch (err: any) {
     const msg = err?.message || "AI generation failed";
+    const isOpenAIError = err instanceof OpenAIRequestError;
+    const status = isOpenAIError && err.status === 429 ? 429 : isOpenAIError ? 502 : 500;
+    const logStatus =
+      isOpenAIError && err.status === 429
+        ? "rate_limited"
+        : isOpenAIError && (err.status === 401 || err.status === 403)
+        ? "unauthorized"
+        : "error";
     await logUsage({
-      kind: "unknown",
-      actor_kind: "public",
-      actor_id: null,
-      status: "error",
+      kind: kindForLog,
+      actor_kind: actor.kind,
+      actor_id: actor.id,
+      status: logStatus,
       error: msg.slice(0, 400),
       latency_ms: Date.now() - started,
     });
-    return NextResponse.json({ ok: false, error: msg }, { status: 500 });
+    return NextResponse.json({ ok: false, error: msg }, { status });
   }
 }

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import Image from "next/image";
 import { usePathname, useRouter } from "next/navigation";
@@ -8,6 +8,7 @@ import { useAdminSession } from "@/hooks/use-admin-session";
 import { hasPermission } from "@/lib/admin-permissions";
 import { AnimatePresence, motion } from "framer-motion";
 import {
+  Activity,
   LayoutDashboard,
   Upload,
   Users,
@@ -34,6 +35,7 @@ import {
   Award,
   UserPlus,
   Calendar,
+  Clock,
   Scale,
   Video,
   PenLine,
@@ -42,6 +44,7 @@ import {
   ArrowRightLeft,
   Brain,
   X,
+  Megaphone,
 } from "lucide-react";
 
 const topLevelItems = [
@@ -49,6 +52,7 @@ const topLevelItems = [
   { label: "Upload Works", href: "/admin/upload-works", icon: Upload, permission: "upload_works" },
   { label: "Client Conversation", href: "/admin/messages", icon: MessageSquare, permission: "messages" },
   { label: "Team Chat", href: "/admin/chat", icon: MessageSquare, permission: "team_chat" },
+  { label: "Announcements", href: "/admin/announcements", icon: Megaphone, permission: "team_chat.broadcast" },
   { label: "Consultations", href: "/admin/consultations", icon: Calendar, permission: "consultations" },
   { label: "Portfolio", href: "/admin/portfolio-designs", icon: ImagePlus, permission: "dashboard" },
   { label: "FAQs", href: "/admin/faqs", icon: HelpCircle, permission: "dashboard" },
@@ -68,6 +72,8 @@ const workspaceNavItems = [
 const hrmNavItems = [
   { label: "Overview", href: "/admin/hrm", icon: BarChart3, permission: "applicants" },
   { label: "Team Members", href: "/admin/team-members", icon: UserPlus, permission: "team_members" },
+  { label: "Timebook", href: "/admin/timebook", icon: Clock, permission: "timebook" },
+  { label: "Work Tracking", href: "/admin/work-tracking", icon: Activity, permission: "work_tracking" },
   { label: "Departments", href: "/admin/departments", icon: Building2, permission: "departments" },
   { label: "Sub-admins", href: "/admin/sub-admins", icon: ShieldCheck, permission: "sub_admins" },
   { label: "Applications", href: "/admin/applications", icon: Users, permission: "applicants" },
@@ -98,6 +104,8 @@ const clientsNavItems = [
   { label: "Client Orders", href: "/admin/orders", icon: ShoppingBag, permission: "orders" },
   { label: "Testimonials", href: "/admin/testimonials", icon: Quote, permission: "testimonials" },
 ];
+
+const ADMIN_SIDEBAR_SCROLL_KEY = "cds.admin.sidebar.scrollTop";
 
 interface NavItem {
   label: string;
@@ -188,9 +196,40 @@ export default function AdminSidebar({ mobileOpen = false, onMobileClose }: Admi
   const pathname = usePathname();
   const router = useRouter();
   const { session } = useAdminSession();
+  const desktopNavRef = useRef<HTMLElement | null>(null);
 
   const permissions = session?.permissions || [];
   const isSuperAdmin = session?.role === "super_admin";
+
+  const rememberSidebarScroll = useCallback(() => {
+    if (typeof window === "undefined") return;
+    const node = desktopNavRef.current;
+    if (!node) return;
+    window.sessionStorage.setItem(ADMIN_SIDEBAR_SCROLL_KEY, String(node.scrollTop));
+  }, []);
+
+  const restoreSidebarScroll = useCallback(() => {
+    if (typeof window === "undefined") return;
+    const raw = window.sessionStorage.getItem(ADMIN_SIDEBAR_SCROLL_KEY);
+    if (!raw) return;
+    const scrollTop = Number(raw);
+    if (!Number.isFinite(scrollTop)) return;
+    window.requestAnimationFrame(() => {
+      if (desktopNavRef.current) desktopNavRef.current.scrollTop = scrollTop;
+    });
+  }, []);
+
+  useEffect(() => {
+    restoreSidebarScroll();
+  }, [pathname, restoreSidebarScroll]);
+
+  const handleDesktopNavigate = useCallback(() => {
+    rememberSidebarScroll();
+  }, [rememberSidebarScroll]);
+
+  const handleMobileNavigate = useCallback(() => {
+    onMobileClose?.();
+  }, [onMobileClose]);
 
   const signOut = async () => {
     await fetch("/api/admin-logout", { method: "POST" });
@@ -231,7 +270,11 @@ export default function AdminSidebar({ mobileOpen = false, onMobileClose }: Admi
         </div>
       )}
 
-      <nav className={`flex-1 space-y-0.5 overflow-y-auto pb-4 ${mobile ? "px-3" : "px-3"}`}>
+      <nav
+        ref={mobile ? undefined : desktopNavRef}
+        onScroll={mobile ? undefined : rememberSidebarScroll}
+        className={`flex-1 space-y-0.5 overflow-y-auto pb-4 ${mobile ? "px-3" : "px-3"}`}
+      >
         {visibleTopLevel.map((item) => {
           const isActive = item.href === "/admin"
             ? pathname === "/admin"
@@ -240,7 +283,7 @@ export default function AdminSidebar({ mobileOpen = false, onMobileClose }: Admi
             <Link
               key={item.href}
               href={item.href}
-              onClick={onMobileClose}
+              onClick={mobile ? handleMobileNavigate : handleDesktopNavigate}
               className={`flex items-center gap-3 px-4 py-2.5 rounded-xl text-[13.5px] font-medium transition-all ${
                 isActive
                   ? "bg-[#0A4FE8] text-white shadow-md shadow-blue-200"
@@ -264,7 +307,7 @@ export default function AdminSidebar({ mobileOpen = false, onMobileClose }: Admi
           pathname={pathname}
           permissions={permissions}
           isSuperAdmin={isSuperAdmin}
-          onNavigate={onMobileClose}
+          onNavigate={mobile ? handleMobileNavigate : handleDesktopNavigate}
         />
         <NavGroup
           label="Projects"
@@ -273,7 +316,7 @@ export default function AdminSidebar({ mobileOpen = false, onMobileClose }: Admi
           pathname={pathname}
           permissions={permissions}
           isSuperAdmin={isSuperAdmin}
-          onNavigate={onMobileClose}
+          onNavigate={mobile ? handleMobileNavigate : handleDesktopNavigate}
         />
         <NavGroup
           label="Clients"
@@ -282,7 +325,7 @@ export default function AdminSidebar({ mobileOpen = false, onMobileClose }: Admi
           pathname={pathname}
           permissions={permissions}
           isSuperAdmin={isSuperAdmin}
-          onNavigate={onMobileClose}
+          onNavigate={mobile ? handleMobileNavigate : handleDesktopNavigate}
         />
         <NavGroup
           label="HRM"
@@ -291,7 +334,7 @@ export default function AdminSidebar({ mobileOpen = false, onMobileClose }: Admi
           pathname={pathname}
           permissions={permissions}
           isSuperAdmin={isSuperAdmin}
-          onNavigate={onMobileClose}
+          onNavigate={mobile ? handleMobileNavigate : handleDesktopNavigate}
         />
         <NavGroup
           label="Workspace"
@@ -300,21 +343,34 @@ export default function AdminSidebar({ mobileOpen = false, onMobileClose }: Admi
           pathname={pathname}
           permissions={permissions}
           isSuperAdmin={isSuperAdmin}
-          onNavigate={onMobileClose}
+          onNavigate={mobile ? handleMobileNavigate : handleDesktopNavigate}
         />
       </nav>
 
       <div className="px-3 pb-6 pt-2 border-t border-gray-50 space-y-1">
-        <Link
-          href="/team"
-          onClick={onMobileClose}
+        <button
+          type="button"
+          onClick={async () => {
+            onMobileClose?.();
+            if (isSuperAdmin) {
+              const res = await fetch("/api/admin/team-bridge", {
+                method: "POST",
+                credentials: "include",
+              });
+              if (res.ok) {
+                router.push("/team");
+                return;
+              }
+            }
+            router.push("/team");
+          }}
           className="group flex items-center gap-3 px-4 py-2.5 rounded-xl text-[13.5px] font-semibold text-white transition-all w-full shadow-[0_6px_18px_rgba(28,78,209,0.18)]"
           style={{ backgroundImage: "linear-gradient(146.28deg, #0035C1 8.83%, #0575FF 86.3%)" }}
           title="Switch to the Team Portal"
         >
           <ArrowRightLeft className="w-[18px] h-[18px]" />
           Open Team Portal
-        </Link>
+        </button>
         <button
           onClick={signOut}
           className="flex items-center gap-3 px-4 py-2.5 rounded-xl text-[13.5px] font-medium text-gray-400 hover:text-red-500 hover:bg-red-50 transition-all w-full"

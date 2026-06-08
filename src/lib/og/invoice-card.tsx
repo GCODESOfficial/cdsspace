@@ -1,5 +1,5 @@
 /**
- * Invoice OG card. Uses the same Metadata-bg.png plate + CDS wordmark lockup
+ * Invoice OG card. Uses the same metabg.png plate + mlogo.svg lockup
  * as the rest of the brand metadata, then layers invoice-specific info:
  *   - Status pill top-right ("Sent", "Paid", etc.)
  *   - "INVOICE-XXXX" title
@@ -81,22 +81,18 @@ export function renderInvoiceCard(p: InvoiceCardProps): ReactElement {
                 }}
             />
             {bgDataUri ? (
-                /* Render the PNG at 2× canvas size and offset so only the
-                   bright glow quadrant (bottom-right of the source PNG) is
-                   visible. Without this the top-left of the canvas renders
-                   the dark navy portion of the source and looks empty. */
                 /* eslint-disable-next-line @next/next/no-img-element */
                 <img
                     src={bgDataUri}
                     alt=""
-                    width={OG_SIZE.width * 2}
-                    height={OG_SIZE.height * 2}
+                    width={OG_SIZE.width}
+                    height={OG_SIZE.height}
                     style={{
                         position: "absolute",
-                        top: -OG_SIZE.height,
-                        left: -OG_SIZE.width,
-                        width: OG_SIZE.width * 2,
-                        height: OG_SIZE.height * 2,
+                        top: 0,
+                        left: 0,
+                        width: OG_SIZE.width,
+                        height: OG_SIZE.height,
                     }}
                 />
             ) : null}
@@ -107,7 +103,6 @@ export function renderInvoiceCard(p: InvoiceCardProps): ReactElement {
                     display: "flex",
                     alignItems: "center",
                     justifyContent: "space-between",
-                    zIndex: 2,
                 }}
             >
                 {logoDataUri ? (
@@ -115,8 +110,8 @@ export function renderInvoiceCard(p: InvoiceCardProps): ReactElement {
                     <img
                         src={logoDataUri}
                         alt="CDS Space — Branding Agency"
-                        width={160}
-                        height={72}
+                        width={190}
+                        height={73}
                         style={{ display: "block" }}
                     />
                 ) : (
@@ -146,7 +141,6 @@ export function renderInvoiceCard(p: InvoiceCardProps): ReactElement {
                 style={{
                     display: "flex",
                     flexDirection: "column",
-                    zIndex: 2,
                     maxWidth: 1000,
                 }}
             >
@@ -184,7 +178,6 @@ export function renderInvoiceCard(p: InvoiceCardProps): ReactElement {
                     display: "flex",
                     alignItems: "center",
                     gap: 12,
-                    zIndex: 2,
                 }}
             >
                 {/* eslint-disable-next-line @next/next/no-img-element */}

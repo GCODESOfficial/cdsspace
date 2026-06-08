@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase";
+import { getTeamSessionFromToken } from "@/lib/team-auth";
 
 export interface AdminSession {
   role: "super_admin" | "sub_admin";
@@ -7,6 +8,10 @@ export interface AdminSession {
   name: string;
   permissions: string[];
   source?: "admin_cookie" | "team_cookie";
+  memberId?: string;
+  teamRoleTitle?: string | null;
+  department?: string | null;
+  adminRoleName?: string | null;
 }
 
 /**
@@ -44,9 +49,6 @@ export function getAdminSession(req: NextRequest): AdminSession | null {
  * bouncing users back to the admin login. We query the safe subset first
  * and opportunistically layer on the role later.
  */
-const TEAM_CORE_COLUMNS =
-  "id, full_name, email, username, is_sub_admin, is_active, permissions, session_expires_at";
-
 /**
  * Async resolver. Prefers the admin cookie; falls back to the team-portal
  * session if that team member is marked `is_sub_admin`. That lets a sub-admin
@@ -68,17 +70,25 @@ export async function getAdminSessionAsync(req: NextRequest): Promise<AdminSessi
   if (!teamToken || !supabaseAdmin) return null;
 
   const db = supabaseAdmin as any;
-  const { data, error } = await db
-    .from("team_members")
-    .select(TEAM_CORE_COLUMNS)
-    .eq("session_token", teamToken)
-    .maybeSingle();
+  const team = await getTeamSessionFromToken(teamToken);
+  if (!team || !team.is_sub_admin) return null;
 
-  if (error || !data) return null;
-  if (!data.is_active || !data.is_sub_admin) return null;
-  if (data.session_expires_at && new Date(data.session_expires_at) < new Date()) return null;
+  let permissions: string[] = Array.isArray(team.permissions) ? [...team.permissions] : [];
+  let teamRoleTitle: string | null = null;
+  let department: string | null = null;
+  let adminRoleName: string | null = null;
 
-  let permissions: string[] = Array.isArray(data.permissions) ? [...data.permissions] : [];
+  try {
+    const { data: profile } = await db
+      .from("team_members")
+      .select("role_title, department")
+      .eq("id", team.id)
+      .maybeSingle();
+    teamRoleTitle = (profile as { role_title: string | null; department: string | null } | null)?.role_title ?? null;
+    department = (profile as { role_title: string | null; department: string | null } | null)?.department ?? null;
+  } catch {
+    // Older schemas still get a valid sub-admin session.
+  }
 
   // Try to layer role permissions on top, but NEVER let a missing column or
   // table break the sign-in bridge. If the roles schema isn't deployed yet
@@ -87,16 +97,17 @@ export async function getAdminSessionAsync(req: NextRequest): Promise<AdminSessi
     const { data: withRole } = await db
       .from("team_members")
       .select("role_id")
-      .eq("id", data.id)
+      .eq("id", team.id)
       .maybeSingle();
     const roleId = (withRole as { role_id: string | null } | null)?.role_id;
     if (roleId) {
       const { data: role } = await db
         .from("admin_roles")
-        .select("permissions")
+        .select("name, permissions")
         .eq("id", roleId)
         .maybeSingle();
-      const rolePerms = (role as { permissions: string[] | null } | null)?.permissions;
+      adminRoleName = (role as { name: string | null; permissions: string[] | null } | null)?.name ?? null;
+      const rolePerms = (role as { name: string | null; permissions: string[] | null } | null)?.permissions;
       if (rolePerms && rolePerms.length) {
         permissions = Array.from(new Set([...(rolePerms as string[]), ...permissions]));
       }
@@ -107,10 +118,14 @@ export async function getAdminSessionAsync(req: NextRequest): Promise<AdminSessi
 
   return {
     role: "sub_admin",
-    email: data.email,
-    name: data.full_name || data.username || "Team member",
+    email: team.email,
+    name: team.full_name || team.username || "Team member",
     permissions,
     source: "team_cookie",
+    memberId: team.id,
+    teamRoleTitle,
+    department,
+    adminRoleName,
   };
 }
 
@@ -125,6 +140,10 @@ export async function GET(req: NextRequest) {
       email: session.email,
       permissions: session.permissions,
       source: session.source,
+      memberId: session.memberId,
+      teamRoleTitle: session.teamRoleTitle,
+      department: session.department,
+      adminRoleName: session.adminRoleName,
     });
   }
 

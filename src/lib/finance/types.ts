@@ -101,16 +101,16 @@ export const DEFAULT_WORKING_HOURS = "9am–5:30pm Monday–Friday  UTC+1";
 // Bank accounts shown on every invoice
 export const CDS_BANK_ACCOUNTS = [
   {
-    bank: "MoniePoint Microfinance Bank",
-    account_name: "CDS Space Branding Agency Limited.",
-    account_number: "5696555358",
-    color: "#0A4FE8", // blue
-    initial: "M",
-    logo: "/moniepoint.png",
+    bank: "Kuda Bank",
+    account_name: "CDS Space Branding Agency Ltd",
+    account_number: "3002258183",
+    color: "#40196D", // kuda purple
+    initial: "K",
+    logo: "/kuda.png",
   },
   {
     bank: "Wema Bank",
-    account_name: "CDS Space Branding Agency Limited.",
+    account_name: "CDS Space Branding Agency Ltd",
     account_number: "0126148969",
     color: "#8A1A5A", // wema purple
     initial: "W",

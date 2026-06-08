@@ -1,5 +1,21 @@
 import { NextRequest, NextResponse } from "next/server";
-import { financeDb, requireFinanceAdmin } from "@/lib/finance/api-auth";
+import { financeDb, requireFinanceAdminAsync } from "@/lib/finance/api-auth";
+import { logActivity } from "@/lib/activity-log";
+import { recordResourceVersion } from "@/lib/admin-versioning";
+
+async function getInvoiceSnapshot(sb: any, id: string) {
+  const { data: invoice } = await sb
+    .from("finance_invoices")
+    .select("*")
+    .eq("id", id)
+    .maybeSingle();
+  const { data: items } = await sb
+    .from("finance_invoice_items")
+    .select("*")
+    .eq("invoice_id", id)
+    .order("position");
+  return { invoice: invoice ?? null, items: items ?? [] };
+}
 
 /**
  * Appends a delivery-speed surcharge line-item to an existing invoice and
@@ -8,7 +24,7 @@ import { financeDb, requireFinanceAdmin } from "@/lib/finance/api-auth";
  * Body: { amount: number, note: string }
  */
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  const denied = requireFinanceAdmin(req); if (denied) return denied;
+  const denied = await requireFinanceAdminAsync(req, "finance_invoices.edit"); if (denied) return denied;
   const { id } = await params;
   const body = await req.json();
   const { amount, note } = body ?? {};
@@ -17,9 +33,10 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   }
 
   const sb = financeDb();
+  const before = await getInvoiceSnapshot(sb, id);
   const { data: invoice, error: invErr } = await sb
     .from("finance_invoices")
-    .select("id, currency, tax_rate, discount")
+    .select("id, invoice_number, client_name, currency, tax_rate, discount")
     .eq("id", id)
     .single();
   if (invErr || !invoice) return NextResponse.json({ error: "Invoice not found" }, { status: 404 });
@@ -62,6 +79,27 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     .from("finance_invoices")
     .update({ subtotal, tax_amount, total })
     .eq("id", id);
+
+  const after = await getInvoiceSnapshot(sb, id);
+  const resourceLabel = `${invoice.invoice_number || id} · ${invoice.client_name || ""}`.trim();
+  await logActivity({
+    action: "invoice.surcharge",
+    page: "finance/invoices",
+    resource_type: "invoice",
+    resource_id: id,
+    resource_label: resourceLabel,
+    metadata: { amount: Number(amount), note },
+  });
+  await recordResourceVersion({
+    action: "invoice.surcharge",
+    page: "finance/invoices",
+    resource_type: "invoice",
+    resource_id: id,
+    resource_label: resourceLabel,
+    before_data: before,
+    after_data: after,
+    metadata: { amount: Number(amount), note },
+  });
 
   return NextResponse.json({ ok: true, subtotal, tax_amount, total });
 }

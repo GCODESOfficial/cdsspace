@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { financeDb, requireFinanceAdmin } from "@/lib/finance/api-auth";
+import { financeDb, requireFinanceAdminAsync } from "@/lib/finance/api-auth";
 
 /**
  * Project documents.
@@ -8,7 +8,7 @@ import { financeDb, requireFinanceAdmin } from "@/lib/finance/api-auth";
  */
 
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-    const denied = requireFinanceAdmin(req);
+    const denied = await requireFinanceAdminAsync(req);
     if (denied) return denied;
     const { id } = await params;
     const sb = financeDb();
@@ -43,7 +43,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
 }
 
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-    const denied = requireFinanceAdmin(req);
+    const denied = await requireFinanceAdminAsync(req);
     if (denied) return denied;
     const { id } = await params;
     const body = await req.json().catch(() => ({}));

@@ -36,7 +36,7 @@ export async function GET() {
     const { data: broadcastThreads } = await db
       .from("team_chat_threads")
       .select("id")
-      .eq("kind", "admin_broadcast");
+      .or("kind.eq.admin_broadcast,visibility.eq.public");
     const broadcastIds = (broadcastThreads || []).map((t: any) => t.id);
 
     threadIdFilter = Array.from(new Set([...participantThreadIds, ...broadcastIds]));
@@ -55,7 +55,7 @@ export async function GET() {
 
   let query = db
     .from("team_chat_threads")
-    .select("id, kind, name, department, includes_admin, created_at")
+    .select("id, kind, name, department, includes_admin, visibility, description, rules, invite_code, is_announcement_only, is_voice_room, is_voice_channel, pinned_message_id, project_id, created_at, updated_at")
     .order("created_at", { ascending: false });
 
   if (threadIdFilter) {
@@ -64,7 +64,7 @@ export async function GET() {
     // Filter specifically for Super Admin to respect member privacy
     // Show all groups/broadcasts/departments, but for 'direct', only if includes_admin is true
     // In PostgREST/Supabase, a complex OR filter is easiest with .or()
-    query = query.or(`kind.in.(group,department,admin_broadcast),and(kind.eq.direct,includes_admin.eq.true)`);
+    query = query.or(`kind.in.(group,department,admin_broadcast),visibility.eq.public,and(kind.eq.direct,includes_admin.eq.true)`);
   }
 
   const { data: threads, error } = await query;
@@ -79,7 +79,7 @@ export async function GET() {
   if (threadIds.length) {
     const [lastMsgsRes, partsRes] = await Promise.all([
       db.from("team_chat_messages")
-        .select("id, thread_id, body, attachment_url, sticker_key, deleted_at, sender_id, sender_is_admin, created_at")
+        .select("id, thread_id, body, attachment_url, sticker_key, deleted_at, sender_id, sender_is_admin, delivery_status, created_at")
         .in("thread_id", threadIds)
         .order("created_at", { ascending: false }),
       db.from("team_chat_participants")
@@ -164,10 +164,23 @@ export async function POST(req: Request) {
   if (!viewer || !db) {
     return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
   }
-  const { kind, name, participant_ids } = await req.json().catch(() => ({}));
-  if (!["direct", "group", "admin_broadcast"].includes(kind)) {
+  const {
+    kind,
+    name,
+    participant_ids,
+    department,
+    project_id,
+    visibility,
+    description,
+    rules,
+    is_announcement_only,
+    is_voice_room,
+    is_voice_channel,
+  } = await req.json().catch(() => ({}));
+  if (!["self", "direct", "group", "department", "project", "admin_broadcast"].includes(kind)) {
     return NextResponse.json({ ok: false, error: "Invalid thread kind" }, { status: 400 });
   }
+  const storedKind = kind === "project" || kind === "self" ? "direct" : kind;
   
   const isSuperAdmin = viewer.kind === "admin" && viewer.role === "super_admin";
   if (kind === "admin_broadcast" && !isSuperAdmin) {
@@ -177,27 +190,77 @@ export async function POST(req: Request) {
   // Group creation (and by extension adding members to a group) is
   // admin-only. Team members can only start direct messages; groups must
   // be orchestrated by an admin so the roster stays intentional.
-  if (kind === "group" && viewer.kind !== "admin") {
-    return NextResponse.json({ ok: false, error: "Only admins can create group chats" }, { status: 403 });
+  if (["group", "department", "project"].includes(kind) && viewer.kind !== "admin") {
+    return NextResponse.json({ ok: false, error: "Only admins can create team channels" }, { status: 403 });
   }
 
   if (kind === "group" && !name?.trim()) {
     return NextResponse.json({ ok: false, error: "Group name is required" }, { status: 400 });
   }
-  if (!Array.isArray(participant_ids) || participant_ids.length === 0) {
+  if (kind === "department" && !String(department || "").trim()) {
+    return NextResponse.json({ ok: false, error: "Department is required" }, { status: 400 });
+  }
+  if (kind === "project" && !String(project_id || "").trim()) {
+    return NextResponse.json({ ok: false, error: "Project is required" }, { status: 400 });
+  }
+  if ((kind === "direct" || kind === "group") && (!Array.isArray(participant_ids) || participant_ids.length === 0)) {
     return NextResponse.json({ ok: false, error: "Pick at least one participant" }, { status: 400 });
   }
 
-  const hasAdmin = participant_ids.includes("admin");
-  const realUserIds = participant_ids.filter((id: any) => id !== "admin");
+  if (kind === "self") {
+    if (viewer.kind === "team") {
+      const { data: existing } = await db
+        .from("team_chat_threads")
+        .select("id")
+        .eq("kind", "direct")
+        .eq("name", "Saved messages")
+        .eq("created_by", viewer.session.id)
+        .maybeSingle();
+      if (existing?.id) return NextResponse.json({ ok: true, thread_id: existing.id });
+    }
+    if (viewer.kind === "admin") {
+      const { data: existing } = await db
+        .from("team_chat_threads")
+        .select("id")
+        .eq("kind", "direct")
+        .eq("name", "Saved messages")
+        .eq("includes_admin", true)
+        .maybeSingle();
+      if (existing?.id) return NextResponse.json({ ok: true, thread_id: existing.id });
+    }
+  }
+
+  const selectedParticipantIds = Array.isArray(participant_ids) ? participant_ids : [];
+  const hasAdmin = selectedParticipantIds.includes("admin");
+  const realUserIds = selectedParticipantIds.filter((id: any) => id !== "admin");
+
+  let resolvedName = name?.trim() || null;
+  if (kind === "self") resolvedName = "Saved messages";
+  if (kind === "department" && !resolvedName) resolvedName = `${String(department).trim()} Department`;
+  if (kind === "project") {
+    const { data: project } = await db
+      .from("finance_projects")
+      .select("name")
+      .eq("id", project_id)
+      .maybeSingle();
+    resolvedName = resolvedName || project?.name || "Project Chat";
+  }
 
   const { data: thread, error } = await db
     .from("team_chat_threads")
     .insert({
-      kind,
-      name: name?.trim() || null,
+      kind: storedKind,
+      name: resolvedName,
+      department: kind === "department" ? String(department).trim() : null,
+      project_id: kind === "project" ? project_id : null,
       created_by: viewer.kind === "team" ? viewer.session.id : null,
       includes_admin: viewer.kind === "admin" || hasAdmin,
+      visibility: ["public", "private", "invite_only"].includes(String(visibility)) ? String(visibility) : "private",
+      description: typeof description === "string" && description.trim() ? description.trim() : null,
+      rules: typeof rules === "string" && rules.trim() ? rules.trim() : null,
+      is_announcement_only: !!is_announcement_only,
+      is_voice_room: !!is_voice_room,
+      is_voice_channel: !!is_voice_channel,
     })
     .select("id")
     .single();
@@ -211,7 +274,30 @@ export async function POST(req: Request) {
     (all || []).forEach((m: any) => allParticipants.add(m.id));
   }
 
-  const rows = Array.from(allParticipants).map((mid) => ({ thread_id: thread.id, team_member_id: mid }));
+  if (kind === "department") {
+    const { data: deptMembers } = await db
+      .from("team_members")
+      .select("id")
+      .eq("is_active", true)
+      .eq("department", String(department).trim());
+    (deptMembers || []).forEach((m: any) => allParticipants.add(m.id));
+  }
+
+  if (kind === "project") {
+    const { data: assigned } = await db
+      .from("project_assignments")
+      .select("team_member_id")
+      .eq("project_id", project_id);
+    (assigned || []).forEach((assignment: any) => {
+      if (assignment.team_member_id) allParticipants.add(assignment.team_member_id);
+    });
+  }
+
+  const rows = Array.from(allParticipants).map((mid) => ({
+    thread_id: thread.id,
+    team_member_id: mid,
+    role: kind === "self" ? "owner" : "member",
+  }));
   if (rows.length) await db.from("team_chat_participants").insert(rows).select();
 
   return NextResponse.json({ ok: true, thread_id: thread.id });

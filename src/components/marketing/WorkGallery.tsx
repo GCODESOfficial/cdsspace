@@ -6,6 +6,12 @@ import { cn } from "@/lib/utils";
 import { ArrowUpRight } from "lucide-react";
 import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
+import {
+    getWorkCoverShape,
+    measureImage,
+    type WorkCoverShape,
+} from "./work-cover-layout";
+import { WorkMosaicItem } from "./WorkMosaicItem";
 
 /**
  * Category filter -> Supabase category name.
@@ -58,6 +64,7 @@ interface WorkGalleryProps {
 export const WorkGallery = ({ activeCategory, searchQuery = "", onOpen }: WorkGalleryProps) => {
     const [works, setWorks] = useState<Work[]>([]);
     const [loading, setLoading] = useState(true);
+    const [coverShapes, setCoverShapes] = useState<Record<number, WorkCoverShape>>({});
 
     useEffect(() => {
         let cancelled = false;
@@ -82,6 +89,23 @@ export const WorkGallery = ({ activeCategory, searchQuery = "", onOpen }: WorkGa
         };
     }, []);
 
+    useEffect(() => {
+        let cancelled = false;
+
+        works.forEach((work) => {
+            if (!work.cover_image) return;
+
+            measureImage(work.cover_image).then((shape) => {
+                if (cancelled || !shape) return;
+                setCoverShapes((prev) => (prev[work.id] ? prev : { ...prev, [work.id]: shape }));
+            });
+        });
+
+        return () => {
+            cancelled = true;
+        };
+    }, [works]);
+
     const activeFilter = CATEGORY_FILTERS.find((c) => c.id === activeCategory);
     const normalizedQuery = searchQuery.trim().toLowerCase();
 
@@ -105,15 +129,23 @@ export const WorkGallery = ({ activeCategory, searchQuery = "", onOpen }: WorkGa
                         query={normalizedQuery}
                     />
                 ) : (
-                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-[16px]">
-                        {filtered.map((work) => (
-                            <div key={work.id} className="h-[504px]">
-                                <ProjectCard
-                                    work={work}
-                                    onClick={() => onOpen(work.id)}
-                                />
-                            </div>
-                        ))}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4 auto-rows-[1px] gap-4 grid-flow-dense">
+                        {filtered.map((work) => {
+                            const shape = coverShapes[work.id];
+
+                            return (
+                                <WorkMosaicItem key={work.id} shape={shape}>
+                                    <ProjectCard
+                                        work={work}
+                                        shape={shape}
+                                        onImageShape={(nextShape) =>
+                                            setCoverShapes((prev) => ({ ...prev, [work.id]: nextShape }))
+                                        }
+                                        onClick={() => onOpen(work.id)}
+                                    />
+                                </WorkMosaicItem>
+                            );
+                        })}
                     </div>
                 )}
             </div>
@@ -125,62 +157,74 @@ export const ProjectCard = ({
     work,
     onClick,
     className,
+    shape,
+    onImageShape,
 }: {
     work: Work;
     onClick: () => void;
     className?: string;
+    shape?: WorkCoverShape | null;
+    onImageShape?: (shape: WorkCoverShape) => void;
 }) => {
+    const [localShape, setLocalShape] = useState<WorkCoverShape | null>(null);
+    const effectiveShape = shape ?? localShape;
+
+    const handleImageLoad = (event: React.SyntheticEvent<HTMLImageElement>) => {
+        const nextShape = getWorkCoverShape(event.currentTarget.naturalWidth, event.currentTarget.naturalHeight);
+        if (!nextShape) return;
+        setLocalShape(nextShape);
+        onImageShape?.(nextShape);
+    };
+
     return (
         <motion.div
             initial={{ opacity: 0, scale: 0.95 }}
             animate={{ opacity: 1, scale: 1 }}
+            whileHover={{ y: -4 }}
+            transition={{ duration: 0.28, ease: "easeOut" }}
             className={cn("relative h-full", className)}
         >
             <button
                 type="button"
                 onClick={onClick}
                 aria-label={`Open ${work.title}`}
-                className="relative block w-full h-full text-left rounded-[24px] lg:rounded-[12px] 2xl:rounded-[24px] overflow-hidden group border border-[#E3E8F4] cursor-pointer bg-brand-stroke/20"
+                className="relative block w-full h-full text-left rounded-[10px] overflow-hidden group border border-[#E3E8F4] cursor-pointer bg-[#050713] shadow-sm transition-shadow duration-500 hover:shadow-2xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue focus-visible:ring-offset-2"
             >
-                {/* Mobile pill with category */}
-                {work.category && (
-                    <div className="absolute top-6 left-6 z-20 md:hidden max-w-[calc(100%-92px)]">
-                        <div className="bg-white/20 backdrop-blur-md border border-white/30 px-3 py-1 rounded-full">
-                            <span className="text-white text-[12px] font-semibold tracking-wide uppercase truncate block">
-                                {work.category}
-                            </span>
-                        </div>
-                    </div>
-                )}
-
-                <div className="absolute top-6 right-6 z-20 md:hidden">
-                    <div className="w-10 h-10 rounded-full bg-white flex items-center justify-center shadow-lg">
-                        <ArrowUpRight className="w-5 h-5 text-[#0035C1]" strokeWidth={2.4} />
-                    </div>
-                </div>
-
                 {/* Cover image */}
                 {work.cover_image ? (
                     <Image
                         src={work.cover_image}
                         alt={work.title}
                         fill
-                        quality={90}
-                        sizes="(min-width: 1024px) 480px, (min-width: 768px) 50vw, 100vw"
-                        className="object-cover transform transition-transform duration-700 group-hover:scale-105"
+                        quality={92}
+                        sizes={
+                            effectiveShape?.kind === "wide"
+                                ? "(min-width: 1536px) 700px, (min-width: 768px) 66vw, 100vw"
+                                : "(min-width: 1536px) 360px, (min-width: 1024px) 33vw, (min-width: 640px) 50vw, 100vw"
+                        }
+                        onLoad={handleImageLoad}
+                        className="object-cover transform transition-transform duration-700 ease-out group-hover:scale-105"
                     />
                 ) : (
                     <div className="absolute inset-0 bg-brand-stroke/30" />
                 )}
 
-                {/* Desktop hover overlay — title + category + arrow, image-only at rest */}
-                <div className="absolute inset-0 bg-brand-navy/60 opacity-0 group-hover:opacity-100 transition-opacity duration-300 hidden md:flex flex-col items-center justify-center text-center p-8 pointer-events-none">
-                    <h3 className="text-white text-2xl font-bold mb-2 tracking-tight">{work.title}</h3>
+                <div className="absolute inset-0 bg-black/0 group-hover:bg-black/35 group-focus-visible:bg-black/35 group-active:bg-black/35 transition-colors duration-300 pointer-events-none" />
+                <div className="absolute inset-x-0 bottom-0 h-1/2 bg-gradient-to-t from-black/78 via-black/25 to-transparent opacity-0 transition-opacity duration-300 pointer-events-none group-hover:opacity-100 group-focus-visible:opacity-100 group-active:opacity-100" />
+
+                <div className="absolute inset-x-0 bottom-0 p-5 md:p-6 text-white opacity-0 translate-y-3 transition-all duration-300 group-hover:opacity-100 group-hover:translate-y-0 group-focus-visible:opacity-100 group-focus-visible:translate-y-0 group-active:opacity-100 group-active:translate-y-0">
                     {work.category && (
-                        <p className="text-white/85 text-[15px] font-medium">{work.category}</p>
+                        <p className="mb-1 text-[10px] font-medium uppercase tracking-[0.22em] text-white/45">
+                            {work.category}
+                        </p>
                     )}
-                    <div className="mt-6 w-12 h-12 rounded-full border border-white flex items-center justify-center">
-                        <ArrowUpRight size={24} strokeWidth={2} className="text-white" />
+                    <div className="flex items-end justify-between gap-4">
+                        <h3 className="max-w-[calc(100%-56px)] text-[15px] md:text-[17px] font-medium leading-snug tracking-tight drop-shadow-md">
+                            {work.title}
+                        </h3>
+                        <div className="grid h-11 w-11 shrink-0 place-items-center rounded-full border border-white/80 bg-white/5 text-white opacity-100 md:opacity-0 md:translate-y-2 transition-all duration-300 group-hover:opacity-100 group-hover:translate-y-0">
+                            <ArrowUpRight size={21} strokeWidth={2} />
+                        </div>
                     </div>
                 </div>
             </button>
@@ -194,11 +238,14 @@ export const ProjectCard = ({
 
 function GallerySkeleton() {
     return (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-[16px]">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4 auto-rows-[1px] gap-4 grid-flow-dense">
             {Array.from({ length: 9 }).map((_, i) => (
                 <div
                     key={i}
-                    className="h-[504px] rounded-[24px] bg-brand-stroke/30 animate-pulse"
+                    className={cn(
+                        "rounded-[10px] bg-brand-stroke/30 animate-pulse",
+                        i % 5 === 0 ? "md:col-span-2 [grid-row-end:span_17]" : "[grid-row-end:span_14]",
+                    )}
                 />
             ))}
         </div>

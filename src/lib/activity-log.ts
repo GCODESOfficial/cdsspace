@@ -4,9 +4,9 @@
  * so the per-page Activity panel has a timeline to render. Failures are
  * swallowed — logging must never break the actual operation it's tracing.
  */
-import { supabaseAdmin } from "@/lib/supabase";
 import { getAdminSession } from "@/lib/admin-session";
 import { getTeamSession } from "@/lib/team-auth";
+import { glashQuery } from "@/lib/glashdb/postgres";
 
 export interface LogActivityInput {
     /** Verb like "team_member.suspend", "invoice.create", "project.assign". */
@@ -24,7 +24,6 @@ export interface LogActivityInput {
 }
 
 export async function logActivity(input: LogActivityInput): Promise<void> {
-    if (!supabaseAdmin) return;
     try {
         // Resolve actor from whichever session is present. Admin wins if
         // both exist because admin routes are what we're instrumenting.
@@ -47,18 +46,23 @@ export async function logActivity(input: LogActivityInput): Promise<void> {
             actor_name = team.full_name || team.email;
         }
 
-        await (supabaseAdmin as any).from("admin_activity_log").insert({
-            actor_kind,
-            actor_id,
-            actor_name,
-            actor_is_admin,
-            action: input.action,
-            resource_type: input.resource_type,
-            resource_id: input.resource_id ?? null,
-            resource_label: input.resource_label ?? null,
-            page: input.page,
-            metadata: input.metadata ?? {},
-        });
+        await glashQuery(
+            `insert into public.admin_activity_log
+              (actor_kind, actor_id, actor_name, actor_is_admin, action, resource_type, resource_id, resource_label, page, metadata)
+             values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+            [
+                actor_kind,
+                actor_id,
+                actor_name,
+                actor_is_admin,
+                input.action,
+                input.resource_type,
+                input.resource_id ?? null,
+                input.resource_label ?? null,
+                input.page,
+                input.metadata ?? {},
+            ],
+        );
     } catch (err) {
         // Activity logging is best-effort. Never let it break the caller.
         console.error("[activity-log] insert failed:", err);

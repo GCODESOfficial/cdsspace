@@ -31,6 +31,8 @@ const VERB_LABELS: Record<string, string> = {
     reset_password: "reset password for",
     send: "sent",
     mark_paid: "marked paid",
+    restore_version: "restored version for",
+    surcharge: "added surcharge to",
     archive: "archived",
 };
 

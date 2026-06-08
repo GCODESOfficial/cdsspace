@@ -5,13 +5,38 @@ import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Copy, Download, Trash2, ExternalLink, Truck, Rocket, Zap, Clock as ClockIcon, Check, Share2, Pencil } from "lucide-react";
+import { Copy, Download, Trash2, ExternalLink, Truck, Rocket, Zap, Clock as ClockIcon, Check, Share2, Pencil, History, RotateCcw, Loader2 } from "lucide-react";
 import { exportInvoiceToPdf } from "@/lib/invoice-pdf";
 import FinanceShell, { glassCard } from "@/components/finance/FinanceShell";
 import InvoiceDocument from "@/components/finance/InvoiceDocument";
 import { DELIVERY_SPEEDS, type DeliverySpeed, type FinanceInvoice, type FinanceInvoiceItem } from "@/lib/finance/types";
+import { buildInvoiceShareMessage } from "@/lib/finance/share";
 import DeliverySurchargeModal from "@/components/finance/DeliverySurchargeModal";
-import { appAlert, appConfirm, appPrompt } from "@/lib/app-notify";
+import { appAlert, appConfirm } from "@/lib/app-notify";
+
+interface VersionRow {
+  id: string;
+  action: string;
+  actor_name: string;
+  resource_label: string | null;
+  created_at: string;
+  before_data?: { invoice?: unknown };
+  metadata: Record<string, unknown> | null;
+}
+
+const VERSION_ACTION_LABELS: Record<string, string> = {
+  "invoice.create": "Created invoice",
+  "invoice.update": "Updated invoice",
+  "invoice.send": "Marked as sent",
+  "invoice.mark_paid": "Marked as paid",
+  "invoice.surcharge": "Added delivery surcharge",
+  "invoice.restore_version": "Restored version",
+  "invoice.delete": "Deleted invoice",
+};
+
+function versionActionLabel(action: string) {
+  return VERSION_ACTION_LABELS[action] ?? action.replace(/\./g, " ");
+}
 
 export default function InvoiceDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
@@ -22,6 +47,11 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
   const [pendingSpeed, setPendingSpeed] = useState<DeliverySpeed | null>(null);
   const [shareOpen, setShareOpen] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [versions, setVersions] = useState<VersionRow[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [historyError, setHistoryError] = useState<string | null>(null);
+  const [restoringVersionId, setRestoringVersionId] = useState<string | null>(null);
 
   const onSpeedClick = (value: DeliverySpeed) => {
     if (invoice?.delivery_speed === value) return;
@@ -74,6 +104,59 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
   };
   useEffect(() => { load(); }, [id]);
 
+  const loadVersions = async () => {
+    setHistoryLoading(true);
+    setHistoryError(null);
+    try {
+      const r = await fetch(`/api/admin/finance/invoices/${id}/versions`, { cache: "no-store" });
+      const d = await r.json();
+      if (!r.ok) {
+        setHistoryError(d?.error || "Couldn't load edit history.");
+        setVersions([]);
+        return;
+      }
+      setVersions(Array.isArray(d.versions) ? d.versions : []);
+    } catch (e) {
+      setHistoryError(e instanceof Error ? e.message : "Couldn't load edit history.");
+      setVersions([]);
+    } finally {
+      setHistoryLoading(false);
+    }
+  };
+
+  const toggleHistory = () => {
+    setHistoryOpen((open) => {
+      const next = !open;
+      if (next && versions.length === 0 && !historyLoading) void loadVersions();
+      return next;
+    });
+  };
+
+  const restoreVersion = async (version: VersionRow) => {
+    if (!(await appConfirm(`Restore the invoice to the version before "${versionActionLabel(version.action)}"?`))) return;
+    setRestoringVersionId(version.id);
+    try {
+      const r = await fetch(`/api/admin/finance/invoices/${id}/versions`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ version_id: version.id }),
+      });
+      const d = await r.json();
+      if (!r.ok) {
+        appAlert(d?.error || "Couldn't restore that version.");
+        return;
+      }
+      setInvoice(d.invoice);
+      setItems(d.items ?? []);
+      await loadVersions();
+      appAlert("Invoice restored.");
+    } catch (e) {
+      appAlert(e instanceof Error ? e.message : "Couldn't restore that version.");
+    } finally {
+      setRestoringVersionId(null);
+    }
+  };
+
   const updateStatus = async (status: string) => {
     await fetch(`/api/admin/finance/invoices/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ status }) });
     load();
@@ -93,9 +176,10 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
   };
 
   const publicUrl = invoice ? `${typeof window !== "undefined" ? window.location.origin : ""}/invoice/${invoice.public_token}` : "";
+  const shareMessage = invoice ? buildInvoiceShareMessage(invoice.invoice_number, publicUrl) : publicUrl;
 
   const copyLink = () => {
-    navigator.clipboard.writeText(publicUrl);
+    navigator.clipboard.writeText(shareMessage);
     setCopied(true);
     setTimeout(() => setCopied(false), 1500);
   };
@@ -145,6 +229,9 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
           <Button variant="outline" className="h-11 px-4 rounded-xl" onClick={() => window.location.href = `/admin/finance/invoices/new?draft=${id}`}>
             <Pencil className="w-4 h-4 mr-1.5" /> Edit
           </Button>
+          <Button variant="outline" className="h-11 px-4 rounded-xl" onClick={toggleHistory}>
+            <History className="w-4 h-4 mr-1.5" /> History
+          </Button>
           <Button
             variant="outline"
             className="h-11 px-4 rounded-xl"
@@ -182,27 +269,25 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
                 <div className="absolute right-0 top-full mt-2 z-50 bg-white rounded-xl shadow-2xl border border-gray-100 p-1.5 flex items-center gap-1">
                   {(() => {
                     const encodedUrl = encodeURIComponent(publicUrl);
-                    const encodedText = encodeURIComponent(
-                      `Invoice ${invoice?.invoice_number ?? ""} from CDS Space`
-                    );
+                    const encodedText = encodeURIComponent(shareMessage);
                     const targets = [
                       {
                         key: "whatsapp",
                         label: "WhatsApp",
                         color: "bg-[#25D366] hover:bg-[#1eb957]",
-                        href: `https://api.whatsapp.com/send?text=${encodedText}%20${encodedUrl}`,
+                        href: `https://api.whatsapp.com/send?text=${encodedText}`,
                       },
                       {
                         key: "facebook",
                         label: "Facebook",
                         color: "bg-[#1877F2] hover:bg-[#0f66d8]",
-                        href: `https://www.facebook.com/sharer/sharer.php?u=${encodedUrl}`,
+                        href: `https://www.facebook.com/sharer/sharer.php?u=${encodedUrl}&quote=${encodedText}`,
                       },
                       {
                         key: "x",
                         label: "X",
                         color: "bg-black hover:bg-neutral-800",
-                        href: `https://twitter.com/intent/tweet?url=${encodedUrl}&text=${encodedText}`,
+                        href: `https://twitter.com/intent/tweet?text=${encodedText}`,
                       },
                       {
                         key: "linkedin",
@@ -230,6 +315,62 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
           </div>
         </div>
       </div>
+
+      {historyOpen && (
+        <div className={`${glassCard} p-5 mb-6`}>
+          <div className="flex items-center justify-between gap-3 mb-4">
+            <div>
+              <h3 className="font-semibold text-gray-900">Edit History</h3>
+              <p className="text-xs text-gray-500 mt-0.5">Shared activity for admins with invoice access.</p>
+            </div>
+            <Button variant="outline" size="sm" className="rounded-lg" onClick={loadVersions} disabled={historyLoading}>
+              {historyLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : "Refresh"}
+            </Button>
+          </div>
+          {historyLoading ? (
+            <div className="py-8 flex justify-center text-gray-400">
+              <Loader2 className="w-5 h-5 animate-spin" />
+            </div>
+          ) : historyError ? (
+            <p className="text-sm text-red-600 bg-red-50 border border-red-100 rounded-xl px-4 py-3">{historyError}</p>
+          ) : versions.length === 0 ? (
+            <p className="text-sm text-gray-500 bg-white/60 rounded-xl px-4 py-4">No saved versions yet.</p>
+          ) : (
+            <div className="divide-y divide-gray-100 rounded-xl overflow-hidden border border-white/70 bg-white/60">
+              {versions.map((version) => {
+                const canRestore = Boolean(version.before_data?.invoice);
+                return (
+                  <div key={version.id} className="p-4 flex items-center justify-between gap-4">
+                    <div className="min-w-0">
+                      <p className="text-sm font-semibold text-gray-900">{versionActionLabel(version.action)}</p>
+                      <p className="text-xs text-gray-500 mt-0.5">
+                        {version.actor_name || "System"} · {new Date(version.created_at).toLocaleString()}
+                      </p>
+                    </div>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="rounded-lg shrink-0"
+                      disabled={!canRestore || restoringVersionId === version.id}
+                      onClick={() => restoreVersion(version)}
+                    >
+                      {restoringVersionId === version.id ? (
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                      ) : canRestore ? (
+                        <>
+                          <RotateCcw className="w-4 h-4 mr-1.5" /> Restore
+                        </>
+                      ) : (
+                        "No restore"
+                      )}
+                    </Button>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Payment terms & delivery editor */}
       <div className={`${glassCard} p-5 mb-6`}>

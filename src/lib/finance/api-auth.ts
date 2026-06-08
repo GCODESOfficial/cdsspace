@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAdminSession, getAdminSessionAsync } from "@/app/api/admin-check/route";
-import { hasPermission } from "@/lib/admin-permissions";
+import { getPermissionForRoute, hasPermission } from "@/lib/admin-permissions";
 import { getSupabaseAdmin } from "@/lib/supabase";
 
 /**
@@ -13,6 +13,11 @@ export function financeDb(): any {
   return getSupabaseAdmin();
 }
 
+function inferPermissionFromRequest(req: NextRequest, fallback: string) {
+  const pathname = new URL(req.url).pathname.replace(/^\/api\/admin/, "/admin");
+  return getPermissionForRoute(pathname) ?? fallback;
+}
+
 /**
  * Synchronous guard (admin-cookie only). Kept for routes that haven't been
  * migrated to the async team-session bridge.
@@ -21,7 +26,8 @@ export function requireFinanceAdmin(req: NextRequest) {
   const session = getAdminSession(req);
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   if (session.role === "super_admin") return null;
-  if (!hasPermission(session.permissions, "finance")) {
+  const permissionKey = inferPermissionFromRequest(req, "finance");
+  if (!hasPermission(session.permissions, permissionKey)) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
   return null;
@@ -35,7 +41,10 @@ export async function requireFinanceAdminAsync(req: NextRequest, permissionKey =
   const session = await getAdminSessionAsync(req);
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   if (session.role === "super_admin") return null;
-  if (!hasPermission(session.permissions, permissionKey)) {
+  const resolvedPermissionKey = permissionKey === "finance"
+    ? inferPermissionFromRequest(req, permissionKey)
+    : permissionKey;
+  if (!hasPermission(session.permissions, resolvedPermissionKey)) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
   return null;

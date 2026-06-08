@@ -53,7 +53,13 @@ export const metadata: Metadata = {
     site: "@cdsspace_",
   },
   icons: {
-    icon: "/navbar/CDS Logo.svg",
+    icon: [
+      { url: "/favicon.png", type: "image/png", sizes: "554x554" },
+    ],
+    shortcut: "/favicon.png",
+    apple: [
+      { url: "/favicon.png", type: "image/png", sizes: "554x554" },
+    ],
   },
   robots: {
     index: true,
@@ -87,7 +93,7 @@ export default function RootLayout({
               "@type": "Organization",
               name: "CDS Space",
               url: "https://cdsspace.pro",
-              logo: "https://cdsspace.pro/navbar/CDS Logo.svg",
+              logo: "https://cdsspace.pro/mlogo.svg",
               description:
                 "Full-service branding agency specializing in brand identity design, UI/UX, web development, industrial print production, and brand consultancy.",
               sameAs: [

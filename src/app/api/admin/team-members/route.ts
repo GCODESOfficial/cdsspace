@@ -2,10 +2,12 @@
 import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { supabaseAdmin } from "@/lib/supabase";
+import { glashQuery } from "@/lib/glashdb/postgres";
 import { hashPassword, generateSalt, generateInviteToken } from "@/lib/team-auth";
 import { isReservedUsername } from "@/lib/reserved-usernames";
 import { logActivity } from "@/lib/activity-log";
 import { notifyTeamMember } from "@/lib/notify-team";
+import { lagosDate } from "@/lib/timebook";
 
 export const runtime = "nodejs";
 
@@ -36,7 +38,54 @@ export async function GET() {
     .order("created_at", { ascending: false });
 
   if (error) return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
-  return NextResponse.json({ ok: true, members: data || [] });
+
+  const members = data || [];
+  const ids = members.map((member: any) => member.id).filter(Boolean);
+  const statusRows = ids.length
+    ? await glashQuery<{ id: string; availability_status: "online" | "offline" | "break" }>(
+        `select
+           m.id,
+           case
+             when e.current_status = 'on_break' then 'break'
+             when exists (
+               select 1
+                 from public.team_device_sessions s
+                where s.team_member_id = m.id
+                  and s.revoked_at is null
+                  and s.expires_at > now()
+             ) then 'online'
+             else 'offline'
+           end as availability_status
+         from public.team_members m
+         left join public.team_time_entries e
+           on e.team_member_id = m.id
+          and e.work_date = $2
+        where m.id = any($1::uuid[])`,
+        [ids, lagosDate()],
+      )
+    : [];
+  const statusById = new Map(statusRows.map((row) => [row.id, row.availability_status]));
+  const faceRows = ids.length
+    ? await glashQuery<any>(
+        `select team_member_id, status, enrolled_at, last_verified_at, enrollment_image_data,
+                latest_capture_image_data, latest_capture_at, latest_match_score,
+                latest_liveness_score, latest_verification_flag, verification_failures,
+                reset_requested_at
+           from public.team_face_profiles
+          where team_member_id = any($1::uuid[])`,
+        [ids],
+      )
+    : [];
+  const faceById = new Map(faceRows.map((row: any) => [row.team_member_id, row]));
+
+  return NextResponse.json({
+    ok: true,
+    members: members.map((member: any) => ({
+      ...member,
+      availability_status: statusById.get(member.id) || "offline",
+      face_review: faceById.get(member.id) || null,
+    })),
+  });
 }
 
 export async function POST(req: Request) {
@@ -151,6 +200,56 @@ export async function PATCH(req: Request) {
 
   const { id, ...patch } = await req.json().catch(() => ({}));
   if (!id) return NextResponse.json({ ok: false, error: "Missing id" }, { status: 400 });
+
+  if (patch.action === "reset_face_capture") {
+    if (admin.role !== "super_admin") {
+      return NextResponse.json({ ok: false, error: "Only super admins can reset face captures." }, { status: 403 });
+    }
+    const memberRow = await glashQuery<{ full_name: string | null; email: string | null }>(
+      "select full_name, email from public.team_members where id = $1 limit 1",
+      [id],
+    );
+    if (!memberRow[0]) return NextResponse.json({ ok: false, error: "Team member not found." }, { status: 404 });
+
+    await glashQuery(
+      `insert into public.team_face_profiles
+        (team_member_id, descriptor, descriptor_version, status, enrollment_attempts,
+         verification_failures, metadata, reset_requested_at, reset_requested_by,
+         enrollment_image_data, latest_capture_image_data, latest_capture_at,
+         latest_match_score, latest_liveness_score, latest_verification_flag)
+       values ($1,'[]'::jsonb,'center-gray-32-v1','reset_required',0,0,$2::jsonb,now(),$3,null,null,null,null,null,'reset_required')
+       on conflict (team_member_id) do update set
+         descriptor = '[]'::jsonb,
+         status = 'reset_required',
+         verification_failures = 0,
+         metadata = coalesce(public.team_face_profiles.metadata, '{}'::jsonb) || excluded.metadata,
+         reset_requested_at = now(),
+         reset_requested_by = excluded.reset_requested_by,
+         enrollment_image_data = null,
+         latest_capture_image_data = null,
+         latest_capture_at = null,
+         latest_match_score = null,
+         latest_liveness_score = null,
+         latest_verification_flag = 'reset_required',
+         latest_verification_event_id = null,
+         updated_at = now()`,
+      [
+        id,
+        JSON.stringify({ reset_reason: patch.reason || "Super-admin reset requested" }),
+        admin.email || admin.name || "super_admin",
+      ],
+    );
+
+    await logActivity({
+      action: "team_member.reset_face_capture",
+      page: "team-members",
+      resource_type: "team_member",
+      resource_id: id,
+      resource_label: memberRow[0].full_name || memberRow[0].email || id,
+      metadata: { reason: patch.reason || null },
+    });
+    return NextResponse.json({ ok: true });
+  }
 
   const allowed = [
     "full_name",

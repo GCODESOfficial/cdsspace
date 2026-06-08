@@ -113,11 +113,10 @@ async function loadImageAsDataUri(
  *   - "Truly Best attracts Best — CDS Space" footer
  */
 export async function exportInvoiceToPdf(invoice: FinanceInvoice, items: FinanceInvoiceItem[]) {
-    const [logoImg, sealImg, moniepointImg, wemaImg] = await Promise.all([
+    const [logoImg, sealImg, ...bankImgs] = await Promise.all([
         loadImageAsDataUri("/navbar/CDS Logo.svg", 256),
         loadImageAsDataUri("/CDS_Seal.png"),
-        loadImageAsDataUri("/moniepoint.png"),
-        loadImageAsDataUri("/wemabank.png"),
+        ...CDS_BANK_ACCOUNTS.map((account) => loadImageAsDataUri(account.logo)),
     ]);
 
     const doc = new jsPDF({ unit: "pt", format: "a4" });
@@ -383,7 +382,6 @@ export async function exportInvoiceToPdf(invoice: FinanceInvoice, items: Finance
     // Bank accounts (2-column grid)
     const bankTop = y + 52;
     const bankColW = innerWidth / 2 - 24;
-    const bankImgs = [moniepointImg, wemaImg];
     CDS_BANK_ACCOUNTS.forEach((b, idx) => {
         const colX = margin + 20 + idx * (bankColW + 24);
         const rowY = bankTop;

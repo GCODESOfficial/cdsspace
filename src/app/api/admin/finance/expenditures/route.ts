@@ -1,9 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
-import { financeDb, requireFinanceAdmin } from "@/lib/finance/api-auth";
+import { financeDb, requireFinanceAdminAsync } from "@/lib/finance/api-auth";
 import { logActivity } from "@/lib/activity-log";
 
 export async function GET(req: NextRequest) {
-  const denied = requireFinanceAdmin(req); if (denied) return denied;
+  const denied = await requireFinanceAdminAsync(req); if (denied) return denied;
   const sb = financeDb();
   const { data, error } = await sb.from("finance_expenditures").select("*").order("spent_on", { ascending: false });
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
@@ -11,7 +11,7 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
-  const denied = requireFinanceAdmin(req); if (denied) return denied;
+  const denied = await requireFinanceAdminAsync(req); if (denied) return denied;
   const body = await req.json();
   const { title, category, amount, currency = "NGN", spent_on, recurring = false, recurrence_cycle, custom_interval_days, next_due_date, notes } = body;
   if (!title || amount == null) return NextResponse.json({ error: "title and amount required" }, { status: 400 });

@@ -181,7 +181,7 @@ export default function ClientMessagesPage() {
   const isCosmic = bg === "cosmic";
 
   return (
-    <div className="flex flex-col h-[calc(100vh-104px)] relative overflow-hidden rounded-2xl">
+    <div className="relative flex h-[calc(100dvh-96px)] min-h-0 flex-col overflow-hidden rounded-[18px] sm:h-[calc(100dvh-112px)] lg:h-[calc(100dvh-120px)]">
       {/* Background */}
       {isCosmic ? (
         <div className="absolute inset-0 bg-[#040B37] -z-10">
@@ -191,18 +191,7 @@ export default function ClientMessagesPage() {
         <div className="absolute inset-0 bg-gradient-to-br from-blue-50 via-white to-blue-50 -z-10" />
       )}
 
-      {/* Header */}
-      <div className={`px-6 py-4 border-b flex items-center justify-between gap-3 shrink-0 backdrop-blur-xl ${isCosmic ? "border-white/10 bg-[#040B37]/40" : "border-white/60 bg-white/60"}`}>
-        <div className="flex items-center gap-3">
-          <div className="w-11 h-11 rounded-xl bg-gradient-to-br from-blue-500 to-indigo-600 grid place-items-center shadow-lg shadow-blue-600/20">
-            <MessageSquare className="w-5 h-5 text-white" />
-          </div>
-          <div>
-            <h1 className={`text-lg font-semibold ${isCosmic ? "text-white" : "text-brand-navy"}`}>Secured Chat</h1>
-            <p className={`text-xs ${isCosmic ? "text-white/60" : "text-brand-body/60"}`}>Chat with the CDS Space team</p>
-          </div>
-        </div>
-
+      <div className={`flex shrink-0 items-center justify-end gap-3 border-b px-3 py-2 backdrop-blur-xl sm:px-4 ${isCosmic ? "border-white/10 bg-[#040B37]/40" : "border-white/60 bg-white/60"}`}>
         {/* Background switcher */}
         <div className={`flex items-center gap-1 rounded-full p-1 ${isCosmic ? "bg-white/10" : "bg-gray-100"}`}>
           <button
@@ -227,7 +216,7 @@ export default function ClientMessagesPage() {
       </div>
 
       {/* Messages */}
-      <div className="flex-1 overflow-y-auto px-6 py-6 space-y-6 relative z-10">
+      <div className="relative z-10 flex-1 space-y-6 overflow-y-auto px-3 py-4 sm:px-6 sm:py-6">
         {messages.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-full text-center">
             <div className={`w-16 h-16 rounded-2xl grid place-items-center mb-4 ${isCosmic ? "bg-white/10" : "bg-blue-50"}`}>
@@ -360,7 +349,7 @@ export default function ClientMessagesPage() {
       </div>
 
       {/* Input */}
-      <div className={`px-6 py-4 border-t shrink-0 backdrop-blur-xl ${isCosmic ? "border-white/10 bg-[#040B37]/40" : "border-white/60 bg-white/60"}`}>
+      <div className={`shrink-0 border-t px-3 py-3 backdrop-blur-xl sm:px-6 sm:py-4 ${isCosmic ? "border-white/10 bg-[#040B37]/40" : "border-white/60 bg-white/60"}`}>
         <div className="flex items-center gap-3">
           <input
             ref={inputRef}

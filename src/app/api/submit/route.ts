@@ -1,17 +1,13 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { NextResponse } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
-
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY! // service role for insert
-);
+import { getGlashDbAdmin } from '@/lib/glashdb';
 
 export async function POST(req: Request) {
   try {
     const body = await req.json();
+    const glashdb = getGlashDbAdmin();
 
-    const { error } = await supabase.from('applications').insert([body]);
+    const { error } = await glashdb.from('applications').insert([body]);
 
     if (error) {
       console.error('Supabase insert error:', error);

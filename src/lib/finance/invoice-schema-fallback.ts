@@ -12,8 +12,11 @@ export function isMissingInvoiceExtensionColumn(error: { message?: string } | nu
   const message = error?.message ?? "";
   return OPTIONAL_INVOICE_EXTENSION_FIELDS.some(
     (field) =>
-      message.includes(`'${field}'`) &&
-      message.includes("'finance_invoices'"),
+      (message.includes(`'${field}'`) || message.includes(`"${field}"`)) &&
+      (message.includes("'finance_invoices'") ||
+        message.includes('"finance_invoices"') ||
+        message.includes("'financial_invoices'") ||
+        message.includes('"financial_invoices"')),
   );
 }
 

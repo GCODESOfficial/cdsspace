@@ -53,7 +53,7 @@ export default function VideoPreviewPlayer() {
 >
   {!isPlaying && (
     <video
-      src="/CDS AGENCY.mp4"
+      src="/videos/cds.mp4"
       autoPlay
       loop
       muted
@@ -74,7 +74,7 @@ export default function VideoPreviewPlayer() {
   {isPlaying && (
     <video
       ref={mainVideoRef}
-      src="/CDS Space Branding Agency.mp4"
+      src="/home/CDS Space Branding Agency.mp4"
       loop
       muted={isMuted}
       playsInline

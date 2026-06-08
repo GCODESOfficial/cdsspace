@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { financeDb, requireFinanceAdmin } from "@/lib/finance/api-auth";
+import { financeDb, requireFinanceAdminAsync } from "@/lib/finance/api-auth";
 
 // CSV format: name,description,unit_price,currency,category
 function parseCsv(text: string) {
@@ -31,7 +31,7 @@ function parseCsv(text: string) {
 }
 
 export async function POST(req: NextRequest) {
-  const denied = requireFinanceAdmin(req); if (denied) return denied;
+  const denied = await requireFinanceAdminAsync(req); if (denied) return denied;
   const form = await req.formData();
   const file = form.get("file") as File | null;
   if (!file) return NextResponse.json({ error: "file required" }, { status: 400 });

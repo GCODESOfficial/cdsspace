@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
 /**
  * Minimal OpenAI Chat Completions client — no SDK. Keeps the bundle
  * lean and lets us stream responses via plain `fetch` + ReadableStream.
@@ -26,6 +25,60 @@ export interface ChatOptions {
 }
 
 const DEFAULT_MODEL = process.env.OPENAI_DEFAULT_MODEL || "gpt-4o-mini";
+
+export class OpenAIRequestError extends Error {
+  status: number;
+  code?: string;
+  type?: string;
+  rawMessage?: string;
+
+  constructor(status: number, message: string, details: { code?: string; type?: string; rawMessage?: string } = {}) {
+    super(message);
+    this.name = "OpenAIRequestError";
+    this.status = status;
+    this.code = details.code;
+    this.type = details.type;
+    this.rawMessage = details.rawMessage;
+  }
+}
+
+function friendlyOpenAIMessage(status: number, rawMessage: string) {
+  if (status === 401 || status === 403) {
+    return "OPENAI_API_KEY was rejected. Update the key and restart the app.";
+  }
+  if (status === 429) {
+    if (/quota|billing/i.test(rawMessage)) {
+      return "OpenAI quota is exhausted for this key. Check billing or replace OPENAI_API_KEY.";
+    }
+    return "OpenAI rate limit reached. Please retry shortly.";
+  }
+  if (status >= 500) {
+    return "OpenAI is temporarily unavailable. Please retry shortly.";
+  }
+  return rawMessage || `OpenAI request failed with status ${status}.`;
+}
+
+async function openAIErrorFromResponse(res: Response) {
+  const body = await res.text();
+  let rawMessage = body.slice(0, 500);
+  let code: string | undefined;
+  let type: string | undefined;
+
+  try {
+    const parsed = JSON.parse(body);
+    rawMessage = parsed?.error?.message || rawMessage;
+    code = parsed?.error?.code;
+    type = parsed?.error?.type;
+  } catch {
+    /* Plain-text or empty error response. */
+  }
+
+  return new OpenAIRequestError(res.status, friendlyOpenAIMessage(res.status, rawMessage), {
+    code,
+    type,
+    rawMessage,
+  });
+}
 
 function authHeaders() {
   const key = process.env.OPENAI_API_KEY;
@@ -58,8 +111,7 @@ export async function chatComplete(
   });
 
   if (!res.ok) {
-    const body = await res.text();
-    throw new Error(`OpenAI ${res.status}: ${body.slice(0, 500)}`);
+    throw await openAIErrorFromResponse(res);
   }
 
   const json = await res.json();
@@ -91,8 +143,8 @@ export async function chatStream(
   });
 
   if (!res.ok || !res.body) {
-    const body = await res.text();
-    throw new Error(`OpenAI ${res.status}: ${body.slice(0, 500)}`);
+    if (!res.ok) throw await openAIErrorFromResponse(res);
+    throw new OpenAIRequestError(502, "OpenAI returned an empty streaming response.");
   }
 
   // Rewrite OpenAI's SSE into plain text chunks for the browser.

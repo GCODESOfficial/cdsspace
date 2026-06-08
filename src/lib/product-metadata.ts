@@ -5,7 +5,7 @@ import type { Metadata } from "next";
  * Produces OG + Twitter card tags with a consistent brand image fallback.
  */
 const SITE = "https://cdsspace.pro";
-const FALLBACK_IMAGE = `${SITE}/navbar/CDS%20Logo.svg`;
+const FALLBACK_IMAGE = `${SITE}/mlogo.svg`;
 
 export function buildProductMetadata(opts: {
     title: string;

@@ -296,6 +296,30 @@ export const PERMISSION_GROUPS: PermissionGroup[] = [
     ],
   },
   {
+    key: "timebook",
+    label: "Team Timebook",
+    route: "/admin/timebook",
+    permissions: [
+      { key: "timebook.view", label: "View Timebook", description: "See attendance, time logs, and compliance reports" },
+      { key: "timebook.manage_schedules", label: "Manage Schedules", description: "Assign work modes and hybrid office days" },
+      { key: "timebook.correct_entries", label: "Correct Entries", description: "Apply attendance corrections and exceptions" },
+      { key: "timebook.review_leave", label: "Review Leave", description: "Approve or reject leave requests" },
+      { key: "timebook.export", label: "Export Reports", description: "Download payroll attendance exports" },
+    ],
+  },
+  {
+    key: "work_tracking",
+    label: "Work Tracking",
+    route: "/admin/work-tracking",
+    permissions: [
+      { key: "work_tracking.view", label: "View Tracking", description: "See productivity dashboards, summaries, and scorecards" },
+      { key: "work_tracking.screenshots", label: "View Screenshots", description: "Open retained screenshot timeline images before retention expiry" },
+      { key: "work_tracking.reports", label: "Generate Reports", description: "Generate daily reports, weekly rollups, and employee-report comparisons" },
+      { key: "work_tracking.settings", label: "Manage Settings", description: "Update capture interval, idle threshold, retention, and access policy" },
+      { key: "work_tracking.retention", label: "Run Retention", description: "Delete expired raw screenshots while preserving summaries and metadata" },
+    ],
+  },
+  {
     key: "team_payroll",
     label: "Team Payroll",
     route: "/admin/team-payroll",
@@ -360,6 +384,9 @@ export const ALL_PERMISSIONS = PERMISSION_GROUPS.flatMap((g) => g.permissions);
 export function hasPermission(permissions: string[], key: string): boolean {
   if (permissions.includes("all")) return true;
   if (permissions.includes(key)) return true;
+  if (key.startsWith("finance_") && permissions.includes("finance.manage")) return true;
+  const owningGroup = PERMISSION_GROUPS.find((g) => g.permissions.some((p) => p.key === key));
+  if (owningGroup && permissions.includes(owningGroup.key)) return true;
   const group = PERMISSION_GROUPS.find((g) => g.key === key);
   if (group) {
     return group.permissions.some((p) => permissions.includes(p.key));
@@ -382,6 +409,7 @@ export function getPermissionForRoute(pathname: string): string | null {
 
   if (pathname.startsWith("/admin/messages")) return "messages";
   if (pathname.startsWith("/admin/chat")) return "team_chat";
+  if (pathname.startsWith("/admin/announcements")) return "team_chat.broadcast";
   if (pathname.startsWith("/admin/integrations/whatsapp")) return "integrations.whatsapp";
   if (pathname.startsWith("/admin/integrations/meta")) return "integrations.meta";
 
@@ -411,6 +439,8 @@ export function getPermissionForRoute(pathname: string): string | null {
   if (pathname.startsWith("/admin/hrm")) return "applicants";
 
   if (pathname.startsWith("/admin/team-members")) return "team_members";
+  if (pathname.startsWith("/admin/timebook")) return "timebook";
+  if (pathname.startsWith("/admin/work-tracking")) return "work_tracking";
   if (pathname.startsWith("/admin/team-payroll")) return "team_payroll";
   if (pathname.startsWith("/admin/departments")) return "departments";
   if (pathname.startsWith("/admin/sub-admins")) return "sub_admins";

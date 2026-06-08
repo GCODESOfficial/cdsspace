@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
-import { financeDb, requireFinanceAdmin } from "@/lib/finance/api-auth";
+import { financeDb, requireFinanceAdminAsync } from "@/lib/finance/api-auth";
 
 export async function GET(req: NextRequest) {
-  const denied = requireFinanceAdmin(req);
+  const denied = await requireFinanceAdminAsync(req);
   if (denied) return denied;
   const sb = financeDb();
   const { data, error } = await sb
@@ -22,7 +22,7 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
-  const denied = requireFinanceAdmin(req);
+  const denied = await requireFinanceAdminAsync(req);
   if (denied) return denied;
   const body = await req.json();
   const { name, client, currency, duration_start, duration_end, notes } = body;

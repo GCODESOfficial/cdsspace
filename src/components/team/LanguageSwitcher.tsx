@@ -24,7 +24,7 @@ export function LanguageSwitcher({ compact = false }: { compact?: boolean }) {
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
-        className="inline-flex items-center gap-2 px-3 py-2 rounded-xl bg-white border border-brand-stroke/40 text-[13px] font-medium text-brand-navy hover:border-brand-blue/40 hover:text-brand-blue transition"
+        className="inline-flex min-h-10 items-center justify-center gap-2 px-3 py-2 rounded-xl bg-white border border-brand-stroke/40 text-[13px] font-medium text-brand-navy hover:border-brand-blue/40 hover:text-brand-blue transition"
       >
         <Globe className="w-4 h-4" />
         {compact ? (

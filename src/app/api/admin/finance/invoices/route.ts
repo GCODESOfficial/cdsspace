@@ -1,11 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
-import { financeDb, requireFinanceAdmin } from "@/lib/finance/api-auth";
+import { financeDb, requireFinanceAdminAsync } from "@/lib/finance/api-auth";
 import { generateInvoiceNumber, randomToken } from "@/lib/finance/types";
 import { isMissingInvoiceExtensionColumn, stripInvoiceExtensionFields } from "@/lib/finance/invoice-schema-fallback";
 import { logActivity } from "@/lib/activity-log";
+import { recordResourceVersion } from "@/lib/admin-versioning";
 
 export async function GET(req: NextRequest) {
-  const denied = requireFinanceAdmin(req); if (denied) return denied;
+  const denied = await requireFinanceAdminAsync(req, "finance_invoices"); if (denied) return denied;
   const sb = financeDb();
   const { data, error } = await sb
     .from("finance_invoices")
@@ -16,7 +17,7 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
-  const denied = requireFinanceAdmin(req); if (denied) return denied;
+  const denied = await requireFinanceAdminAsync(req, "finance_invoices.create"); if (denied) return denied;
   const body = await req.json();
   const {
     project_id = null, milestone_id = null, client_name, client_email, client_address,
@@ -94,6 +95,16 @@ export async function POST(req: NextRequest) {
     resource_type: "invoice",
     resource_id: invoice.id,
     resource_label: `${invoice.invoice_number} · ${client_name}`,
+    metadata: { total: invoice.total, currency: invoice.currency, status: invoice.status },
+  });
+  await recordResourceVersion({
+    action: "invoice.create",
+    page: "finance/invoices",
+    resource_type: "invoice",
+    resource_id: invoice.id,
+    resource_label: `${invoice.invoice_number} · ${client_name}`,
+    before_data: {},
+    after_data: { invoice, items: itemRows },
     metadata: { total: invoice.total, currency: invoice.currency, status: invoice.status },
   });
 

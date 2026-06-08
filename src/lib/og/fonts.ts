@@ -1,13 +1,11 @@
 /**
  * Inter font loader for Satori (Next.js's ImageResponse).
  *
- * Primary source: `@fontsource/inter` WOFF files shipped in node_modules.
- * Satori accepts TTF / OTF / plain WOFF (not WOFF2), and the fontsource
- * package conveniently bundles both — we read the .woff variants so the
- * build is fully offline-deterministic.
+ * Primary source: the Geist TTF that ships inside Next's compiled @vercel/og
+ * bundle, so ImageResponse never errors out with "No fonts are loaded".
  *
- * Fallback: the Noto Sans TTF that ships inside @vercel/og itself, so
- * ImageResponse never errors out with "No fonts are loaded".
+ * Local brand fonts are intentionally not used here because Satori can be
+ * pickier than the browser about TTF internals during static prerendering.
  */
 import fs from "node:fs";
 import path from "node:path";
@@ -25,34 +23,17 @@ function toArrayBuffer(buf: Buffer): ArrayBuffer {
     return ab;
 }
 
-function readInterWoff(weight: 400 | 700 | 800): OgFont | null {
+function readNextFontFallback(): ArrayBuffer | null {
     try {
         const p = path.join(
-            process.cwd(),
-            "node_modules",
-            "@fontsource",
-            "inter",
-            "files",
-            `inter-latin-${weight}-normal.woff`,
-        );
-        const buf = fs.readFileSync(p);
-        return { name: "Inter", data: toArrayBuffer(buf), weight, style: "normal" };
-    } catch {
-        return null;
-    }
-}
-
-function readNotoSansFallback(): ArrayBuffer | null {
-    try {
-        const p = path.join(
-            process.cwd(),
+            /*turbopackIgnore: true*/ process.cwd(),
             "node_modules",
             "next",
             "dist",
             "compiled",
             "@vercel",
             "og",
-            "noto-sans-v27-latin-regular.ttf",
+            "Geist-Regular.ttf",
         );
         return toArrayBuffer(fs.readFileSync(p));
     } catch {
@@ -64,13 +45,7 @@ let cached: OgFont[] | null = null;
 
 export function getOgFonts(): OgFont[] {
     if (cached) return cached;
-    const inter = [readInterWoff(400), readInterWoff(700), readInterWoff(800)]
-        .filter((x): x is OgFont => !!x);
-    if (inter.length > 0) {
-        cached = inter;
-        return cached;
-    }
-    const fallback = readNotoSansFallback();
+    const fallback = readNextFontFallback();
     if (fallback) {
         cached = [
             { name: "Inter", data: fallback, weight: 400, style: "normal" },

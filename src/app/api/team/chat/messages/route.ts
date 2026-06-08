@@ -6,7 +6,9 @@ import {
   getTeamChatDb,
   getViewerPayload,
   hydrateTeamMessages,
+  TEAM_CHAT_MESSAGE_COLUMNS,
 } from "@/lib/team-chat-server";
+import { canShareProtectedChatResource } from "@/lib/chat-resource-permissions";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -26,11 +28,14 @@ export async function GET(req: Request) {
     return NextResponse.json({ ok: false, error: "Forbidden" }, { status: 403 });
   }
 
+  const protectedShare = await canShareProtectedChatResource(viewer, threadId, metadata);
+  if (!protectedShare.ok) {
+    return NextResponse.json({ ok: false, error: protectedShare.error }, { status: 403 });
+  }
+
   const { data, error } = await db
     .from("team_chat_messages")
-    .select(
-      "id, thread_id, sender_id, sender_is_admin, body, attachment_url, forwarded, reply_to_message_id, sticker_key, reactions, edited_at, deleted_at, created_at",
-    )
+    .select(TEAM_CHAT_MESSAGE_COLUMNS)
     .eq("thread_id", threadId)
     .order("created_at", { ascending: true })
     .limit(limit);
@@ -51,7 +56,19 @@ export async function POST(req: Request) {
   if (!viewer || !db) {
     return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
   }
-  const { threadId, body, attachmentUrl, replyToMessageId, stickerKey } = await req.json().catch(() => ({}));
+  const {
+    threadId,
+    body,
+    attachmentUrl,
+    replyToMessageId,
+    stickerKey,
+    messageType,
+    scheduledFor,
+    metadata,
+    fileName,
+    fileSizeBytes,
+    mimeType,
+  } = await req.json().catch(() => ({}));
   if (!threadId || !(body?.trim() || attachmentUrl || stickerKey)) {
     return NextResponse.json(
       { ok: false, error: "threadId and a message body, sticker, or attachment are required" },
@@ -83,10 +100,16 @@ export async function POST(req: Request) {
       attachment_url: attachmentUrl || null,
       reply_to_message_id: replyToMessageId || null,
       sticker_key: stickerKey || null,
+      message_type: messageType || (stickerKey ? "sticker" : attachmentUrl ? "file" : "text"),
+      delivery_status: scheduledFor ? "scheduled" : "sent",
+      scheduled_for: scheduledFor || null,
+      sent_at: scheduledFor ? null : new Date().toISOString(),
+      metadata: metadata && typeof metadata === "object" ? metadata : {},
+      file_name: fileName || null,
+      file_size_bytes: Number.isFinite(Number(fileSizeBytes)) ? Number(fileSizeBytes) : null,
+      mime_type: mimeType || null,
     })
-    .select(
-      "id, thread_id, sender_id, sender_is_admin, body, attachment_url, forwarded, reply_to_message_id, sticker_key, reactions, edited_at, deleted_at, created_at",
-    )
+    .select(TEAM_CHAT_MESSAGE_COLUMNS)
     .single();
   if (error) return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
 

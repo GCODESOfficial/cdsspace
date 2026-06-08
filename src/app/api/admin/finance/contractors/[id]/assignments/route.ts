@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
-import { financeDb, requireFinanceAdmin } from "@/lib/finance/api-auth";
+import { financeDb, requireFinanceAdminAsync } from "@/lib/finance/api-auth";
 
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  const denied = requireFinanceAdmin(req); if (denied) return denied;
+  const denied = await requireFinanceAdminAsync(req); if (denied) return denied;
   const { id } = await params;
   const body = await req.json();
   const { project_id, milestone_id = null, agreed_amount, currency = "NGN", notes } = body;

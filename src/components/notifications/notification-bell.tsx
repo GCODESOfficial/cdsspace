@@ -12,6 +12,15 @@ export default function NotificationBell() {
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [open, setOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
+  const prevUnreadCount = useRef<number>(0);
+  const isFirstLoad = useRef<boolean>(true);
+
+  // ---------- Play Sound ----------
+  const playNotificationSound = useCallback(() => {
+    const audio = new Audio("/special-notification.mp3");
+    audio.volume = 0.6;
+    audio.play().catch((err) => console.log("Audio playback failed:", err));
+  }, []);
 
   // ---------- Fetch ----------
   const fetchNotifications = useCallback(async () => {
@@ -21,11 +30,21 @@ export default function NotificationBell() {
       );
       if (!res.ok) return;
       const data = await res.json();
-      setNotifications(data.notifications || []);
+      const newNotifications = data.notifications || [];
+      
+      const newUnreadCount = newNotifications.filter((n: Notification) => !n.is_read).length;
+      
+      if (!isFirstLoad.current && newUnreadCount > prevUnreadCount.current) {
+        playNotificationSound();
+      }
+      
+      prevUnreadCount.current = newUnreadCount;
+      isFirstLoad.current = false;
+      setNotifications(newNotifications);
     } catch {
       // silently ignore network errors
     }
-  }, []);
+  }, [playNotificationSound]);
 
   useEffect(() => {
     fetchNotifications();
@@ -98,48 +117,60 @@ export default function NotificationBell() {
       {/* Dropdown */}
       <AnimatePresence>
         {open && (
-          <motion.div
-            initial={{ opacity: 0, y: -8, scale: 0.96 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: -8, scale: 0.96 }}
-            transition={{ duration: 0.15 }}
-            className="absolute right-0 mt-2 w-[360px] bg-white rounded-xl shadow-xl border border-gray-200 z-50 overflow-hidden"
-          >
-            {/* Header */}
-            <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100">
-              <h3 className="text-sm font-semibold text-gray-900">
-                Notifications
-              </h3>
-              {unreadCount > 0 && (
-                <button
-                  type="button"
-                  onClick={markAllAsRead}
-                  className="text-xs text-blue-600 hover:text-blue-700 font-medium transition-colors"
-                >
-                  Mark all as read
-                </button>
-              )}
-            </div>
+          <>
+            <motion.button
+              type="button"
+              aria-label="Close notifications"
+              className="fixed inset-0 z-40 cursor-default bg-transparent"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setOpen(false)}
+            />
+            <motion.div
+              initial={{ opacity: 0, y: -8, scale: 0.96 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: -8, scale: 0.96 }}
+              transition={{ duration: 0.15 }}
+              className="fixed left-3 right-3 top-[4.5rem] bg-white rounded-2xl shadow-xl border border-gray-200 z-50 overflow-hidden max-h-[min(70vh,calc(100dvh-6rem))] md:absolute md:left-auto md:right-0 md:top-auto md:mt-2 md:w-[360px] md:max-h-none md:rounded-xl"
+            >
+              {/* Header */}
+              <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100">
+                <h3 className="text-sm font-semibold text-gray-900">
+                  Notifications
+                </h3>
+                {unreadCount > 0 && (
+                  <button
+                    type="button"
+                    onClick={markAllAsRead}
+                    className="text-xs text-blue-600 hover:text-blue-700 font-medium transition-colors"
+                  >
+                    Mark all as read
+                  </button>
+                )}
+              </div>
 
-            {/* List */}
-            <div className="max-h-[400px] overflow-y-auto divide-y divide-gray-100">
-              {notifications.length === 0 ? (
-                <div className="px-4 py-10 text-center text-sm text-gray-400">
-                  No notifications
-                </div>
-              ) : (
-                notifications
-                  .slice(0, MAX_DISPLAY)
-                  .map((n) => (
-                    <NotificationItem
-                      key={n.id}
-                      notification={n}
-                      onRead={markAsRead}
-                    />
-                  ))
-              )}
-            </div>
-          </motion.div>
+              {/* List */}
+              <div className="max-h-[min(70vh,calc(100dvh-9.5rem))] overflow-y-auto divide-y divide-gray-100 md:max-h-[400px]">
+                {notifications.length === 0 ? (
+                  <div className="px-4 py-10 text-center text-sm text-gray-400">
+                    No notifications
+                  </div>
+                ) : (
+                  notifications
+                    .slice(0, MAX_DISPLAY)
+                    .map((n) => (
+                      <NotificationItem
+                        key={n.id}
+                        notification={n}
+                        onRead={markAsRead}
+                        onNavigate={() => setOpen(false)}
+                      />
+                    ))
+                )}
+              </div>
+            </motion.div>
+          </>
         )}
       </AnimatePresence>
     </div>

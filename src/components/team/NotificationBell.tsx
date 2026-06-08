@@ -53,6 +53,7 @@ export function NotificationBell() {
   const [items, setItems] = useState<Notification[]>([]);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
   const prevUnreadCount = useRef<number>(0);
   const isFirstLoad = useRef<boolean>(true);
 
@@ -62,7 +63,18 @@ export function NotificationBell() {
     audio.play().catch((err) => console.log("Audio playback failed:", err));
   }, []);
 
-  async function fetchNotifications() {
+  useEffect(() => {
+    if (!open) return;
+    const closeOnOutside = (event: PointerEvent) => {
+      if (containerRef.current && !containerRef.current.contains(event.target as Node)) {
+        setOpen(false);
+      }
+    };
+    document.addEventListener("pointerdown", closeOnOutside);
+    return () => document.removeEventListener("pointerdown", closeOnOutside);
+  }, [open]);
+
+  const fetchNotifications = useCallback(async () => {
     setLoading(true);
     try {
       const res = await fetch("/api/team/notifications", { credentials: "include" });
@@ -82,13 +94,13 @@ export function NotificationBell() {
     } finally {
       setLoading(false);
     }
-  }
+  }, [playNotificationSound]);
 
   useEffect(() => {
     fetchNotifications();
     const t = setInterval(fetchNotifications, 30_000);
     return () => clearInterval(t);
-  }, []);
+  }, [fetchNotifications]);
 
   const unread = items.filter((n) => !n.read_at);
   const groups = useMemo(() => groupNotifications(items), [items]);
@@ -127,7 +139,7 @@ export function NotificationBell() {
   }
 
   return (
-    <div className="relative">
+    <div ref={containerRef} className="relative">
       <button
         onClick={() => setOpen((o) => !o)}
         className="relative p-2 rounded-xl bg-white border border-brand-stroke/40 text-brand-navy hover:border-brand-blue/40 hover:text-brand-blue transition"
@@ -165,7 +177,7 @@ export function NotificationBell() {
               ) : items.length === 0 ? (
                 <div className="py-10 text-center">
                   <Bell className="w-8 h-8 text-brand-stroke mx-auto mb-3" />
-                  <p className="text-[13px] text-brand-body/60">You're all caught up</p>
+                  <p className="text-[13px] text-brand-body/60">You&apos;re all caught up</p>
                 </div>
               ) : (
                 groups.map((g) => (

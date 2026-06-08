@@ -1,46 +1,90 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
 import { NextResponse } from "next/server";
-import { supabaseAdmin } from "@/lib/supabase";
+import { glashQuery } from "@/lib/glashdb/postgres";
 import { getTeamSession } from "@/lib/team-auth";
 
 export const runtime = "nodejs";
 
+type TeamNotificationRow = {
+  id: string;
+  kind: string;
+  title: string;
+  body: string | null;
+  link: string | null;
+  thread_id: string | null;
+  project_id?: string | null;
+  document_id?: string | null;
+  work_id?: string | null;
+  meeting_id?: string | null;
+  signature_request_id?: string | null;
+  created_at: string;
+  read_at: string | null;
+};
+
+function normalizeTeamNotificationLink(row: TeamNotificationRow) {
+  if (row.link) return row.link;
+  if (row.thread_id) return `/team/chat?thread=${row.thread_id}`;
+  if (row.project_id) return `/team/work?project=${row.project_id}`;
+  if (row.work_id) return `/team/work?work=${row.work_id}`;
+  if (row.document_id) return `/team/cdocs?document=${row.document_id}`;
+  if (row.meeting_id) return `/team/cmeet?meeting=${row.meeting_id}`;
+  if (row.signature_request_id) return `/team/csign?request=${row.signature_request_id}`;
+  return null;
+}
+
 export async function GET() {
   const session = await getTeamSession();
-  if (!session || !supabaseAdmin) {
+  if (!session) {
     return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
   }
 
-  const db = supabaseAdmin as any;
-  const { data } = await db
-    .from("team_notifications")
-    .select("*")
-    .eq("recipient_id", session.id)
-    .order("created_at", { ascending: false })
-    .limit(50);
+  const data = await glashQuery<TeamNotificationRow>(
+    `select *
+       from public.team_notifications
+      where recipient_id = $1
+      order by created_at desc
+      limit 50`,
+    [session.id],
+  );
 
-  return NextResponse.json({ ok: true, notifications: data || [] });
+  return NextResponse.json({
+    ok: true,
+    notifications: data.map((row) => ({
+      ...row,
+      link: normalizeTeamNotificationLink(row),
+    })),
+  });
 }
 
 export async function PATCH(req: Request) {
   const session = await getTeamSession();
-  if (!session || !supabaseAdmin) {
+  if (!session) {
     return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
   }
 
   const body = await req.json().catch(() => ({}));
   const { ids, all } = body as { ids?: string[]; all?: boolean };
-  const db = supabaseAdmin as any;
+  if (!all && (!Array.isArray(ids) || ids.length === 0)) {
+    return NextResponse.json({ ok: false, error: "ids or all is required" }, { status: 400 });
+  }
 
-  let query = db
-    .from("team_notifications")
-    .update({ read_at: new Date().toISOString() })
-    .eq("recipient_id", session.id)
-    .is("read_at", null);
+  if (all) {
+    await glashQuery(
+      `update public.team_notifications
+          set read_at = now()
+        where recipient_id = $1
+          and read_at is null`,
+      [session.id],
+    );
+  } else {
+    await glashQuery(
+      `update public.team_notifications
+          set read_at = now()
+        where recipient_id = $1
+          and read_at is null
+          and id = any($2::uuid[])`,
+      [session.id, ids],
+    );
+  }
 
-  if (!all && ids?.length) query = query.in("id", ids);
-
-  const { error } = await query;
-  if (error) return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
   return NextResponse.json({ ok: true });
 }

@@ -101,7 +101,7 @@ export function TeamSidebar({ member, onLogout, mobileOpen = false, onClose }: T
                 Staff
               </p>
             </div>
-            <a
+            <Link
               href="/admin"
               onClick={onClose}
               className="flex items-center justify-between gap-3 px-3 py-2.5 rounded-xl text-[13.5px] text-brand-body hover:bg-brand-bg/70 hover:text-brand-navy transition"
@@ -111,7 +111,7 @@ export function TeamSidebar({ member, onLogout, mobileOpen = false, onClose }: T
                 {t("nav.adminDashboard")}
               </span>
               <ExternalLink className="w-3.5 h-3.5 opacity-50" />
-            </a>
+            </Link>
           </>
         )}
       </nav>

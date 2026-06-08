@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { MessageSquare, Send, X } from "lucide-react";
+import { Bookmark, Languages, Loader2, MessageSquare, Pin, Send, Star, X } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 
 interface ChatMessage {
@@ -14,6 +14,11 @@ interface ChatMessage {
   file_url?: string;
   created_at: string;
   is_read: boolean;
+  pinned_at?: string | null;
+  starred_by?: string[];
+  bookmarked_by?: string[];
+  translated?: Record<string, string>;
+  deleted_at?: string | null;
 }
 
 export function ChatWidget() {
@@ -22,6 +27,7 @@ export function ChatWidget() {
   const [input, setInput] = useState("");
   const [userId, setUserId] = useState<string | null>(null);
   const [isSending, setIsSending] = useState(false);
+  const [actionBusy, setActionBusy] = useState<string | null>(null);
   const [unreadCount, setUnreadCount] = useState(0);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -138,6 +144,34 @@ export function ChatWidget() {
     }
   };
 
+  const runMessageAction = async (
+    msg: ChatMessage,
+    action: "pin" | "unpin" | "star" | "unstar" | "bookmark" | "unbookmark" | "translate",
+  ) => {
+    if (msg.id.startsWith("temp_")) return;
+    setActionBusy(msg.id);
+    try {
+      const payload: Record<string, unknown> = { action };
+      if (action === "translate") {
+        const language = window.prompt("Translate this message to which language?", "English");
+        if (!language?.trim()) return;
+        payload.language = language.trim();
+      }
+      const res = await fetch(`/api/chat/messages/${msg.id}/actions`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const json = await res.json();
+      if (!res.ok || !json.ok) throw new Error(json.error || "Message action failed");
+      await fetchMessages();
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setActionBusy(null);
+    }
+  };
+
   const formatTime = (dateStr: string) => {
     const date = new Date(dateStr);
     return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
@@ -222,11 +256,12 @@ export function ChatWidget() {
                   </div>
                   {group.messages.map((msg) => {
                     const isOwn = msg.sender_role === "client";
+                    const viewerKey = `client:${userId}`;
+                    const starred = (msg.starred_by || []).includes(viewerKey);
+                    const bookmarked = (msg.bookmarked_by || []).includes(viewerKey);
+                    const translations = Object.entries(msg.translated || {});
                     return (
-                      <div
-                        key={msg.id}
-                        className={`flex mb-2 ${isOwn ? "justify-end" : "justify-start"}`}
-                      >
+                      <div key={msg.id} className={`group flex mb-2 ${isOwn ? "justify-end" : "justify-start"}`}>
                         <div
                           className={`max-w-[75%] px-4 py-2 rounded-2xl text-sm ${
                             isOwn
@@ -234,7 +269,24 @@ export function ChatWidget() {
                               : "bg-gray-200 text-gray-900 rounded-bl-sm"
                           }`}
                         >
-                          <p className="whitespace-pre-wrap break-words">{msg.message}</p>
+                          {(msg.pinned_at || starred || bookmarked) && (
+                            <div className={`mb-1.5 flex flex-wrap gap-1 ${isOwn ? "justify-end" : "justify-start"}`}>
+                              {msg.pinned_at && <span className="inline-flex items-center gap-1 rounded-full bg-white/15 px-1.5 py-0.5 text-[9px] font-bold"><Pin className="w-3 h-3" /> Pin</span>}
+                              {starred && <span className="inline-flex items-center gap-1 rounded-full bg-white/15 px-1.5 py-0.5 text-[9px] font-bold"><Star className="w-3 h-3" /> Star</span>}
+                              {bookmarked && <span className="inline-flex items-center gap-1 rounded-full bg-white/15 px-1.5 py-0.5 text-[9px] font-bold"><Bookmark className="w-3 h-3" /> Saved</span>}
+                            </div>
+                          )}
+                          <p className="whitespace-pre-wrap break-words">{msg.deleted_at ? "Message deleted" : msg.message}</p>
+                          {translations.length > 0 && (
+                            <div className={`mt-2 rounded-xl border px-3 py-2 ${isOwn ? "border-white/20 bg-white/10" : "border-gray-300 bg-white/70"}`}>
+                              {translations.map(([language, translated]) => (
+                                <div key={language}>
+                                  <p className={`text-[9px] font-bold uppercase tracking-widest ${isOwn ? "text-blue-100" : "text-[#08129C]"}`}>{language}</p>
+                                  <p className="text-[12px] leading-5">{translated}</p>
+                                </div>
+                              ))}
+                            </div>
+                          )}
                           {msg.file_url && (
                             <a
                               href={msg.file_url}
@@ -254,6 +306,42 @@ export function ChatWidget() {
                           >
                             {formatTime(msg.created_at)}
                           </p>
+                          {!msg.deleted_at && (
+                            <div className={`mt-1.5 flex items-center gap-1 ${isOwn ? "justify-end" : "justify-start"} opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition`}>
+                              <button
+                                onClick={() => runMessageAction(msg, msg.pinned_at ? "unpin" : "pin")}
+                                disabled={actionBusy === msg.id}
+                                className={`rounded-full p-1 ${isOwn ? "hover:bg-white/15" : "hover:bg-gray-300/70"}`}
+                                title={msg.pinned_at ? "Unpin" : "Pin"}
+                              >
+                                {actionBusy === msg.id ? <Loader2 className="w-3 h-3 animate-spin" /> : <Pin className="w-3 h-3" />}
+                              </button>
+                              <button
+                                onClick={() => runMessageAction(msg, starred ? "unstar" : "star")}
+                                disabled={actionBusy === msg.id}
+                                className={`rounded-full p-1 ${isOwn ? "hover:bg-white/15" : "hover:bg-gray-300/70"}`}
+                                title={starred ? "Unstar" : "Star"}
+                              >
+                                <Star className="w-3 h-3" />
+                              </button>
+                              <button
+                                onClick={() => runMessageAction(msg, bookmarked ? "unbookmark" : "bookmark")}
+                                disabled={actionBusy === msg.id}
+                                className={`rounded-full p-1 ${isOwn ? "hover:bg-white/15" : "hover:bg-gray-300/70"}`}
+                                title={bookmarked ? "Remove bookmark" : "Bookmark"}
+                              >
+                                <Bookmark className="w-3 h-3" />
+                              </button>
+                              <button
+                                onClick={() => runMessageAction(msg, "translate")}
+                                disabled={actionBusy === msg.id || !msg.message}
+                                className={`rounded-full p-1 ${isOwn ? "hover:bg-white/15" : "hover:bg-gray-300/70"}`}
+                                title="Translate"
+                              >
+                                <Languages className="w-3 h-3" />
+                              </button>
+                            </div>
+                          )}
                         </div>
                       </div>
                     );

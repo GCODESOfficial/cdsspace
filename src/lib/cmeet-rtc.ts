@@ -18,10 +18,10 @@
 // `replaceVideoTrack()` to swap it everywhere without renegotiation.
 
 import { createClient, type RealtimeChannel } from "@supabase/supabase-js";
+import { getGlashDbBrowserConfig } from "@/lib/glashdb/env";
 
-// Use the public Supabase client (anon key) — Realtime only needs it.
-const url = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
-const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "";
+// Use the public GlashDB/Supabase-compatible client (anon key) for Realtime signaling.
+const { url, anonKey } = getGlashDbBrowserConfig();
 
 export type RemotePeer = {
   peerId: string;
@@ -98,7 +98,7 @@ function buildRtcConfig(): RTCConfiguration {
 const RTC_CONFIG = buildRtcConfig();
 
 export class CMeetClient {
-  private supa = createClient(url, anon);
+  private supa = createClient(url, anonKey);
   private channel: RealtimeChannel | null = null;
   private peers = new Map<string, RemotePeer>();
   private localStream: MediaStream | null = null;

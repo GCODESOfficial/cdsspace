@@ -70,8 +70,8 @@ export default function ProtectDocsPage({ variant = "team" }: { variant?: "team"
   }
 
   return (
-    <div className={`p-6 md:p-8 ${variant === "admin" ? "max-w-[1200px]" : "max-w-[1100px]"}`}>
-      <div className="flex items-center justify-between mb-6">
+    <div className={`px-0 py-1 md:p-6 lg:p-8 ${variant === "admin" ? "max-w-[1200px]" : "max-w-[1100px]"}`}>
+      <div className="mb-6 flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
         <div>
           {variant === "admin" && <p className="text-[#0A4FE8] text-sm font-semibold">Workspace</p>}
           <h1 className="text-[26px] font-bold text-[#0D1B39] tracking-tight">Protect Docs</h1>
@@ -79,14 +79,14 @@ export default function ProtectDocsPage({ variant = "team" }: { variant?: "team"
             Vault for briefs, secrets (.env), contracts, and assets with optional per-file passwords and visibility rules.
           </p>
         </div>
-        <button onClick={() => setShowCreate(true)} className="inline-flex items-center gap-2 px-5 py-2.5 bg-[#0A4FE8] text-white text-[13px] font-medium rounded-xl hover:bg-[#083EC0]">
+        <button onClick={() => setShowCreate(true)} className="inline-flex w-full md:w-auto items-center justify-center gap-2 px-5 py-3 bg-[#0A4FE8] text-white text-[13px] font-medium rounded-2xl hover:bg-[#083EC0]">
           <Plus className="w-4 h-4" /> New
         </button>
       </div>
 
-      <div className="mb-4 relative">
+      <div className="mb-4 relative md:w-72">
         <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
-        <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search…" className="pl-9 pr-3 py-2 rounded-xl bg-white border border-gray-200 text-[12.5px] w-72" />
+        <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search…" className="w-full pl-9 pr-3 py-2.5 rounded-xl bg-white border border-gray-200 text-[12.5px]" />
       </div>
 
       <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
@@ -94,29 +94,37 @@ export default function ProtectDocsPage({ variant = "team" }: { variant?: "team"
           <div className="py-14 flex justify-center"><Loader2 className="w-5 h-5 animate-spin text-[#0A4FE8]" /></div>
         ) : filtered.length === 0 ? (
           <div className="py-14 text-center text-[13px] text-gray-400">Empty vault. Create the first protected doc.</div>
-        ) : (
-          <ul className="divide-y divide-gray-50">
-            {filtered.map((d) => (
-              <li key={d.id} className="px-5 py-3.5 flex items-center gap-3">
-                <div className={`w-9 h-9 rounded-lg flex items-center justify-center shrink-0 ${d.kind === "env" ? "bg-amber-100 text-amber-700" : "bg-[#0A4FE8]/10 text-[#0A4FE8]"}`}>
-                  {d.kind === "env" ? <FileKey className="w-4 h-4" /> : <FileText className="w-4 h-4" />}
-                </div>
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-1.5">
-                    <p className="text-[13.5px] font-semibold text-[#0D1B39] truncate">{d.title}</p>
-                    {d.has_password && <Lock className="w-3 h-3 text-amber-500 shrink-0" />}
+          ) : (
+            <ul className="divide-y divide-gray-50">
+              {filtered.map((d) => (
+                <li key={d.id} className="px-4 sm:px-5 py-4">
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+                    <div className="flex items-start gap-3 min-w-0 flex-1">
+                      <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${d.kind === "env" ? "bg-amber-100 text-amber-700" : "bg-[#0A4FE8]/10 text-[#0A4FE8]"}`}>
+                        {d.kind === "env" ? <FileKey className="w-4 h-4" /> : <FileText className="w-4 h-4" />}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <p className="text-[13.5px] font-semibold text-[#0D1B39] truncate">{d.title}</p>
+                          {d.has_password && <Lock className="w-3 h-3 text-amber-500 shrink-0" />}
+                        </div>
+                        <p className="text-[11px] text-gray-400 mt-1 flex flex-wrap items-center gap-2">
+                          <span>{KIND_LABEL[d.kind] || "Doc"}</span>
+                          <span>{d.visibility.replace(/_/g, " ")}</span>
+                          <span>{new Date(d.created_at).toLocaleDateString()}</span>
+                          {d.file_path_present && <span><Paperclip className="w-2.5 h-2.5 inline" /> file</span>}
+                        </p>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2 sm:shrink-0">
+                      <button onClick={() => openDoc(d)} className="inline-flex flex-1 sm:flex-none items-center justify-center p-2.5 rounded-xl text-gray-400 hover:text-[#0A4FE8] hover:bg-blue-50" title="Open"><Eye className="w-4 h-4" /></button>
+                      <button onClick={() => remove(d)} className="inline-flex flex-1 sm:flex-none items-center justify-center p-2.5 rounded-xl text-gray-400 hover:text-rose-600 hover:bg-rose-50" title="Delete"><Trash2 className="w-4 h-4" /></button>
+                    </div>
                   </div>
-                  <p className="text-[11px] text-gray-400 mt-0.5">
-                    {KIND_LABEL[d.kind] || "Doc"} · {d.visibility.replace(/_/g, " ")} · {new Date(d.created_at).toLocaleDateString()}
-                    {d.file_path_present && <> · <Paperclip className="w-2.5 h-2.5 inline" /> file</>}
-                  </p>
-                </div>
-                <button onClick={() => openDoc(d)} className="p-2 rounded-lg text-gray-400 hover:text-[#0A4FE8] hover:bg-blue-50" title="Open"><Eye className="w-4 h-4" /></button>
-                <button onClick={() => remove(d)} className="p-2 rounded-lg text-gray-400 hover:text-rose-600 hover:bg-rose-50" title="Delete"><Trash2 className="w-4 h-4" /></button>
-              </li>
-            ))}
-          </ul>
-        )}
+                </li>
+              ))}
+            </ul>
+          )}
       </div>
 
       {showCreate && <CreateModal onClose={() => setShowCreate(false)} onCreated={() => { setShowCreate(false); fetchDocs(); }} />}
@@ -166,7 +174,7 @@ function CreateModal({ onClose, onCreated }: { onClose: () => void; onCreated: (
         <div className="p-5 flex-1 overflow-y-auto space-y-4">
           <Field label="Title *" value={title} onChange={setTitle} />
           <Field label="Description" value={description} onChange={setDescription} />
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <label className="block text-[11px] font-medium text-gray-500 mb-1.5">Kind</label>
               <select value={kind} onChange={(e) => setKind(e.target.value)} className="w-full px-3 py-2.5 rounded-xl bg-gray-50 border border-gray-200 text-[13px]">
@@ -199,11 +207,11 @@ function CreateModal({ onClose, onCreated }: { onClose: () => void; onCreated: (
           </div>
           {error && <div className="rounded-xl bg-rose-50 border border-rose-200 text-rose-700 text-[12px] px-4 py-2.5">{error}</div>}
         </div>
-        <div className="px-5 py-4 border-t border-gray-100 flex items-center gap-2">
-          <button onClick={submit} disabled={saving} className="inline-flex items-center gap-1.5 px-5 py-2.5 rounded-xl bg-[#0A4FE8] text-white text-[13px] font-medium hover:bg-[#083EC0] disabled:opacity-50">
+        <div className="px-5 py-4 border-t border-gray-100 flex flex-col-reverse gap-2 sm:flex-row sm:items-center">
+          <button onClick={submit} disabled={saving} className="inline-flex w-full sm:w-auto items-center justify-center gap-1.5 px-5 py-2.5 rounded-xl bg-[#0A4FE8] text-white text-[13px] font-medium hover:bg-[#083EC0] disabled:opacity-50">
             {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Shield className="w-4 h-4" />} Create
           </button>
-          <button onClick={onClose} className="px-4 py-2.5 text-[13px] text-gray-600 border border-gray-200 rounded-xl hover:bg-gray-50">Cancel</button>
+          <button onClick={onClose} className="w-full sm:w-auto px-4 py-2.5 text-[13px] text-gray-600 border border-gray-200 rounded-xl hover:bg-gray-50">Cancel</button>
         </div>
       </div>
     </div>

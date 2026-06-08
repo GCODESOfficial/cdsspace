@@ -8,6 +8,7 @@ import FinanceShell, { glassCard } from "@/components/finance/FinanceShell";
 import StatCard from "@/components/finance/StatCard";
 import ActivityPanel from "@/components/admin/ActivityPanel";
 import { Currency, formatMoney } from "@/lib/finance/types";
+import { buildInvoiceShareMessage } from "@/lib/finance/share";
 import { appAlert, appConfirm, appPrompt } from "@/lib/app-notify";
 
 interface Row {
@@ -110,20 +111,22 @@ export default function InvoicesPage() {
   };
 
   const bulkShare = async () => {
-    const urls: string[] = [];
+    const messages: string[] = [];
     const origin = window.location.origin;
     
     for (const id of selected) {
       const res = await fetch(`/api/admin/finance/invoices/${id}`);
       const { invoice } = await res.json();
       if (invoice.public_token) {
-        urls.push(`${origin}/invoice/${invoice.public_token}`);
+        messages.push(
+          buildInvoiceShareMessage(invoice.invoice_number, `${origin}/invoice/${invoice.public_token}`)
+        );
       }
     }
     
-    if (urls.length > 0) {
-      await navigator.clipboard.writeText(urls.join("\n"));
-      appAlert(`${urls.length} share link(s) copied to clipboard.`);
+    if (messages.length > 0) {
+      await navigator.clipboard.writeText(messages.join("\n\n"));
+      appAlert(`${messages.length} invoice share message(s) copied to clipboard.`);
     }
     clearSelection();
   };
@@ -198,7 +201,7 @@ export default function InvoicesPage() {
                   <Copy className="w-3.5 h-3.5" /> Duplicate
                 </button>
                 <button disabled={working} onClick={bulkShare} className="text-[11px] font-semibold uppercase tracking-wider px-3 py-1.5 rounded-lg bg-white text-gray-700 ring-1 ring-gray-200 hover:bg-gray-50 transition disabled:opacity-50 inline-flex items-center gap-1.5">
-                  <Share2 className="w-3.5 h-3.5" /> Copy Links
+                  <Share2 className="w-3.5 h-3.5" /> Copy Messages
                 </button>
                 <button disabled={working} onClick={bulkDelete} className="text-[11px] font-semibold uppercase tracking-wider px-3 py-1.5 rounded-lg bg-red-50 text-red-700 ring-1 ring-red-200 hover:bg-red-100 transition disabled:opacity-50 inline-flex items-center gap-1.5">
                   <Trash2 className="w-3.5 h-3.5" /> Delete
@@ -275,4 +278,3 @@ export default function InvoicesPage() {
     </FinanceShell>
   );
 }
-

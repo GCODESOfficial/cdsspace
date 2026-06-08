@@ -1,9 +1,10 @@
 import { PrismaPg } from "@prisma/adapter-pg"
 import { Pool } from "pg"
 import { PrismaClient } from '@prisma/client'
+import { getGlashDbDatabaseUrl } from "@/lib/glashdb/env"
 
 const prismaClientSingleton = () => {
-    const databaseUrl = process.env.DATABASE_URL;
+    const databaseUrl = getGlashDbDatabaseUrl();
 
     const pool = new Pool({
         connectionString: databaseUrl,

@@ -1,8 +1,6 @@
 import { supabase } from "@/lib/supabase";
 import type { TeamSession } from "@/lib/team-auth";
 
-const db = supabase as any;
-
 export type CDocAction =
   | "created"
   | "edited"
@@ -24,11 +22,11 @@ export async function logCDocActivity(
 ): Promise<void> {
   if (!cdocId) return;
   try {
-    await db.from("cdocs_activity").insert([
+    await supabase.from("team_cdocs_activity").insert([
       {
         cdoc_id: cdocId,
         actor_member_id: session?.kind === "member" ? session.memberId : null,
-        actor_is_owner: session?.kind === "owner",
+        actor_is_admin: session?.kind === "owner",
         actor_name: session?.kind === "owner"
           ? "Admin"
           : session?.name || session?.username || session?.email || null,

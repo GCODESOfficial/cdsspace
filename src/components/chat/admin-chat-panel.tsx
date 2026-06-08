@@ -1,7 +1,21 @@
 "use client";
 
 import { useState, useEffect, useRef, useCallback } from "react";
-import { MessageSquare, Send, User, ChevronLeft, Forward, X, Search, Loader2, CornerDownRight } from "lucide-react";
+import {
+  MessageSquare,
+  Send,
+  User,
+  ChevronLeft,
+  Forward,
+  X,
+  Search,
+  Loader2,
+  CornerDownRight,
+  Pin,
+  Star,
+  Bookmark,
+  Languages,
+} from "lucide-react";
 
 type MessageSource = "web" | "whatsapp_cloud" | "whatsapp_qr" | "instagram" | "facebook";
 
@@ -41,6 +55,12 @@ interface ChatMessage {
   file_url?: string;
   created_at: string;
   is_read: boolean;
+  pinned_at?: string | null;
+  starred_by?: string[];
+  bookmarked_by?: string[];
+  translated?: Record<string, string>;
+  edited_at?: string | null;
+  deleted_at?: string | null;
   source?: MessageSource;
   forwarded?: {
     original_sender_name: string;
@@ -82,6 +102,7 @@ export function AdminChatPanel() {
   const [isLoadingMessages, setIsLoadingMessages] = useState(false);
   const [mobileShowThread, setMobileShowThread] = useState(false);
   const [forwardMsg, setForwardMsg] = useState<ChatMessage | null>(null);
+  const [actionBusy, setActionBusy] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -198,6 +219,35 @@ export function AdminChatPanel() {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       handleSend();
+    }
+  };
+
+  const runClientMessageAction = async (
+    msg: ChatMessage,
+    action: "pin" | "unpin" | "star" | "unstar" | "bookmark" | "unbookmark" | "translate",
+  ) => {
+    if (msg.id.startsWith("temp_")) return;
+    setActionBusy(msg.id);
+    try {
+      const payload: Record<string, unknown> = { action };
+      if (action === "translate") {
+        const language = window.prompt("Translate this message to which language?", "English");
+        if (!language?.trim()) return;
+        payload.language = language.trim();
+      }
+      const res = await fetch(`/api/chat/messages/${msg.id}/actions`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const json = await res.json();
+      if (!res.ok || !json.ok) throw new Error(json.error || "Message action failed");
+      await fetchMessages();
+      await fetchRooms();
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setActionBusy(null);
     }
   };
 
@@ -424,19 +474,23 @@ export function AdminChatPanel() {
                     </div>
                     {group.messages.map((msg) => {
                       const isOwn = msg.sender_role === "admin";
+                      const starred = (msg.starred_by || []).some((key) => key.startsWith("admin:"));
+                      const bookmarked = (msg.bookmarked_by || []).some((key) => key.startsWith("admin:"));
+                      const translations = Object.entries(msg.translated || {});
                       return (
                         <div
                           key={msg.id}
                           className={`group flex mb-2 items-end gap-2 ${isOwn ? "justify-end" : "justify-start"}`}
                         >
                           {isOwn && (
-                            <button
-                              onClick={() => setForwardMsg(msg)}
-                              className="opacity-0 group-hover:opacity-100 transition p-1.5 rounded-full hover:bg-[#2a3578] text-gray-400 hover:text-[#5BA8FF]"
-                              title="Forward"
-                            >
-                              <Forward className="w-3.5 h-3.5" />
-                            </button>
+                            <ClientMessageTools
+                              msg={msg}
+                              busy={actionBusy === msg.id}
+                              starred={starred}
+                              bookmarked={bookmarked}
+                              onForward={() => setForwardMsg(msg)}
+                              onAction={runClientMessageAction}
+                            />
                           )}
                           <div
                             className={`max-w-[75%] px-4 py-2.5 rounded-2xl text-sm ${
@@ -458,9 +512,26 @@ export function AdminChatPanel() {
                                 </span>
                               </div>
                             )}
+                            {(msg.pinned_at || starred || bookmarked) && (
+                              <div className={`mb-1.5 flex flex-wrap gap-1 ${isOwn ? "justify-end" : "justify-start"}`}>
+                                {msg.pinned_at && <span className="inline-flex items-center gap-1 rounded-full bg-white/15 px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider"><Pin className="w-3 h-3" /> Pinned</span>}
+                                {starred && <span className="inline-flex items-center gap-1 rounded-full bg-white/15 px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider"><Star className="w-3 h-3" /> Starred</span>}
+                                {bookmarked && <span className="inline-flex items-center gap-1 rounded-full bg-white/15 px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider"><Bookmark className="w-3 h-3" /> Saved</span>}
+                              </div>
+                            )}
                             <p className="whitespace-pre-wrap break-words">
-                              {msg.message}
+                              {msg.deleted_at ? "Message deleted" : msg.message}
                             </p>
+                            {translations.length > 0 && (
+                              <div className={`mt-2 rounded-xl border px-3 py-2 ${isOwn ? "border-white/20 bg-white/10" : "border-[#2a3578] bg-[#0f1740]/60"}`}>
+                                {translations.map(([language, translated]) => (
+                                  <div key={language}>
+                                    <p className="text-[9px] font-bold uppercase tracking-widest text-[#9fcaff]">{language}</p>
+                                    <p className="text-[12px] leading-5">{translated}</p>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
                             {msg.file_url && (
                               <a
                                 href={msg.file_url}
@@ -482,13 +553,14 @@ export function AdminChatPanel() {
                             </p>
                           </div>
                           {!isOwn && (
-                            <button
-                              onClick={() => setForwardMsg(msg)}
-                              className="opacity-0 group-hover:opacity-100 transition p-1.5 rounded-full hover:bg-[#2a3578] text-gray-400 hover:text-[#5BA8FF]"
-                              title="Forward to team"
-                            >
-                              <Forward className="w-3.5 h-3.5" />
-                            </button>
+                            <ClientMessageTools
+                              msg={msg}
+                              busy={actionBusy === msg.id}
+                              starred={starred}
+                              bookmarked={bookmarked}
+                              onForward={() => setForwardMsg(msg)}
+                              onAction={runClientMessageAction}
+                            />
                           )}
                         </div>
                       );
@@ -542,6 +614,70 @@ export function AdminChatPanel() {
           onDone={() => setForwardMsg(null)}
         />
       )}
+    </div>
+  );
+}
+
+function ClientMessageTools({
+  msg,
+  busy,
+  starred,
+  bookmarked,
+  onForward,
+  onAction,
+}: {
+  msg: ChatMessage;
+  busy: boolean;
+  starred: boolean;
+  bookmarked: boolean;
+  onForward: () => void;
+  onAction: (
+    msg: ChatMessage,
+    action: "pin" | "unpin" | "star" | "unstar" | "bookmark" | "unbookmark" | "translate",
+  ) => void;
+}) {
+  return (
+    <div className="opacity-100 md:opacity-0 md:group-hover:opacity-100 transition flex items-center gap-1">
+      <button
+        onClick={() => onAction(msg, msg.pinned_at ? "unpin" : "pin")}
+        disabled={busy}
+        className="p-1.5 rounded-full hover:bg-[#2a3578] text-gray-400 hover:text-[#5BA8FF] disabled:opacity-40"
+        title={msg.pinned_at ? "Unpin" : "Pin"}
+      >
+        {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Pin className="w-3.5 h-3.5" />}
+      </button>
+      <button
+        onClick={() => onAction(msg, starred ? "unstar" : "star")}
+        disabled={busy}
+        className="p-1.5 rounded-full hover:bg-[#2a3578] text-gray-400 hover:text-[#5BA8FF] disabled:opacity-40"
+        title={starred ? "Unstar" : "Star"}
+      >
+        <Star className="w-3.5 h-3.5" />
+      </button>
+      <button
+        onClick={() => onAction(msg, bookmarked ? "unbookmark" : "bookmark")}
+        disabled={busy}
+        className="p-1.5 rounded-full hover:bg-[#2a3578] text-gray-400 hover:text-[#5BA8FF] disabled:opacity-40"
+        title={bookmarked ? "Remove bookmark" : "Bookmark"}
+      >
+        <Bookmark className="w-3.5 h-3.5" />
+      </button>
+      <button
+        onClick={() => onAction(msg, "translate")}
+        disabled={busy || !msg.message}
+        className="p-1.5 rounded-full hover:bg-[#2a3578] text-gray-400 hover:text-[#5BA8FF] disabled:opacity-40"
+        title="Translate"
+      >
+        <Languages className="w-3.5 h-3.5" />
+      </button>
+      <button
+        onClick={onForward}
+        disabled={busy}
+        className="p-1.5 rounded-full hover:bg-[#2a3578] text-gray-400 hover:text-[#5BA8FF] disabled:opacity-40"
+        title="Forward"
+      >
+        <Forward className="w-3.5 h-3.5" />
+      </button>
     </div>
   );
 }
