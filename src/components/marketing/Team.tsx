@@ -25,7 +25,7 @@ const teamMembers: TeamMember[] = [
         name: "Chris John",
         role: "Chief Executive Officer",
         description: "Chief Executive Officer of CDS Space, leading brand and product direction. Focused on quality, clarity, and setting the standard.",
-        image: "/about/Frame 2147238910-5.svg",
+        image: "/optimized/about/chris-john.webp",
         socials: {
             x: "https://x.com/thechrisjohn_",
             facebook: "https://www.facebook.com/thechrisjohnn",
@@ -47,34 +47,34 @@ const teamMembers: TeamMember[] = [
         name: "Ayomide Ajayi",
         role: "Creative Director",
         description: "Ayomide leads brand and product design across Web2 and Web3. Focused on quality, clarity, and getting it right.",
-        image: "/about/Frame 2147238910-3.svg",
+        image: "/optimized/about/ayomide-ajayi.webp",
         socials: { x: "https://x.com/crowther_a3" },
     },
     {
         name: "Honest Ernest",
         role: "Product Manager",
         description: "Honest focuses on product clarity and outcomes. Moves fast with clear direction, slows on key decisions. Obsessed with details.",
-        image: "/about/Frame 2147238910-2.svg",
+        image: "/optimized/about/honest-ernest.webp",
         socials: { x: "https://x.com/oneststyles" },
     },
     {
         name: "Godsgift Etuk",
         role: "Chief Software Developer",
         description: "Godsgift leads the technical implementation, ensuring every pixel-perfect design is matched by robust, high-performance code.",
-        image: "/about/Frame 2147238910-1.svg",
+        image: "/optimized/about/godsgift-etuk.webp",
         socials: { x: "https://x.com/GCODES_official" },
     },
     {
         name: "Edidiong Esuene",
         role: "Account Manager",
         description: "Edidiong manages the agency's financial health and client accounts. She ensures every project remains profitable and balanced. Focused on the numbers.",
-        image: "/about/Frame 2147238910-4.svg",
+        image: "/optimized/about/edidiong-esuene.webp",
     },
     {
         name: "Emediong John",
         role: "Human Resource Manager",
         description: "Emediong focuses on building the right team and supporting people. Handles hiring and growth. Sometimes too focused on well-being.",
-        image: "/about/Frame 2147238910.svg",
+        image: "/optimized/about/emediong-john.webp",
         socials: { x: "https://x.com/Johnemedion" },
     }
 ];
@@ -146,8 +146,7 @@ const TeamCard = ({ member, index }: { member: TeamMember, index: number }) => {
                                 src={member.image}
                                 alt={member.name}
                                 fill
-                                priority={index < 3}
-                                quality={95}
+                                quality={84}
                                 sizes="(max-width: 768px) 90vw, (max-width: 1024px) 45vw, 320px"
                                 className="object-contain object-bottom transition-transform duration-700 group-hover:scale-105"
                             />
@@ -182,7 +181,7 @@ const TeamCard = ({ member, index }: { member: TeamMember, index: number }) => {
                         </p>
                     </div>
 
-                    {/* Social popover — clicking opens all configured socials */}
+                    {/* Social popover - clicking opens all configured socials */}
                     {member.socials && hasAnySocial(member.socials) && (
                         <SocialButton socials={member.socials} name={member.name} />
                     )}

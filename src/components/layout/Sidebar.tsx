@@ -5,13 +5,13 @@ import Image from "next/image";
 import Link from "next/link";
 import { cn } from "@/lib/utils";
 import { motion, AnimatePresence } from "framer-motion";
-import { LogOut, LayoutDashboard, CreditCard, FileText, Image as ImageIcon, Package, MessageSquare, ShoppingBag, Handshake, Settings } from "lucide-react";
+import { LogOut, LayoutDashboard, Newspaper, FileText, Image as ImageIcon, Package, MessageSquare, ShoppingBag, Handshake, Settings } from "lucide-react";
 import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 
 const mainNavItems = [
     { name: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
-    { name: "Subscription", href: "/subscription", icon: CreditCard },
+    { name: "Blog", href: "/dashboard/blog", icon: Newspaper },
     { name: "Brand Brief", href: "/brand-brief", icon: FileText },
     { name: "Banners", href: "/dashboard/banners", icon: ImageIcon, comingSoon: true },
     { name: "Merch", href: "/dashboard/merch", icon: Package, comingSoon: true },
@@ -199,7 +199,7 @@ export const Sidebar = ({ isOpen = false, onClose }: SidebarProps) => {
             {isMobile && (
                 <div className="p-4 border-t border-[#E3E8F4]/40 flex items-center gap-3">
                     <div className="w-10 h-10 bg-brand-blue rounded-full flex items-center justify-center shadow-sm overflow-hidden relative shrink-0">
-                        {userAvatar ? <Image src={userAvatar} alt={userName} fill className="object-cover" /> : <span className="text-white text-sm font-semibold">{userInitials}</span>}
+                        <span className="text-white text-sm font-semibold">{userInitials}</span>
                     </div>
                     <div className="flex flex-col min-w-0">
                         <span className="text-brand-navy text-sm font-semibold truncate">{userName}</span>

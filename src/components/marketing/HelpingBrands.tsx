@@ -8,45 +8,45 @@ const services = [
     {
         title: "Design & Development",
         assets: [
-            { src: "/home/SafeAi Page-6.svg", width: 144, height: 118, left: 117.86, top: -21.03, rotate: 5.58, z: 10 },
-            { src: "/home/Rectangle 34133.svg", width: 144, height: 118, left: 46, top: -44, rotate: -14.95, z: 20 },
+            { src: "/optimized/home/safeai-page-6.webp", width: 144, height: 118, left: 117.86, top: -21.03, rotate: 5.58, z: 10 },
+            { src: "/optimized/home/rectangle-34133.webp", width: 144, height: 118, left: 46, top: -44, rotate: -14.95, z: 20 },
         ]
     },
     {
         title: "Brand Strategy",
         assets: [
-            { src: "/home/Tees Kitchen.svg", width: 104, height: 118, left: 3.04, top: -27.87, rotate: -17.44, z: 10 },
-            { src: "/home/Bullionz.svg", width: 104, height: 118, left: 183.03, top: -26.29, rotate: 14.74, z: 20 },
-            { src: "/home/CityWave.svg", width: 104, height: 118, left: 107.33, top: -45, rotate: 0, z: 15 },
+            { src: "/optimized/home/tees-kitchen.webp", width: 104, height: 118, left: 3.04, top: -27.87, rotate: -17.44, z: 10 },
+            { src: "/optimized/home/bullionz.webp", width: 104, height: 118, left: 183.03, top: -26.29, rotate: 14.74, z: 20 },
+            { src: "/optimized/home/citywave.webp", width: 104, height: 118, left: 107.33, top: -45, rotate: 0, z: 15 },
         ]
     },
     {
         title: "Rollup Banners",
         assets: [
-            { src: "/home/Rollup Banner.svg", width: 104, height: 118, left: 58.67, top: -23.33, rotate: -13.46, z: 10 },
-            { src: "/home/Rollup Banner 01.svg", width: 104, height: 118, left: 132.59, top: -48, rotate: 12.91, z: 20 },
+            { src: "/optimized/home/rollup-banner.webp", width: 104, height: 118, left: 58.67, top: -23.33, rotate: -13.46, z: 10 },
+            { src: "/optimized/home/rollup-banner-01.webp", width: 104, height: 118, left: 132.59, top: -48, rotate: 12.91, z: 20 },
         ]
     },
     {
         title: "Event Branding",
         assets: [
-            { src: "/home/Rectangle 34137.svg", width: 144, height: 118, left: 120, top: -30, rotate: 2.84, z: 10 },
-            { src: "/home/Rectangle 34136.svg", width: 144, height: 118, left: 49, top: -50, rotate: -14.27, z: 20 },
+            { src: "/optimized/home/rectangle-34137.webp", width: 144, height: 118, left: 120, top: -30, rotate: 2.84, z: 10 },
+            { src: "/optimized/home/rectangle-34136.webp", width: 144, height: 118, left: 49, top: -50, rotate: -14.27, z: 20 },
         ]
     },
     {
         title: "Merch & Packaging",
         assets: [
-            { src: "/home/overall_cloth.svg", width: 104, height: 118, left: 3.04, top: -35.87, rotate: -17.44, z: 10 },
-            { src: "/home/Immune Booster.svg", width: 104, height: 118, left: 183.03, top: -34.29, rotate: 14.74, z: 20 },
-            { src: "/home/food wrap.svg", width: 104, height: 118, left: 107.33, top: -53, rotate: 0, z: 15 },
+            { src: "/optimized/home/overall-cloth.webp", width: 104, height: 118, left: 3.04, top: -35.87, rotate: -17.44, z: 10 },
+            { src: "/optimized/home/immune-booster.webp", width: 104, height: 118, left: 183.03, top: -34.29, rotate: 14.74, z: 20 },
+            { src: "/optimized/home/food-wrap.webp", width: 104, height: 118, left: 107.33, top: -53, rotate: 0, z: 15 },
         ]
     },
     {
         title: "Creative Support / Consulting",
         assets: [
-            { src: "/home/Rectangle 34137 1.svg", width: 144, height: 118, left: 44.67, top: -27.21, rotate: -3.85, z: 10 },
-            { src: "/home/Rectangle 34136 1.svg", width: 144, height: 118, left: 103.67, top: -50.37, rotate: 15.72, z: 20 },
+            { src: "/optimized/home/rectangle-34137-1.webp", width: 144, height: 118, left: 44.67, top: -27.21, rotate: -3.85, z: 10 },
+            { src: "/optimized/home/rectangle-34136-1.webp", width: 144, height: 118, left: 103.67, top: -50.37, rotate: 15.72, z: 20 },
         ]
     }
 ];
@@ -99,7 +99,7 @@ export const HelpingBrands = () => {
                                             src={asset.src}
                                             alt={`${service.title} asset ${aIdx}`}
                                             fill
-                                            quality={90}
+                                            quality={84}
                                             sizes="(max-width: 640px) 50vw, (max-width: 1024px) 33vw, 260px"
                                             className="object-cover"
                                         />

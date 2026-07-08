@@ -7,9 +7,7 @@ import type React from "react"
 import { useState, useEffect, type FormEvent } from "react"
 import { useRouter } from "next/navigation"
 import { EnhancedEditor, type ImageType } from "@/components/enhanced-editor"
-import { uploadFile } from "@/lib/storage-service"
 import { toast } from "sonner"
-import { supabase } from "@/lib/supabase"
 import { CATEGORIES } from "@/lib/constants"
 import { Upload, ImagePlus, Loader2, X } from "lucide-react"
 
@@ -42,14 +40,50 @@ export default function UploadWorkPage() {
 
   const handleContinueToUpload = () => { if (validateForm()) setShowModal(true) }
 
+  // Upload a single file through the server route (service-role storage, so it
+  // is not blocked by browser RLS). Returns the public URL.
+  const uploadViaServer = async (file: File, folder: "covers" | "works"): Promise<string> => {
+    const fd = new FormData()
+    fd.append("file", file)
+    fd.append("folder", folder)
+    const res = await fetch("/api/admin/works/upload", { method: "POST", body: fd })
+    const data = await res.json().catch(() => ({}))
+    if (!res.ok || !data?.ok) throw new Error(data?.error || `Failed to upload ${file.name}`)
+    return data.url as string
+  }
+
   const handleFinalSubmit = async () => {
     if (!coverImage) { toast.error("Cover image is required"); return }
     if (!category) { toast.error("Please select a category"); return }
+    const imagesToAdd = projectImages.filter((img) => img.file)
+    if (imagesToAdd.length === 0) { toast.error("Please add at least one image"); return }
+
     try {
       setIsSubmitting(true)
-      const coverImagePath = await uploadFile(coverImage, "covers")
-      const { data: workData, error: workError } = await supabase
-        .from("works").insert({
+
+      // 1. Upload cover + every project image (each as its own small request).
+      const coverImagePath = await uploadViaServer(coverImage, "covers")
+      const uploadedImages = await Promise.all(
+        imagesToAdd.map(async (image, index) => {
+          const imagePath = await uploadViaServer(image.file as File, "works")
+          return {
+            image_url: imagePath,
+            position: image.position ?? index,
+            transformations: {
+              size: image.size ?? { width: 100, height: 100 },
+              isFullWidth: image.isFullWidth ?? false,
+              spanRows: image.spanRows ?? 1,
+              ...image.transformations,
+            },
+          }
+        })
+      )
+
+      // 2. Persist the work + images server-side (glashQuery, bypasses RLS).
+      const res = await fetch("/api/admin/works", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
           title,
           description,
           cover_image: coverImagePath,
@@ -58,33 +92,21 @@ export default function UploadWorkPage() {
           project_scope: projectScope.trim() || null,
           deliverables: deliverables.trim() || null,
           timeline: timeline.trim() || null,
-        }).select()
-      if (workError) throw workError
-      const workId = workData[0].id
-      const imagesToAdd = projectImages.filter((img) => img.file)
-      if (imagesToAdd.length > 0) {
-        const uploadedImages = await Promise.all(
-          imagesToAdd.map(async (image, index) => {
-            if (!image.file) throw new Error("File is required")
-            const imagePath = await uploadFile(image.file, "works")
-            return {
-              work_id: workId, image_url: imagePath, position: image.position ?? index,
-              transformations: {
-                size: image.size ?? { width: 100, height: 100 },
-                isFullWidth: image.isFullWidth ?? false,
-                spanRows: image.spanRows ?? 1, ...image.transformations,
-              }
-            }
-          })
-        )
-        const { error: imagesError } = await supabase.from("work_images").insert(uploadedImages).select()
-        if (imagesError) throw imagesError
-      }
+          images: uploadedImages,
+        }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok || !data?.ok) throw new Error(data?.error || "Please try again.")
+
       toast.success("Work uploaded successfully")
+      setShowModal(false)
       router.push("/admin")
     } catch (error: any) {
+      // Keep the modal open so the error is visible and the user can retry.
       toast.error(`Error: ${error.message || "Please try again."}`)
-    } finally { setIsSubmitting(false); setShowModal(false) }
+    } finally {
+      setIsSubmitting(false)
+    }
   }
 
   return (
@@ -175,7 +197,7 @@ export default function UploadWorkPage() {
                 <label className="block text-xs font-medium text-gray-500 mb-1.5">Cover Image</label>
                 <p className="text-[11px] text-gray-500 leading-snug mb-2">
                   <span className="font-semibold text-gray-700">Recommended: 1200 × 1500 px</span> (4:5 portrait).
-                  Keep the subject centered — the card is ~397×496 px on the home page and ~443×504 px on the Work page, so edges may crop slightly. JPG, PNG, or WebP, under 2 MB.
+                  Keep the subject centered - the card is ~397×496 px on the home page and ~443×504 px on the Work page, so edges may crop slightly. JPG, PNG, or WebP, under 2 MB.
                 </p>
                 <input type="file" accept="image/*" onChange={handleCoverImageChange}
                   className="text-sm text-gray-600 file:mr-3 file:py-1.5 file:px-4 file:rounded-lg file:border file:border-gray-200 file:text-sm file:font-medium file:bg-gray-50 file:text-gray-700 hover:file:bg-gray-100 file:cursor-pointer" />

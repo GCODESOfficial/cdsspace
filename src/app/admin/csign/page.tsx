@@ -53,7 +53,7 @@ export default function AdminCsignPage() {
   }, []);
 
   const nameForId = (id: string | null) =>
-    id ? members.find((m) => m.id === id)?.full_name || "—" : "";
+    id ? members.find((m) => m.id === id)?.full_name || "-" : "";
 
   return (
     <div className="p-8 max-w-[1200px]">
@@ -130,7 +130,7 @@ function Row({ r, signerName }: { r: Request; signerName: string }) {
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2 flex-wrap">
           <p className="text-[13px] font-semibold text-[#0D1B39]">
-            {signerName || r.signer_name || r.signer_email || "—"}
+            {signerName || r.signer_name || r.signer_email || "-"}
           </p>
           <span className={`text-[10px] font-semibold uppercase tracking-wider px-1.5 py-0.5 rounded border ${m.color}`}>
             {m.label}

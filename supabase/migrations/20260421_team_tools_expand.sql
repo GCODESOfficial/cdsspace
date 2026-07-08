@@ -5,7 +5,7 @@
 -- Idempotent. Safe to re-run.
 -- ============================================
 
--- 1. cDocs — share token + templates + tags + categories + theme
+-- 1. cDocs - share token + templates + tags + categories + theme
 ALTER TABLE public.team_cdocs
   ADD COLUMN IF NOT EXISTS share_token TEXT UNIQUE DEFAULT encode(gen_random_bytes(16), 'hex'),
   ADD COLUMN IF NOT EXISTS last_saved_at TIMESTAMPTZ DEFAULT now(),
@@ -36,7 +36,7 @@ ALTER TABLE public.team_cdocs_activity ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS "allow_all_team_cdocs_activity" ON public.team_cdocs_activity;
 CREATE POLICY "allow_all_team_cdocs_activity" ON public.team_cdocs_activity FOR ALL USING (true) WITH CHECK (true);
 
--- 2. cSign — expand signature_requests
+-- 2. cSign - expand signature_requests
 ALTER TABLE public.team_signature_requests
   ADD COLUMN IF NOT EXISTS signature_x NUMERIC,
   ADD COLUMN IF NOT EXISTS signature_y NUMERIC,
@@ -45,7 +45,7 @@ ALTER TABLE public.team_signature_requests
 
 -- Align `status` enum with the port (pending/opened/signed/declined/cancelled already ok)
 
--- 3. Protect Docs — kind + file metadata
+-- 3. Protect Docs - kind + file metadata
 ALTER TABLE public.team_protected_documents
   ADD COLUMN IF NOT EXISTS kind TEXT NOT NULL DEFAULT 'generic' CHECK (kind IN ('generic','brief','env','contract','asset','cdocs')),
   ADD COLUMN IF NOT EXISTS body TEXT,
@@ -63,7 +63,7 @@ DROP TRIGGER IF EXISTS trg_team_protected_docs_touch ON public.team_protected_do
 CREATE TRIGGER trg_team_protected_docs_touch BEFORE UPDATE ON public.team_protected_documents
   FOR EACH ROW EXECUTE FUNCTION public.touch_updated_at();
 
--- 4. cResume — expand the resume profile
+-- 4. cResume - expand the resume profile
 ALTER TABLE public.team_resumes
   ADD COLUMN IF NOT EXISTS avatar_url TEXT,
   ADD COLUMN IF NOT EXISTS location TEXT,
@@ -72,7 +72,7 @@ ALTER TABLE public.team_resumes
   ADD COLUMN IF NOT EXISTS socials JSONB NOT NULL DEFAULT '{}'::jsonb,
   ADD COLUMN IF NOT EXISTS is_public BOOLEAN NOT NULL DEFAULT false;
 
--- 5. cMeet — bring fields the port expects
+-- 5. cMeet - bring fields the port expects
 ALTER TABLE public.team_meetings
   ADD COLUMN IF NOT EXISTS audio_only BOOLEAN NOT NULL DEFAULT false,
   ADD COLUMN IF NOT EXISTS project_id UUID,

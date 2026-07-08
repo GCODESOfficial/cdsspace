@@ -48,7 +48,7 @@ export default function AdminNotificationBell() {
 
   useEffect(() => {
     fetchNotifications();
-    const id = setInterval(fetchNotifications, POLL_INTERVAL);
+    const id = setInterval(() => { if (!document.hidden) fetchNotifications(); }, POLL_INTERVAL);
     return () => clearInterval(id);
   }, [fetchNotifications]);
 

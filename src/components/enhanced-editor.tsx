@@ -19,7 +19,16 @@ import {
   ArrowDown,
   Type,
   Info,
+  FileText,
 } from "lucide-react"
+
+// A gallery item can be a PDF (uploaded "in place of images"). Detect it from
+// the picked File or from an existing asset URL.
+const isPdfItem = (img: ImageType): boolean => {
+  if (img.file) return img.file.type === "application/pdf" || /\.pdf$/i.test(img.file.name)
+  const u = img.image_url || img.originalUrl || img.preview || ""
+  return /\.pdf(?:[?#]|$)/i.test(u)
+}
 
 // Define proper types for the component
 export type ImageType = {
@@ -385,13 +394,13 @@ export function EnhancedEditor({ initialImages = [], onImagesChange }: EnhancedE
       <div className="flex justify-between items-center text-[#020839]">
         <h3 className="text-lg font-medium">Project Images ({images.length})</h3>
         <Button type="button" className="hover:bg-blue-50 cursor-pointer" variant="outline" size="sm" onClick={() => fileInputRef.current?.click()}>
-          Add Images
+          Add Images / PDF
         </Button>
         <Input
           type="file"
           ref={fileInputRef}
           className="hidden"
-          accept="image/*"
+          accept="image/*,application/pdf"
           multiple
           onChange={handleFileChange}
         />
@@ -432,12 +441,19 @@ export function EnhancedEditor({ initialImages = [], onImagesChange }: EnhancedE
                       transform: `scale(${(image.size?.width || 100) / 100})`,
                     }}
                   >
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img
-                      src={image.preview || image.originalUrl || image.image_url || "/placeholder.svg"}
-                      alt={image.alt_text || `Project image ${index + 1}`}
-                      className="w-full h-full object-cover"
-                    />
+                    {isPdfItem(image) ? (
+                      <div className="flex h-full w-full flex-col items-center justify-center gap-1.5 bg-gray-50 text-gray-500">
+                        <FileText className="h-8 w-8" />
+                        <span className="text-xs font-medium">PDF document</span>
+                      </div>
+                    ) : (
+                      /* eslint-disable-next-line @next/next/no-img-element */
+                      <img
+                        src={image.preview || image.originalUrl || image.image_url || "/placeholder.svg"}
+                        alt={image.alt_text || `Project image ${index + 1}`}
+                        className="w-full h-full object-cover"
+                      />
+                    )}
                   </div>
 
                   {/* Caption display */}
@@ -606,7 +622,7 @@ export function EnhancedEditor({ initialImages = [], onImagesChange }: EnhancedE
       ) : (
         <div className="border text-[#020839] border-gray-300 rounded-md p-8 text-center text-muted-foreground cursor-pointer" onClick={() => fileInputRef.current?.click()}>
           <Move className="mx-auto h-8 w-8 mb-2 opacity-50" />
-          <p>Drag and drop images here or click &quot;Add Images&quot;</p>
+          <p>Drag and drop images or a PDF here, or click &quot;Add Images / PDF&quot;</p>
         </div>
       )}
 

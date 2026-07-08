@@ -2,6 +2,15 @@
 
 import { createClient } from '@/lib/supabase/server'
 
+type AuthFormData = {
+    email: string;
+    password: string;
+    fullName?: string;
+    phoneNumber?: string;
+    companyName?: string;
+    next?: string | null;
+}
+
 function getSiteUrl() {
     // Use explicit env var if set, otherwise fall back based on environment
     if (process.env.NEXT_PUBLIC_SITE_URL) {
@@ -15,7 +24,11 @@ function getSiteUrl() {
     return 'http://localhost:3000';
 }
 
-export async function login(formData: any) {
+function getSafeNextPath(next?: string | null) {
+    return next?.startsWith('/') && !next.startsWith('//') ? next : '/dashboard';
+}
+
+export async function login(formData: AuthFormData) {
     const supabase = await createClient()
 
     const { error } = await supabase.auth.signInWithPassword({
@@ -30,11 +43,12 @@ export async function login(formData: any) {
     return { success: true }
 }
 
-export async function signup(formData: any) {
+export async function signup(formData: AuthFormData) {
     const supabase = await createClient()
     const siteUrl = getSiteUrl()
+    const nextPath = getSafeNextPath(formData.next)
 
-    const { data, error } = await supabase.auth.signUp({
+    const { error } = await supabase.auth.signUp({
         email: formData.email,
         password: formData.password,
         options: {
@@ -43,7 +57,7 @@ export async function signup(formData: any) {
                 phone_number: formData.phoneNumber,
                 company_name: formData.companyName,
             },
-            emailRedirectTo: `${siteUrl}/auth/callback?next=/dashboard`,
+            emailRedirectTo: `${siteUrl}/auth/callback?next=${encodeURIComponent(nextPath)}`,
         },
     })
 
@@ -58,14 +72,14 @@ export async function oauthLogin(provider: 'google' | 'twitter' | 'facebook', ne
     const siteUrl = getSiteUrl()
 
     // Google uses a custom OAuth dance hosted on cdsspace.com so the consent
-    // screen reads "to continue to cdsspace.com" instead of the Supabase URL.
+    // screen reads "to continue to cdsspace.com" instead of the GlashDB URL.
     if (provider === 'google') {
         const url = new URL(`${siteUrl}/api/auth/google/login`)
         if (next) url.searchParams.set('next', next)
         return { url: url.toString() }
     }
 
-    // Twitter (X) and Facebook go through Supabase's standard OAuth flow,
+    // Twitter (X) and Facebook go through the GlashDB-compatible OAuth flow,
     // which redirects back to /auth/callback?code=... to exchange the code.
     if (provider === 'twitter' || provider === 'facebook') {
         const supabase = await createClient()

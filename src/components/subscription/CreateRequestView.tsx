@@ -91,7 +91,7 @@ const RichTextEditor = ({
         }
         setIsChecking(true);
         try {
-            // LanguageTool public API — free, no key needed
+            // LanguageTool public API - free, no key needed
             const params = new URLSearchParams({ text, language: "en-US" });
             const res = await fetch("https://api.languagetool.org/v2/check", {
                 method: "POST",

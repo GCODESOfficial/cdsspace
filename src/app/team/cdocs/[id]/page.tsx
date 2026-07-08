@@ -6,7 +6,6 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { ArrowLeft, Save, Download, Link2, History, Stamp, PenLine, Sun, Moon, Trash2, Archive, Check, Loader2 } from "lucide-react";
-import { exportCDocToPdf } from "@/lib/cdocs-pdf";
 import { appAlert, appConfirm, appPrompt } from "@/lib/app-notify";
 import { RichDocEditor } from "@/components/cdocs/rich-doc-editor";
 
@@ -95,8 +94,9 @@ export default function CDocEditor() {
     navigator.clipboard.writeText(`${window.location.origin}/cdocs/${doc.share_token}`);
   }
 
-  function download() {
+  async function download() {
     if (!doc) return;
+    const { exportCDocToPdf } = await import("@/lib/cdocs-pdf");
     exportCDocToPdf({
       title,
       body,
@@ -212,7 +212,7 @@ export default function CDocEditor() {
                       <div className="flex-1 min-w-0">
                         <p className="text-[#0D1B39]">
                           <span className="font-semibold">{a.actor_name || (a.actor_is_admin ? "Admin" : "Member")}</span> {a.action}
-                          {a.detail ? <> — <span className="italic text-gray-500">{a.detail}</span></> : null}
+                          {a.detail ? <> - <span className="italic text-gray-500">{a.detail}</span></> : null}
                         </p>
                         <p className="text-[10.5px] text-gray-400">{new Date(a.created_at).toLocaleString()}</p>
                       </div>

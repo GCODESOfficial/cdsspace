@@ -3,6 +3,7 @@
 /* eslint-disable @next/next/no-img-element */
 
 import { Suspense, useCallback, useEffect, useRef, useState } from "react";
+import { initials } from "@/lib/utils";
 import { useSearchParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import QRCode from "qrcode";
@@ -309,11 +310,7 @@ function CreateModal({ initialDocId, initialSignerId, onClose, onCreated }: {
                       }}
                       className="w-4 h-4"
                     />
-                    {m.avatar_url ? (
-                      <img src={m.avatar_url} alt="" className="w-7 h-7 rounded-full" />
-                    ) : (
-                      <div className="w-7 h-7 rounded-full bg-[#0A4FE8]/10 text-[#0A4FE8] flex items-center justify-center text-[10px] font-bold">{m.full_name.charAt(0)}</div>
-                    )}
+                    <div className="w-7 h-7 rounded-full bg-[#0A4FE8]/10 text-[#0A4FE8] flex items-center justify-center text-[10px] font-bold">{initials(m.full_name)}</div>
                     <div className="flex-1 min-w-0">
                       <p className="text-[12.5px] font-semibold text-[#0D1B39] truncate">{m.full_name}</p>
                       <p className="text-[10.5px] text-gray-400 truncate">{m.email}</p>
@@ -370,7 +367,7 @@ function SignerCard({ req }: { req: SignReq }) {
 
   useEffect(() => { QRCode.toDataURL(url, { width: 180 }).then(setQr); }, [url]);
 
-  const shareText = `Please sign this document${req.team_cdocs ? ` — "${req.team_cdocs.title}"` : ""}: ${url}`;
+  const shareText = `Please sign this document${req.team_cdocs ? ` - "${req.team_cdocs.title}"` : ""}: ${url}`;
 
   function open(href: string) { window.open(href, "_blank", "noopener,noreferrer"); }
   async function copy() {

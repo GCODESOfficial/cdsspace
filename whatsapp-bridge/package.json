@@ -2,7 +2,7 @@
   "name": "cds-whatsapp-bridge",
   "version": "0.1.0",
   "private": true,
-  "description": "Long-running process that links a WhatsApp business account via QR and bridges messages to/from Supabase.",
+  "description": "Long-running process that links a WhatsApp business account via QR and bridges messages to/from GlashDB.",
   "type": "module",
   "main": "index.mjs",
   "scripts": {

@@ -1,4 +1,5 @@
 import { AuthLayout } from "@/components/layout/AuthLayout";
+import { AuthBrandPanel } from "@/components/layout/AuthBrandPanel";
 
 export default function AuthRootLayout({
     children,
@@ -6,7 +7,7 @@ export default function AuthRootLayout({
     children: React.ReactNode;
 }>) {
     return (
-        <AuthLayout>
+        <AuthLayout brand={<AuthBrandPanel />}>
             {children}
         </AuthLayout>
     );

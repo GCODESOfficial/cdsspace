@@ -186,3 +186,74 @@ export async function POST(req: Request) {
     );
   }
 }
+
+// PATCH - interact with existing collaboration items: vote on a poll, or move a
+// task's status. Votes are stored inside the poll's `settings.votes` JSON as
+// { viewerKey: optionIndex } so no schema change is needed.
+export async function PATCH(req: Request) {
+  const viewer = await getChatViewer();
+  if (!viewer) return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
+
+  const body = await req.json().catch(() => ({}));
+  const threadId = String(body?.threadId || "");
+  const action = String(body?.action || "");
+  const denied = await requireThread(viewer, threadId);
+  if (denied) return denied;
+
+  const actor = getViewerReactionKey(viewer);
+  try {
+    if (action === "vote_poll") {
+      const pollId = String(body?.pollId || "");
+      const optionIndex = Number(body?.optionIndex);
+      if (!pollId || !Number.isInteger(optionIndex)) {
+        return NextResponse.json({ ok: false, error: "pollId and optionIndex required" }, { status: 400 });
+      }
+      const poll = (
+        await glashQuery<any>(`select * from public.team_chat_polls where id = $1 and thread_id = $2`, [pollId, threadId])
+      )[0];
+      if (!poll) return NextResponse.json({ ok: false, error: "Poll not found" }, { status: 404 });
+      const options = Array.isArray(poll.options) ? poll.options : [];
+      if (optionIndex < 0 || optionIndex >= options.length) {
+        return NextResponse.json({ ok: false, error: "Invalid option" }, { status: 400 });
+      }
+      const settings = poll.settings && typeof poll.settings === "object" ? { ...poll.settings } : {};
+      const votes = settings.votes && typeof settings.votes === "object" ? { ...settings.votes } : {};
+      // Re-voting the same option clears your vote (toggle).
+      if (votes[actor] === optionIndex) delete votes[actor];
+      else votes[actor] = optionIndex;
+      settings.votes = votes;
+      const updated = (
+        await glashQuery<any>(`update public.team_chat_polls set settings = $1::jsonb where id = $2 returning *`, [
+          JSON.stringify(settings),
+          pollId,
+        ])
+      )[0];
+      return NextResponse.json({ ok: true, item: updated });
+    }
+
+    if (action === "toggle_task") {
+      const taskId = String(body?.taskId || "");
+      const status = String(body?.status || "");
+      const allowed = ["not_started", "in_progress", "completed"];
+      if (!taskId || !allowed.includes(status)) {
+        return NextResponse.json({ ok: false, error: "taskId and a valid status are required" }, { status: 400 });
+      }
+      const progress = status === "completed" ? 100 : status === "in_progress" ? 50 : 0;
+      const updated = (
+        await glashQuery<any>(
+          `update public.team_chat_tasks set status = $1, progress = $2 where id = $3 and thread_id = $4 returning *`,
+          [status, progress, taskId, threadId],
+        )
+      )[0];
+      if (!updated) return NextResponse.json({ ok: false, error: "Task not found" }, { status: 404 });
+      return NextResponse.json({ ok: true, item: updated });
+    }
+
+    return NextResponse.json({ ok: false, error: "Unsupported action" }, { status: 400 });
+  } catch (error) {
+    return NextResponse.json(
+      { ok: false, error: error instanceof Error ? error.message : "Collaboration action failed" },
+      { status: 500 },
+    );
+  }
+}

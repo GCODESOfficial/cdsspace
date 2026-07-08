@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { appPrompt } from "@/lib/app-notify";
 import {
     Check,
     Copy,
@@ -41,7 +42,7 @@ export function BrandBriefShareModal({
 
     const briefUrl = `${payload.origin}/brand-brief/${payload.public_token}`;
     const label = payload.invite_label?.trim() || "your brand brief";
-    const shareText = `Hey! Please fill out ${label} — no account needed, just tap the link: ${briefUrl}`;
+    const shareText = `Hey! Please fill out ${label} - no account needed, just tap the link: ${briefUrl}`;
 
     const copy = async (text: string) => {
         try {
@@ -49,7 +50,7 @@ export function BrandBriefShareModal({
             setCopied(true);
             setTimeout(() => setCopied(false), 1500);
         } catch {
-            window.prompt("Copy this link:", text);
+            appPrompt({ title: "Copy this link", message: "Select and copy the link below:", defaultValue: text, confirmLabel: "Done" });
         }
     };
 
@@ -79,7 +80,7 @@ export function BrandBriefShareModal({
                                 Brief link ready to share
                             </h2>
                             <p className="text-white/80 text-[13px] mt-1">
-                                Send this to your client — they can fill it without creating an account.
+                                Send this to your client - they can fill it without creating an account.
                             </p>
                         </div>
                         <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-white/10" aria-label="Close">
@@ -146,7 +147,7 @@ export function BrandBriefShareModal({
                             color="bg-gray-900 hover:bg-black text-white"
                             icon={Mail}
                             href={`mailto:?subject=${encodeURIComponent(
-                                `Brand brief — ${label}`,
+                                `Brand brief - ${label}`,
                             )}&body=${encodeURIComponent(shareText)}`}
                         />
                         <ShareBtn
@@ -156,7 +157,7 @@ export function BrandBriefShareModal({
                             onClick={() => {
                                 if (typeof navigator !== "undefined" && typeof navigator.share === "function") {
                                     navigator
-                                        .share({ title: `CDS Space — ${label}`, text: shareText, url: briefUrl })
+                                        .share({ title: `CDS Space - ${label}`, text: shareText, url: briefUrl })
                                         .catch(() => {});
                                 } else {
                                     copy(shareText);
@@ -178,7 +179,7 @@ export function BrandBriefShareModal({
                 )}
 
                 <div className="px-6 py-4 bg-gray-50 border-t border-gray-100 text-[11px] text-gray-500 leading-relaxed">
-                    Clients don't need an account. They'll land on a branded form, fill it in, and submit —
+                    Clients don't need an account. They'll land on a branded form, fill it in, and submit -
                     you'll see their answers in the Brand Briefs list the moment they're done.
                 </div>
             </div>

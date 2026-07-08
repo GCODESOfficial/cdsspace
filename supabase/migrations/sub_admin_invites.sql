@@ -6,7 +6,7 @@
 -- Why we need this table even though `sub_admins` already holds the email
 -- and (plaintext) password: we don't want the password ever appearing in a
 -- URL, referrer header, or browser history. The token in the URL is
--- meaningless on its own — the server exchanges it for the credentials
+-- meaningless on its own - the server exchanges it for the credentials
 -- exactly once, then marks it used.
 
 create table if not exists public.sub_admin_invites (

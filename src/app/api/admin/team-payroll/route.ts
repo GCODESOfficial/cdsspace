@@ -14,9 +14,9 @@ async function guard(req: NextRequest) {
 /**
  * Admin team-payroll endpoint.
  *
- *   GET   /api/admin/team-payroll               — list entries joined with member bank info
- *   POST  /api/admin/team-payroll               — create one entry
- *   POST  /api/admin/team-payroll  (bulk=true)  — create many (one per active member / department)
+ *   GET   /api/admin/team-payroll               - list entries joined with member bank info
+ *   POST  /api/admin/team-payroll               - create one entry
+ *   POST  /api/admin/team-payroll  (bulk=true)  - create many (one per active member / department)
  */
 export async function GET(req: NextRequest) {
     const { deny } = await guard(req);

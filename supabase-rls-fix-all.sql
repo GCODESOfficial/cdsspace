@@ -7,7 +7,7 @@
 -- permissive policy so app access is preserved.
 --
 -- It matches the policy pattern used elsewhere in this project
--- (e.g. supabase-hrm.sql, supabase-clients.sql) — FOR ALL USING (true)
+-- (e.g. supabase-hrm.sql, supabase-clients.sql) - FOR ALL USING (true)
 -- WITH CHECK (true). Tighten per-table later if a table contains
 -- data that must not be readable by the anon role.
 --

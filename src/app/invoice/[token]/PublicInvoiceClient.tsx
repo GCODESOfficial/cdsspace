@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Download, Share2 } from "lucide-react";
 import type { FinanceInvoice, FinanceInvoiceItem } from "@/lib/finance/types";
 import { buildInvoiceShareMessage } from "@/lib/finance/share";
-import { exportInvoiceToPdf } from "@/lib/invoice-pdf";
+import { appToast } from "@/lib/app-notify";
 
 export default function PublicInvoiceClient({ token }: { token: string }) {
   const sp = useSearchParams();
@@ -34,7 +34,9 @@ export default function PublicInvoiceClient({ token }: { token: string }) {
     if (!invoice) return;
     setIsDownloading(true);
     try {
-      // Direct jsPDF render — no html2canvas, no CORS image loads, no hangs.
+      // Direct jsPDF render - no html2canvas, no CORS image loads, no hangs.
+      // Loaded on demand so jsPDF stays out of the initial page bundle.
+      const { exportInvoiceToPdf } = await import("@/lib/invoice-pdf");
       exportInvoiceToPdf(invoice, items);
     } catch (error) {
       console.error("Failed to generate PDF:", error);
@@ -97,7 +99,7 @@ export default function PublicInvoiceClient({ token }: { token: string }) {
                 }).catch(() => {});
               } else {
                 navigator.clipboard.writeText(shareText);
-                alert("Invoice share message copied to clipboard!");
+                appToast({ message: "Invoice link copied to clipboard", kind: "success" });
               }
             }}
             className="h-11 px-5 rounded-xl border-blue-200 text-blue-700 hover:bg-blue-50"

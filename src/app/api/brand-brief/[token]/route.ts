@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getSupabaseAdmin } from "@/lib/supabase";
 
 /**
- * Public endpoint — no auth required. The token itself is the credential.
+ * Public endpoint - no auth required. The token itself is the credential.
  *
  *  GET   → returns the brief (if the link is still valid)
  *  PATCH → saves partial answers (draft auto-save)

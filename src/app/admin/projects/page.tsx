@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { supabase } from "@/lib/supabase";
-import { Briefcase, UserCog, Repeat, ArrowUpRight, Loader2, CheckCircle2, Clock, Pause } from "lucide-react";
+import { ArrowDownToLine, ArrowUpRight, Briefcase, CheckCircle2, Loader2, UserCog } from "lucide-react";
 
 interface Stats {
   totalProjects: number;
@@ -11,27 +11,37 @@ interface Stats {
   completedProjects: number;
   pausedProjects: number;
   totalContractors: number;
-  totalSubscriptions: number;
+  totalInflow: number;
+}
+
+interface ProjectSummary {
+  id: string;
+  name: string;
+  client: string;
+  status: string;
+  created_at: string;
 }
 
 const SECTIONS = [
   { href: "/admin/projects/list", label: "Projects", desc: "Create & manage projects with milestones", icon: Briefcase, tint: "from-blue-500 to-indigo-500" },
   { href: "/admin/projects/contractors", label: "Sub-contractors", desc: "Manage sub-contractors & assignments", icon: UserCog, tint: "from-violet-500 to-purple-500" },
-  { href: "/admin/projects/subscriptions", label: "Subscriptions", desc: "Recurring tools, servers & services", icon: Repeat, tint: "from-amber-500 to-orange-500" },
+  { href: "/admin/projects/subscriptions", label: "Inflow", desc: "Record positive funds received", icon: ArrowDownToLine, tint: "from-emerald-500 to-teal-500" },
 ];
+
+const formatNaira = (value: number) => `₦${value.toLocaleString("en", { maximumFractionDigits: 0 })}`;
 
 export default function ProjectsOverview() {
   const [stats, setStats] = useState<Stats | null>(null);
-  const [recentProjects, setRecentProjects] = useState<any[]>([]);
+  const [recentProjects, setRecentProjects] = useState<ProjectSummary[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
     async function load() {
       try {
-        const [projectsRes, contractorsRes, subsRes, recentRes] = await Promise.all([
+        const [projectsRes, contractorsRes, inflowsRes, recentRes] = await Promise.all([
           supabase.from("finance_projects").select("id, status"),
           supabase.from("finance_contractors").select("id"),
-          supabase.from("finance_subscriptions").select("id").eq("active", true),
+          supabase.from("finance_inflows").select("amount"),
           supabase.from("finance_projects").select("id, name, client, status, created_at").order("created_at", { ascending: false }).limit(5),
         ]);
 
@@ -42,7 +52,7 @@ export default function ProjectsOverview() {
           completedProjects: projects.filter(p => p.status === "completed").length,
           pausedProjects: projects.filter(p => p.status === "paused").length,
           totalContractors: contractorsRes.data?.length || 0,
-          totalSubscriptions: subsRes.data?.length || 0,
+          totalInflow: (inflowsRes.data || []).reduce((sum, entry) => sum + Number(entry.amount || 0), 0),
         });
         setRecentProjects(recentRes.data || []);
       } catch (e) {
@@ -55,26 +65,26 @@ export default function ProjectsOverview() {
   }, []);
 
   return (
-    <div className="p-8 max-w-[1200px]">
+    <div className="p-4 sm:p-6 lg:p-8 max-w-[1200px]">
       <div className="mb-8">
         <p className="text-[#0A4FE8] text-sm font-semibold">Operations</p>
         <h1 className="text-[28px] font-bold text-[#0D1B39] tracking-tight">Projects</h1>
-        <p className="text-gray-400 text-[13px] mt-1">Manage projects, sub-contractors, and recurring subscriptions</p>
+        <p className="text-gray-400 text-[13px] mt-1">Manage projects, sub-contractors, and inflow records</p>
       </div>
 
       {isLoading ? (
         <div className="flex justify-center py-10"><Loader2 className="w-6 h-6 animate-spin text-blue-400" /></div>
       ) : stats && (
-        <div className="grid grid-cols-4 gap-5 mb-8">
+        <div className="grid grid-cols-1 gap-5 mb-8 sm:grid-cols-2 xl:grid-cols-4">
           <StatCard icon={<Briefcase className="w-5 h-5 text-[#0A4FE8]" />} label="Total Projects" value={stats.totalProjects} bg="bg-blue-50" />
           <StatCard icon={<CheckCircle2 className="w-5 h-5 text-emerald-600" />} label="Active" value={stats.activeProjects} bg="bg-emerald-50" />
           <StatCard icon={<UserCog className="w-5 h-5 text-purple-600" />} label="Sub-contractors" value={stats.totalContractors} bg="bg-purple-50" />
-          <StatCard icon={<Repeat className="w-5 h-5 text-amber-600" />} label="Active Subs" value={stats.totalSubscriptions} bg="bg-amber-50" />
+          <StatCard icon={<ArrowDownToLine className="w-5 h-5 text-emerald-600" />} label="Inflow" value={formatNaira(stats.totalInflow)} bg="bg-emerald-50" />
         </div>
       )}
 
       <h2 className="text-sm font-semibold text-gray-400 uppercase tracking-wider mb-4">Quick Access</h2>
-      <div className="grid grid-cols-3 gap-5 mb-8">
+      <div className="grid grid-cols-1 gap-5 mb-8 sm:grid-cols-2 lg:grid-cols-3">
         {SECTIONS.map((s) => (
           <Link key={s.href} href={s.href} className="group">
             <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-6 h-full hover:shadow-lg hover:-translate-y-0.5 transition-all">
@@ -121,7 +131,7 @@ export default function ProjectsOverview() {
   );
 }
 
-function StatCard({ icon, label, value, bg }: { icon: React.ReactNode; label: string; value: number; bg: string }) {
+function StatCard({ icon, label, value, bg }: { icon: React.ReactNode; label: string; value: number | string; bg: string }) {
   return (
     <div className={`${bg} rounded-2xl p-5`}>
       <div className="w-10 h-10 rounded-xl bg-white flex items-center justify-center mb-4 shadow-sm">{icon}</div>

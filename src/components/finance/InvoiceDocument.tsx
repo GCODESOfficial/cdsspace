@@ -2,7 +2,7 @@
 
 import Image from "next/image";
 import {
-  Currency, formatMoney,
+  Currency, formatFinanceDate, formatMoney,
   CDS_BANK_ACCOUNTS,
   DEFAULT_PAYMENT_TERMS, DEFAULT_REVISIONS_NOTE, DEFAULT_WORKING_HOURS,
   deliverySpeedLabel, type DeliverySpeed,
@@ -27,7 +27,7 @@ export default function InvoiceDocument({ invoice, items }: { invoice: Invoice; 
   const revisions = invoice.revisions_note || DEFAULT_REVISIONS_NOTE;
   const hours = invoice.working_hours || DEFAULT_WORKING_HOURS;
   const deliverySpeed = deliverySpeedLabel(invoice.delivery_speed || "standard");
-  const deliveryPeriod = invoice.delivery_period || "—";
+  const deliveryPeriod = invoice.delivery_period || "-";
 
   return (
     <div className="bg-white text-gray-900 max-w-[820px] mx-auto p-5 sm:p-12 print:p-4 shadow-[0_30px_80px_rgba(15,40,90,0.10)] print:shadow-none rounded-2xl print:rounded-none print:max-w-none print:w-full">
@@ -66,12 +66,12 @@ export default function InvoiceDocument({ invoice, items }: { invoice: Invoice; 
         </div>
         <div className="sm:text-right">
           <div className="text-[10px] uppercase tracking-wider text-gray-400 mb-2">Issued / Due</div>
-          <div className="text-sm">{new Date(invoice.issue_date).toLocaleDateString()}</div>
-          {invoice.due_date && <div className="text-sm text-gray-600">Due {new Date(invoice.due_date).toLocaleDateString()}</div>}
+          <div className="text-sm">{formatFinanceDate(invoice.issue_date)}</div>
+          {invoice.due_date && <div className="text-sm text-gray-600">Due {formatFinanceDate(invoice.due_date)}</div>}
         </div>
       </div>
 
-      {/* Items — table on desktop, card list on mobile */}
+      {/* Items - table on desktop, card list on mobile */}
       <div className="hidden sm:block">
         <table className="w-full border-separate border-spacing-0">
           <thead>
@@ -151,7 +151,7 @@ export default function InvoiceDocument({ invoice, items }: { invoice: Invoice; 
         </div>
       )}
 
-      {/* Payment Details — brand panel */}
+      {/* Payment Details - brand panel */}
       <section 
         className="mt-10 rounded-2xl overflow-hidden bg-[#06103A] text-white print:break-inside-avoid"
         style={{ WebkitPrintColorAdjust: 'exact', printColorAdjust: 'exact' } as any}
@@ -208,7 +208,7 @@ export default function InvoiceDocument({ invoice, items }: { invoice: Invoice; 
       </div>
 
       <div className="mt-6 pt-6 border-t border-gray-100 text-center text-xs text-gray-400">
-        Truly Best attracts Best — CDS Space
+        Truly Best attracts Best - CDS Space
       </div>
     </div>
   );

@@ -2,12 +2,12 @@ import { LegalShell } from "@/components/legal/LegalShell";
 import { loadLegalDocument } from "@/lib/legal/server";
 
 export const metadata = {
-    title: "Terms of Service — CDS Space",
+    title: "Terms of Service - CDS Space",
     description:
         "The terms that govern your use of CDS Space websites, dashboards, and services. Governed by Nigerian law and adapted for users in Rwanda, the UK, USA, China, and worldwide.",
     alternates: { canonical: "https://cdsspace.pro/terms" },
     openGraph: {
-        title: "Terms of Service — CDS Space",
+        title: "Terms of Service - CDS Space",
         description: "The terms that govern your use of CDS Space websites, dashboards, and services.",
         url: "https://cdsspace.pro/terms",
         type: "website",

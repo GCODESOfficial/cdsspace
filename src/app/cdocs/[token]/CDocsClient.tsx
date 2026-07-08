@@ -3,7 +3,6 @@
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import { Download, Loader2 } from "lucide-react";
-import { exportCDocToPdf } from "@/lib/cdocs-pdf";
 import { parseCDocBody } from "@/lib/cdocs-markdown";
 import { isHtmlBody, sanitizeCDocHtml } from "@/lib/cdocs-html";
 
@@ -40,7 +39,8 @@ export default function CDocPublicPage() {
   const blocks = bodyIsHtml ? [] : parseCDocBody(doc.body || "");
   const safeHtml = bodyIsHtml ? sanitizeCDocHtml(doc.body) : "";
 
-  function download() {
+  async function download() {
+    const { exportCDocToPdf } = await import("@/lib/cdocs-pdf");
     exportCDocToPdf({ title: doc!.title, body: doc!.body, theme: doc!.theme, stamped: doc!.stamped, shareUrl: window.location.href });
   }
 

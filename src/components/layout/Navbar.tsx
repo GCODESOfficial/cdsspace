@@ -13,6 +13,7 @@ const navLinks = [
     { name: "Home", href: "/" },
     { name: "About", href: "/about" },
     { name: "Work", href: "/work" },
+    { name: "Blog", href: "/blog" },
 ];
 
 export const Navbar = () => {
@@ -134,7 +135,7 @@ export const Navbar = () => {
                     onMouseLeave={() => setIsDropdownOpen(false)}
                 >
                     <AnimatePresence>
-                        {isDropdownOpen && <StudioDropdown />}
+                        {isDropdownOpen && <StudioDropdown isLoggedIn={isLoggedIn} />}
                     </AnimatePresence>
                 </div>
 
@@ -149,7 +150,7 @@ export const Navbar = () => {
                             className="absolute top-[58px] sm:top-[62px] left-0 right-0 bg-white/95 backdrop-blur-md border-x border-b border-brand-stroke/20 rounded-b-[24px] shadow-2xl md:hidden overflow-hidden origin-top z-40"
                         >
                             <div className="flex flex-col h-full">
-                                {/* Scrollable nav area — keeps the CTA pinned at the bottom */}
+                                {/* Scrollable nav area - keeps the CTA pinned at the bottom */}
                                 <div className="flex-1 overflow-y-auto px-5 sm:px-6 pt-5 sm:pt-6">
                                     <div className="space-y-3.5">
                                         {navLinks.map((link) => (
@@ -166,11 +167,14 @@ export const Navbar = () => {
                                             </Link>
                                         ))}
 
-                                        <MobileStudioAccordion onClose={() => setIsMobileMenuOpen(false)} />
+                                        <MobileStudioAccordion
+                                            isLoggedIn={isLoggedIn}
+                                            onClose={() => setIsMobileMenuOpen(false)}
+                                        />
                                     </div>
                                 </div>
 
-                                {/* Mobile CTA — pinned */}
+                                {/* Mobile CTA - pinned */}
                                 <div className="shrink-0 px-5 sm:px-6 pt-4 pb-5 sm:pb-6 border-t border-brand-stroke/10 bg-white/95">
                                     <Link
                                         href={accountHref}

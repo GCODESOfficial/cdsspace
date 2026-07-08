@@ -1,4 +1,5 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
+import { randomInt } from "crypto";
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase";
 
@@ -9,7 +10,7 @@ const UNAMBIGUOUS = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 function generateTrackingCode() {
   let code = "CDS-";
   for (let i = 0; i < 6; i++) {
-    code += UNAMBIGUOUS[Math.floor(Math.random() * UNAMBIGUOUS.length)];
+    code += UNAMBIGUOUS[randomInt(UNAMBIGUOUS.length)];
   }
   return code;
 }
@@ -53,40 +54,49 @@ export async function POST(req: Request) {
       return NextResponse.json({ ok: false, error: "This role is no longer accepting applications" }, { status: 400 });
     }
 
-    // Generate a unique tracking code (retry on the very unlikely collision)
-    let tracking_code = generateTrackingCode();
-    for (let attempt = 0; attempt < 5; attempt++) {
-      const { data: dup } = await db
-        .from("role_applications")
-        .select("id")
-        .eq("tracking_code", tracking_code)
-        .maybeSingle();
-      if (!dup) break;
-      tracking_code = generateTrackingCode();
-    }
-
     const cleanWorkLinks = Array.isArray(work_links)
       ? work_links.map((l: string) => String(l).trim()).filter(Boolean)
       : null;
 
-    const { data: inserted, error } = await db
-      .from("role_applications")
-      .insert({
-        role_id,
-        full_name: String(full_name).trim(),
-        email: String(email).trim().toLowerCase(),
-        phone: phone ? String(phone).trim() : null,
-        location: location ? String(location).trim() : null,
-        cover_letter: cover_letter ? String(cover_letter).trim() : null,
-        portfolio_link: portfolio_link ? String(portfolio_link).trim() : null,
-        resume_link: resume_link ? String(resume_link).trim() : null,
-        work_links: cleanWorkLinks && cleanWorkLinks.length > 0 ? cleanWorkLinks : null,
-        tracking_code,
-      })
-      .select("id, tracking_code, created_at")
-      .single();
+    const applicationPayload = {
+      role_id,
+      full_name: String(full_name).trim(),
+      email: String(email).trim().toLowerCase(),
+      phone: phone ? String(phone).trim() : null,
+      location: location ? String(location).trim() : null,
+      cover_letter: cover_letter ? String(cover_letter).trim() : null,
+      portfolio_link: portfolio_link ? String(portfolio_link).trim() : null,
+      resume_link: resume_link ? String(resume_link).trim() : null,
+      work_links: cleanWorkLinks && cleanWorkLinks.length > 0 ? cleanWorkLinks : null,
+    };
 
-    if (error) throw error;
+    let inserted: { id: string; tracking_code: string | null; created_at: string } | null = null;
+    let lastError: Error | null = null;
+
+    for (let attempt = 0; attempt < 8; attempt++) {
+      const tracking_code = generateTrackingCode();
+      const { data, error } = await db
+        .from("role_applications")
+        .insert({ ...applicationPayload, tracking_code })
+        .select("id, tracking_code, created_at")
+        .single();
+
+      if (!error) {
+        inserted = data;
+        break;
+      }
+
+      const message = String(error.message || "");
+      if (error.code === "23505" || message.toLowerCase().includes("duplicate")) {
+        lastError = error;
+        continue;
+      }
+
+      throw error;
+    }
+
+    if (!inserted) throw lastError || new Error("Could not create a unique tracking code");
+    if (!inserted.tracking_code) throw new Error("Application saved without a tracking code. Please contact support.");
 
     return NextResponse.json({ ok: true, ...inserted }, { status: 201 });
   } catch (err: any) {

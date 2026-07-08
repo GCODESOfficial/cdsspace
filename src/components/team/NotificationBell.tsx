@@ -16,9 +16,9 @@ interface Notification {
 }
 
 interface NotificationGroup {
-  /** Stable key for grouping — thread_id if present, otherwise kind+title. */
+  /** Stable key for grouping - thread_id if present, otherwise kind+title. */
   key: string;
-  /** Newest notification — used for the headline + click target. */
+  /** Newest notification - used for the headline + click target. */
   primary: Notification;
   /** All notifications in the group, newest first. */
   items: Notification[];
@@ -98,7 +98,7 @@ export function NotificationBell() {
 
   useEffect(() => {
     fetchNotifications();
-    const t = setInterval(fetchNotifications, 30_000);
+    const t = setInterval(() => { if (!document.hidden) fetchNotifications(); }, 30_000);
     return () => clearInterval(t);
   }, [fetchNotifications]);
 
@@ -116,7 +116,7 @@ export function NotificationBell() {
     fetchNotifications();
   }
 
-  // Mark every notification inside a group as read — fired when the user
+  // Mark every notification inside a group as read - fired when the user
   // clicks the group header. Optimistic so the badge drops immediately and
   // doesn't wait for the 30s poll.
   async function markGroupRead(group: NotificationGroup) {
@@ -212,8 +212,8 @@ export function NotificationBell() {
  * (e.g. multiple "New message in #Family House" rows), clicking the header
  * toggles an expanded list below with the individual notifications.
  *
- * Clicking the header or any child ALWAYS marks the group read — the whole
- * point of the feature — so the unread dot + bell badge drop instantly.
+ * Clicking the header or any child ALWAYS marks the group read - the whole
+ * point of the feature - so the unread dot + bell badge drop instantly.
  */
 function NotificationGroupRow({
   group,

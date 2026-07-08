@@ -6,7 +6,7 @@
  *    in the `legal_documents` table yet;
  *  - the admin "Initialize with default content" action.
  *
- * The HTML is intentionally plain — no Tailwind classes on the inner markup.
+ * The HTML is intentionally plain - no Tailwind classes on the inner markup.
  * Styling lives in `.legal-prose` (globals.css). This keeps the round-trip
  * through Microsoft Word / Google Docs clean, because Word writes its own
  * formatting and `mammoth` strips unknown classes on upload.
@@ -31,23 +31,23 @@ const PRIVACY_CONTENT = `
 <h2 id="data">3. Personal Data We Collect</h2>
 <h3>3.1 Data you provide directly</h3>
 <ul>
-  <li><strong>Account data</strong> — full name, email address, password (hashed), phone number, company name, country.</li>
-  <li><strong>Profile data</strong> — avatar, job title, billing address, business description.</li>
-  <li><strong>Project data</strong> — briefs, creative assets, files, brand words, messages you send through our chat or support channels.</li>
-  <li><strong>Payment data</strong> — billing details processed through our payment providers. We do not store full card numbers on our servers.</li>
-  <li><strong>Career / contractor data</strong> — CV, portfolio links, work history, identification documents submitted when applying to join us.</li>
+  <li><strong>Account data</strong> - full name, email address, password (hashed), phone number, company name, country.</li>
+  <li><strong>Profile data</strong> - avatar, job title, billing address, business description.</li>
+  <li><strong>Project data</strong> - briefs, creative assets, files, brand words, messages you send through our chat or support channels.</li>
+  <li><strong>Payment data</strong> - billing details processed through our payment providers. We do not store full card numbers on our servers.</li>
+  <li><strong>Career / contractor data</strong> - CV, portfolio links, work history, identification documents submitted when applying to join us.</li>
 </ul>
 <h3>3.2 Data collected automatically</h3>
 <ul>
-  <li><strong>Device &amp; usage data</strong> — IP address, browser type, device identifiers, pages viewed, referring URL, timestamps.</li>
-  <li><strong>Cookies and similar technologies</strong> — session cookies, authentication tokens (Supabase <code>sb-*</code> cookies, our <code>cds_oauth_*</code> cookies), and limited analytics cookies. See Section 10.</li>
-  <li><strong>Log data</strong> — error logs, security events, and API request logs.</li>
+  <li><strong>Device &amp; usage data</strong> - IP address, browser type, device identifiers, pages viewed, referring URL, timestamps.</li>
+  <li><strong>Cookies and similar technologies</strong> - session cookies, authentication tokens (GlashDB-compatible <code>sb-*</code> cookies, our <code>cds_oauth_*</code> cookies), and limited analytics cookies. See Section 10.</li>
+  <li><strong>Log data</strong> - error logs, security events, and API request logs.</li>
 </ul>
 <h3>3.3 Data from third parties</h3>
 <ul>
-  <li><strong>Google Sign-In</strong> — when you sign in with Google, we receive your name, email, Google account ID, and profile picture. We do not receive your Google password.</li>
-  <li><strong>Payment processors</strong> — transaction reference, payment status, and limited billing identifiers.</li>
-  <li><strong>Public sources</strong> — for business-to-business outreach, we may process publicly available professional contact information.</li>
+  <li><strong>Google Sign-In</strong> - when you sign in with Google, we receive your name, email, Google account ID, and profile picture. We do not receive your Google password.</li>
+  <li><strong>Payment processors</strong> - transaction reference, payment status, and limited billing identifiers.</li>
+  <li><strong>Public sources</strong> - for business-to-business outreach, we may process publicly available professional contact information.</li>
 </ul>
 <p>We do <strong>not</strong> intentionally collect sensitive personal data (health, religion, political views, biometric data) unless you voluntarily share it in connection with a project, and we do not require it to provide the Services.</p>
 
@@ -73,11 +73,11 @@ const PRIVACY_CONTENT = `
 <h2 id="sharing">5. Who We Share Data With</h2>
 <p>We do <strong>not</strong> sell your personal data. We share it only with the categories of recipients below, and only to the extent needed for the purposes in Section 4:</p>
 <ul>
-  <li><strong>Service providers (processors)</strong> — hosting and infrastructure (Vercel Inc., USA), database and authentication (Supabase Inc., USA/EU), Google OAuth (Google LLC, USA), email delivery (Google Workspace / SMTP), file storage, and analytics providers.</li>
-  <li><strong>Payment processors</strong> — to take payment and refund transactions.</li>
-  <li><strong>Professional advisors</strong> — accountants, auditors, and lawyers, under duties of confidentiality.</li>
-  <li><strong>Authorities</strong> — where required by a valid legal request under Nigerian law or another applicable jurisdiction (for example, the Nigeria Data Protection Commission, tax authorities, or a court).</li>
-  <li><strong>Corporate transactions</strong> — in connection with a merger, acquisition, or sale of assets, subject to equivalent protection of your data.</li>
+  <li><strong>Service providers (processors)</strong> - hosting and infrastructure (Vercel Inc., USA), database and authentication (GlashDB), Google OAuth (Google LLC, USA), email delivery (Google Workspace / SMTP), file storage, and analytics providers.</li>
+  <li><strong>Payment processors</strong> - to take payment and refund transactions.</li>
+  <li><strong>Professional advisors</strong> - accountants, auditors, and lawyers, under duties of confidentiality.</li>
+  <li><strong>Authorities</strong> - where required by a valid legal request under Nigerian law or another applicable jurisdiction (for example, the Nigeria Data Protection Commission, tax authorities, or a court).</li>
+  <li><strong>Corporate transactions</strong> - in connection with a merger, acquisition, or sale of assets, subject to equivalent protection of your data.</li>
 </ul>
 <p>Every processor is bound by a written data-processing agreement that obliges them to process your data only on our instructions and to keep it secure.</p>
 
@@ -105,17 +105,17 @@ const PRIVACY_CONTENT = `
 <h2 id="rights">8. Your Rights</h2>
 <p>Subject to the law applicable to you, you have the following rights over your personal data:</p>
 <ul>
-  <li><strong>Access</strong> — ask for a copy of the data we hold about you.</li>
-  <li><strong>Rectification</strong> — ask us to correct inaccurate or incomplete data.</li>
-  <li><strong>Erasure / Deletion</strong> — ask us to delete data we no longer need to hold.</li>
-  <li><strong>Restriction</strong> — ask us to pause processing in certain circumstances.</li>
-  <li><strong>Objection</strong> — object to processing based on our legitimate interests, including direct marketing.</li>
-  <li><strong>Portability</strong> — receive your data in a structured, machine-readable format and transmit it elsewhere.</li>
-  <li><strong>Withdraw consent</strong> — at any time, without affecting the lawfulness of processing before withdrawal.</li>
-  <li><strong>Lodge a complaint</strong> — with the Nigeria Data Protection Commission (NDPC), your local supervisory authority in the EU/UK, the National Cyber Security Authority of Rwanda, the California Attorney General, or the Cyberspace Administration of China.</li>
-  <li><strong>Non-discrimination (California)</strong> — we will not deny you service, charge you a different price, or provide a lower quality of service because you exercised a CCPA/CPRA right.</li>
-  <li><strong>Opt-out of sale / sharing (California)</strong> — we do not sell your personal information, and we do not share it for cross-context behavioural advertising.</li>
-  <li><strong>Right to know personal information processing (China, PIPL)</strong> — including the right to copy, correct, delete, and, in the event of death, for your next of kin to exercise your rights.</li>
+  <li><strong>Access</strong> - ask for a copy of the data we hold about you.</li>
+  <li><strong>Rectification</strong> - ask us to correct inaccurate or incomplete data.</li>
+  <li><strong>Erasure / Deletion</strong> - ask us to delete data we no longer need to hold.</li>
+  <li><strong>Restriction</strong> - ask us to pause processing in certain circumstances.</li>
+  <li><strong>Objection</strong> - object to processing based on our legitimate interests, including direct marketing.</li>
+  <li><strong>Portability</strong> - receive your data in a structured, machine-readable format and transmit it elsewhere.</li>
+  <li><strong>Withdraw consent</strong> - at any time, without affecting the lawfulness of processing before withdrawal.</li>
+  <li><strong>Lodge a complaint</strong> - with the Nigeria Data Protection Commission (NDPC), your local supervisory authority in the EU/UK, the National Cyber Security Authority of Rwanda, the California Attorney General, or the Cyberspace Administration of China.</li>
+  <li><strong>Non-discrimination (California)</strong> - we will not deny you service, charge you a different price, or provide a lower quality of service because you exercised a CCPA/CPRA right.</li>
+  <li><strong>Opt-out of sale / sharing (California)</strong> - we do not sell your personal information, and we do not share it for cross-context behavioural advertising.</li>
+  <li><strong>Right to know personal information processing (China, PIPL)</strong> - including the right to copy, correct, delete, and, in the event of death, for your next of kin to exercise your rights.</li>
 </ul>
 <p>To exercise any right, email <a href="mailto:support@cdsspace.pro">support@cdsspace.pro</a>. We will respond within 30 days (or the shorter period required by your jurisdiction), and may ask you to verify your identity before we act.</p>
 
@@ -135,9 +135,9 @@ const PRIVACY_CONTENT = `
 <h2 id="cookies">10. Cookies &amp; Similar Technologies</h2>
 <p>We use the following categories of cookies:</p>
 <ul>
-  <li><strong>Strictly necessary</strong> — session and authentication cookies (<code>sb-*</code>, <code>cds_oauth_state</code>, <code>cds_oauth_nonce</code>, <code>cds_oauth_next</code>) that are required for sign-in and security. These cannot be disabled.</li>
-  <li><strong>Functional</strong> — to remember your preferences.</li>
-  <li><strong>Analytics</strong> — to understand how the Services are used, in aggregate form.</li>
+  <li><strong>Strictly necessary</strong> - session and authentication cookies (<code>sb-*</code>, <code>cds_oauth_state</code>, <code>cds_oauth_nonce</code>, <code>cds_oauth_next</code>) that are required for sign-in and security. These cannot be disabled.</li>
+  <li><strong>Functional</strong> - to remember your preferences.</li>
+  <li><strong>Analytics</strong> - to understand how the Services are used, in aggregate form.</li>
 </ul>
 <p>You can control non-essential cookies through your browser settings and, where shown, our in-product cookie banner. Withdrawing consent will not affect any service you are logged into.</p>
 
@@ -164,7 +164,7 @@ const PRIVACY_CONTENT = `
 
 <h2 id="contact">16. How to Contact Us</h2>
 <p>For any question about this Policy or how we handle your data, contact:</p>
-<p><strong>CDS Space — Data Protection</strong><br/>Email: <a href="mailto:support@cdsspace.pro">support@cdsspace.pro</a></p>
+<p><strong>CDS Space - Data Protection</strong><br/>Email: <a href="mailto:support@cdsspace.pro">support@cdsspace.pro</a></p>
 <p><em>Note: This document is provided as a good-faith compliance framework based on publicly available statutes as of the effective date. It is not legal advice. Before relying on it, have it reviewed by qualified counsel in each jurisdiction where you operate.</em></p>
 `.trim();
 
@@ -231,7 +231,7 @@ const TERMS_CONTENT = `
 <p>We may remove content, suspend features, or terminate accounts that we reasonably believe breach this Section.</p>
 
 <h2 id="third-parties">8. Third-Party Services</h2>
-<p>The Services rely on third-party providers including Google (for Sign-In), Supabase (for authentication and data storage), Vercel (for hosting), and payment processors. Your use of those services is also subject to their respective terms and privacy policies. We are not responsible for outages, changes, or failures of third-party services, but we will use reasonable efforts to minimise disruption.</p>
+<p>The Services rely on third-party providers including Google (for Sign-In), GlashDB (for authentication and data storage), Vercel (for hosting), and payment processors. Your use of those services is also subject to their respective terms and privacy policies. We are not responsible for outages, changes, or failures of third-party services, but we will use reasonable efforts to minimise disruption.</p>
 
 <h2 id="confidentiality">9. Confidentiality</h2>
 <p>Each party will protect the other&rsquo;s confidential information with at least the same care it uses for its own, and only use it to perform or receive the Services. This obligation survives termination for 5 years, or indefinitely for trade secrets. It does not apply to information that is public, was already known, is independently developed, or is required to be disclosed by law.</p>

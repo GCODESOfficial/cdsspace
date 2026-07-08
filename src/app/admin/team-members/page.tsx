@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { initials } from "@/lib/utils";
 import {
   Loader2,
   Plus,
@@ -45,6 +46,7 @@ interface TeamMember {
   phone: string | null;
   is_active: boolean;
   is_sub_admin: boolean;
+  is_team_lead?: boolean;
   permissions: string[];
   invite_token: string | null;
   invite_filled: boolean;
@@ -461,6 +463,14 @@ export default function AdminTeamMembersPage() {
                 selected={selectedMemberIds.has(m.id)}
                 onToggleSelect={() => toggleMemberSelection(m.id)}
                 onToggleActive={() => toggleActive(m)}
+                onToggleLead={async () => {
+                  await fetch("/api/admin/team-members", {
+                    method: "PATCH",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ id: m.id, is_team_lead: !m.is_team_lead }),
+                  });
+                  fetchMembers();
+                }}
                 onPromote={() => setPromotingMember(m)}
                 onDelete={() => remove(m)}
                 onView={() => setViewingMember(m)}
@@ -489,7 +499,7 @@ export default function AdminTeamMembersPage() {
         />
       )}
 
-      {/* Full-profile viewer — also exposes suspend / unsuspend */}
+      {/* Full-profile viewer - also exposes suspend / unsuspend */}
       {viewingMember && (
         <MemberProfileModal
           member={viewingMember}
@@ -517,6 +527,7 @@ function MemberRow({
   selected,
   onToggleSelect,
   onToggleActive,
+  onToggleLead,
   onPromote,
   onDelete,
   onView,
@@ -525,6 +536,7 @@ function MemberRow({
   selected: boolean;
   onToggleSelect: () => void;
   onToggleActive: () => void;
+  onToggleLead: () => void;
   onPromote: () => void;
   onDelete: () => void;
   onView: () => void;
@@ -547,18 +559,9 @@ function MemberRow({
         onChange={onToggleSelect}
         className="w-4 h-4 rounded border-gray-300 text-[#0A4FE8] cursor-pointer shrink-0"
       />
-      {m.avatar_url ? (
-        // eslint-disable-next-line @next/next/no-img-element
-        <img
-          src={m.avatar_url}
-          alt={m.full_name}
-          className="w-10 h-10 rounded-full object-cover border border-gray-200"
-        />
-      ) : (
-        <div className="w-10 h-10 rounded-full bg-[#0A4FE8] text-white text-sm font-bold flex items-center justify-center">
-          {m.full_name.charAt(0).toUpperCase()}
-        </div>
-      )}
+      <div className="w-10 h-10 rounded-full bg-[#0A4FE8] text-white text-sm font-bold flex items-center justify-center">
+        {initials(m.full_name)}
+      </div>
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2 flex-wrap">
           <p className="text-[14px] font-semibold text-[#0D1B39]">{m.full_name}</p>
@@ -568,6 +571,14 @@ function MemberRow({
               <ShieldCheck className="w-3 h-3" /> Sub-admin
             </span>
           )}
+          <button
+            type="button"
+            onClick={onToggleLead}
+            title={m.is_team_lead ? "Team lead - click to remove" : "Make team lead (can assign tasks in their department)"}
+            className={`text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded transition ${m.is_team_lead ? "bg-indigo-600 text-white" : "bg-gray-100 text-gray-400 hover:bg-indigo-50 hover:text-indigo-600"}`}
+          >
+            Lead
+          </button>
           {!m.is_active && (
             <span className="text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded bg-gray-100 text-gray-500">
               Inactive
@@ -1047,7 +1058,7 @@ function AddMemberForm({
               onChange={(e) => pickRole(e.target.value)}
               className="flex-1 min-w-[240px] px-4 py-2.5 rounded-xl bg-gray-50 border border-gray-200 text-[13px] text-[#0D1B39] focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-300 transition"
             >
-              <option value="">— No role (regular team member) —</option>
+              <option value="">- No role (regular team member) -</option>
               {roles.map((r) => (
                 <option key={r.id} value={r.id}>
                   {r.name} ({r.permissions.length} perm{r.permissions.length === 1 ? "" : "s"})
@@ -1335,7 +1346,7 @@ function PromoteMemberModal({
                     onChange={(e) => pickRole(e.target.value)}
                     className="flex-1 px-4 py-2.5 rounded-xl bg-gray-50 border border-gray-200 text-[13px] focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-300 transition"
                   >
-                    <option value="">— Manual permissions —</option>
+                    <option value="">- Manual permissions -</option>
                     {roles.map((r) => (
                       <option key={r.id} value={r.id}>
                         {r.name} ({r.permissions.length} perms)
@@ -1511,7 +1522,7 @@ function FaceReviewCard({
   const livenessScore = review?.latest_liveness_score == null ? null : Number(review.latest_liveness_score);
 
   return (
-    <div className="mx-6 mb-5 rounded-2xl border border-gray-100 bg-gray-50/60 p-4">
+    <div className="h-full rounded-2xl border border-gray-100 bg-gray-50/60 p-4">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <div className="inline-flex items-center gap-2 text-[10px] font-bold uppercase tracking-wider text-gray-400">
@@ -1562,9 +1573,9 @@ function FaceReviewCard({
       </div>
 
       <div className="mt-4 grid gap-2 text-[12px] sm:grid-cols-3">
-        <FaceMetric label="Match score" value={matchScore == null ? "—" : matchScore.toFixed(3)} />
-        <FaceMetric label="Liveness" value={livenessScore == null ? "—" : livenessScore.toFixed(3)} />
-        <FaceMetric label="Last verified" value={review?.last_verified_at ? new Date(review.last_verified_at).toLocaleString() : "—"} />
+        <FaceMetric label="Match score" value={matchScore == null ? "-" : matchScore.toFixed(3)} />
+        <FaceMetric label="Liveness" value={livenessScore == null ? "-" : livenessScore.toFixed(3)} />
+        <FaceMetric label="Last verified" value={review?.last_verified_at ? new Date(review.last_verified_at).toLocaleString() : "-"} />
       </div>
     </div>
   );
@@ -1635,22 +1646,13 @@ function MemberProfileModal({
   return (
     <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4" onClick={onClose}>
       <div
-        className="bg-white w-full max-w-lg rounded-2xl shadow-2xl overflow-hidden"
+        className="bg-white w-full max-w-4xl max-h-[90vh] flex flex-col rounded-2xl shadow-2xl overflow-hidden"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="px-6 py-5 border-b border-gray-100 flex items-center gap-4">
-          {member.avatar_url ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img
-              src={member.avatar_url}
-              alt={member.full_name}
-              className="w-14 h-14 rounded-full object-cover border border-gray-200"
-            />
-          ) : (
-            <div className="w-14 h-14 rounded-full bg-[#0A4FE8] text-white text-lg font-bold flex items-center justify-center">
-              {member.full_name.charAt(0).toUpperCase()}
-            </div>
-          )}
+        <div className="px-6 py-5 border-b border-gray-100 flex items-center gap-4 shrink-0">
+          <div className="w-14 h-14 rounded-full bg-[#0A4FE8] text-white text-lg font-bold flex items-center justify-center">
+            {initials(member.full_name)}
+          </div>
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2 flex-wrap">
               <p className="text-[16px] font-semibold text-[#0D1B39] truncate">{member.full_name}</p>
@@ -1669,31 +1671,37 @@ function MemberProfileModal({
           </button>
         </div>
 
-        <div className="px-6 py-5 grid grid-cols-2 gap-4">
-          {fields.map((f) => (
-            <div key={f.label}>
-              <div className="text-[10px] uppercase tracking-wider text-gray-400 mb-0.5">{f.label}</div>
-              <div className="text-[13px] text-[#0D1B39] break-words">{f.value || "—"}</div>
+        <div className="flex-1 overflow-y-auto">
+          <div className="grid gap-5 p-6 lg:grid-cols-[minmax(0,1fr)_360px]">
+            <div className="space-y-5">
+              <div className="grid grid-cols-2 gap-4">
+                {fields.map((f) => (
+                  <div key={f.label}>
+                    <div className="text-[10px] uppercase tracking-wider text-gray-400 mb-0.5">{f.label}</div>
+                    <div className="text-[13px] text-[#0D1B39] break-words">{f.value || "-"}</div>
+                  </div>
+                ))}
+              </div>
+
+              {member.is_sub_admin && member.permissions?.length > 0 && (
+                <div>
+                  <div className="text-[10px] uppercase tracking-wider text-gray-400 mb-1">Sub-admin permissions</div>
+                  <div className="flex flex-wrap gap-1.5">
+                    {member.permissions.map((p) => (
+                      <span key={p} className="text-[11px] px-2 py-0.5 rounded-full bg-blue-50 text-[#0A4FE8] border border-blue-100">
+                        {p}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
-          ))}
+
+            <FaceReviewCard member={member} onResetFace={onResetFace} />
+          </div>
         </div>
 
-        {member.is_sub_admin && member.permissions?.length > 0 && (
-          <div className="px-6 pb-5">
-            <div className="text-[10px] uppercase tracking-wider text-gray-400 mb-1">Sub-admin permissions</div>
-            <div className="flex flex-wrap gap-1.5">
-              {member.permissions.map((p) => (
-                <span key={p} className="text-[11px] px-2 py-0.5 rounded-full bg-blue-50 text-[#0A4FE8] border border-blue-100">
-                  {p}
-                </span>
-              ))}
-            </div>
-          </div>
-        )}
-
-        <FaceReviewCard member={member} onResetFace={onResetFace} />
-
-        <div className="px-6 py-4 border-t border-gray-100 flex items-center justify-end gap-2 bg-gray-50/60">
+        <div className="px-6 py-4 border-t border-gray-100 flex items-center justify-end gap-2 bg-gray-50/60 shrink-0">
           <button
             onClick={onClose}
             className="px-4 py-2 text-sm font-medium text-gray-600 hover:bg-gray-100 rounded-lg transition"

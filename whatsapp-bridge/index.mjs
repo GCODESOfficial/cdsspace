@@ -1,12 +1,12 @@
 #!/usr/bin/env node
 // WhatsApp Web QR bridge for CDS Space.
-// Run this on a persistent host (a small VPS, Railway, Fly, or a laptop) — NOT on Vercel.
+// Run this on a persistent host (a small VPS, Railway, Fly, or a laptop) - NOT on Vercel.
 // It reads outbound messages from `whatsapp_outbox` and writes inbound messages into
 // `chat_messages` with source='whatsapp_qr'.
 //
 // Env:
-//   NEXT_PUBLIC_SUPABASE_URL
-//   SUPABASE_SERVICE_ROLE_KEY
+//   GLASHDB_URL or NEXT_PUBLIC_GLASHDB_URL
+//   GLASHDB_SERVICE_ROLE_KEY
 //   BRIDGE_POLL_MS            (optional, default 2000)
 //   BRIDGE_HEARTBEAT_MS       (optional, default 30000)
 
@@ -17,17 +17,17 @@ import QRCode from "qrcode";
 
 const { Client, LocalAuth } = pkg;
 
-const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
-const SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
+const GLASHDB_URL = process.env.GLASHDB_URL || process.env.NEXT_PUBLIC_GLASHDB_URL;
+const SERVICE_KEY = process.env.GLASHDB_SERVICE_ROLE_KEY;
 const POLL_MS = Number(process.env.BRIDGE_POLL_MS || 2000);
 const HEARTBEAT_MS = Number(process.env.BRIDGE_HEARTBEAT_MS || 30000);
 
-if (!SUPABASE_URL || !SERVICE_KEY) {
-  console.error("Missing NEXT_PUBLIC_SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY");
+if (!GLASHDB_URL || !SERVICE_KEY) {
+  console.error("Missing GLASHDB_URL/NEXT_PUBLIC_GLASHDB_URL or GLASHDB_SERVICE_ROLE_KEY");
   process.exit(1);
 }
 
-const supabase = createClient(SUPABASE_URL, SERVICE_KEY, {
+const glashdb = createClient(GLASHDB_URL, SERVICE_KEY, {
   auth: { autoRefreshToken: false, persistSession: false },
 });
 
@@ -36,7 +36,7 @@ const waRoomIdFromPhone = (p) => `whatsapp_${normalisePhone(p)}`;
 const SESSION_ID = "cds-bridge";
 
 async function setIntegrationFields(fields) {
-  const { error } = await supabase
+  const { error } = await glashdb
     .from("whatsapp_integrations")
     .update({ ...fields, updated_at: new Date().toISOString() })
     .eq("mode", "web_qr");
@@ -47,7 +47,7 @@ async function ingestInbound({ fromPhone, waName, body, externalId, mediaUrl, me
   const phone = normalisePhone(fromPhone);
   const roomId = waRoomIdFromPhone(phone);
 
-  const { data: existing } = await supabase
+  const { data: existing } = await glashdb
     .from("chat_messages")
     .select("id")
     .eq("source", "whatsapp_qr")
@@ -55,7 +55,7 @@ async function ingestInbound({ fromPhone, waName, body, externalId, mediaUrl, me
     .maybeSingle();
   if (existing?.id) return;
 
-  await supabase.from("whatsapp_contacts").upsert(
+  await glashdb.from("whatsapp_contacts").upsert(
     {
       phone,
       wa_name: waName || null,
@@ -65,13 +65,13 @@ async function ingestInbound({ fromPhone, waName, body, externalId, mediaUrl, me
     { onConflict: "phone" },
   );
 
-  const { data: contact } = await supabase
+  const { data: contact } = await glashdb
     .from("whatsapp_contacts")
     .select("client_id")
     .eq("phone", phone)
     .maybeSingle();
 
-  const { error } = await supabase.from("chat_messages").insert({
+  const { error } = await glashdb.from("chat_messages").insert({
     room_id: roomId,
     sender_id: contact?.client_id ?? null,
     sender_role: "client",
@@ -86,13 +86,13 @@ async function ingestInbound({ fromPhone, waName, body, externalId, mediaUrl, me
     return;
   }
 
-  const { data: adminProfile } = await supabase
+  const { data: adminProfile } = await glashdb
     .from("profiles")
     .select("id")
     .eq("email", "ceo@cdsspace.pro")
     .maybeSingle();
   if (adminProfile?.id) {
-    await supabase.from("notifications").insert({
+    await glashdb.from("notifications").insert({
       user_id: adminProfile.id,
       type: "new_message",
       title: `WhatsApp · ${waName || phone}`,
@@ -111,7 +111,7 @@ const client = new Client({
 });
 
 client.on("qr", async (qr) => {
-  console.log("[bridge] QR received — publishing to Supabase");
+  console.log("[bridge] QR received - publishing to GlashDB");
   try {
     const dataUrl = await QRCode.toDataURL(qr, { margin: 1, width: 320 });
     await setIntegrationFields({
@@ -128,7 +128,7 @@ client.on("qr", async (qr) => {
 
 client.on("ready", async () => {
   const me = client.info?.wid?.user || null;
-  console.log(`[bridge] ready — linked as ${me}`);
+  console.log(`[bridge] ready - linked as ${me}`);
   await setIntegrationFields({
     qr_code: null,
     qr_status: "connected",
@@ -157,7 +157,7 @@ client.on("message", async (msg) => {
   let mediaUrl = null;
   let body = msg.body || "";
 
-  // Skip status broadcasts and groups for now — 1:1 client chats only.
+  // Skip status broadcasts and groups for now - 1:1 client chats only.
   if (msg.from.endsWith("@g.us") || msg.from === "status@broadcast") return;
 
   if (msg.hasMedia) {
@@ -182,7 +182,7 @@ client.on("message", async (msg) => {
 });
 
 async function processOutbox() {
-  const { data: rows } = await supabase
+  const { data: rows } = await glashdb
     .from("whatsapp_outbox")
     .select("*")
     .eq("status", "pending")
@@ -195,7 +195,7 @@ async function processOutbox() {
     try {
       const sent = await client.sendMessage(jid, row.body || "");
       const serialised = sent?.id?._serialized || null;
-      await supabase
+      await glashdb
         .from("whatsapp_outbox")
         .update({
           status: "sent",
@@ -205,7 +205,7 @@ async function processOutbox() {
         })
         .eq("id", row.id);
       if (row.chat_message_id && serialised) {
-        await supabase
+        await glashdb
           .from("chat_messages")
           .update({ external_id: serialised })
           .eq("id", row.chat_message_id);
@@ -213,7 +213,7 @@ async function processOutbox() {
     } catch (err) {
       const attempts = (row.attempts || 0) + 1;
       const failed = attempts >= 3;
-      await supabase
+      await glashdb
         .from("whatsapp_outbox")
         .update({
           status: failed ? "failed" : "pending",

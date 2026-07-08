@@ -1,7 +1,8 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { LocationHero } from "@/components/marketing";
+import { LocationHero } from "@/components/marketing/LocationHero";
+import { LazySection } from "@/components/marketing/LazySection";
 
 
 const MapSection = dynamic(() => import("@/components/marketing/MapSection").then(mod => mod.MapSection), {
@@ -17,7 +18,9 @@ export default function LocationPage() {
         <main className="min-h-screen selection:bg-brand-blue selection:text-white bg-brand-bg relative">
             <LocationHero />
 
-            <MapSection />
+            <LazySection minHeight={840}>
+                <MapSection />
+            </LazySection>
         </main>
     );
 }

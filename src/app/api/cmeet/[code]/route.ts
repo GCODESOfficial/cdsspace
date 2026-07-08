@@ -2,6 +2,7 @@
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase";
 import { getToolActor } from "@/lib/team-tools-auth";
+import { closeStaleCmeets } from "@/lib/cmeet-autoclose";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -9,6 +10,7 @@ export const dynamic = "force-dynamic";
 export async function GET(_req: Request, ctx: { params: Promise<{ code: string }> }) {
   const { code } = await ctx.params;
   if (!code || !supabaseAdmin) return NextResponse.json({ ok: false, error: "Invalid" }, { status: 400 });
+  await closeStaleCmeets();
   const actor = await getToolActor();
   const db = supabaseAdmin as any;
   const { data } = await db

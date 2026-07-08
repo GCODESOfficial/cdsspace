@@ -15,9 +15,9 @@ export async function generateMetadata({ params }: { params: Params }): Promise<
 
     const label = data?.brand_name || data?.invite_label || "Brand Brief";
     return {
-        title: `${label} — Brand Brief · CDS Space`,
+        title: `${label} - Brand Brief · CDS Space`,
         description:
-            "Tell us about your brand. Fill in a few questions so CDS Space can craft the right strategy for you — no account needed.",
+            "Tell us about your brand. Fill in a few questions so CDS Space can craft the right strategy for you - no account needed.",
         robots: { index: false, follow: false },
     };
 }

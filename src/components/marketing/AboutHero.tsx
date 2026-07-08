@@ -140,11 +140,10 @@ export const AboutHero = () => {
                         {/* Team Image - Node 5914:1535 */}
                         <div className="w-full max-w-[916px] h-auto aspect-[916/559] relative rounded-[16px] overflow-hidden grayscale hover:grayscale-0 transition-all duration-700 shadow-lg border border-[#c8d1e0]/30">
                             <Image
-                                src="/about/group shot.svg"
+                                src="/optimized/about/group-shot.webp"
                                 alt="CDS Team"
                                 fill
-                                priority
-                                quality={95}
+                                quality={84}
                                 className="object-cover"
                                 sizes="(max-width: 768px) 100vw, (max-width: 1280px) 90vw, 916px"
                             />

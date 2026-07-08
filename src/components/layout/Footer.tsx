@@ -19,7 +19,7 @@ interface FooterLink {
     hasMap?: boolean;
 }
 
-// CDS Space HQ — used for the live map widget
+// CDS Space HQ - used for the live map widget
 const CDS_MAP = {
     query: "CDS Space, Uyo, Nigeria",
     shareUrl: "https://share.google/NIu5EOfuVtZMMvXvi",
@@ -49,9 +49,8 @@ export const Footer = () => {
         {
             title: "CDS Studio",
             links: [
-                { label: "Best Brand", href: "/consultation" },
-                { label: "BrandMe", href: "/" },
-                { label: "Brand Brief", href: "#" },
+                { label: "Blog", href: "/blog" },
+                { label: "Brand Brief", href: "/consultation" },
                 { label: "Partnership", href: "/partnership" },
                 { label: "Rollup Banners", href: "/banners" },
                 { label: "Merch", href: "/merch" },
@@ -61,7 +60,7 @@ export const Footer = () => {
         {
             title: "Community",
             links: [
-                { label: "Career", href: "#" },
+                { label: "Career", href: "/Career" },
                 { label: "X", href: "https://x.com/cdsspace_" },
                 { label: "TikTok", href: "https://vm.tiktok.com/ZS9dpUwVB8row-InHYP/" },
                 { label: "Facebook", href: "https://web.facebook.com/cdsspace" },
@@ -274,13 +273,13 @@ export const Footer = () => {
             {/* Live HQ map widget */}
             <Dialog open={mapOpen} onOpenChange={setMapOpen}>
                 <DialogContent className="bg-white p-0 max-w-3xl w-[95vw] rounded-2xl border-0 shadow-2xl overflow-hidden">
-                    <DialogTitle className="sr-only">CDS Space HQ — Uyo, Nigeria</DialogTitle>
+                    <DialogTitle className="sr-only">CDS Space HQ - Uyo, Nigeria</DialogTitle>
                     <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
                         <div className="flex items-center gap-3">
                             <Image src="/navbar/CDS Logo.svg" alt="CDS Space" width={44} height={44} />
                             <div>
                                 <div className="text-base font-semibold text-gray-900">CDS Space HQ</div>
-                                <div className="text-xs text-gray-500">Uyo, Akwa Ibom — Nigeria</div>
+                                <div className="text-xs text-gray-500">Uyo, Akwa Ibom - Nigeria</div>
                             </div>
                         </div>
                         <button onClick={() => setMapOpen(false)} className="w-9 h-9 rounded-lg hover:bg-gray-100 grid place-items-center text-gray-500 hover:text-gray-900 transition">

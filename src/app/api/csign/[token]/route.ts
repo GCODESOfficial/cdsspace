@@ -5,7 +5,7 @@ import { supabaseAdmin } from "@/lib/supabase";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-// Public GET — fetch request + attached doc body. Marks as opened on first view.
+// Public GET - fetch request + attached doc body. Marks as opened on first view.
 export async function GET(_req: Request, ctx: { params: Promise<{ token: string }> }) {
   const { token } = await ctx.params;
   if (!token || !supabaseAdmin) return NextResponse.json({ ok: false, error: "Invalid" }, { status: 400 });
@@ -35,7 +35,7 @@ export async function GET(_req: Request, ctx: { params: Promise<{ token: string 
   return NextResponse.json({ ok: true, request: reqRow, team_cdocs: doc });
 }
 
-// Public PUT — submit signature
+// Public PUT - submit signature
 export async function PUT(req: Request, ctx: { params: Promise<{ token: string }> }) {
   const { token } = await ctx.params;
   if (!token || !supabaseAdmin) return NextResponse.json({ ok: false, error: "Invalid" }, { status: 400 });
@@ -80,7 +80,7 @@ export async function PUT(req: Request, ctx: { params: Promise<{ token: string }
   return NextResponse.json({ ok: true });
 }
 
-// Public DELETE — decline to sign
+// Public DELETE - decline to sign
 export async function DELETE(_req: Request, ctx: { params: Promise<{ token: string }> }) {
   const { token } = await ctx.params;
   if (!token || !supabaseAdmin) return NextResponse.json({ ok: false, error: "Invalid" }, { status: 400 });

@@ -77,7 +77,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     if (insertErr) return NextResponse.json({ error: insertErr.message }, { status: 500 });
 
     const assets: string[] = Array.isArray(brief.assets_needed) ? brief.assets_needed : [];
-    const rows = (assets.length ? assets : ["Brand brief — scope TBD"]).map((name, idx) => ({
+    const rows = (assets.length ? assets : ["Brand brief - scope TBD"]).map((name, idx) => ({
         invoice_id: invoice.id,
         name,
         description: null,

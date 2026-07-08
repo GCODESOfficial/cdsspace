@@ -146,7 +146,7 @@ export function appToast(opts: ToastOptions | string) {
 }
 
 /* ------------------------------------------------------------------ */
-/*  <AppNotifyRoot /> — mount once in app/layout.tsx                  */
+/*  <AppNotifyRoot /> - mount once in app/layout.tsx                  */
 /* ------------------------------------------------------------------ */
 export function AppNotifyRoot() {
   const [snap, setSnap] = React.useState(store.snap());

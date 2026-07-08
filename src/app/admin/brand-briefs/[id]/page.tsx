@@ -29,7 +29,6 @@ import {
     type BrandBrief,
     type BrandBriefDraft,
 } from "@/lib/brand-brief";
-import { exportBrandBriefToPdf } from "@/lib/brand-brief-pdf";
 
 const STATUS_STYLES: Record<string, string> = {
     pending: "bg-amber-50 text-amber-700 ring-1 ring-amber-200",
@@ -97,8 +96,9 @@ export default function AdminBrandBriefDetailPage({
         setTimeout(() => setCopied(false), 1500);
     };
 
-    const download = () => {
+    const download = async () => {
         if (!draft) return;
+        const { exportBrandBriefToPdf } = await import("@/lib/brand-brief-pdf");
         exportBrandBriefToPdf(draft, {
             inviteLabel: brief?.invite_label,
             status: brief?.status,
@@ -304,7 +304,7 @@ export default function AdminBrandBriefDetailPage({
                 <TimelineCell label="Last updated" value={formatDateTime(brief.updated_at)} />
                 <TimelineCell
                     label="Submitted"
-                    value={brief.submitted_at ? formatDateTime(brief.submitted_at) : "—"}
+                    value={brief.submitted_at ? formatDateTime(brief.submitted_at) : "-"}
                     accent={brief.submitted_at ? "emerald" : undefined}
                 />
                 <TimelineCell
@@ -355,12 +355,12 @@ export default function AdminBrandBriefDetailPage({
                             <Input
                                 value={inviteLabel}
                                 onChange={(e) => setInviteLabel(e.target.value)}
-                                placeholder="e.g. Adeesi — rebrand"
+                                placeholder="e.g. Adeesi - rebrand"
                                 className="h-11 rounded-xl"
                             />
                         ) : (
                             <p className="text-[14px] text-[#0D1B39]">
-                                {brief.invite_label || <span className="text-gray-400">—</span>}
+                                {brief.invite_label || <span className="text-gray-400">-</span>}
                             </p>
                         )}
                     </div>
@@ -376,7 +376,7 @@ export default function AdminBrandBriefDetailPage({
                             />
                         ) : (
                             <p className="text-[14px] text-[#0D1B39] whitespace-pre-wrap">
-                                {brief.invite_note || <span className="text-gray-400">—</span>}
+                                {brief.invite_note || <span className="text-gray-400">-</span>}
                             </p>
                         )}
                     </div>
@@ -411,7 +411,7 @@ export default function AdminBrandBriefDetailPage({
 }
 
 function formatDateTime(iso: string | null | undefined): string {
-    if (!iso) return "—";
+    if (!iso) return "-";
     try {
         return new Date(iso).toLocaleString(undefined, {
             month: "short",
@@ -489,10 +489,10 @@ function FieldCell({
                     {Array.isArray(raw)
                         ? raw.length
                             ? raw.join(", ")
-                            : <span className="text-gray-400">—</span>
+                            : <span className="text-gray-400">-</span>
                         : raw?.toString().trim()
                           ? raw.toString()
-                          : <span className="text-gray-400">—</span>}
+                          : <span className="text-gray-400">-</span>}
                 </p>
             ) : fieldKey === "assets_needed" ? (
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">

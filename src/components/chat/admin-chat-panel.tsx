@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef, useCallback } from "react";
+import { appPrompt } from "@/lib/app-notify";
 import {
   MessageSquare,
   Send,
@@ -140,7 +141,7 @@ export function AdminChatPanel() {
   // Initial rooms fetch + polling
   useEffect(() => {
     fetchRooms();
-    const interval = setInterval(fetchRooms, 5000);
+    const interval = setInterval(() => { if (!document.hidden) fetchRooms(); }, 8000);
     return () => clearInterval(interval);
   }, [fetchRooms]);
 
@@ -150,7 +151,7 @@ export function AdminChatPanel() {
       setIsLoadingMessages(true);
       fetchMessages();
     }
-    const interval = setInterval(fetchMessages, 5000);
+    const interval = setInterval(() => { if (!document.hidden) fetchMessages(); }, 8000);
     return () => clearInterval(interval);
   }, [selectedRoom, fetchMessages]);
 
@@ -231,7 +232,7 @@ export function AdminChatPanel() {
     try {
       const payload: Record<string, unknown> = { action };
       if (action === "translate") {
-        const language = window.prompt("Translate this message to which language?", "English");
+        const language = await appPrompt({ title: "Translate message", message: "Translate this message to which language?", defaultValue: "English" });
         if (!language?.trim()) return;
         payload.language = language.trim();
       }
@@ -291,11 +292,9 @@ export function AdminChatPanel() {
         (room.meta.username ? `@${room.meta.username}` : room.meta.external_user_id)
       );
     }
-    // No linked profile yet — hide the raw uuid from the admin UI.
+    // No linked profile yet - hide the raw uuid from the admin UI.
     return "Client";
   };
-
-  const getAvatarUrl = (room: ChatRoom) => room.client?.avatar_url || null;
 
   const getInitials = (room: ChatRoom) => {
     const name = getClientName(room);
@@ -364,14 +363,7 @@ export function AdminChatPanel() {
                 <div className="flex items-start gap-3">
                   {/* Avatar */}
                   <div className="w-10 h-10 rounded-full bg-[#2a3578] flex items-center justify-center shrink-0 overflow-hidden text-[#5BA8FF] text-[11px] font-bold uppercase">
-                    {getAvatarUrl(room) ? (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img
-                        src={getAvatarUrl(room) as string}
-                        alt={getClientName(room)}
-                        className="w-full h-full object-cover"
-                      />
-                    ) : room.client || room.whatsapp || room.meta ? (
+                    {room.client || room.whatsapp || room.meta ? (
                       <span>{getInitials(room)}</span>
                     ) : (
                       <User className="w-5 h-5" />
@@ -426,14 +418,7 @@ export function AdminChatPanel() {
                 <ChevronLeft className="w-5 h-5" />
               </button>
               <div className="w-9 h-9 rounded-full bg-[#2a3578] flex items-center justify-center overflow-hidden text-[#5BA8FF] text-[11px] font-bold uppercase">
-                {selectedRoomData && getAvatarUrl(selectedRoomData) ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img
-                    src={getAvatarUrl(selectedRoomData) as string}
-                    alt={getClientName(selectedRoomData)}
-                    className="w-full h-full object-cover"
-                  />
-                ) : selectedRoomData && (selectedRoomData.client || selectedRoomData.whatsapp || selectedRoomData.meta) ? (
+                {selectedRoomData && (selectedRoomData.client || selectedRoomData.whatsapp || selectedRoomData.meta) ? (
                   <span>{getInitials(selectedRoomData)}</span>
                 ) : (
                   <User className="w-5 h-5" />

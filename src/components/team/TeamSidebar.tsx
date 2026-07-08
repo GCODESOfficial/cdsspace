@@ -4,9 +4,12 @@ import Link from "next/link";
 import Image from "next/image";
 import { usePathname } from "next/navigation";
 import { useTranslation } from "@/lib/i18n/context";
+import { initials } from "@/lib/utils";
 import { AnimatePresence, motion } from "framer-motion";
 import {
   LayoutDashboard,
+  CalendarCheck,
+  Clock,
   Briefcase,
   MessageSquare,
   ShieldCheck,
@@ -17,6 +20,7 @@ import {
   Settings,
   LogOut,
   ExternalLink,
+  GraduationCap,
   X,
 } from "lucide-react";
 
@@ -26,6 +30,7 @@ interface TeamSidebarProps {
     avatar_url: string | null;
     role_title: string | null;
     is_sub_admin: boolean;
+    has_screening_assignment?: boolean;
   };
   onLogout: () => void;
   mobileOpen?: boolean;
@@ -38,7 +43,10 @@ export function TeamSidebar({ member, onLogout, mobileOpen = false, onClose }: T
 
   const mainItems = [
     { label: t("nav.overview"), href: "/team", icon: LayoutDashboard, exact: true },
+    { label: "My Day", href: "/team/my-day", icon: CalendarCheck },
+    { label: "Attendance", href: "/team/timebook", icon: Clock },
     { label: t("nav.work"), href: "/team/work", icon: Briefcase },
+    { label: "Weekly Report", href: "/team/work-tracking", icon: FileText },
     { label: t("nav.chat"), href: "/team/chat", icon: MessageSquare },
     { label: t("nav.protectDocs"), href: "/team/protect-docs", icon: ShieldCheck },
     { label: t("nav.cmeet"), href: "/team/cmeet", icon: Video },
@@ -94,6 +102,21 @@ export function TeamSidebar({ member, onLogout, mobileOpen = false, onClose }: T
           );
         })}
 
+        {member.has_screening_assignment && (
+          <Link
+            href="/team/screening"
+            onClick={onClose}
+            className={`flex items-center gap-3 px-3 py-2.5 rounded-xl text-[13.5px] transition ${
+              pathname === "/team/screening" || pathname?.startsWith("/team/screening/")
+                ? "bg-brand-blue text-white font-semibold shadow-[0_6px_18px_rgba(28,78,209,0.25)]"
+                : "text-brand-body hover:bg-brand-bg/70 hover:text-brand-navy"
+            }`}
+          >
+            <GraduationCap className="w-[18px] h-[18px]" />
+            <span>Screening Questions</span>
+          </Link>
+        )}
+
         {member.is_sub_admin && (
           <>
             <div className="pt-4 pb-1 px-3">
@@ -141,18 +164,9 @@ export function TeamSidebar({ member, onLogout, mobileOpen = false, onClose }: T
         </button>
 
         <div className="mt-2 px-3 py-3 rounded-xl bg-brand-bg/60 flex items-center gap-3">
-          {member.avatar_url ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img
-              src={member.avatar_url}
-              alt={member.full_name}
-              className="w-9 h-9 rounded-full object-cover border border-brand-stroke/40"
-            />
-          ) : (
-            <div className="w-9 h-9 rounded-full bg-brand-blue text-white text-[13px] font-bold flex items-center justify-center">
-              {member.full_name.charAt(0).toUpperCase()}
-            </div>
-          )}
+          <div className="w-9 h-9 rounded-full bg-brand-blue text-white text-[13px] font-bold flex items-center justify-center">
+            {initials(member.full_name)}
+          </div>
           <div className="min-w-0 flex-1">
             <p className="text-[13px] font-semibold text-brand-navy truncate">
               {member.full_name}

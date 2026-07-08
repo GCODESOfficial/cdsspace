@@ -76,7 +76,7 @@ export const Pricing = () => {
                             height={600}
                             className="w-full h-auto object-contain pointer-events-none"
                             draggable={false}
-                            priority
+                            loading="lazy"
                         />
                     </motion.div>
 

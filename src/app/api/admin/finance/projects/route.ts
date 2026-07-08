@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { financeDb, requireFinanceAdminAsync } from "@/lib/finance/api-auth";
+import { ensureProjectChannel } from "@/lib/team-chat-channels";
 
 export async function GET(req: NextRequest) {
   const denied = await requireFinanceAdminAsync(req);
@@ -24,20 +25,36 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   const denied = await requireFinanceAdminAsync(req);
   if (denied) return denied;
-  const body = await req.json();
-  const { name, client, currency, duration_start, duration_end, notes } = body;
+  const body = await req.json().catch(() => ({}));
+  const name = String(body?.name ?? "").trim();
+  const client = String(body?.client ?? "").trim();
+  const currency = String(body?.currency ?? "").trim();
+  const { duration_start, duration_end, notes } = body ?? {};
   if (!name || !client || !currency) {
-    return NextResponse.json({ error: "name, client, currency required" }, { status: 400 });
+    return NextResponse.json({ error: "Project name, client and currency are required." }, { status: 400 });
   }
   if (!["NGN", "RWF", "USD"].includes(currency)) {
     return NextResponse.json({ error: "invalid currency" }, { status: 400 });
   }
+  const isDate = (v: unknown) => typeof v === "string" && /^\d{4}-\d{2}-\d{2}$/.test(v);
+  const start = isDate(duration_start) ? duration_start : null;
+  const end = isDate(duration_end) ? duration_end : null;
+  if (start && end && end < start) {
+    return NextResponse.json({ error: "Project end date cannot be before the start date." }, { status: 400 });
+  }
   const sb = financeDb();
   const { data, error } = await sb
     .from("finance_projects")
-    .insert({ name, client, currency, duration_start: duration_start || null, duration_end: duration_end || null, notes: notes || null })
+    .insert({ name, client, currency, duration_start: start, duration_end: end, notes: (typeof notes === "string" && notes.trim()) || null })
     .select()
     .single();
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  if (error) {
+    console.error("[finance/projects] create failed:", error.message);
+    return NextResponse.json({ error: "Could not create the project. Please check the details and try again." }, { status: 500 });
+  }
+
+  // Auto-create the project's team chat room (best-effort, never blocks).
+  await ensureProjectChannel(data.id).catch(() => null);
+
   return NextResponse.json({ project: data });
 }

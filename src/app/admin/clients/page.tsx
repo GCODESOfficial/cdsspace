@@ -58,7 +58,7 @@ export default function ClientsOverview() {
       <div className="mb-8">
         <p className="text-[#0A4FE8] text-sm font-semibold">Management</p>
         <h1 className="text-[28px] font-bold text-[#0D1B39] tracking-tight">Clients</h1>
-        <p className="text-gray-400 text-[13px] mt-1">All client relationships in one place — brands, orders, and testimonials.</p>
+        <p className="text-gray-400 text-[13px] mt-1">All client relationships in one place - brands, orders, and testimonials.</p>
       </div>
 
       {/* Stats */}

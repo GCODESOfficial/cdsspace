@@ -1,0 +1,17 @@
+{
+  "name": "cds-zkteco-bridge",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Local agent that exposes a USB ZKTeco fingerprint reader (ZKFinger SDK) over localhost HTTP for the CDS Space Time Machine portal. Ships with a working simulator so the portal is usable without hardware.",
+  "type": "module",
+  "main": "index.mjs",
+  "scripts": {
+    "start": "node index.mjs",
+    "simulator": "ZK_DRIVER=simulator node index.mjs"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "express": "^4.19.2",
+    "koffi": "^2.9.0"
+  }
+}

@@ -177,7 +177,7 @@ export default function PricingPage() {
                   const val = getPrice(plan, ind).price_usd;
                   return (
                     <td key={plan} className="py-3 px-6 text-right text-[13px] font-mono text-gray-600">
-                      {val > 0 ? `$${val.toLocaleString()}` : <span className="text-gray-300">—</span>}
+                      {val > 0 ? `$${val.toLocaleString()}` : <span className="text-gray-300">-</span>}
                     </td>
                   );
                 })}

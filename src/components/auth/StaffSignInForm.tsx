@@ -2,43 +2,10 @@
 
 import { useEffect, useState } from "react";
 import NextLink from "next/link";
-import {
-  Copy,
-  Eye,
-  EyeOff,
-  KeyRound,
-  Loader2,
-  MapPin,
-  QrCode,
-  RefreshCw,
-  ShieldCheck,
-  Smartphone,
-  Users,
-} from "lucide-react";
+import { Eye, EyeOff, Loader2, ShieldCheck, Users, Download, Monitor, Smartphone, CheckCircle2 } from "lucide-react";
+import { detectPlatform, detectOs, type Platform } from "@/lib/desktop-app";
 
 type Tab = "admin" | "team";
-
-interface FaceChallenge {
-  token: string;
-  code: string;
-  purpose: "enrollment" | "verification" | "login";
-  actions: string[];
-  expires_at: string;
-}
-
-interface FaceCompleteResult {
-  ok: boolean;
-  requires_geofence?: boolean;
-  face_event_id?: string;
-  member?: {
-    full_name?: string | null;
-  } | null;
-}
-
-interface GeofenceStep {
-  faceEventId: string;
-  memberName: string;
-}
 
 export function StaffSignInForm({ initialTab = "admin" }: { initialTab?: Tab }) {
   const [tab, setTab] = useState<Tab>(initialTab);
@@ -56,19 +23,24 @@ export function StaffSignInForm({ initialTab = "admin" }: { initialTab?: Tab }) 
   const [identifier, setIdentifier] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
-  const [teamBypassCode, setTeamBypassCode] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
-  const [faceChallenge, setFaceChallenge] = useState<FaceChallenge | null>(null);
-  const [faceMemberName, setFaceMemberName] = useState("");
-  const [geofenceStep, setGeofenceStep] = useState<GeofenceStep | null>(null);
 
-  // Invite redemption from ?invite=TOKEN — works on both tabs. If a team
+  // Invite redemption from ?invite=TOKEN - works on both tabs. If a team
   // invite link is opened, we auto-switch to the Team tab so the pre-fill
   // lines up with the right endpoint.
   const [inviteStatus, setInviteStatus] = useState<"idle" | "redeeming" | "ready" | "error">("idle");
   const [inviteMessage, setInviteMessage] = useState<string | null>(null);
   const [inviteProcessed, setInviteProcessed] = useState(false);
+
+  // Platform detection for the team-portal download prompt. Runs client-side
+  // only (defaults to desktop-browser during SSR so nothing flashes wrong).
+  const [platform, setPlatform] = useState<Platform>("desktop-browser");
+  const [os, setOs] = useState<"mac" | "windows" | "other">("other");
+  useEffect(() => {
+    setPlatform(detectPlatform());
+    setOs(detectOs());
+  }, []);
 
   // Pre-fill from a just-redeemed team invite that walked the user through
   // /team/invite/[token]. The setup form stashes { username, password } in
@@ -88,7 +60,7 @@ export function StaffSignInForm({ initialTab = "admin" }: { initialTab?: Tab }) 
       if (pw) setPassword(pw);
       setInviteStatus("ready");
       setInviteMessage(
-        `Welcome${full_name ? `, ${full_name.split(" ")[0]}` : ""}. Your account is ready — press Sign In to continue.`,
+        `Welcome${full_name ? `, ${full_name.split(" ")[0]}` : ""}. Your account is ready - press Sign In to continue.`,
       );
     } catch {
       // ignore malformed payload
@@ -131,7 +103,7 @@ export function StaffSignInForm({ initialTab = "admin" }: { initialTab?: Tab }) 
         setIdentifier(json.username ?? json.email ?? "");
         setPassword(json.password ?? "");
         setInviteStatus("ready");
-        setInviteMessage("Welcome. Your credentials are filled in — press Sign In to continue.");
+        setInviteMessage("Welcome. Your credentials are filled in - press Sign In to continue.");
       })
       .catch((e) => {
         setInviteStatus("error");
@@ -142,8 +114,6 @@ export function StaffSignInForm({ initialTab = "admin" }: { initialTab?: Tab }) 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
-    setFaceChallenge(null);
-    setGeofenceStep(null);
     setIsLoading(true);
 
     try {
@@ -164,19 +134,10 @@ export function StaffSignInForm({ initialTab = "admin" }: { initialTab?: Tab }) 
         const res = await fetch("/api/team/login", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            identifier,
-            password,
-            bypass_code: teamBypassCode.trim() || undefined,
-          }),
+          body: JSON.stringify({ identifier, password }),
           credentials: "include",
         });
         const json = await res.json();
-        if (json.requires_face_setup || json.requires_face_verification) {
-          setFaceChallenge(json.face_challenge);
-          setFaceMemberName(json.member?.full_name || "");
-          return;
-        }
         if (!res.ok || !json.ok) {
           setError(json.error || "Invalid credentials");
           return;
@@ -194,49 +155,10 @@ export function StaffSignInForm({ initialTab = "admin" }: { initialTab?: Tab }) 
     if (next === tab) return;
     setTab(next);
     setError(null);
-    setFaceChallenge(null);
-    setGeofenceStep(null);
     // Keep identifier/password so a user who mis-picked doesn't have to retype
   }
 
   const isAdmin = tab === "admin";
-
-  if (!isAdmin && faceChallenge) {
-    return (
-      <FaceHandoffPanel
-        challenge={faceChallenge}
-        memberName={faceMemberName}
-        onBack={() => {
-          setFaceChallenge(null);
-          setError(null);
-        }}
-        onDone={(result) => {
-          if (result.requires_geofence && result.face_event_id) {
-            setFaceChallenge(null);
-            setGeofenceStep({
-              faceEventId: result.face_event_id,
-              memberName: result.member?.full_name || faceMemberName,
-            });
-            return;
-          }
-          window.location.href = "/team";
-        }}
-      />
-    );
-  }
-
-  if (!isAdmin && geofenceStep) {
-    return (
-      <GeofencePanel
-        faceEventId={geofenceStep.faceEventId}
-        memberName={geofenceStep.memberName}
-        onBack={() => {
-          setGeofenceStep(null);
-          setError(null);
-        }}
-      />
-    );
-  }
 
   return (
     <div className="w-full flex flex-col gap-6 lg:gap-8 xl:gap-[32px] 2xl:gap-[40px]">
@@ -255,7 +177,7 @@ export function StaffSignInForm({ initialTab = "admin" }: { initialTab?: Tab }) 
         </p>
       </div>
 
-      {/* Segmented toggle — Admin | Team side by side */}
+      {/* Segmented toggle - Admin | Team side by side */}
       <div className="w-full bg-brand-bg border border-brand-stroke rounded-xl p-1 flex relative">
         <div
           className="absolute top-1 bottom-1 w-[calc(50%-4px)] rounded-xl bg-white border border-brand-stroke shadow-[0_4px_12px_rgba(4,11,55,0.06)] transition-transform duration-300"
@@ -283,7 +205,69 @@ export function StaffSignInForm({ initialTab = "admin" }: { initialTab?: Tab }) 
         </button>
       </div>
 
-      {/* Invite banner — shows for whichever tab redeemed the invite */}
+      {/* Team: platform-aware access prompt */}
+      {!isAdmin && platform === "desktop-browser" && (
+        <div className="rounded-2xl border border-brand-blue/20 bg-brand-blue/[0.04] p-4">
+          <div className="flex items-start gap-3">
+            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-brand-blue/10">
+              <Monitor className="h-5 w-5 text-brand-blue" />
+            </div>
+            <div className="min-w-0">
+              <p className="text-[14px] font-bold text-brand-navy">Get the CDS Space app</p>
+              <p className="mt-0.5 text-[12.5px] leading-relaxed text-brand-body/70">
+                For full work sessions (automatic background reporting across all your screens),
+                download the desktop app and sign in there. You can also just continue in this
+                browser below — sign-in works either way.
+              </p>
+            </div>
+          </div>
+          <div className="mt-3 flex flex-col gap-2 sm:flex-row">
+            <NextLink
+              href="/download"
+              className={`inline-flex flex-1 items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-[13px] font-semibold transition ${os === "mac" ? "bg-brand-blue text-white hover:bg-brand-blue/90" : "bg-white text-brand-navy border border-brand-stroke hover:border-brand-blue/40"}`}
+            >
+              <Download className="h-4 w-4" /> Download for macOS
+            </NextLink>
+            <NextLink
+              href="/download"
+              className={`inline-flex flex-1 items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-[13px] font-semibold transition ${os === "windows" ? "bg-brand-blue text-white hover:bg-brand-blue/90" : "bg-white text-brand-navy border border-brand-stroke hover:border-brand-blue/40"}`}
+            >
+              <Download className="h-4 w-4" /> Download for Windows
+            </NextLink>
+          </div>
+          <p className="mt-2 text-center text-[11.5px] text-brand-body/50">
+            Continuing in the browser signs you in with activity-only tracking.
+          </p>
+        </div>
+      )}
+
+      {/* Team: running inside the desktop app */}
+      {!isAdmin && platform === "desktop-app" && (
+        <div className="flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-[12.5px] font-medium text-emerald-700">
+          <CheckCircle2 className="h-4 w-4 shrink-0" /> CDS Space desktop app detected — you&apos;re all set to sign in.
+        </div>
+      )}
+
+      {/* Team: mobile / tablet — web portal is allowed here */}
+      {!isAdmin && platform === "mobile" && (
+        <div className="flex items-start gap-2 rounded-xl border border-brand-blue/20 bg-brand-blue/[0.04] px-4 py-3 text-[12.5px] leading-relaxed text-brand-body/75">
+          <Smartphone className="mt-0.5 h-4 w-4 shrink-0 text-brand-blue" />
+          <span>On mobile you can sign in and use the web portal directly. The desktop app is only needed on computers.</span>
+        </div>
+      )}
+
+      {/* Team policy notice: VPN + monitoring disclosure (all platforms) */}
+      {!isAdmin && (
+        <div className="px-4 py-3 rounded-xl text-[12.5px] leading-relaxed border bg-amber-50 border-amber-200 text-amber-800">
+          <p className="font-semibold">Before you sign in</p>
+          <ul className="mt-1 list-disc pl-4 space-y-0.5">
+            <li><b>Do not use a VPN</b> when logging in or checking in — it interferes with attendance and location verification.</li>
+            <li>Work sessions are monitored during work hours (activity and periodic screen captures) to keep reporting, compliance and productive use of work time fair for everyone.</li>
+          </ul>
+        </div>
+      )}
+
+      {/* Invite banner - shows for whichever tab redeemed the invite */}
       {inviteStatus !== "idle" && (
         <div
           className={
@@ -355,33 +339,13 @@ export function StaffSignInForm({ initialTab = "admin" }: { initialTab?: Tab }) 
           </div>
         </div>
 
-        {!isAdmin && (
-          <div className="flex flex-col gap-1.5 2xl:gap-2">
-            <label className="text-brand-body text-[13px] lg:text-[14px] 2xl:text-[15px] font-medium">
-              Team bypass code
-            </label>
-            <div className="bg-brand-bg border border-brand-stroke rounded-xl px-3 lg:px-4 py-3 lg:py-3.5 2xl:py-4 flex items-center gap-2 transition-colors focus-within:border-brand-blue/40">
-              <KeyRound className="h-4 w-4 text-brand-mute" />
-              <input
-                type="text"
-                value={teamBypassCode}
-                onChange={(e) => setTeamBypassCode(e.target.value.toUpperCase())}
-                placeholder="Optional super-admin code"
-                disabled={isLoading}
-                autoComplete="one-time-code"
-                className="w-full bg-transparent outline-none text-brand-navy text-[13px] lg:text-[14px] 2xl:text-[15px] font-medium placeholder:text-brand-mute disabled:opacity-50"
-              />
-            </div>
-          </div>
-        )}
-
         {error && (
           <div className="bg-rose-50 border border-rose-200 text-rose-600 px-3 lg:px-4 py-2.5 lg:py-3 rounded-xl text-xs lg:text-sm font-medium">
             {error}
           </div>
         )}
 
-        {/* CTA — mirrors client sign-in button */}
+        {/* CTA - mirrors client sign-in button */}
         <button
           type="submit"
           disabled={isLoading}
@@ -409,339 +373,6 @@ export function StaffSignInForm({ initialTab = "admin" }: { initialTab?: Tab }) 
           Sign in here
         </NextLink>
       </div>
-    </div>
-  );
-}
-
-function FaceHandoffPanel({
-  challenge,
-  memberName,
-  onBack,
-  onDone,
-}: {
-  challenge: FaceChallenge;
-  memberName: string;
-  onBack: () => void;
-  onDone: (result: FaceCompleteResult) => void;
-}) {
-  const [origin, setOrigin] = useState("");
-  const [qrDataUrl, setQrDataUrl] = useState("");
-  const [pollingState, setPollingState] = useState<"waiting" | "verifying" | "expired" | "error">("waiting");
-  const [error, setError] = useState<string | null>(null);
-  const linkPath = `/team/face/${challenge.code}`;
-  const fullLink = origin ? `${origin}${linkPath}` : linkPath;
-  const isEnrollment = challenge.purpose === "enrollment";
-
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    setOrigin(window.location.origin);
-  }, []);
-
-  useEffect(() => {
-    let cancelled = false;
-    if (!fullLink.startsWith("http")) return;
-    import("qrcode")
-      .then((QRCode) => QRCode.toDataURL(fullLink, { margin: 1, width: 240, color: { dark: "#0D1B39", light: "#FFFFFF" } }))
-      .then((url) => {
-        if (!cancelled) setQrDataUrl(url);
-      })
-      .catch(() => {
-        if (!cancelled) setError("Could not generate QR code. Use the short link instead.");
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [fullLink]);
-
-  useEffect(() => {
-    let cancelled = false;
-    const check = async () => {
-      try {
-        setPollingState((current) => current === "waiting" ? "verifying" : current);
-        const res = await fetch(`/api/team/face/status?code=${encodeURIComponent(challenge.code)}`, {
-          credentials: "include",
-          cache: "no-store",
-        });
-        const json = await res.json();
-        if (cancelled) return;
-        if (!res.ok || !json.ok) {
-          setPollingState("error");
-          setError(json.error || "Could not verify face handoff.");
-          return;
-        }
-        if (json.status === "expired") {
-          setPollingState("expired");
-          setError("This face link expired. Go back and sign in again.");
-          return;
-        }
-        if (json.status === "authenticated") {
-          window.location.href = "/team";
-          return;
-        }
-        if (json.status === "passed" && json.requires_geofence && json.face_event_id) {
-          onDone({
-            ok: true,
-            requires_geofence: true,
-            face_event_id: json.face_event_id,
-            member: json.member,
-          });
-          return;
-        }
-        setPollingState("waiting");
-      } catch {
-        if (!cancelled) {
-          setPollingState("error");
-          setError("Connection lost while waiting for phone verification.");
-        }
-      }
-    };
-    const immediate = window.setTimeout(check, 800);
-    const interval = window.setInterval(check, 2500);
-    return () => {
-      cancelled = true;
-      window.clearTimeout(immediate);
-      window.clearInterval(interval);
-    };
-  }, [challenge.code, onDone]);
-
-  async function copyLink() {
-    try {
-      await navigator.clipboard.writeText(fullLink);
-    } catch {
-      setError("Copy failed. Type the short link on your phone instead.");
-    }
-  }
-
-  return (
-    <div className="w-full flex flex-col gap-5 sm:gap-6">
-      <div>
-        <p className="text-[11px] uppercase tracking-[0.2em] text-brand-blue font-bold">
-          {isEnrollment ? "Face Setup" : "Face Verification"}
-        </p>
-        <h1 className="mt-2 text-brand-navy text-[26px] lg:text-[32px] font-semibold tracking-[-0.02em] leading-tight">
-          Continue on your phone
-        </h1>
-        <p className="mt-2 text-brand-body text-sm leading-relaxed">
-          {memberName ? `${memberName.split(" ")[0]}, ` : ""}
-          scan the QR code or open the short link on your phone to complete the liveness check. This desktop will continue automatically.
-        </p>
-      </div>
-
-      <div className="grid gap-4 sm:grid-cols-[auto_1fr] sm:items-center rounded-[24px] border border-brand-stroke bg-brand-bg p-4 sm:p-5">
-        <div className="mx-auto flex h-[196px] w-[196px] items-center justify-center rounded-[24px] border border-white bg-white p-3 shadow-sm">
-          {qrDataUrl ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img src={qrDataUrl} alt="Face verification QR code" className="h-full w-full" />
-          ) : (
-            <QrCode className="h-16 w-16 text-brand-blue/40" />
-          )}
-        </div>
-        <div className="min-w-0">
-          <div className="mb-3 inline-flex items-center gap-2 rounded-full bg-white px-3 py-1.5 text-[11px] font-bold uppercase tracking-[0.16em] text-brand-blue">
-            <Smartphone className="h-3.5 w-3.5" />
-            Phone check
-          </div>
-          <p className="text-[13px] font-semibold text-brand-navy">Short link</p>
-          <div className="mt-2 flex items-center gap-2 rounded-2xl border border-brand-stroke bg-white px-3 py-3">
-            <code className="min-w-0 flex-1 truncate text-[13px] font-semibold text-brand-navy">
-              {fullLink.replace(/^https?:\/\//, "")}
-            </code>
-            <button
-              type="button"
-              onClick={copyLink}
-              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-brand-bg text-brand-blue"
-              aria-label="Copy phone link"
-            >
-              <Copy className="h-4 w-4" />
-            </button>
-          </div>
-          <p className="mt-3 text-[12px] leading-5 text-brand-body/70">
-            Link expires at {new Date(challenge.expires_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}.
-          </p>
-        </div>
-      </div>
-
-      <div className="rounded-2xl border border-brand-stroke bg-white px-4 py-3">
-        <div className="flex items-center gap-3">
-          {pollingState === "waiting" || pollingState === "verifying" ? (
-            <Loader2 className="h-4 w-4 animate-spin text-brand-blue" />
-          ) : (
-            <RefreshCw className="h-4 w-4 text-rose-500" />
-          )}
-          <p className="text-[13px] font-semibold text-brand-navy">
-            {pollingState === "waiting" || pollingState === "verifying"
-              ? "Waiting for phone verification..."
-              : "Phone verification needs attention"}
-          </p>
-        </div>
-        {error && <p className="mt-2 text-[12px] leading-5 text-rose-600">{error}</p>}
-      </div>
-
-      <button
-        type="button"
-        onClick={onBack}
-        className="h-12 rounded-xl border border-brand-stroke bg-white text-sm font-semibold text-brand-body"
-      >
-        Back to sign in
-      </button>
-    </div>
-  );
-}
-
-function GeofencePanel({
-  faceEventId,
-  memberName,
-  onBack,
-}: {
-  faceEventId: string;
-  memberName: string;
-  onBack: () => void;
-}) {
-  const [location, setLocation] = useState<{
-    latitude: number;
-    longitude: number;
-    accuracy: number | null;
-    captured_at: string;
-  } | null>(null);
-  const [bypassCode, setBypassCode] = useState("");
-  const [error, setError] = useState<string | null>(null);
-  const [locating, setLocating] = useState(false);
-  const [submitting, setSubmitting] = useState(false);
-
-  function captureLocation() {
-    setError(null);
-    if (!navigator.geolocation) {
-      setError("Location access is not available in this browser.");
-      return;
-    }
-    setLocating(true);
-    navigator.geolocation.getCurrentPosition(
-      (position) => {
-        setLocation({
-          latitude: position.coords.latitude,
-          longitude: position.coords.longitude,
-          accuracy: position.coords.accuracy ?? null,
-          captured_at: new Date().toISOString(),
-        });
-        setLocating(false);
-      },
-      () => {
-        setError("Location permission was denied. Enter a team bypass code to continue.");
-        setLocating(false);
-      },
-      { enableHighAccuracy: true, timeout: 15000, maximumAge: 30000 },
-    );
-  }
-
-  async function submitGeofence() {
-    setSubmitting(true);
-    setError(null);
-    try {
-      const res = await fetch("/api/team/login/geofence", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include",
-        body: JSON.stringify({
-          face_event_id: faceEventId,
-          location,
-          bypass_code: bypassCode.trim() || undefined,
-        }),
-      });
-      const json = await res.json();
-      if (!res.ok || !json.ok) {
-        setError(json.error || "Location verification failed.");
-        return;
-      }
-      window.location.href = "/team";
-    } finally {
-      setSubmitting(false);
-    }
-  }
-
-  return (
-    <div className="w-full flex flex-col gap-5">
-      <div>
-        <p className="text-[11px] uppercase tracking-[0.2em] text-brand-blue font-bold">
-          Location Check
-        </p>
-        <h1 className="mt-2 text-brand-navy text-[26px] lg:text-[32px] font-semibold tracking-[-0.02em] leading-tight">
-          Verify office location
-        </h1>
-        <p className="mt-2 text-brand-body text-sm leading-relaxed">
-          {memberName ? `${memberName.split(" ")[0]}, ` : ""}
-          continue with your current location or a super-admin team bypass code.
-        </p>
-      </div>
-
-      <div className="rounded-2xl border border-brand-stroke bg-brand-bg p-4">
-        <div className="flex items-start gap-3">
-          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-blue-50 text-brand-blue">
-            <MapPin className="h-5 w-5" />
-          </div>
-          <div>
-            <p className="text-sm font-bold text-brand-navy">
-              {location ? "Location captured" : "CDS Space HQ geofence"}
-            </p>
-            <p className="mt-1 text-xs leading-relaxed text-brand-body">
-              {location
-                ? `Accuracy: ${Math.round(location.accuracy ?? 0)}m`
-                : "Onsite and assigned hybrid staff must be within the office radius."}
-            </p>
-          </div>
-        </div>
-      </div>
-
-      <div className="flex flex-col gap-1.5 2xl:gap-2">
-        <label className="text-brand-body text-[13px] lg:text-[14px] 2xl:text-[15px] font-medium">
-          Team bypass code
-        </label>
-        <div className="bg-brand-bg border border-brand-stroke rounded-xl px-3 lg:px-4 py-3 lg:py-3.5 2xl:py-4 flex items-center gap-2 transition-colors focus-within:border-brand-blue/40">
-          <KeyRound className="h-4 w-4 text-brand-mute" />
-          <input
-            type="text"
-            value={bypassCode}
-            onChange={(e) => setBypassCode(e.target.value.toUpperCase())}
-            placeholder="Optional super-admin code"
-            autoComplete="one-time-code"
-            className="w-full bg-transparent outline-none text-brand-navy text-[13px] lg:text-[14px] 2xl:text-[15px] font-medium placeholder:text-brand-mute"
-          />
-        </div>
-      </div>
-
-      {error && (
-        <div className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-medium text-rose-600">
-          {error}
-        </div>
-      )}
-
-      <div className="grid grid-cols-2 gap-2">
-        <button
-          type="button"
-          onClick={onBack}
-          className="h-12 rounded-xl border border-brand-stroke bg-white text-sm font-semibold text-brand-body"
-        >
-          Back
-        </button>
-        <button
-          type="button"
-          onClick={captureLocation}
-          disabled={locating}
-          className="inline-flex h-12 items-center justify-center gap-2 rounded-xl border border-brand-stroke bg-white text-sm font-semibold text-brand-navy disabled:opacity-50"
-        >
-          {locating ? <Loader2 className="h-4 w-4 animate-spin" /> : <MapPin className="h-4 w-4" />}
-          Capture
-        </button>
-      </div>
-
-      <button
-        type="button"
-        onClick={submitGeofence}
-        disabled={submitting || (!location && !bypassCode.trim())}
-        className="inline-flex h-12 items-center justify-center gap-2 rounded-xl bg-brand-blue text-sm font-semibold text-white disabled:opacity-50"
-      >
-        {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <ShieldCheck className="h-4 w-4" />}
-        Finish sign in
-      </button>
     </div>
   );
 }

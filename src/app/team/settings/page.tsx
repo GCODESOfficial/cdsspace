@@ -1,8 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Loader2, Save, UserRound, Lock, Globe, Camera, Check } from "lucide-react";
-import { supabase } from "@/lib/supabase";
+import { Loader2, Save, UserRound, Lock, Globe, Check } from "lucide-react";
+import { initials } from "@/lib/utils";
 import { useTranslation, LOCALES, type Locale } from "@/lib/i18n/context";
 
 interface Profile {
@@ -110,40 +110,8 @@ function ProfileForm({ profile, onUpdate }: { profile: Profile; onUpdate: (p: Pr
   const [phone, setPhone] = useState(profile.phone || "");
   const [location, setLocation] = useState(profile.location || "");
   const [bio, setBio] = useState(profile.bio || "");
-  const [avatar, setAvatar] = useState(profile.avatar_url);
-  const [uploading, setUploading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [toast, setToast] = useState<{ ok: boolean; msg: string } | null>(null);
-
-  async function handleAvatarUpload(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    setUploading(true);
-    try {
-      const ext = file.name.split(".").pop();
-      const path = `${profile.id}/${Date.now()}.${ext}`;
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const { error } = await (supabase as any).storage
-        .from("team-avatars")
-        .upload(path, file, { contentType: file.type, upsert: true });
-      if (error) throw error;
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const { data } = (supabase as any).storage.from("team-avatars").getPublicUrl(path);
-      setAvatar(data.publicUrl);
-      await fetch("/api/team/profile", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ avatar_url: data.publicUrl }),
-      });
-      setToast({ ok: true, msg: "Avatar updated" });
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    } catch (err: any) {
-      setToast({ ok: false, msg: err.message || "Upload failed" });
-    } finally {
-      setUploading(false);
-      setTimeout(() => setToast(null), 2500);
-    }
-  }
 
   async function save() {
     setSaving(true);
@@ -157,7 +125,7 @@ function ProfileForm({ profile, onUpdate }: { profile: Profile; onUpdate: (p: Pr
     if (!res.ok) {
       setToast({ ok: false, msg: json.error || "Save failed" });
     } else {
-      onUpdate({ ...profile, full_name, role_title, phone, location, bio, avatar_url: avatar });
+      onUpdate({ ...profile, full_name, role_title, phone, location, bio });
       setToast({ ok: true, msg: "Profile saved" });
     }
     setTimeout(() => setToast(null), 2500);
@@ -167,23 +135,8 @@ function ProfileForm({ profile, onUpdate }: { profile: Profile; onUpdate: (p: Pr
     <div className="bg-white rounded-2xl border border-brand-stroke/30 p-6 md:p-8 space-y-6">
       {/* Avatar */}
       <div className="flex flex-col items-start gap-4 sm:flex-row sm:items-center sm:gap-5">
-        <div className="relative w-20 h-20">
-          {avatar ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img
-              src={avatar}
-              alt={profile.full_name}
-              className="w-20 h-20 rounded-full object-cover border-2 border-brand-stroke/30"
-            />
-          ) : (
-            <div className="w-20 h-20 rounded-full bg-brand-blue text-white text-2xl font-bold flex items-center justify-center">
-              {profile.full_name.charAt(0).toUpperCase()}
-            </div>
-          )}
-          <label className="absolute bottom-0 right-0 w-7 h-7 rounded-full bg-brand-navy text-white flex items-center justify-center cursor-pointer hover:bg-brand-blue transition">
-            {uploading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Camera className="w-3.5 h-3.5" />}
-            <input type="file" accept="image/*" className="hidden" onChange={handleAvatarUpload} />
-          </label>
+        <div className="w-20 h-20 rounded-full bg-brand-blue text-white text-2xl font-bold flex items-center justify-center">
+          {initials(profile.full_name)}
         </div>
         <div>
           <p className="text-[14px] font-semibold text-brand-navy">{profile.full_name}</p>

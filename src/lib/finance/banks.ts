@@ -1,4 +1,4 @@
-// Nigerian bank codes — sourced from CBN sort code list provided to CDS Space.
+// Nigerian bank codes - sourced from CBN sort code list provided to CDS Space.
 // Format: { name, code }. Used for payroll generation and contractor records.
 
 export interface Bank {

@@ -10,7 +10,6 @@ import { ArrowUpRight } from "lucide-react";
 import { WorkDetailOverlay } from "./WorkDetailOverlay";
 import {
     getWorkCoverShape,
-    measureImage,
     type WorkCoverShape,
 } from "./work-cover-layout";
 import { WorkMosaicItem } from "./WorkMosaicItem";
@@ -33,14 +32,45 @@ export const Works = () => {
         let cancelled = false;
 
         (async () => {
-            const { data, error } = await supabase
-                .from("works")
-                .select("id, title, category, cover_image, created_at")
-                .order("created_at", { ascending: false })
-                .limit(6);
+            // Show the works the admin curated as "Featured" - stored in the
+            // `brands` table (selected = true, name = work title, ordered).
+            // Falls back to the most-recent uploads only when nothing has been
+            // featured yet, so the section is never empty.
+            const { data: featuredRows } = await supabase
+                .from("brands")
+                .select("name, order")
+                .eq("selected", true)
+                .order("order", { ascending: true });
+
+            let result: Work[] = [];
+            const titles = (featuredRows ?? []).map((b: { name: string }) => b.name);
+
+            if (titles.length > 0) {
+                const { data: matching } = await supabase
+                    .from("works")
+                    .select("id, title, category, cover_image, created_at")
+                    .in("title", titles);
+
+                const byTitle = new Map<string, Work>(
+                    ((matching as Work[]) ?? []).map((w) => [w.title, w]),
+                );
+                // Preserve the admin-defined featured order.
+                result = titles
+                    .map((t: string) => byTitle.get(t))
+                    .filter((w): w is Work => Boolean(w));
+            }
+
+            if (result.length === 0) {
+                const { data } = await supabase
+                    .from("works")
+                    .select("id, title, category, cover_image, created_at")
+                    .order("created_at", { ascending: false })
+                    .limit(6);
+                result = (data as Work[]) ?? [];
+            }
 
             if (cancelled) return;
-            if (!error && data) setWorks(data as Work[]);
+            setWorks(result);
             setLoading(false);
         })();
 
@@ -49,24 +79,7 @@ export const Works = () => {
         };
     }, []);
 
-    useEffect(() => {
-        let cancelled = false;
-
-        works.forEach((work) => {
-            if (!work.cover_image) return;
-
-            measureImage(work.cover_image).then((shape) => {
-                if (cancelled || !shape) return;
-                setCoverShapes((prev) => (prev[work.id] ? prev : { ...prev, [work.id]: shape }));
-            });
-        });
-
-        return () => {
-            cancelled = true;
-        };
-    }, [works]);
-
-    const mainGridProjects = works.slice(0, 6);
+    const mainGridProjects = works.slice(0, 8);
 
     return (
         <section className="py-16 md:py-24 lg:py-32 bg-brand-bg" id="works">
@@ -150,6 +163,7 @@ function WorkCard({
     onImageShape?: (shape: WorkCoverShape) => void;
 }) {
     const [localShape, setLocalShape] = useState<WorkCoverShape | null>(null);
+    const [imageFailed, setImageFailed] = useState(false);
     const effectiveShape = shape ?? localShape;
 
     const handleImageLoad = (event: React.SyntheticEvent<HTMLImageElement>) => {
@@ -173,7 +187,7 @@ function WorkCard({
                 aria-label={`Open ${work.title}`}
                 className="relative block h-full w-full text-left overflow-hidden group bg-[#050713] cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand-blue"
             >
-                {work.cover_image ? (
+                {work.cover_image && !imageFailed ? (
                     <Image
                         src={work.cover_image}
                         alt={work.title}
@@ -185,10 +199,13 @@ function WorkCard({
                                 : "(min-width: 1536px) 360px, (min-width: 1024px) 33vw, (min-width: 640px) 50vw, 100vw"
                         }
                         onLoad={handleImageLoad}
+                        onError={() => setImageFailed(true)}
                         className="object-cover transform transition-transform duration-700 group-hover:scale-105"
                     />
                 ) : (
-                    <div className="absolute inset-0 bg-brand-stroke/30" />
+                    <div className="absolute inset-0 bg-[#050713]">
+                        <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_20%,rgba(28,78,209,0.22),transparent_38%)]" />
+                    </div>
                 )}
 
                 <div className="absolute inset-0 bg-black/0 group-hover:bg-black/35 group-focus-visible:bg-black/35 group-active:bg-black/35 transition-colors duration-300 pointer-events-none" />
@@ -240,7 +257,7 @@ function EmptyState() {
                 No works have been uploaded yet.
             </p>
             <p className="text-brand-mute text-sm mt-1">
-                Check back soon — we’re publishing new projects.
+                Check back soon - we’re publishing new projects.
             </p>
         </div>
     );

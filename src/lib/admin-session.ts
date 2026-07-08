@@ -48,24 +48,24 @@ export async function getAdminSession(): Promise<AdminSession | null> {
     const teamRoleTitle: string | null = team.role_title ?? null;
     const department: string | null = team.department ?? null;
     let adminRoleName: string | null = null;
-    const roleData = await glashMaybeOne<{ role_id?: string | null }>(
-      "select role_id from public.team_members where id = $1 limit 1",
-      [team.id],
-    ).catch(() => null);
-
-    if (roleData?.role_id) {
-      try {
-        const role = await glashMaybeOne<{ name: string | null; permissions: string[] | null }>(
-          "select name, permissions from public.admin_roles where id = $1 limit 1",
-          [roleData.role_id],
-        );
-        adminRoleName = role?.name ?? null;
-        if (Array.isArray(role?.permissions) && role.permissions.length) {
+    // Single JOIN instead of two round-trips (role_id lookup, then admin_roles).
+    try {
+      const role = await glashMaybeOne<{ name: string | null; permissions: string[] | null }>(
+        `select r.name, r.permissions
+           from public.team_members m
+           join public.admin_roles r on r.id = m.role_id
+          where m.id = $1
+          limit 1`,
+        [team.id],
+      );
+      if (role) {
+        adminRoleName = role.name ?? null;
+        if (Array.isArray(role.permissions) && role.permissions.length) {
           permissions = Array.from(new Set([...role.permissions, ...permissions]));
         }
-      } catch {
-        // Roles schema may not be present in older environments.
       }
+    } catch {
+      // Roles schema may not be present in older environments.
     }
 
     return {

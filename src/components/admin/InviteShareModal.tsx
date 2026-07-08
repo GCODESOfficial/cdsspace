@@ -27,7 +27,7 @@ export interface InviteSharePayload {
 /**
  * Show immediately after a team member is created. Presents the invite
  * link + configured credentials and one-click share to WhatsApp /
- * LinkedIn / Facebook (all use the platform's standard sharer URL —
+ * LinkedIn / Facebook (all use the platform's standard sharer URL -
  * no SDK required).
  */
 export function InviteShareModal({
@@ -226,7 +226,7 @@ function composeShareText(p: InviteSharePayload, url: string) {
     `• Username: ${p.username}`,
   ];
   if (p.password) lines.push(`• Password: ${p.password}`);
-  lines.push(`Click here to sign in — we've pre-filled everything for you: ${url}`);
+  lines.push(`Click here to sign in - we've pre-filled everything for you: ${url}`);
   return lines.join("\n");
 }
 

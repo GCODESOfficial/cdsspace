@@ -1,69 +1,70 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createHash, randomBytes } from "crypto";
+import { cookies } from "next/headers";
+import { createClient } from "@/lib/glashdb/server";
 
 /**
- * Step 1 of CDS-Space-hosted Google OAuth.
+ * Start "Continue with Google" using GlashDB's native OAuth.
  *
- * Why this route exists:
- *  We don't want the Google consent screen to read
- *  "to continue to udorpewvuezxxlzedafo.supabase.co". By doing the OAuth
- *  dance on our own domain and then handing the resulting Google ID token
- *  to `supabase.auth.signInWithIdToken` in the callback route, the only
- *  redirect_uri Google ever sees is `https://cdsspace.com/api/auth/google/callback`
- *  — so the consent screen reads "to continue to cdsspace.com".
+ * We call signInWithOAuth server-side (which sets the PKCE code-verifier cookie
+ * on THIS origin) and redirect the browser to GlashDB's Google authorize URL.
+ * Google returns to GlashDB, which redirects back to `<origin>/auth/callback`,
+ * where `exchangeCodeForSession` completes the login. Everything runs against
+ * api.glashdb.com — no Supabase, no Vercel.
  *
- * Flow:
- *  1. Generate a CSRF state token + a nonce
- *  2. Persist them in httpOnly cookies (so the callback can verify them)
- *  3. Send the hashed nonce to Google so we can verify the returned id_token
- *  4. Redirect the browser to Google's OAuth consent screen
+ * CRITICAL: GlashDB matches `redirect_to` against the project's allowed Redirect
+ * URLs by EXACT string, INCLUDING scheme and query string. So:
+ *   - we send a bare `<origin>/auth/callback` (no ?next=…) — a query string would
+ *     break the match and yield "redirectTo is not allowed for this project";
+ *   - we force https for real domains (http only for localhost), because the
+ *     allow-list entry is https and http≠https;
+ *   - the post-login destination ("next") is carried in a short-lived cookie
+ *     instead of the URL, and read back in /auth/callback.
+ * Each origin used (https://cdsspace.pro, http://localhost:3000, …) must be in
+ * the GlashDB Redirect URLs list.
  */
 function getOrigin(req: NextRequest) {
-  return process.env.NEXT_PUBLIC_SITE_URL || req.nextUrl.origin;
+  const host = req.headers.get("x-forwarded-host") || req.nextUrl.host;
+  const isLocal = /^(localhost|127\.0\.0\.1)(:\d+)?$/.test(host);
+  const proto = isLocal ? "http" : "https";
+  return `${proto}://${host}`;
+}
+
+function safeNext(raw: string | null): string {
+  // Only allow same-site absolute paths, never open redirects.
+  return raw && raw.startsWith("/") && !raw.startsWith("//") ? raw : "/dashboard";
 }
 
 export async function GET(req: NextRequest) {
-  const clientId = process.env.GOOGLE_CLIENT_ID;
-  if (!clientId) {
-    return NextResponse.json({ error: "GOOGLE_CLIENT_ID is not configured" }, { status: 500 });
-  }
-
-  const next = req.nextUrl.searchParams.get("next") || "/dashboard";
+  const next = safeNext(req.nextUrl.searchParams.get("next"));
   const origin = getOrigin(req);
-  const redirectUri = `${origin}/api/auth/google/callback`;
+  const redirectTo = `${origin}/auth/callback`; // MUST stay bare (no query) to match the allow-list
 
-  // CSRF protection: random state token compared between this request
-  // and the callback (via httpOnly cookie).
-  const state = randomBytes(24).toString("hex");
-
-  // Replay protection: nonce that we'll embed in the id_token. Google hashes
-  // the nonce we send via `nonce=<sha256_of_raw_nonce>`, then echoes the raw
-  // nonce back inside the signed id_token. We verify the match in the callback.
-  const rawNonce = randomBytes(24).toString("hex");
-  const hashedNonce = createHash("sha256").update(rawNonce).digest("hex");
-
-  const params = new URLSearchParams({
-    client_id: clientId,
-    redirect_uri: redirectUri,
-    response_type: "code",
-    scope: "openid email profile",
-    access_type: "offline",
-    prompt: "consent",
-    state,
-    nonce: hashedNonce,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const glash = (await createClient()) as any;
+  const { data, error } = await glash.auth.signInWithOAuth({
+    provider: "google",
+    options: { skipBrowserRedirect: true, redirectTo },
   });
 
-  const res = NextResponse.redirect(`https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}`);
+  if (error || !data?.url) {
+    const url = new URL("/login", origin);
+    url.searchParams.set(
+      "error",
+      /disabled/i.test(error?.message || "") ? "google_disabled" : "google_start_failed",
+    );
+    return NextResponse.redirect(url);
+  }
 
-  const cookieOpts = {
+  // Carry the post-login destination in a short-lived cookie (the URL can't hold
+  // it without breaking GlashDB's exact-match redirect allow-list).
+  const store = await cookies();
+  store.set("cds_oauth_next", next, {
     httpOnly: true,
-    secure: process.env.NODE_ENV === "production",
-    sameSite: "lax" as const,
+    secure: origin.startsWith("https://"),
+    sameSite: "lax",
     path: "/",
-    maxAge: 60 * 10, // 10 minutes
-  };
-  res.cookies.set("cds_oauth_state", state, cookieOpts);
-  res.cookies.set("cds_oauth_nonce", rawNonce, cookieOpts);
-  res.cookies.set("cds_oauth_next", next, cookieOpts);
-  return res;
+    maxAge: 600,
+  });
+
+  return NextResponse.redirect(data.url);
 }

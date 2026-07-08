@@ -3,6 +3,7 @@
 // CDS Space header, website, date, page numbers at the footer.
 
 import jsPDF from "jspdf";
+import { installBrandFont } from "@/lib/pdf/pdf-fonts";
 import { DEFAULT_CDOC_THEME, normalizeCDocTheme, type CDocTheme } from "@/lib/cdocs-theme";
 import { parseCDocBody, type CDocSpan } from "@/lib/cdocs-markdown";
 import { isHtmlBody, parseRichHtmlToBlocks, hexToRgb, type RichBlock } from "@/lib/cdocs-html";
@@ -34,7 +35,7 @@ const LINE_HEIGHT = 5.8;
 const LOGO_SRC = "/images/cds-logo.svg";
 const SEAL_SRC = "/CDS_Seal.png";
 const LOGO_RENDER_W = 256; // px
-const SEAL_RENDER_W = 512; // px — bigger so the embossed seal stays crisp
+const SEAL_RENDER_W = 512; // px - bigger so the embossed seal stays crisp
 
 type RasterAsset = { dataUrl: string; width: number; height: number } | null;
 const assetCache = new Map<string, Promise<RasterAsset>>();
@@ -76,6 +77,7 @@ export async function exportCDocToPdf(opts: CDocPdfOptions) {
   // Pre-load both raster assets in parallel so the PDF render isn't blocked twice.
   const [logo, seal] = await Promise.all([loadLogo(), opts.stamped ? loadSeal() : Promise.resolve(null)]);
   const doc = new jsPDF();
+  installBrandFont(doc);
   const w = doc.internal.pageSize.getWidth();
   const h = doc.internal.pageSize.getHeight();
   const theme = normalizeCDocTheme(opts.theme || DEFAULT_CDOC_THEME);
@@ -109,7 +111,7 @@ export async function exportCDocToPdf(opts: CDocPdfOptions) {
     // didn't load (e.g. server-side render).
     let tagX = MARGIN_X;
     if (logo) {
-      const logoH = 10; // mm — keeps the header tidy
+      const logoH = 10; // mm - keeps the header tidy
       const logoW = (logo.width / logo.height) * logoH;
       doc.addImage(logo.dataUrl, "PNG", MARGIN_X, 14, logoW, logoH);
       tagX = MARGIN_X; // tagline still anchored to the left margin
@@ -146,7 +148,7 @@ export async function exportCDocToPdf(opts: CDocPdfOptions) {
   doc.setFontSize(20); setText(palette.title);
   doc.text(opts.title || "Untitled", MARGIN_X, MARGIN_TOP);
 
-  // Body — either markdown-lite (legacy) or HTML (rich editor).
+  // Body - either markdown-lite (legacy) or HTML (rich editor).
   const maxWidth = w - MARGIN_X * 2;
   const usesHtml = isHtmlBody(opts.body || "");
   const richBlocks: RichBlock[] = usesHtml ? parseRichHtmlToBlocks(opts.body || "") : [];
@@ -198,7 +200,7 @@ export async function exportCDocToPdf(opts: CDocPdfOptions) {
       line.push(chars[i]);
       if (chars[i].ch === " " || chars[i].ch === "\t") wordStart = line.length;
       if (measureLine(line) > maxWidth) {
-        // Overflow — rewind to last word boundary if possible.
+        // Overflow - rewind to last word boundary if possible.
         if (wordStart > 0 && wordStart < line.length) {
           const carry = line.splice(wordStart);
           flushLine();
@@ -207,7 +209,7 @@ export async function exportCDocToPdf(opts: CDocPdfOptions) {
           line.push(...carry);
           wordStart = 0;
         } else {
-          // One long word wider than the line — hard-break.
+          // One long word wider than the line - hard-break.
           const carry = [line.pop()!];
           flushLine();
           line.push(...carry);
@@ -454,7 +456,7 @@ export async function exportCDocToPdf(opts: CDocPdfOptions) {
   // Official CDS Space seal on the last page, bottom-right.
   if (opts.stamped && seal) {
     doc.setPage(pageCount);
-    const sealSize = 36; // mm — keeps it visible without overpowering signatures
+    const sealSize = 36; // mm - keeps it visible without overpowering signatures
     const sealX = w - MARGIN_X - sealSize;
     const sealY = h - MARGIN_BOTTOM - sealSize - 4;
     doc.addImage(seal.dataUrl, "PNG", sealX, sealY, sealSize, sealSize);
@@ -478,7 +480,7 @@ function drawCircularStamp(
   cy: number,
   palette: { muted: readonly [number, number, number]; line: readonly [number, number, number] }
 ) {
-  // Use the muted color for everything — already reads as "faint" against
+  // Use the muted color for everything - already reads as "faint" against
   // either the dark-bg or light-bg theme.
   doc.setDrawColor(palette.muted[0], palette.muted[1], palette.muted[2]);
   doc.setTextColor(palette.muted[0], palette.muted[1], palette.muted[2]);
@@ -508,7 +510,7 @@ function drawCircularStamp(
     doc.text(text[i], x, y, { angle: rot, align: "center", baseline: "middle" } as any);
   }
 
-  // Center wordmark — bold "CDS Space" stacked tight inside the inner ring.
+  // Center wordmark - bold "CDS Space" stacked tight inside the inner ring.
   const oldFont = (doc as any).getFont?.();
   doc.setFontSize(8);
   doc.setFont(oldFont?.fontName || "helvetica", "bold");
@@ -517,7 +519,7 @@ function drawCircularStamp(
   doc.setFont(oldFont?.fontName || "helvetica", "normal");
   doc.text("Space", cx, cy + 4.5, { align: "center", baseline: "middle" } as any);
 
-  // Small star/dot mark to keep symmetry — 12 o'clock + 6 o'clock decorations.
+  // Small star/dot mark to keep symmetry - 12 o'clock + 6 o'clock decorations.
   doc.setFontSize(6);
   doc.text("●", cx, cy - inner + 2, { align: "center", baseline: "middle" } as any);
   doc.text("●", cx, cy + inner - 2, { align: "center", baseline: "middle" } as any);

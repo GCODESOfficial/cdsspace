@@ -16,7 +16,6 @@ import { EnhancedEditor, type ImageType } from "@/components/enhanced-editor"
 import { Loader2 } from "lucide-react"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { uploadFile, deleteFile } from "@/lib/storage-service"
 import { toast } from "sonner"
 import { supabase } from "@/lib/supabase"
 import { CATEGORIES } from "@/lib/constants"
@@ -216,142 +215,70 @@ export default function EditWorkPage() {
     try {
       setIsSubmitting(true)
 
+      // Upload a changed cover; otherwise keep the existing URL.
       let coverImagePath = originalCoverImage
-
-      // Upload new cover image if changed
       if (coverImage) {
-        coverImagePath = await uploadFile(coverImage, "covers")
-
-        // Delete old cover image if it exists and is different
-        if (originalCoverImage && originalCoverImage !== coverImagePath) {
-          try {
-            await deleteFile(originalCoverImage)
-          } catch (error) {
-            console.error("Error deleting old cover image:", error)
-          }
-        }
+        coverImagePath = await uploadViaServer(coverImage, "covers")
       }
 
-      // Create update object
-      const updateData = {
-        title,
-        description,
-        cover_image: coverImagePath,
-        category,
-        industry: industry.trim() || null,
-        project_scope: projectScope.trim() || null,
-        deliverables: deliverables.trim() || null,
-        timeline: timeline.trim() || null,
-      }
-
-      console.log("Update data:", updateData)
-
-      // Update work entry
-      const { error: workError } = await supabase.from("works").update(updateData).eq("id", workId)
-
-      if (workError) throw workError
-
-      // Handle image updates
-
-      // 1. Find images to delete (in originalImages but not in projectImages)
-      const imagesToDelete = originalImages.filter((origImg) => !projectImages.some((img) => img.id === origImg.id))
-
-      // 2. Find images to add (new images in projectImages with file property)
-      const imagesToAdd = projectImages.filter((img) => img.file && !img.id)
-
-      // 3. Find images to update (in both arrays but with different properties)
-      const imagesToUpdate = projectImages.filter(
-        (img) =>
-          img.id &&
-          originalImages.some(
-            (origImg) =>
-              origImg.id === img.id &&
-              (origImg.position !== img.position ||
-                origImg.isFullWidth !== img.isFullWidth ||
-                origImg.spanRows !== img.spanRows ||
-                JSON.stringify(origImg.transformations) !== JSON.stringify(img.transformations)),
-          ),
-      )
-
-      // Delete images
-      if (imagesToDelete.length > 0) {
-        // Delete from storage
-        for (const img of imagesToDelete) {
-          if (img.originalUrl) {
-            try {
-              await deleteFile(img.originalUrl)
-            } catch (error) {
-              console.error("Error deleting image:", error)
-            }
-          }
-        }
-
-        // Delete from database
-        const { error: deleteError } = await supabase
-          .from("work_images")
-          .delete()
-          .in("id", imagesToDelete.map((img) => img.id).filter(Boolean) as number[])
-
-        if (deleteError) throw deleteError
-      }
-
-      // Add new images
-      if (imagesToAdd.length > 0) {
-        const uploadedImages = await Promise.all(
-          imagesToAdd.map(async (image, index) => {
-            if (!image.file) {
-              throw new Error("File is required for new images")
-            }
-
-            const imagePath = await uploadFile(image.file, "works")
-            return {
-              work_id: workId,
-              image_url: imagePath,
-              position: image.position ?? index,
-              transformations: {
-                size: image.size ?? { width: 100, height: 100 },
-                isFullWidth: image.isFullWidth ?? false,
-                spanRows: image.spanRows ?? 1,
-                ...image.transformations,
-              }
-            }
-          }),
-        )
-
-        const { error: imagesError } = await supabase.from("work_images").insert(uploadedImages)
-
-        if (imagesError) throw imagesError
-      }
-
-      // Update existing images
-      for (const image of imagesToUpdate) {
-        if (!image.id) continue
-
-        const { error: updateError } = await supabase
-          .from("work_images")
-          .update({
-            position: image.position,
+      // Build the full desired image set (in current order). New images (with a
+      // `file`) get uploaded; existing images keep their URL.
+      const images = await Promise.all(
+        projectImages.map(async (image, index) => {
+          const imageUrl = image.file
+            ? await uploadViaServer(image.file as File, "works")
+            : (image.image_url || image.originalUrl)
+          return {
+            image_url: imageUrl,
+            position: image.position ?? index,
             transformations: {
-              ...image.transformations,
+              ...(image.transformations || {}),
               size: image.size ?? image.transformations?.size ?? { width: 100, height: 100 },
               isFullWidth: image.isFullWidth ?? image.transformations?.isFullWidth ?? false,
               spanRows: image.spanRows ?? image.transformations?.spanRows ?? 1,
-            }
-          })
-          .eq("id", image.id)
+            },
+          }
+        }),
+      )
 
-        if (updateError) throw updateError
-      }
+      const res = await fetch(`/api/admin/works/${workId}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title,
+          description,
+          cover_image: coverImagePath,
+          category,
+          industry: industry.trim() || null,
+          project_scope: projectScope.trim() || null,
+          deliverables: deliverables.trim() || null,
+          timeline: timeline.trim() || null,
+          images,
+        }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok || !data?.ok) throw new Error(data?.error || "Please try again.")
 
       toast.success("Work updated successfully")
+      setIsModalOpen(false)
       router.push("/admin")
     } catch (error: any) {
       console.error("Error updating work:", error)
       toast.error(`Error updating work: ${error.message || "Please try again."}`)
     } finally {
       setIsSubmitting(false)
-      setIsModalOpen(false)
     }
+  }
+
+  // Upload one file through the server route (service-role storage, RLS-proof).
+  const uploadViaServer = async (file: File, folder: "covers" | "works"): Promise<string> => {
+    const fd = new FormData()
+    fd.append("file", file)
+    fd.append("folder", folder)
+    const res = await fetch("/api/admin/works/upload", { method: "POST", body: fd })
+    const data = await res.json().catch(() => ({}))
+    if (!res.ok || !data?.ok) throw new Error(data?.error || `Failed to upload ${file.name}`)
+    return data.url as string
   }
 
   // Create a handler function for the EnhancedEditor's onImagesChange prop
@@ -522,7 +449,7 @@ export default function EditWorkPage() {
                 <Label htmlFor="coverImage" className="text-lg mb-2">Cover Image</Label>
                 <p className="text-xs text-gray-500 leading-snug mb-3">
                   <span className="font-semibold text-gray-700">Recommended: 1200 × 1500 px</span> (4:5 portrait).
-                  Keep the subject centered — the card is ~397×496 px on the home page and ~443×504 px on the Work page, so edges may crop slightly. JPG, PNG, or WebP, under 2 MB.
+                  Keep the subject centered - the card is ~397×496 px on the home page and ~443×504 px on the Work page, so edges may crop slightly. JPG, PNG, or WebP, under 2 MB.
                 </p>
                 <Input id="coverImage" type="file" accept="image/*" onChange={handleCoverImageChange} />
                 {(coverImagePreview || originalCoverImage) && (

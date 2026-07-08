@@ -1,5 +1,5 @@
 -- ============================================
--- CDS Space: Team payroll — bank details + change-request flow
+-- CDS Space: Team payroll - bank details + change-request flow
 -- Idempotent. Run in Supabase SQL editor.
 -- ============================================
 

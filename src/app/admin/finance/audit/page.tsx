@@ -444,30 +444,32 @@ export default function FinancialAuditPage() {
 
   async function fetchReport() {
     setIsReportLoading(true);
-    const startMonth = monthKey(startDate);
-    const endMonth = monthKey(endDate);
+    const reportStart = safeDateKey(startDate) || initialRange.start;
+    const reportEnd = safeDateKey(endDate) || reportStart;
+    const startMonth = monthKey(reportStart);
+    const endMonth = monthKey(reportEnd);
 
     const [invoicesRes, inflowsRes, expendituresRes, contractorPayRes, payrollRunsRes, employeeRes] = await Promise.all([
       supabase
         .from("finance_invoices")
         .select("id, invoice_number, client_name, total, subtotal, tax_amount, tax_rate, status, issue_date, due_date")
-        .gte("issue_date", startDate)
-        .lte("issue_date", endDate),
+        .gte("issue_date", reportStart)
+        .lte("issue_date", reportEnd),
       supabase
         .from("finance_inflows")
         .select("id, title, source, amount, currency, received_on, payment_method, reference, notes")
-        .gte("received_on", startDate)
-        .lte("received_on", endDate),
+        .gte("received_on", reportStart)
+        .lte("received_on", reportEnd),
       supabase
         .from("finance_expenditures")
         .select("id, title, category, amount, spent_on")
-        .gte("spent_on", startDate)
-        .lte("spent_on", endDate),
+        .gte("spent_on", reportStart)
+        .lte("spent_on", reportEnd),
       supabase
         .from("finance_contractor_payments")
         .select("id, amount, paid_on")
-        .gte("paid_on", startDate)
-        .lte("paid_on", endDate),
+        .gte("paid_on", reportStart)
+        .lte("paid_on", reportEnd),
       supabase
         .from("finance_payroll_runs")
         .select("id, title, period, status, total, created_at")
@@ -493,7 +495,7 @@ export default function FinancialAuditPage() {
     const operationsSpend = expenditures.reduce((sum, entry) => sum + Number(entry.amount || 0), 0);
     const contractorPay = contractorPayments.reduce((sum, entry) => sum + Number(entry.amount || 0), 0);
     const monthlyPayroll = employees.reduce((sum, employee) => sum + Number(employee.base_salary || 0), 0);
-    const buckets = buildMonthBuckets(startDate, endDate);
+    const buckets = buildMonthBuckets(reportStart, reportEnd);
 
     paidInvoices.forEach((invoice) => {
       const bucket = buckets.get(monthKey(invoice.issue_date));
@@ -1164,7 +1166,7 @@ export default function FinancialAuditPage() {
                   <div className="flex flex-wrap items-center gap-3 text-[11px] text-gray-400 mt-0.5">
                     {statement.bank_name && <span>{statement.bank_name}</span>}
                     {statement.account_number && <span>•••{statement.account_number.slice(-4)}</span>}
-                    {(statement.period_start || statement.period_end) && <span>{statement.period_start || "—"} to {statement.period_end || "—"}</span>}
+                    {(statement.period_start || statement.period_end) && <span>{statement.period_start || "-"} to {statement.period_end || "-"}</span>}
                     <span>Uploaded {new Date(statement.uploaded_at).toLocaleDateString()}</span>
                     <span>Cr {fmt(Number(statement.total_credit || 0))}</span>
                     <span>Dr {fmt(Number(statement.total_debit || 0))}</span>
@@ -1286,8 +1288,8 @@ function LedgerReport({ report, fmt, periodLabel }: { report: FinancialReport; f
                   <td className="py-3 pr-4 text-gray-500 whitespace-nowrap">{safeFormatDate(row.date)}</td>
                   <td className="py-3 pr-4 font-medium text-[#0D1B39]">{row.account}</td>
                   <td className="py-3 pr-4 text-gray-500">{row.memo}</td>
-                  <td className="py-3 pr-4 text-right tabular-nums">{row.debit ? fmt(row.debit) : "—"}</td>
-                  <td className="py-3 text-right tabular-nums">{row.credit ? fmt(row.credit) : "—"}</td>
+                  <td className="py-3 pr-4 text-right tabular-nums">{row.debit ? fmt(row.debit) : "-"}</td>
+                  <td className="py-3 text-right tabular-nums">{row.credit ? fmt(row.credit) : "-"}</td>
                 </tr>
               ))}
             </tbody>

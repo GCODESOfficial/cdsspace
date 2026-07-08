@@ -1,5 +1,5 @@
 -- ============================================
--- CDS Space: Invoice — payment terms + delivery speed
+-- CDS Space: Invoice - payment terms + delivery speed
 -- Idempotent.
 -- ============================================
 

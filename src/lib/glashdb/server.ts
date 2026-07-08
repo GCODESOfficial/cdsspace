@@ -2,12 +2,14 @@ import { createServerClient } from "@supabase/ssr";
 import { cookies } from "next/headers";
 import { createGlashServerQueryClient } from "@/lib/glashdb/query-server";
 import { getGlashDbServerConfig } from "./env";
+import { getGlashRealtimeOptions } from "./realtime-transport";
 
 export async function createClient() {
   const cookieStore = await cookies();
   const { url, anonKey } = getGlashDbServerConfig();
 
   const compat = createServerClient(url, anonKey, {
+    realtime: getGlashRealtimeOptions(),
     cookies: {
       getAll() {
         return cookieStore.getAll();

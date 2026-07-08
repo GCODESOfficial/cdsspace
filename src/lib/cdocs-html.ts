@@ -50,7 +50,7 @@ const ALLOWED_ATTRS: Record<string, Set<string>> = {
 /**
  * Very conservative sanitizer suitable for an already-trusted team editor.
  * Strips <script>, event handlers, and javascript: URLs. Does NOT parse CSS
- * in depth — only keeps `style` on known tags.
+ * in depth - only keeps `style` on known tags.
  */
 export function sanitizeCDocHtml(html: string): string {
   if (!html) return "";
@@ -196,7 +196,7 @@ function visitBlock(node: Node, out: RichBlock[], ctx: InlineCtx) {
     return;
   }
 
-  // Inline-level tag at the block root — wrap as a paragraph
+  // Inline-level tag at the block root - wrap as a paragraph
   const spans = collectInline(el, ctx);
   if (spans.length) out.push({ kind: "paragraph", spans });
 }

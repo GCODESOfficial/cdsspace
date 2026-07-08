@@ -1,19 +1,14 @@
 import { NextResponse } from "next/server";
-import nodemailer from "nodemailer";
+import { emailFrom, createEmailTransport } from "@/lib/email-from";
+import { brandedEmailHtml } from "@/lib/email-template";
 
 export async function POST(req: Request) {
   const formData = await req.json();
 
-  const transporter = nodemailer.createTransport({
-    service: "gmail",
-    auth: {
-      user: process.env.EMAIL_USER,
-      pass: process.env.EMAIL_PASS,
-    },
-  });
+  const transporter = createEmailTransport();
 
   const adminEmail = {
-    from: `"CDS Form" <${process.env.EMAIL_USER}>`,
+    from: emailFrom("CDS Form"),
     to: "contact.cdsspace@gmail.com",
     subject: `New CDS Brand Identity Brief from ${formData.addressName || "User"}`,
     text: `
@@ -42,20 +37,19 @@ Delivery Options: ${formData.giftDeliveryOptions?.join(", ")}
   };
 
   const userEmail = {
-    from: `"CDS Space" <${process.env.EMAIL_USER}>`,
+    from: emailFrom("CDS Space"),
     to: formData.email,
     subject: "Thanks for Submitting Your Brand Identity Brief!",
-    html: `
-      <div style="font-family: sans-serif; color: #333;">
-        <h2>Hi ${formData.addressName || "there"},</h2>
+    html: brandedEmailHtml(
+      `
+        <h2 style="margin:0 0 12px;color:#0D1B39;">Hi ${formData.addressName || "there"},</h2>
         <p>Thank you for filling out our Brand Identity Brief!</p>
         <p>Your submission has been received. Our team will review the details and begin crafting your brand's visual identity.</p>
-        <p>If we need any clarification, we’ll reach out to you at <strong>${formData.email}</strong>.</p>
-        <br/>
-        <p>Warm regards,</p>
-        <p><strong>CDS Space</strong></p>
-      </div>
-    `,
+        <p>If we need any clarification, we'll reach out to you at <strong>${formData.email}</strong>.</p>
+        <p style="margin-top:16px;">Warm regards,<br/><strong>CDS Space</strong></p>
+      `,
+      { eyebrow: "Brand Identity Brief", preheader: "We've received your brand brief." },
+    ),
   };
 
   try {

@@ -78,7 +78,7 @@ export default function AdminCdocsPage() {
           <p className="text-[#0A4FE8] text-sm font-semibold">Workspace</p>
           <h1 className="text-[28px] font-bold text-[#0D1B39] tracking-tight">cDocs</h1>
           <p className="text-gray-400 text-[13px] mt-1">
-            Internal docs, knowledge base, and playbooks — versioned and commentable.
+            Internal docs, knowledge base, and playbooks - versioned and commentable.
           </p>
         </div>
         <button

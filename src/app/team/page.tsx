@@ -8,6 +8,10 @@ import {
   Video,
   ArrowUpRight,
   Clock,
+  CalendarCheck,
+  LogIn,
+  ListPlus,
+  FileText,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { useTranslation } from "@/lib/i18n/context";
@@ -21,6 +25,7 @@ interface OverviewData {
   };
   recent_work: { id: string; title: string; category: string | null; cover_image: string | null }[];
   upcoming_meetings: { id: string; title: string; scheduled_for: string | null; room_code: string }[];
+  resume_completion?: number;
 }
 
 export default function TeamOverviewPage() {
@@ -41,6 +46,7 @@ export default function TeamOverviewPage() {
   if (!data) return null;
 
   const { member, stats, recent_work, upcoming_meetings } = data;
+  const resumeCompletion = Math.max(0, Math.min(100, data.resume_completion ?? 0));
 
   return (
     <div className="space-y-5 md:space-y-6 max-w-[1400px]">
@@ -62,9 +68,36 @@ export default function TeamOverviewPage() {
             <p className="text-white/80 mt-1 text-[14px]">{member.role_title}</p>
           )}
           <p className="text-white/80 mt-4 max-w-xl text-[14px] leading-relaxed">
-            Here&apos;s what&apos;s on your plate today. Keep up the craft — the world is watching.
+            Here&apos;s what&apos;s on your plate today. Keep up the craft - the world is watching.
           </p>
         </div>
+      </div>
+
+      {/* Quick actions */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4">
+        <QuickAction icon={CalendarCheck} label="My Day" desc="Today's tasks & report" href="/team/my-day" accent="bg-blue-50 text-brand-blue" />
+        <QuickAction icon={LogIn} label="Check in" desc="Clock in for today" href="/team/timebook" accent="bg-emerald-50 text-emerald-600" />
+        <QuickAction icon={ListPlus} label="Assign task" desc="Delegate to the team" href="/team/my-day" accent="bg-purple-50 text-purple-600" />
+        <Link
+          href="/team/cresume"
+          className="group bg-white rounded-2xl border border-brand-stroke/30 p-4 hover:border-amber-400/50 hover:shadow-[0_12px_28px_rgba(217,119,6,0.08)] transition"
+        >
+          <div className="flex items-center justify-between">
+            <div className="w-10 h-10 rounded-xl bg-amber-50 text-amber-600 flex items-center justify-center">
+              <FileText className="w-5 h-5" />
+            </div>
+            <span className="text-[20px] font-bold text-brand-navy tracking-tight">{resumeCompletion}%</span>
+          </div>
+          <p className="mt-3 text-[13px] font-bold text-brand-navy">
+            {resumeCompletion >= 100 ? "Resume complete" : "Complete your resume"}
+          </p>
+          <p className="text-[11px] text-brand-body/60 mb-2">
+            {resumeCompletion >= 100 ? "Your profile is all set." : "Stand out to clients and the team."}
+          </p>
+          <div className="h-1.5 rounded-full bg-brand-stroke/30 overflow-hidden">
+            <div className="h-full rounded-full bg-amber-500 transition-all" style={{ width: `${resumeCompletion}%` }} />
+          </div>
+        </Link>
       </div>
 
       {/* Stat cards */}
@@ -170,6 +203,33 @@ export default function TeamOverviewPage() {
       </div>
 
     </div>
+  );
+}
+
+function QuickAction({
+  icon: Icon,
+  label,
+  desc,
+  href,
+  accent,
+}: {
+  icon: LucideIcon;
+  label: string;
+  desc: string;
+  href: string;
+  accent: string;
+}) {
+  return (
+    <Link
+      href={href}
+      className="group bg-white rounded-2xl border border-brand-stroke/30 p-4 hover:border-brand-blue/40 hover:shadow-[0_12px_28px_rgba(28,78,209,0.06)] transition"
+    >
+      <div className={`w-10 h-10 rounded-xl ${accent} flex items-center justify-center`}>
+        <Icon className="w-5 h-5" />
+      </div>
+      <p className="mt-3 text-[13px] font-bold text-brand-navy">{label}</p>
+      <p className="text-[11px] text-brand-body/60">{desc}</p>
+    </Link>
   );
 }
 

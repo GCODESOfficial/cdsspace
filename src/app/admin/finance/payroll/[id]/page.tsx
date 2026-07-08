@@ -127,7 +127,7 @@ export default function PayrollRunPage({ params }: { params: Promise<{ id: strin
       </div>
 
       {items.length === 0 ? (
-        <div className={`${glassCard} p-12 text-center text-gray-500`}>No items yet — add an item to get started.</div>
+        <div className={`${glassCard} p-12 text-center text-gray-500`}>No items yet - add an item to get started.</div>
       ) : (
         <div className={`${glassCard} overflow-hidden`}>
           <table className="w-full text-sm">

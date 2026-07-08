@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { initials } from "@/lib/utils";
 import Link from "next/link";
 import {
     Users,
@@ -151,10 +152,24 @@ export function ProjectCollaborationPanel({ projectId }: { projectId: string }) 
             const membersRes = await fetch("/api/admin/team-members").then((r) => r.json());
             const ms: Member[] = membersRes.members ?? membersRes.data ?? [];
             setMembers(ms.filter((m: Member) => m.is_active));
-            const uniqueDepts = Array.from(
-                new Set(ms.map((m: Member) => m.department).filter((x): x is string => !!x)),
-            );
-            setDepartments(uniqueDepts);
+            // Prefer the canonical departments table (covers multi-department
+            // members via team_member_departments); fall back to the members'
+            // legacy single-department field if the endpoint fails.
+            try {
+                const deptRes = await fetch("/api/admin/departments").then((r) => r.json());
+                const names = (deptRes.departments ?? [])
+                    .map((d: { name?: string }) => d.name)
+                    .filter((x: unknown): x is string => !!x);
+                if (names.length) {
+                    setDepartments(names);
+                } else {
+                    throw new Error("no departments");
+                }
+            } catch {
+                setDepartments(Array.from(
+                    new Set(ms.map((m: Member) => m.department).filter((x): x is string => !!x)),
+                ));
+            }
 
             const [cdocsRes, protRes] = await Promise.all([
                 fetch("/api/team/cdocs").then((r) => r.ok ? r.json() : { data: [] }).catch(() => ({ data: [] })),
@@ -201,7 +216,7 @@ export function ProjectCollaborationPanel({ projectId }: { projectId: string }) 
         const d = await r.json();
         if (!r.ok) return appAlert(d.error || "Couldn't start chat.");
         setChatThreadId(d.thread?.id ?? null);
-        appAlert("Project chat ready — team members will see it in their team chat.");
+        appAlert("Project chat ready - team members will see it in their team chat.");
     };
 
     return (
@@ -214,7 +229,7 @@ export function ProjectCollaborationPanel({ projectId }: { projectId: string }) 
                             <Users className="w-4 h-4" /> Assignees
                         </h3>
                         <p className="text-[12px] text-gray-500">
-                            Add a team member, or an entire department — every active member in that department
+                            Add a team member, or an entire department - every active member in that department
                             will see the project automatically.
                         </p>
                     </div>
@@ -252,7 +267,7 @@ export function ProjectCollaborationPanel({ projectId }: { projectId: string }) 
                                     }`}
                                 >
                                     {a.team_member_id ? (
-                                        a.team_members?.full_name.charAt(0).toUpperCase() ?? "?"
+                                        a.team_members?.full_name ? initials(a.team_members.full_name) : "?"
                                     ) : (
                                         <Building2 className="w-4 h-4" />
                                     )}
@@ -361,7 +376,7 @@ export function ProjectCollaborationPanel({ projectId }: { projectId: string }) 
                             <MessageSquare className="w-4 h-4" /> Chat &amp; Group Call
                         </h3>
                         <p className="text-[12px] text-gray-500">
-                            Start a project chat or kick off a call — now or on a schedule. Everyone assigned above gets added.
+                            Start a project chat or kick off a call - now or on a schedule. Everyone assigned above gets added.
                         </p>
                     </div>
                     <div className="flex items-center gap-2">
@@ -591,7 +606,7 @@ function AssignModal({
                                 ) : (
                                     members.map((m) => (
                                         <SelectItem key={m.id} value={m.id}>
-                                            {m.full_name} — {m.department || "No dept."}
+                                            {m.full_name} - {m.department || "No dept."}
                                         </SelectItem>
                                     ))
                                 )}
@@ -764,7 +779,7 @@ function DocumentModal({
 
             <div className="mt-3">
                 <Label className="text-[11px] uppercase tracking-wider text-gray-500 font-bold">
-                    Display title {kind !== "link" && <span className="text-gray-400">(optional — defaults to the doc title)</span>}
+                    Display title {kind !== "link" && <span className="text-gray-400">(optional - defaults to the doc title)</span>}
                 </Label>
                 <Input
                     value={title}

@@ -2,12 +2,12 @@ import { LegalShell } from "@/components/legal/LegalShell";
 import { loadLegalDocument } from "@/lib/legal/server";
 
 export const metadata = {
-    title: "Privacy Policy — CDS Space",
+    title: "Privacy Policy - CDS Space",
     description:
         "How CDS Space collects, uses, and protects your personal data. Compliant with the Nigeria Data Protection Act 2023 and adapted for Rwanda, UK, EU, USA, and China.",
     alternates: { canonical: "https://cdsspace.pro/privacy" },
     openGraph: {
-        title: "Privacy Policy — CDS Space",
+        title: "Privacy Policy - CDS Space",
         description: "How CDS Space collects, uses, and protects your personal data.",
         url: "https://cdsspace.pro/privacy",
         type: "website",

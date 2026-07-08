@@ -2,6 +2,7 @@
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase";
 import { getToolActor } from "@/lib/team-tools-auth";
+import { closeStaleCmeets } from "@/lib/cmeet-autoclose";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -19,6 +20,7 @@ function genRoomCode() {
 export async function GET(req: Request) {
   const actor = await getToolActor();
   if (!actor || !supabaseAdmin) return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
+  await closeStaleCmeets();
   const url = new URL(req.url);
   const includeArchived = url.searchParams.get("archived") === "true";
   const db = supabaseAdmin as any;
@@ -27,7 +29,7 @@ export async function GET(req: Request) {
     "id, room_code, title, created_by, created_by_admin, started_at, ended_at, scheduled_for, audio_only, archived_at, created_at";
 
   // Admins see every meeting. Team members only see meetings they either
-  // created or were tagged as participants on — not every historical call.
+  // created or were tagged as participants on - not every historical call.
   if (actor.kind === "admin") {
     let q = db.from("team_meetings").select(columns).order("created_at", { ascending: false });
     if (!includeArchived) q = q.is("archived_at", null);
@@ -53,7 +55,7 @@ export async function GET(req: Request) {
   return NextResponse.json({ ok: true, meetings: data || [] });
 }
 
-/** Bulk archive / restore — body: { ids: string[], action: "archive" | "unarchive" } */
+/** Bulk archive / restore - body: { ids: string[], action: "archive" | "unarchive" } */
 export async function PATCH(req: Request) {
   const actor = await getToolActor();
   if (!actor || !supabaseAdmin) return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
@@ -71,7 +73,7 @@ export async function PATCH(req: Request) {
   return NextResponse.json({ ok: true, count: ids.length });
 }
 
-/** Bulk delete — body: { ids: string[] }. */
+/** Bulk delete - body: { ids: string[] }. */
 export async function DELETE(req: Request) {
   const actor = await getToolActor();
   if (!actor || !supabaseAdmin) return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });

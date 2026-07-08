@@ -1,5 +1,5 @@
 -- ============================================
--- CDS Space: cMeet — soft-archive support
+-- CDS Space: cMeet - soft-archive support
 -- ============================================
 -- Adds archived_at to team_meetings. The meetings list filters out
 -- archived rows; bulk actions can move rows in/out of the archive.

@@ -2,6 +2,10 @@ import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 import { getGlashDbServerConfig } from "./env";
 
+function getSafeNextPath(next?: string | null) {
+  return next?.startsWith("/") && !next.startsWith("//") ? next : "/dashboard";
+}
+
 export async function updateSession(request: NextRequest) {
   let response = NextResponse.next({ request });
   const { url, anonKey } = getGlashDbServerConfig();
@@ -25,10 +29,13 @@ export async function updateSession(request: NextRequest) {
     data: { user },
   } = await glashdb.auth.getUser();
 
+  // Note: /brand-brief/[token] is a PUBLIC, no-account-needed page (clients fill
+  // shared briefs without signing in), so it must NOT be guarded here.
   const isDashboardRoute =
     request.nextUrl.pathname.startsWith("/dashboard") ||
     request.nextUrl.pathname.startsWith("/subscription") ||
-    request.nextUrl.pathname.startsWith("/partnership");
+    request.nextUrl.pathname.startsWith("/partnership") ||
+    request.nextUrl.pathname.startsWith("/settings");
 
   if (isDashboardRoute && !user) {
     const loginUrl = new URL("/login", request.url);
@@ -41,7 +48,7 @@ export async function updateSession(request: NextRequest) {
       request.nextUrl.pathname.startsWith("/signup")) &&
     user
   ) {
-    const next = request.nextUrl.searchParams.get("next") || "/dashboard";
+    const next = getSafeNextPath(request.nextUrl.searchParams.get("next"));
     return NextResponse.redirect(new URL(next, request.url));
   }
 

@@ -50,11 +50,11 @@ export async function generateMetadata({ params }: { params: Promise<{ username:
     return buildProductMetadata({
         product: "cResume",
         // Name comes first and bold-appearing because OG renderers render the title in bold.
-        title: `${name} — ${role}`,
+        title: `${name} - ${role}`,
         description: bio,
         path: `/${username}`,
         image: avatar,
-        imageAlt: `${name} — ${role}`,
+        imageAlt: `${name} - ${role}`,
     });
 }
 

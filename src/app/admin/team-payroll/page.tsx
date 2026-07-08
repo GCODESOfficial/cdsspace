@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { initials } from "@/lib/utils";
 import {
     Wallet,
     Plus,
@@ -28,7 +29,7 @@ import {
     SelectTrigger,
     SelectValue,
 } from "@/components/ui/select";
-import { appAlert, appConfirm } from "@/lib/app-notify";
+import { appAlert, appConfirm, appPrompt } from "@/lib/app-notify";
 
 type EntryStatus = "pending" | "approved" | "paid" | "cancelled";
 type PeriodType = "monthly" | "weekly" | "bi_weekly" | "one_off";
@@ -184,7 +185,7 @@ export default function AdminTeamPayrollPage() {
     };
 
     const markPaid = async (e: Entry) => {
-        const ref = window.prompt("Payment reference (optional):") ?? "";
+        const ref = (await appPrompt({ title: "Mark as paid", message: "Payment reference (optional):", placeholder: "e.g. transfer ref" })) ?? "";
         await fetch(`/api/admin/team-payroll/${e.id}`, {
             method: "PATCH",
             headers: { "Content-Type": "application/json" },
@@ -303,32 +304,32 @@ export default function AdminTeamPayrollPage() {
                         >
                             <div className="flex items-center gap-3 mb-3">
                                 <div className="w-9 h-9 rounded-xl bg-[#0A4FE8]/10 text-[#0A4FE8] flex items-center justify-center text-[12px] font-bold">
-                                    {m.full_name.charAt(0).toUpperCase()}
+                                    {initials(m.full_name)}
                                 </div>
                                 <div className="min-w-0 flex-1">
                                     <div className="text-[13.5px] font-semibold text-[#0D1B39] truncate">{m.full_name}</div>
                                     <div className="text-[11.5px] text-gray-400 truncate">
-                                        {m.role_title || "—"} · {m.department || "No dept."}
+                                        {m.role_title || "-"} · {m.department || "No dept."}
                                     </div>
                                 </div>
                             </div>
                             <div className="grid grid-cols-2 gap-2 text-[11.5px]">
                                 <div>
                                     <p className="text-gray-400">Bank</p>
-                                    <p className="font-medium text-[#0D1B39] truncate">{m.bank_name || "—"}</p>
+                                    <p className="font-medium text-[#0D1B39] truncate">{m.bank_name || "-"}</p>
                                 </div>
                                 <div>
                                     <p className="text-gray-400">Account</p>
-                                    <p className="font-medium text-[#0D1B39] font-mono">{m.account_number || "—"}</p>
+                                    <p className="font-medium text-[#0D1B39] font-mono">{m.account_number || "-"}</p>
                                 </div>
                                 <div>
                                     <p className="text-gray-400">Name on account</p>
-                                    <p className="font-medium text-[#0D1B39] truncate">{m.account_name || "—"}</p>
+                                    <p className="font-medium text-[#0D1B39] truncate">{m.account_name || "-"}</p>
                                 </div>
                                 <div>
                                     <p className="text-gray-400">Base salary</p>
                                     <p className="font-medium text-[#0D1B39]">
-                                        {m.base_salary ? fmtMoney(m.base_salary, m.salary_currency ?? "NGN") : "—"}
+                                        {m.base_salary ? fmtMoney(m.base_salary, m.salary_currency ?? "NGN") : "-"}
                                     </p>
                                 </div>
                             </div>
@@ -404,8 +405,8 @@ export default function AdminTeamPayrollPage() {
                             {filtered.map((e) => (
                                 <tr key={e.id} className="border-t border-white/60 hover:bg-white/50 transition">
                                     <td className="px-5 py-4">
-                                        <div className="font-medium text-[#0D1B39]">{e.team_members?.full_name ?? "—"}</div>
-                                        <div className="text-[11px] text-gray-400">{e.team_members?.department ?? "—"}</div>
+                                        <div className="font-medium text-[#0D1B39]">{e.team_members?.full_name ?? "-"}</div>
+                                        <div className="text-[11px] text-gray-400">{e.team_members?.department ?? "-"}</div>
                                     </td>
                                     <td className="px-5 py-4 text-gray-700">
                                         <div className="font-mono text-[13px]">{e.period}</div>
@@ -425,9 +426,9 @@ export default function AdminTeamPayrollPage() {
                                         </div>
                                     </td>
                                     <td className="px-5 py-4 text-[12px] text-gray-600">
-                                        <div className="truncate max-w-[200px]">{e.bank_name || "—"}</div>
+                                        <div className="truncate max-w-[200px]">{e.bank_name || "-"}</div>
                                         <div className="font-mono text-gray-400 truncate max-w-[200px]">
-                                            {e.account_number ?? "—"}
+                                            {e.account_number ?? "-"}
                                         </div>
                                     </td>
                                     <td className="px-5 py-4">
@@ -641,7 +642,7 @@ function CreatePayrollModal({
                         <SelectContent>
                             {activeMembers.map((m) => (
                                 <SelectItem key={m.id} value={m.id}>
-                                    {m.full_name} — {m.department || "No dept."}
+                                    {m.full_name} - {m.department || "No dept."}
                                 </SelectItem>
                             ))}
                         </SelectContent>
@@ -759,7 +760,7 @@ function EditPayrollModal({
     };
 
     return (
-        <ModalShell title={`Edit payroll — ${entry.team_members?.full_name ?? ""}`} onClose={onClose}>
+        <ModalShell title={`Edit payroll - ${entry.team_members?.full_name ?? ""}`} onClose={onClose}>
             <div className="grid grid-cols-2 gap-3">
                 <Field label="Period"><Input value={period} onChange={(e) => setPeriod(e.target.value)} className="h-11 rounded-xl" /></Field>
                 <Field label="Status">
@@ -785,9 +786,9 @@ function EditPayrollModal({
                     <Banknote className="w-3.5 h-3.5" /> Bank snapshot on this entry
                 </div>
                 <div className="grid grid-cols-2 gap-2">
-                    <div><span className="text-gray-400">Bank:</span> {entry.bank_name || "—"}</div>
-                    <div><span className="text-gray-400">Account:</span> <span className="font-mono">{entry.account_number ?? "—"}</span></div>
-                    <div className="col-span-2"><span className="text-gray-400">Name on account:</span> {entry.account_name || "—"}</div>
+                    <div><span className="text-gray-400">Bank:</span> {entry.bank_name || "-"}</div>
+                    <div><span className="text-gray-400">Account:</span> <span className="font-mono">{entry.account_number ?? "-"}</span></div>
+                    <div className="col-span-2"><span className="text-gray-400">Name on account:</span> {entry.account_name || "-"}</div>
                 </div>
             </div>
             <div className="flex justify-end gap-2 mt-5">
@@ -843,7 +844,7 @@ function EditBankModal({
     };
 
     return (
-        <ModalShell title={`Bank details — ${member.full_name}`} onClose={onClose}>
+        <ModalShell title={`Bank details - ${member.full_name}`} onClose={onClose}>
             <div className="grid grid-cols-2 gap-3">
                 <Field label="Bank name" className="col-span-2">
                     <Input value={bankName} onChange={(e) => setBankName(e.target.value)} className="h-11 rounded-xl" />
@@ -904,7 +905,7 @@ function BankRequestsModal({
     const [working, setWorking] = useState<string | null>(null);
 
     const decide = async (r: BankRequest, action: "approve" | "reject") => {
-        const note = action === "reject" ? window.prompt("Why are you rejecting this? (optional)") ?? "" : "";
+        const note = action === "reject" ? ((await appPrompt({ title: "Reject request", message: "Why are you rejecting this? (optional)" })) ?? "") : "";
         setWorking(r.id);
         try {
             const res = await fetch(`/api/admin/team-payroll/bank-requests/${r.id}`, {
@@ -934,7 +935,7 @@ function BankRequestsModal({
                                         {r.team_members?.full_name ?? "Unknown member"}
                                     </div>
                                     <div className="text-[12px] text-gray-400">
-                                        {r.team_members?.department ?? "—"} · {new Date(r.created_at).toLocaleString()}
+                                        {r.team_members?.department ?? "-"} · {new Date(r.created_at).toLocaleString()}
                                     </div>
                                 </div>
                                 <span className="text-[10px] uppercase tracking-wider font-semibold px-2.5 py-1 rounded-full bg-amber-50 text-amber-700 ring-1 ring-amber-200">
@@ -944,15 +945,15 @@ function BankRequestsModal({
                             <div className="grid grid-cols-2 gap-3 text-[12.5px]">
                                 <div>
                                     <p className="text-gray-400 text-[10px] uppercase tracking-wider mb-0.5">Current</p>
-                                    <p className="font-medium">{r.team_members?.bank_name ?? "—"}</p>
-                                    <p className="font-mono text-gray-600">{r.team_members?.account_number ?? "—"}</p>
-                                    <p className="text-gray-500">{r.team_members?.account_name ?? "—"}</p>
+                                    <p className="font-medium">{r.team_members?.bank_name ?? "-"}</p>
+                                    <p className="font-mono text-gray-600">{r.team_members?.account_number ?? "-"}</p>
+                                    <p className="text-gray-500">{r.team_members?.account_name ?? "-"}</p>
                                 </div>
                                 <div>
                                     <p className="text-gray-400 text-[10px] uppercase tracking-wider mb-0.5">Proposed</p>
-                                    <p className="font-medium">{r.bank_name ?? "—"}</p>
-                                    <p className="font-mono text-gray-600">{r.account_number ?? "—"}</p>
-                                    <p className="text-gray-500">{r.account_name ?? "—"}</p>
+                                    <p className="font-medium">{r.bank_name ?? "-"}</p>
+                                    <p className="font-mono text-gray-600">{r.account_number ?? "-"}</p>
+                                    <p className="text-gray-500">{r.account_name ?? "-"}</p>
                                 </div>
                             </div>
                             {r.reason && (

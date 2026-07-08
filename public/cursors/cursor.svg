@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 57 80">
+  <defs>
+    <pattern id="px" width="8.4" height="8.4" patternUnits="userSpaceOnUse" patternTransform="translate(4 4)">
+      <path d="M8.4 0V8.4M0 8.4H8.4" stroke="#AFC2F2" stroke-width="1" stroke-opacity="0.6"/>
+    </pattern>
+    <clipPath id="face"><polygon points="4.00,4.00 4.00,62.80 19.12,48.52 27.94,69.94 37.18,66.16 28.78,45.16 46.84,45.16"/></clipPath>
+    <mask id="cut">
+      <rect width="57" height="80" fill="white"/>
+      <polygon points="4.00,4.00 4.00,62.80 19.12,48.52 27.94,69.94 37.18,66.16 28.78,45.16 46.84,45.16" fill="black"/>
+    </mask>
+  </defs>
+  <g mask="url(#cut)"><polygon points="10.00,10.00 10.00,68.80 25.12,54.52 33.94,75.94 43.18,72.16 34.78,51.16 52.84,51.16" fill="#040B37"/><polygon points="9.00,9.00 9.00,67.80 24.12,53.52 32.94,74.94 42.18,71.16 33.78,50.16 51.84,50.16" fill="#040B37"/><polygon points="8.00,8.00 8.00,66.80 23.12,52.52 31.94,73.94 41.18,70.16 32.78,49.16 50.84,49.16" fill="#040B37"/><polygon points="7.00,7.00 7.00,65.80 22.12,51.52 30.94,72.94 40.18,69.16 31.78,48.16 49.84,48.16" fill="#123491"/><polygon points="6.00,6.00 6.00,64.80 21.12,50.52 29.94,71.94 39.18,68.16 30.78,47.16 48.84,47.16" fill="#123491"/><polygon points="5.00,5.00 5.00,63.80 20.12,49.52 28.94,70.94 38.18,67.16 29.78,46.16 47.84,46.16" fill="#123491"/></g>
+  <g clip-path="url(#face)"><rect width="57" height="80" fill="url(#px)"/></g>
+  <polygon points="4.00,4.00 4.00,62.80 19.12,48.52 27.94,69.94 37.18,66.16 28.78,45.16 46.84,45.16" fill="none" stroke="#1C4ED1" stroke-width="3.2" stroke-linejoin="round"/>
+</svg>

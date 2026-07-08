@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState, useMemo } from "react";
 
 /**
- * Cosmic interactive starfield — extracted from the landing CTA so it can be
+ * Cosmic interactive starfield - extracted from the landing CTA so it can be
  * reused as a chat background. Renders a deep-blue starry canvas with twinkling
  * stars, periodic shooting stars, and a soft nebula glow that follows the cursor.
  */

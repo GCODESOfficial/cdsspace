@@ -1,11 +1,11 @@
 /**
- * Minimal OpenAI Chat Completions client — no SDK. Keeps the bundle
+ * Minimal OpenAI Chat Completions client - no SDK. Keeps the bundle
  * lean and lets us stream responses via plain `fetch` + ReadableStream.
  *
  * Requires env:
- *   OPENAI_API_KEY        — required
- *   OPENAI_ORGANIZATION   — optional
- *   OPENAI_DEFAULT_MODEL  — optional, defaults to "gpt-4o-mini"
+ *   OPENAI_API_KEY        - required
+ *   OPENAI_ORGANIZATION   - optional
+ *   OPENAI_DEFAULT_MODEL  - optional, defaults to "gpt-4o-mini"
  */
 
 const OPENAI_URL = "https://api.openai.com/v1/chat/completions";
@@ -91,7 +91,7 @@ function authHeaders() {
   return h;
 }
 
-/** One-shot completion — returns the text + token usage. */
+/** One-shot completion - returns the text + token usage. */
 export async function chatComplete(
   messages: ChatMessage[],
   opts: ChatOptions = {}
@@ -123,7 +123,7 @@ export async function chatComplete(
   };
 }
 
-/** Server-sent-events stream — yields the incremental text chunks. */
+/** Server-sent-events stream - yields the incremental text chunks. */
 export async function chatStream(
   messages: ChatMessage[],
   opts: ChatOptions = {}

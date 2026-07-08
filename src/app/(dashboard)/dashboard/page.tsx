@@ -5,6 +5,7 @@ import { motion } from "framer-motion";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
 import { supabase } from "@/lib/supabase";
+import { formatFinanceDate } from "@/lib/finance/types";
 import {
     Plus, FileText, Image as ImageIcon, Package, Handshake, Calendar, MessageSquare,
     ShoppingBag, Loader2, ArrowRight, Volume2, Share2, Download,
@@ -75,18 +76,23 @@ export default function DashboardPage() {
                 const name = user.user_metadata?.full_name?.split(" ")[0] || user.email?.split("@")[0] || "there";
                 setUserName(name);
 
-                // Fetch word of the day (rotates by day index)
-                const { data: words } = await supabase.from("branding_words").select("*");
+                // All dashboard data in one parallel batch (avoids a request
+                // waterfall — everything below only depends on `user`).
+                const [wordsRes, designsRes, bannersRes, invsRes, msgsRes] = await Promise.all([
+                    supabase.from("branding_words").select("id, word, pronunciation, part_of_speech, meaning, example"),
+                    supabase.from("design_requests").select("id, title, status, created_at").eq("user_id", user.id).neq("status", "COMPLETED").order("created_at", { ascending: false }).limit(5),
+                    supabase.from("banner_requests").select("id, title, status, created_at").eq("user_id", user.id).neq("status", "COMPLETED").order("created_at", { ascending: false }).limit(5),
+                    supabase.from("finance_invoices").select("id, invoice_number, total, currency, status, issue_date").eq("client_email", user.email || "").order("issue_date", { ascending: false }).limit(5),
+                    supabase.from("chat_messages").select("id, message, sender_role, created_at").eq("room_id", `client_${user.id}`).order("created_at", { ascending: false }).limit(5),
+                ]);
+
+                // Word of the day (rotates by day index)
+                const words = wordsRes.data;
                 if (words && words.length > 0) {
                     const dayIndex = Math.floor(Date.now() / (1000 * 60 * 60 * 24)) % words.length;
                     setWord(words[dayIndex]);
                 }
 
-                // Fetch pending jobs (designs + banners)
-                const [designsRes, bannersRes] = await Promise.all([
-                    supabase.from("design_requests").select("id, title, status, created_at").eq("user_id", user.id).neq("status", "COMPLETED").order("created_at", { ascending: false }).limit(5),
-                    supabase.from("banner_requests").select("id, title, status, created_at").eq("user_id", user.id).neq("status", "COMPLETED").order("created_at", { ascending: false }).limit(5),
-                ]);
                 const jobs = [
                     // eslint-disable-next-line @typescript-eslint/no-explicit-any
                     ...(((designsRes.data as any[]) || []).map((d: any) => ({ ...d, type: "design" }))),
@@ -94,14 +100,8 @@ export default function DashboardPage() {
                     ...(((bannersRes.data as any[]) || []).map((b: any) => ({ ...b, type: "banner" }))),
                 ].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()).slice(0, 5);
                 setPendingJobs(jobs);
-
-                // Fetch invoices
-                const { data: invs } = await supabase.from("finance_invoices").select("id, invoice_number, total, currency, status, issue_date").eq("client_email", user.email || "").order("issue_date", { ascending: false }).limit(5);
-                setInvoices(invs || []);
-
-                // Fetch recent messages
-                const { data: msgs } = await supabase.from("chat_messages").select("id, message, sender_role, created_at").eq("room_id", `client_${user.id}`).order("created_at", { ascending: false }).limit(5);
-                setMessages(msgs || []);
+                setInvoices(invsRes.data || []);
+                setMessages(msgsRes.data || []);
             } catch (e) {
                 console.error(e);
             } finally {
@@ -121,7 +121,7 @@ export default function DashboardPage() {
 
     const shareWord = (platform: string) => {
         if (!word) return;
-        const text = `📚 Branding Word of the Day: ${word.word}\n${word.pronunciation || ""}\n\n${word.meaning}\n\n— from CDS Space`;
+        const text = `📚 Branding Word of the Day: ${word.word}\n${word.pronunciation || ""}\n\n${word.meaning}\n\n- from CDS Space`;
         const encoded = encodeURIComponent(text);
         const urls: Record<string, string> = {
             whatsapp: `https://wa.me/?text=${encoded}`,
@@ -143,6 +143,19 @@ export default function DashboardPage() {
         const ctx = canvas.getContext("2d");
         if (!ctx) return;
 
+        // Use the brand font (Neue Campton) that next/font already loaded on the
+        // page. Read its resolved family off <body>, and make sure the weights +
+        // italic the card uses are ready before drawing (canvas draws sync).
+        const fam = getComputedStyle(document.body).fontFamily || "sans-serif";
+        const primary = fam.split(",")[0].trim() || "sans-serif";
+        try {
+            await Promise.all([
+                document.fonts.load(`400 44px ${primary}`),
+                document.fonts.load(`700 96px ${primary}`),
+                document.fonts.load(`italic 400 36px ${primary}`),
+            ]);
+        } catch { /* fall back to whatever's available */ }
+
         // Background gradient
         const gradient = ctx.createLinearGradient(0, 0, 1080, 1080);
         gradient.addColorStop(0, "#0035C1");
@@ -162,24 +175,24 @@ export default function DashboardPage() {
 
         // Header label
         ctx.fillStyle = "rgba(255,255,255,0.7)";
-        ctx.font = "bold 28px sans-serif";
+        ctx.font = `bold 28px ${fam}`;
         ctx.fillText("BRANDING WORD OF THE DAY", 80, 130);
 
         // Word
         ctx.fillStyle = "white";
-        ctx.font = "bold 96px sans-serif";
+        ctx.font = `bold 96px ${fam}`;
         ctx.fillText(word.word, 80, 270);
 
         // Pronunciation
         if (word.pronunciation) {
             ctx.fillStyle = "rgba(255,255,255,0.6)";
-            ctx.font = "italic 36px sans-serif";
+            ctx.font = `italic 36px ${fam}`;
             ctx.fillText(word.pronunciation, 80, 330);
         }
 
         // Meaning (wrap text)
         ctx.fillStyle = "white";
-        ctx.font = "44px sans-serif";
+        ctx.font = `44px ${fam}`;
         const words = word.meaning.split(" ");
         let line = "";
         let y = 460;
@@ -197,10 +210,10 @@ export default function DashboardPage() {
 
         // Footer
         ctx.fillStyle = "rgba(255,255,255,0.8)";
-        ctx.font = "bold 32px sans-serif";
+        ctx.font = `bold 32px ${fam}`;
         ctx.fillText("CDS Space", 80, 1000);
         ctx.fillStyle = "rgba(255,255,255,0.5)";
-        ctx.font = "26px sans-serif";
+        ctx.font = `26px ${fam}`;
         ctx.fillText("cdsspace.pro", 80, 1040);
 
         const link = document.createElement("a");
@@ -365,7 +378,7 @@ export default function DashboardPage() {
                                 <div key={inv.id} className="flex items-center gap-3 p-2.5 rounded-xl hover:bg-[#F5F7FA]/50 transition">
                                     <div className="flex-1 min-w-0">
                                         <p className="text-[12px] font-medium text-brand-navy truncate">{inv.invoice_number}</p>
-                                        <p className="text-[10px] text-brand-body/50">{new Date(inv.issue_date).toLocaleDateString()}</p>
+                                        <p className="text-[10px] text-brand-body/50">{formatFinanceDate(inv.issue_date)}</p>
                                     </div>
                                     <div className="text-right">
                                         <p className="text-[12px] font-semibold tabular-nums text-brand-navy">{inv.currency} {Number(inv.total).toLocaleString()}</p>

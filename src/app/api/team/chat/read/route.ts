@@ -6,7 +6,7 @@ import { glashQuery } from "@/lib/glashdb/postgres";
 
 export const runtime = "nodejs";
 
-// POST { threadId } — upsert the viewer's last_read_at for this thread.
+// POST { threadId } - upsert the viewer's last_read_at for this thread.
 export async function POST(req: Request) {
   const viewer = await getChatViewer();
   if (!viewer || !supabaseAdmin) {
@@ -28,7 +28,7 @@ export async function POST(req: Request) {
   if (error) return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
 
   // Opening a thread is a strong signal the user saw every unread
-  // chat_message notification for it — clear them so the bell badge drops
+  // chat_message notification for it - clear them so the bell badge drops
   // without waiting for an extra click in the bell itself.
   await db
     .from("team_notifications")

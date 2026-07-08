@@ -1,19 +1,25 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getAdminSession } from "@/app/api/admin-check/route";
+import { getAdminSessionAsync } from "@/app/api/admin-check/route";
+import { hasPermission } from "@/lib/admin-permissions";
 import { getSupabaseAdmin } from "@/lib/supabase";
 
-function guard(req: NextRequest) {
-    const s = getAdminSession(req);
+async function guard(req: NextRequest) {
+    const s = await getAdminSessionAsync(req);
     if (!s) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     if (s.role === "super_admin") return null;
-    if (s.permissions.includes("team_members.promote") || s.permissions.includes("team_members")) {
+    if (
+        hasPermission(s.permissions, "admin_roles.manage") ||
+        hasPermission(s.permissions, "sub_admins") ||
+        hasPermission(s.permissions, "team_members.promote") ||
+        hasPermission(s.permissions, "team_members")
+    ) {
         return null;
     }
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 }
 
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-    const denied = guard(req);
+    const denied = await guard(req);
     if (denied) return denied;
     const { id } = await params;
     const body = await req.json().catch(() => ({}));
@@ -37,7 +43,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 }
 
 export async function DELETE(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-    const denied = guard(req);
+    const denied = await guard(req);
     if (denied) return denied;
     const { id } = await params;
     const sb = getSupabaseAdmin() as any;

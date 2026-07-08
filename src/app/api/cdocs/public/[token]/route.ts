@@ -4,7 +4,7 @@ import { supabaseAdmin } from "@/lib/supabase";
 
 export const runtime = "nodejs";
 
-// Public — no auth. Read-only shape.
+// Public - no auth. Read-only shape.
 export async function GET(_req: Request, ctx: { params: Promise<{ token: string }> }) {
   const { token } = await ctx.params;
   if (!token || !supabaseAdmin) return NextResponse.json({ ok: false, error: "Invalid" }, { status: 400 });

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getAdminSession } from "@/app/api/admin-check/route";
+import { getAdminSessionAsync } from "@/app/api/admin-check/route";
 import { hasPermission } from "@/lib/admin-permissions";
 import { isLegalSlug } from "@/lib/legal/default-content";
 import { loadLegalDocument } from "@/lib/legal/server";
@@ -15,9 +15,9 @@ export const runtime = "nodejs";
  * /upload route which parses it back to HTML with `mammoth`.
  */
 export async function GET(req: NextRequest, { params }: { params: Promise<{ slug: string }> }) {
-    const session = getAdminSession(req);
+    const session = await getAdminSessionAsync(req);
     if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    if (!hasPermission(session.permissions, "legal")) {
+    if (session.role !== "super_admin" && !hasPermission(session.permissions, "legal")) {
         return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
 

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef, useCallback } from "react";
+import { appPrompt } from "@/lib/app-notify";
 import { motion, AnimatePresence } from "framer-motion";
 import { Bookmark, Languages, Loader2, MessageSquare, Pin, Send, Star, X } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
@@ -72,7 +73,7 @@ export function ChatWidget() {
   // Initial fetch + polling
   useEffect(() => {
     fetchMessages();
-    const interval = setInterval(fetchMessages, 5000);
+    const interval = setInterval(() => { if (!document.hidden) fetchMessages(); }, 10000);
     return () => clearInterval(interval);
   }, [fetchMessages]);
 
@@ -153,7 +154,7 @@ export function ChatWidget() {
     try {
       const payload: Record<string, unknown> = { action };
       if (action === "translate") {
-        const language = window.prompt("Translate this message to which language?", "English");
+        const language = await appPrompt({ title: "Translate message", message: "Translate this message to which language?", defaultValue: "English" });
         if (!language?.trim()) return;
         payload.language = language.trim();
       }

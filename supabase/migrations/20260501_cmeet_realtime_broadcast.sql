@@ -6,7 +6,7 @@
 -- fails with CHANNEL_ERROR the moment a peer tries to connect.
 --
 -- This migration installs two permissive policies that apply only to
--- topics matching `cmeet:%` — every authenticated user can read and
+-- topics matching `cmeet:%` - every authenticated user can read and
 -- write broadcast frames for those topics, and nothing else is exposed.
 --
 -- Re-runnable: policies are dropped-if-exists first.

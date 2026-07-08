@@ -149,10 +149,10 @@ export default function PayrollPage() {
                 {employees.map((e) => (
                   <tr key={e.id} className="border-t border-white/60 hover:bg-white/50">
                     <td className="px-5 py-4 font-medium text-gray-900">{e.name}</td>
-                    <td className="px-5 py-4 text-gray-500">{e.role ?? "—"}</td>
-                    <td className="px-5 py-4 text-gray-500">{e.bank_code ? findBankByCode(e.bank_code)?.name : "—"}</td>
-                    <td className="px-5 py-4 text-gray-500 font-mono">{e.account_number ?? "—"}</td>
-                    <td className="px-5 py-4 font-semibold">{e.base_salary ? formatMoney(e.base_salary, e.currency) : "—"}</td>
+                    <td className="px-5 py-4 text-gray-500">{e.role ?? "-"}</td>
+                    <td className="px-5 py-4 text-gray-500">{e.bank_code ? findBankByCode(e.bank_code)?.name : "-"}</td>
+                    <td className="px-5 py-4 text-gray-500 font-mono">{e.account_number ?? "-"}</td>
+                    <td className="px-5 py-4 font-semibold">{e.base_salary ? formatMoney(e.base_salary, e.currency) : "-"}</td>
                     <td className="px-5 py-4 text-right">
                       <button onClick={() => removeEmp(e.id)} className="w-8 h-8 rounded-lg hover:bg-red-50 grid place-items-center text-gray-400 hover:text-red-600"><Trash2 className="w-4 h-4" /></button>
                     </td>

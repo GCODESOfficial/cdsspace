@@ -39,7 +39,7 @@ const STATUS_STYLES: Record<string, string> = {
 type StatusFilter = "all" | "pending" | "submitted" | "archived";
 
 function relativeTime(iso: string | null | undefined): string {
-    if (!iso) return "—";
+    if (!iso) return "-";
     const d = new Date(iso);
     const diff = Date.now() - d.getTime();
     const sec = Math.floor(diff / 1000);
@@ -306,7 +306,7 @@ export default function AdminBrandBriefsPage() {
     return (
         <FinanceShell
             title="Brand Briefs"
-            subtitle="Generate shareable brief links — clients fill without creating an account."
+            subtitle="Generate shareable brief links - clients fill without creating an account."
             actions={
                 <Button
                     onClick={() => setShowCreate(true)}
@@ -481,10 +481,10 @@ export default function AdminBrandBriefsPage() {
                                                 />
                                             </td>
                                             <td className="px-5 py-4 font-medium text-[#0D1B39]">
-                                                {r.invite_label || <span className="text-gray-400">—</span>}
+                                                {r.invite_label || <span className="text-gray-400">-</span>}
                                             </td>
                                             <td className="px-5 py-4 text-gray-700">
-                                                {r.brand_name || <span className="text-gray-400">—</span>}
+                                                {r.brand_name || <span className="text-gray-400">-</span>}
                                             </td>
                                             <td className="px-5 py-4 text-gray-700">
                                                 {r.contact_name ? (
@@ -495,7 +495,7 @@ export default function AdminBrandBriefsPage() {
                                                         )}
                                                     </div>
                                                 ) : (
-                                                    <span className="text-gray-400">—</span>
+                                                    <span className="text-gray-400">-</span>
                                                 )}
                                             </td>
                                             <td className="px-5 py-4 text-gray-500">
@@ -650,7 +650,7 @@ export default function AdminBrandBriefsPage() {
                                 <Input
                                     value={inviteLabel}
                                     onChange={(e) => setInviteLabel(e.target.value)}
-                                    placeholder="e.g. Adeesi — rebrand"
+                                    placeholder="e.g. Adeesi - rebrand"
                                     className="mt-1.5 h-11 rounded-xl"
                                 />
                             </div>

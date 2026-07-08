@@ -1,23 +1,29 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getAdminSession } from "@/app/api/admin-check/route";
+import { getAdminSessionAsync } from "@/app/api/admin-check/route";
+import { hasPermission } from "@/lib/admin-permissions";
 import { getSupabaseAdmin } from "@/lib/supabase";
 
 /**
- * Admin roles — reusable permission bundles. Only super admins
- * (or anyone with `team_members.promote`) can manage them.
+ * Admin roles - reusable permission bundles. Super admins, and sub-admins who
+ * manage the Sub-Admins / Team Members section, can manage them.
  */
-function guard(req: NextRequest) {
-    const s = getAdminSession(req);
+async function guard(req: NextRequest) {
+    const s = await getAdminSessionAsync(req);
     if (!s) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     if (s.role === "super_admin") return null;
-    if (s.permissions.includes("team_members.promote") || s.permissions.includes("team_members")) {
+    if (
+        hasPermission(s.permissions, "admin_roles.manage") ||
+        hasPermission(s.permissions, "sub_admins") ||
+        hasPermission(s.permissions, "team_members.promote") ||
+        hasPermission(s.permissions, "team_members")
+    ) {
         return null;
     }
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 }
 
 export async function GET(req: NextRequest) {
-    const denied = guard(req);
+    const denied = await guard(req);
     if (denied) return denied;
     const sb = getSupabaseAdmin() as any;
     const { data, error } = await sb
@@ -29,7 +35,7 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
-    const denied = guard(req);
+    const denied = await guard(req);
     if (denied) return denied;
     const body = await req.json().catch(() => ({}));
     const name = body?.name?.toString().trim();

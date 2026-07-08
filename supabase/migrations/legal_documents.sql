@@ -25,7 +25,7 @@ create index if not exists legal_documents_slug_idx on public.legal_documents (s
 -- of a published document.
 alter table public.legal_documents enable row level security;
 
--- Public (anon) users can read documents — the privacy/terms pages fetch them.
+-- Public (anon) users can read documents - the privacy/terms pages fetch them.
 drop policy if exists "legal_documents_public_read" on public.legal_documents;
 create policy "legal_documents_public_read"
     on public.legal_documents

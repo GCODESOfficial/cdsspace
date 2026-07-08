@@ -1,7 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { NextResponse } from "next/server";
-import { cookies } from "next/headers";
 import { supabaseAdmin } from "@/lib/supabase";
+import { getAdminSession } from "@/lib/admin-session";
 import { glashQuery } from "@/lib/glashdb/postgres";
 import { hashPassword, generateSalt, generateInviteToken } from "@/lib/team-auth";
 import { isReservedUsername } from "@/lib/reserved-usernames";
@@ -11,16 +11,11 @@ import { lagosDate } from "@/lib/timebook";
 
 export const runtime = "nodejs";
 
+// Use the canonical session resolver: accepts the admin_session cookie OR a
+// sub-admin's team_session (team-portal login). The old local JSON.parse only
+// read admin_session, so team-portal admins got 401s and saw an empty list.
 async function verifyAdmin() {
-  const store = await cookies();
-  const raw = store.get("admin_session")?.value;
-  if (!raw) return null;
-  try {
-    const session = JSON.parse(raw);
-    return session.role === "super_admin" || session.role === "sub_admin" ? session : null;
-  } catch {
-    return null;
-  }
+  return getAdminSession();
 }
 
 export async function GET() {
@@ -33,7 +28,7 @@ export async function GET() {
   const { data, error } = await db
     .from("team_members")
     .select(
-      "id, full_name, email, username, avatar_url, role_title, department, phone, is_active, is_sub_admin, permissions, invite_token, invite_filled, joined_at, created_at, bank_name, bank_code, account_number, account_name, base_salary, salary_currency, pay_cycle"
+      "id, full_name, email, username, avatar_url, role_title, department, phone, is_active, is_sub_admin, is_team_lead, permissions, invite_token, invite_filled, joined_at, created_at, bank_name, bank_code, account_number, account_name, base_salary, salary_currency, pay_cycle"
     )
     .order("created_at", { ascending: false });
 
@@ -175,7 +170,7 @@ export async function POST(req: Request) {
       recipient_id: data.id,
       kind: "sub_admin_granted",
       title: "You've been made a sub-admin",
-      body: `You now have admin access with permissions: ${(Array.isArray(permissions) ? permissions : []).join(", ") || "—"}. Check the admin dashboard.`,
+      body: `You now have admin access with permissions: ${(Array.isArray(permissions) ? permissions : []).join(", ") || "-"}. Check the admin dashboard.`,
       link: "/admin",
       actor_is_admin: true,
     });
@@ -258,6 +253,7 @@ export async function PATCH(req: Request) {
     "phone",
     "is_active",
     "is_sub_admin",
+    "is_team_lead",
     "permissions",
   ];
   const updates: Record<string, any> = {};
@@ -290,7 +286,7 @@ export async function PATCH(req: Request) {
       });
     }
 
-    // Sub-admin promotion (newly granted) — log + notify recipient
+    // Sub-admin promotion (newly granted) - log + notify recipient
     const promoted = !before.is_sub_admin && updates.is_sub_admin === true;
     const demoted = before.is_sub_admin && updates.is_sub_admin === false;
     if (promoted) {
@@ -306,7 +302,7 @@ export async function PATCH(req: Request) {
         recipient_id: id,
         kind: "sub_admin_granted",
         title: "You've been made a sub-admin",
-        body: `You now have admin access with permissions: ${(Array.isArray(updates.permissions) ? updates.permissions : before.permissions || []).join(", ") || "—"}. Check the admin dashboard.`,
+        body: `You now have admin access with permissions: ${(Array.isArray(updates.permissions) ? updates.permissions : before.permissions || []).join(", ") || "-"}. Check the admin dashboard.`,
         link: "/admin",
         actor_is_admin: true,
       });

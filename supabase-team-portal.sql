@@ -299,7 +299,7 @@ VALUES
   ('team-signatures', 'team-signatures', true)
 ON CONFLICT (id) DO NOTHING;
 
--- Storage policies — open for app-level role checks
+-- Storage policies - open for app-level role checks
 DO $$
 DECLARE
   bucket TEXT;

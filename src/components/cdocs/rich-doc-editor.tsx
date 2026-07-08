@@ -3,6 +3,7 @@
 /* eslint-disable @next/next/no-img-element */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { appPrompt } from "@/lib/app-notify";
 import {
   Bold, Italic, Underline, AlignLeft, AlignCenter, AlignRight, AlignJustify,
   List, ListOrdered, Heading1, Heading2, Heading3, Minus, Link as LinkIcon,
@@ -110,11 +111,11 @@ export function RichDocEditor({ value, onChange, theme = "light", placeholder = 
   }
 
   /* ---------------- Link ---------------- */
-  function addLink() {
+  async function addLink() {
     rootRef.current?.focus();
     restoreSelection();
     const current = window.getSelection()?.toString() || "";
-    const url = window.prompt("Link URL", "https://");
+    const url = await appPrompt({ title: "Insert link", message: "Link URL", defaultValue: "https://", inputType: "url" });
     if (!url) return;
     if (current) {
       exec("createLink", url);

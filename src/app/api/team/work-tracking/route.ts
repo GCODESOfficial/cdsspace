@@ -3,7 +3,7 @@ import crypto from "crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { getGlashDbAdmin } from "@/lib/glashdb";
 import { getTeamSession } from "@/lib/team-auth";
-import { lagosDate, lagosMinutes, TIMEBOOK_SCHEDULE } from "@/lib/timebook";
+import { lagosDate } from "@/lib/timebook";
 import {
   DEFAULT_CAPTURE_INTERVAL_SECONDS,
   DEFAULT_IDLE_THRESHOLD_SECONDS,
@@ -16,11 +16,6 @@ import { analyzeSnapshotWithAi } from "@/lib/work-tracking-ai";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-
-function isOfficialBreak() {
-  const minutes = lagosMinutes();
-  return minutes >= TIMEBOOK_SCHEDULE.breakStartMinutes && minutes < TIMEBOOK_SCHEDULE.breakEndMinutes;
-}
 
 async function getSettings(db: any) {
   const { data } = await db
@@ -182,13 +177,8 @@ export async function POST(req: NextRequest) {
     const entry = await getTodayEntry(db, session.id, workDate);
 
     if (action === "start_session") {
-      if (!entry?.clock_in_at || entry.clock_out_at) {
-        return NextResponse.json({ ok: false, error: "Clock in on the timebook before starting work tracking." }, { status: 400 });
-      }
-      if (entry.current_status === "on_break" || isOfficialBreak()) {
-        return NextResponse.json({ ok: false, error: "Work tracking pauses during break time." }, { status: 409 });
-      }
-
+      // Tracking runs for the whole logged-in dashboard session — it does NOT
+      // require a timebook clock-in, so work before/after check-in is covered.
       const existing = await getActiveSession(db, session.id, workDate);
       if (existing) return NextResponse.json({ ok: true, session: existing, settings });
 
@@ -196,7 +186,7 @@ export async function POST(req: NextRequest) {
         .from("team_work_tracking_sessions")
         .insert({
           team_member_id: session.id,
-          time_entry_id: entry.id,
+          time_entry_id: entry?.id ?? null,
           work_date: workDate,
           status: "active",
           capture_interval_seconds: settings.capture_interval_seconds || DEFAULT_CAPTURE_INTERVAL_SECONDS,
@@ -228,9 +218,6 @@ export async function POST(req: NextRequest) {
     if (action === "pause_session" || action === "resume_session") {
       const sessionId = body.session_id;
       if (!sessionId) return NextResponse.json({ ok: false, error: "session_id is required." }, { status: 400 });
-      if (action === "resume_session" && (!entry?.clock_in_at || entry.clock_out_at)) {
-        return NextResponse.json({ ok: false, error: "Clock in first." }, { status: 400 });
-      }
       const { data, error } = await db
         .from("team_work_tracking_sessions")
         .update({
@@ -272,10 +259,7 @@ export async function POST(req: NextRequest) {
       if (!sessionId || !screenshotDataUrl) {
         return NextResponse.json({ ok: false, error: "session_id and screenshot_data_url are required." }, { status: 400 });
       }
-      if (!entry?.clock_in_at || entry.clock_out_at) {
-        return NextResponse.json({ ok: false, error: "Tracking stopped because you are not clocked in." }, { status: 409 });
-      }
-      if (entry.current_status === "on_break" || isOfficialBreak()) {
+      if (entry?.current_status === "on_break") {
         await db
           .from("team_work_tracking_sessions")
           .update({ status: "paused", pause_reason: "break_time" })
@@ -332,7 +316,7 @@ export async function POST(req: NextRequest) {
           id: snapshotId,
           session_id: sessionId,
           team_member_id: session.id,
-          time_entry_id: entry.id,
+          time_entry_id: entry?.id ?? null,
           work_date: workDate,
           captured_at: now,
           local_captured_at: body.local_captured_at || null,
@@ -345,7 +329,7 @@ export async function POST(req: NextRequest) {
           screenshot_storage_path: storedPath,
           screenshot_sha256: crypto.createHash("sha256").update(buffer).digest("hex"),
           expires_at: expiresAt,
-          ai_status: analysis.model === "local-fallback" ? "analyzed" : "analyzed",
+          ai_status: analysis.model === "local-fallback" ? "failed" : "analyzed",
           ai_summary: analysis.summary,
           ai_categories: analysis.categories,
           detected_apps: analysis.detected_apps,

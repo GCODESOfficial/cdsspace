@@ -6,8 +6,7 @@
     "dev": "next dev",
     "build": "next build",
     "build:next": "next build",
-    "glash": "glash build",
-    "glash:optimize": "glash optimize public",
+    "deploy": "glash deploy --asset-mode offload --source-upload chunked",
     "start": "next start",
     "lint": "eslint ."
   },
@@ -102,6 +101,7 @@
     "tailwind-merge": "^3.2.0",
     "tailwind-scrollbar-hide": "^2.0.0",
     "tailwindcss-animate": "^1.0.7",
+    "unpdf": "^1.6.2",
     "url": "^0.11.4",
     "uuid": "^11.1.0",
     "vaul": "^1.1.2",

@@ -74,7 +74,7 @@ export default function VideoPreviewPlayer() {
   {isPlaying && (
     <video
       ref={mainVideoRef}
-      src="/home/CDS Space Branding Agency.mp4"
+      src="/home/cds-space-brand-reel.mp4"
       loop
       muted={isMuted}
       playsInline

@@ -26,7 +26,7 @@ export async function POST(req: NextRequest) {
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
   // Keep the suggestion tables in sync so future entries pick up this value.
-  // Fire-and-forget — don't let a failure here block the expenditure insert.
+  // Fire-and-forget - don't let a failure here block the expenditure insert.
   const bumpSuggestion = async (table: string, name: string) => {
     try {
       const { data: existing } = await sb.from(table).select("id, usage_count").ilike("name", name).maybeSingle();

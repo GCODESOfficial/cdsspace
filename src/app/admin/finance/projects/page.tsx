@@ -29,10 +29,14 @@ interface ProjectRow {
 }
 
 const STATUS_STYLES: Record<string, string> = {
-  active:    "bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200",
-  completed: "bg-blue-50 text-blue-700 ring-1 ring-blue-200",
-  paused:    "bg-amber-50 text-amber-700 ring-1 ring-amber-200",
-  archived:  "bg-gray-100 text-gray-600 ring-1 ring-gray-200",
+  new:             "bg-sky-50 text-sky-700 ring-1 ring-sky-200",
+  active:          "bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200",
+  completed:       "bg-blue-50 text-blue-700 ring-1 ring-blue-200",
+  paused:          "bg-amber-50 text-amber-700 ring-1 ring-amber-200",
+  delayed:         "bg-red-50 text-red-700 ring-1 ring-red-200",
+  awaiting_client: "bg-violet-50 text-violet-700 ring-1 ring-violet-200",
+  under_review:    "bg-indigo-50 text-indigo-700 ring-1 ring-indigo-200",
+  archived:        "bg-gray-100 text-gray-600 ring-1 ring-gray-200",
 };
 
 export default function ProjectsPage() {
@@ -52,7 +56,14 @@ export default function ProjectsPage() {
   useEffect(() => { load(); }, []);
 
   const create = async () => {
-    if (!form.name || !form.client) return;
+    if (!form.name.trim() || !form.client.trim()) {
+      appAlert("Project name and client are required.");
+      return;
+    }
+    if (form.duration_start && form.duration_end && form.duration_end < form.duration_start) {
+      appAlert("End date cannot be before the start date.");
+      return;
+    }
     setSaving(true);
     const r = await fetch("/api/admin/finance/projects", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(form) });
     setSaving(false);
@@ -166,7 +177,7 @@ export default function ProjectsPage() {
                         <p className="text-xs text-gray-500">{p.client}</p>
                       </div>
                     </div>
-                    <span className={`text-[10px] uppercase tracking-wider font-semibold px-2.5 py-1 rounded-full ${STATUS_STYLES[p.status] ?? STATUS_STYLES.archived}`}>{p.status}</span>
+                    <span className={`text-[10px] uppercase tracking-wider font-semibold px-2.5 py-1 rounded-full ${STATUS_STYLES[p.status] ?? STATUS_STYLES.new}`}>{p.status.replace(/_/g, " ")}</span>
                   </div>
 
                   <div className="grid grid-cols-2 gap-3 mb-4">

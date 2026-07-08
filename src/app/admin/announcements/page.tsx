@@ -4,14 +4,18 @@ import { useEffect, useMemo, useState } from "react";
 import {
   BellRing,
   BriefcaseBusiness,
+  Check,
   CheckCircle2,
   Loader2,
+  Mail,
+  MessageSquare,
   Megaphone,
   Send,
   Users,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { appAlert } from "@/lib/app-notify";
+import ActivityPanel from "@/components/admin/ActivityPanel";
 
 type Audience = "clients" | "team" | "project";
 type ClientMode = "all" | "selected";
@@ -49,9 +53,10 @@ export default function AdminAnnouncementsPage() {
   const [audience, setAudience] = useState<Audience>("team");
   const [clientMode, setClientMode] = useState<ClientMode>("all");
   const [teamMode, setTeamMode] = useState<TeamMode>("all");
+  const [channels, setChannels] = useState({ inApp: true, email: false });
   const [selectedClients, setSelectedClients] = useState<Set<string>>(new Set());
   const [selectedTeam, setSelectedTeam] = useState<Set<string>>(new Set());
-  const [department, setDepartment] = useState("");
+  const [selectedDepartments, setSelectedDepartments] = useState<Set<string>>(new Set());
   const [projectId, setProjectId] = useState("");
   const [query, setQuery] = useState("");
   const [title, setTitle] = useState("");
@@ -108,6 +113,23 @@ export default function AdminAnnouncementsPage() {
     );
   }, [query, teamMembers]);
 
+  // Member count per department, so the department list reads like the team list.
+  const departmentCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const member of teamMembers) {
+      const dept = member.department?.trim();
+      if (!dept) continue;
+      counts.set(dept, (counts.get(dept) || 0) + 1);
+    }
+    return counts;
+  }, [teamMembers]);
+
+  const departmentRecipientCount = useMemo(() => {
+    if (selectedDepartments.size === 0) return 0;
+    const lowered = new Set(Array.from(selectedDepartments).map((d) => d.toLowerCase()));
+    return teamMembers.filter((m) => m.department && lowered.has(m.department.toLowerCase())).length;
+  }, [selectedDepartments, teamMembers]);
+
   const selectedCount =
     audience === "clients"
       ? clientMode === "all" ? clients.length : selectedClients.size
@@ -115,7 +137,7 @@ export default function AdminAnnouncementsPage() {
         ? teamMode === "all"
           ? teamMembers.length
           : teamMode === "department"
-            ? teamMembers.filter((member) => member.department?.toLowerCase() === department.toLowerCase()).length
+            ? departmentRecipientCount
             : selectedTeam.size
         : projectId
           ? "project team"
@@ -130,6 +152,14 @@ export default function AdminAnnouncementsPage() {
 
   async function sendAnnouncement(event: React.FormEvent) {
     event.preventDefault();
+    if (audience === "clients" && !channels.inApp && !channels.email) {
+      await appAlert({
+        title: "Pick a channel",
+        message: "Choose in-app chat, email, or both for client announcements.",
+        kind: "error",
+      });
+      return;
+    }
     setSubmitting(true);
     setLastSent(null);
     try {
@@ -141,9 +171,10 @@ export default function AdminAnnouncementsPage() {
           audience,
           clientMode,
           teamMode,
+          channels,
           clientIds: Array.from(selectedClients),
           teamMemberIds: Array.from(selectedTeam),
-          department,
+          departments: Array.from(selectedDepartments),
           projectId,
           title,
           message,
@@ -173,29 +204,33 @@ export default function AdminAnnouncementsPage() {
   }
 
   return (
-    <div className="mx-auto flex w-full max-w-[1400px] flex-col gap-5 p-4 sm:gap-6 sm:p-6 lg:p-8">
-      <header className="flex flex-col gap-4 rounded-[28px] border border-white/70 bg-white p-5 shadow-sm sm:p-6 lg:flex-row lg:items-center lg:justify-between">
+    <div className="mx-auto flex w-full max-w-[1400px] flex-col gap-6 p-4 sm:p-6 lg:p-8">
+      {/* Header */}
+      <header className="flex flex-col gap-5 rounded-2xl border border-gray-100 bg-white p-5 shadow-sm sm:p-6 lg:flex-row lg:items-center lg:justify-between">
         <div className="min-w-0">
           <div className="inline-flex items-center gap-2 rounded-full bg-blue-50 px-3 py-1 text-[12px] font-bold uppercase tracking-[0.14em] text-[#0A4FE8] ring-1 ring-blue-100">
             <Megaphone className="h-3.5 w-3.5" />
             Announcement Center
           </div>
-          <h1 className="mt-3 text-[28px] font-bold tracking-tight text-[#0D1B39] sm:text-[34px]">
+          <h1 className="mt-3 text-[28px] font-bold tracking-tight text-[#0D1B39] sm:text-[32px]">
             Push Notifications
           </h1>
-          <p className="mt-1 max-w-2xl text-[14px] leading-6 text-slate-500">
+          <p className="mt-1 max-w-2xl text-[14px] leading-6 text-gray-500">
             Send one announcement to clients, all team members, selected departments, or everyone assigned to a project.
+            Every announcement also lands in the recipient&apos;s Messages as a note from CDS&nbsp;Space.
           </p>
         </div>
-        <div className="grid grid-cols-3 gap-2 rounded-2xl bg-[#F0F5FF] p-2 text-center sm:min-w-[360px]">
-          <Metric label="Clients" value={clients.length} />
-          <Metric label="Team" value={teamMembers.length} />
-          <Metric label="Projects" value={projects.length} />
+        <div className="grid grid-cols-3 gap-3 sm:min-w-[380px]">
+          <StatTile icon={BellRing} color="blue" label="Clients" value={clients.length} />
+          <StatTile icon={Users} color="purple" label="Team" value={teamMembers.length} />
+          <StatTile icon={BriefcaseBusiness} color="emerald" label="Projects" value={projects.length} />
         </div>
       </header>
 
-      <form onSubmit={sendAnnouncement} className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_380px]">
-        <section className="rounded-[28px] border border-white/70 bg-white p-4 shadow-sm sm:p-6">
+      <form onSubmit={sendAnnouncement} className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_390px]">
+        {/* Compose */}
+        <section className="rounded-2xl border border-gray-100 bg-white p-4 shadow-sm sm:p-6">
+          <SectionLabel>Audience</SectionLabel>
           <div className="grid gap-3 sm:grid-cols-3">
             <AudienceButton
               active={audience === "clients"}
@@ -220,13 +255,13 @@ export default function AdminAnnouncementsPage() {
             />
           </div>
 
-          <div className="mt-6 grid gap-4">
+          <div className="mt-7 grid gap-5">
             <Field label="Title">
               <input
                 value={title}
                 onChange={(event) => setTitle(event.target.value)}
                 placeholder="Example: Office closure notice"
-                className="h-12 w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 text-[14px] font-medium text-[#0D1B39] outline-none transition focus:border-[#0A4FE8]/40 focus:bg-white focus:ring-4 focus:ring-blue-100"
+                className="h-12 w-full rounded-xl border border-gray-200 bg-gray-50 px-4 text-[14px] font-medium text-[#0D1B39] outline-none transition focus:border-blue-300 focus:bg-white focus:ring-2 focus:ring-blue-100"
                 required
               />
             </Field>
@@ -236,7 +271,7 @@ export default function AdminAnnouncementsPage() {
                 onChange={(event) => setMessage(event.target.value)}
                 placeholder="Write the announcement people should see..."
                 rows={6}
-                className="min-h-[160px] w-full resize-y rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-[14px] font-medium leading-6 text-[#0D1B39] outline-none transition focus:border-[#0A4FE8]/40 focus:bg-white focus:ring-4 focus:ring-blue-100"
+                className="min-h-[160px] w-full resize-y rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 text-[14px] font-medium leading-6 text-[#0D1B39] outline-none transition focus:border-blue-300 focus:bg-white focus:ring-2 focus:ring-blue-100"
                 required
               />
             </Field>
@@ -245,20 +280,21 @@ export default function AdminAnnouncementsPage() {
                 value={link}
                 onChange={(event) => setLink(event.target.value)}
                 placeholder={audience === "clients" ? "/dashboard/orders" : "/team/chat"}
-                className="h-12 w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 text-[14px] font-medium text-[#0D1B39] outline-none transition focus:border-[#0A4FE8]/40 focus:bg-white focus:ring-4 focus:ring-blue-100"
+                className="h-12 w-full rounded-xl border border-gray-200 bg-gray-50 px-4 text-[14px] font-medium text-[#0D1B39] outline-none transition focus:border-blue-300 focus:bg-white focus:ring-2 focus:ring-blue-100"
               />
             </Field>
           </div>
         </section>
 
-        <aside className="rounded-[28px] border border-white/70 bg-white p-4 shadow-sm sm:p-5">
+        {/* Recipients */}
+        <aside className="flex flex-col rounded-2xl border border-gray-100 bg-white p-4 shadow-sm sm:p-5">
           <div className="flex items-center justify-between gap-3">
             <div>
               <h2 className="text-[16px] font-bold text-[#0D1B39]">Recipients</h2>
-              <p className="text-[12px] text-slate-500">{String(selectedCount)} selected</p>
+              <p className="text-[12px] text-gray-500">{String(selectedCount)} selected</p>
             </div>
             {lastSent && (
-              <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-3 py-1 text-[11px] font-bold text-emerald-700">
+              <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-3 py-1 text-[11px] font-bold text-emerald-700 ring-1 ring-emerald-100">
                 <CheckCircle2 className="h-3.5 w-3.5" />
                 Sent
               </span>
@@ -266,21 +302,43 @@ export default function AdminAnnouncementsPage() {
           </div>
 
           {loading ? (
-            <div className="mt-6 flex h-48 items-center justify-center rounded-3xl bg-slate-50">
+            <div className="mt-6 flex h-48 items-center justify-center rounded-2xl bg-gray-50">
               <Loader2 className="h-5 w-5 animate-spin text-[#0A4FE8]" />
             </div>
           ) : (
             <div className="mt-5 space-y-4">
               {audience === "clients" && (
                 <>
-                  <Segmented
-                    value={clientMode}
-                    options={[
-                      { label: "All clients", value: "all" },
-                      { label: "Pick clients", value: "selected" },
-                    ]}
-                    onChange={(value) => setClientMode(value as ClientMode)}
-                  />
+                  <div>
+                    <SectionLabel>Channels</SectionLabel>
+                    <div className="grid grid-cols-2 gap-2">
+                      <ChannelToggle
+                        icon={MessageSquare}
+                        label="In-app chat"
+                        hint="Dashboard + Messages"
+                        active={channels.inApp}
+                        onClick={() => setChannels((c) => ({ ...c, inApp: !c.inApp }))}
+                      />
+                      <ChannelToggle
+                        icon={Mail}
+                        label="Email"
+                        hint="Send to inbox"
+                        active={channels.email}
+                        onClick={() => setChannels((c) => ({ ...c, email: !c.email }))}
+                      />
+                    </div>
+                  </div>
+                  <div>
+                    <SectionLabel>Who</SectionLabel>
+                    <Segmented
+                      value={clientMode}
+                      options={[
+                        { label: "All clients", value: "all" },
+                        { label: "Pick clients", value: "selected" },
+                      ]}
+                      onChange={(value) => setClientMode(value as ClientMode)}
+                    />
+                  </div>
                   {clientMode === "selected" && (
                     <Picker
                       query={query}
@@ -310,16 +368,52 @@ export default function AdminAnnouncementsPage() {
                     onChange={(value) => setTeamMode(value as TeamMode)}
                   />
                   {teamMode === "department" && (
-                    <select
-                      value={department}
-                      onChange={(event) => setDepartment(event.target.value)}
-                      className="h-12 w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 text-[14px] font-semibold text-[#0D1B39] outline-none focus:border-[#0A4FE8]/40 focus:ring-4 focus:ring-blue-100"
-                    >
-                      <option value="">Choose department</option>
-                      {departments.map((dept) => (
-                        <option key={dept} value={dept}>{dept}</option>
-                      ))}
-                    </select>
+                    <>
+                      <div className="flex items-center justify-between px-1">
+                        <p className="text-[11px] font-semibold text-gray-500">
+                          Select one or more departments
+                        </p>
+                        {selectedDepartments.size > 0 && (
+                          <button
+                            type="button"
+                            onClick={() => setSelectedDepartments(new Set())}
+                            className="text-[11px] font-semibold text-[#0A4FE8] hover:underline"
+                          >
+                            Clear
+                          </button>
+                        )}
+                      </div>
+                      {departments.length === 0 ? (
+                        <p className="rounded-xl border border-gray-100 px-4 py-8 text-center text-[13px] text-gray-400">
+                          No departments found.
+                        </p>
+                      ) : (
+                        <div className="max-h-[320px] overflow-y-auto rounded-xl border border-gray-100">
+                          {departments.map((dept) => {
+                            const selected = selectedDepartments.has(dept);
+                            const count = departmentCounts.get(dept) || 0;
+                            return (
+                              <button
+                                key={dept}
+                                type="button"
+                                onClick={() => toggleSelection(setSelectedDepartments, selectedDepartments, dept)}
+                                className={`flex w-full items-center gap-3 border-b border-gray-100 px-4 py-3 text-left transition last:border-b-0 ${
+                                  selected ? "bg-blue-50" : "bg-white hover:bg-gray-50"
+                                }`}
+                              >
+                                <CheckBox selected={selected} />
+                                <span className="min-w-0 flex-1">
+                                  <span className="block truncate text-[13px] font-bold text-[#0D1B39]">{dept}</span>
+                                  <span className="block truncate text-[11px] text-gray-500">
+                                    {count} member{count === 1 ? "" : "s"}
+                                  </span>
+                                </span>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </>
                   )}
                   {teamMode === "selected" && (
                     <Picker
@@ -342,7 +436,7 @@ export default function AdminAnnouncementsPage() {
                 <select
                   value={projectId}
                   onChange={(event) => setProjectId(event.target.value)}
-                  className="h-12 w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 text-[14px] font-semibold text-[#0D1B39] outline-none focus:border-[#0A4FE8]/40 focus:ring-4 focus:ring-blue-100"
+                  className="h-12 w-full rounded-xl border border-gray-200 bg-gray-50 px-4 text-[14px] font-semibold text-[#0D1B39] outline-none focus:border-blue-300 focus:ring-2 focus:ring-blue-100"
                 >
                   <option value="">Choose project team</option>
                   {projects.map((project) => (
@@ -356,25 +450,97 @@ export default function AdminAnnouncementsPage() {
               <button
                 type="submit"
                 disabled={submitting || loading}
-                className="inline-flex h-12 w-full items-center justify-center gap-2 rounded-2xl bg-[#0A4FE8] px-5 text-[14px] font-bold text-white shadow-lg shadow-blue-600/20 transition hover:bg-[#083EC0] disabled:cursor-not-allowed disabled:opacity-60"
+                className="inline-flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-[#0A4FE8] px-5 text-[14px] font-bold text-white shadow-sm transition hover:bg-[#083EC0] disabled:cursor-not-allowed disabled:opacity-60"
               >
                 {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
                 Send announcement
               </button>
+              {lastSent && (
+                <p className="text-center text-[11.5px] text-gray-400">
+                  Last sent to {lastSent.count} · {lastSent.target}
+                </p>
+              )}
             </div>
           )}
         </aside>
       </form>
+
+      {/* Activity log - every send is recorded with the sub-admin's name + time. */}
+      <ActivityPanel page="announcements" title="Announcement activity" limit={40} />
     </div>
   );
 }
 
-function Metric({ label, value }: { label: string; value: number }) {
+const STAT_COLORS: Record<string, { bg: string; iconBg: string; icon: string }> = {
+  blue: { bg: "bg-blue-50", iconBg: "bg-blue-100", icon: "text-[#0A4FE8]" },
+  purple: { bg: "bg-purple-50", iconBg: "bg-purple-100", icon: "text-[#7C3AED]" },
+  emerald: { bg: "bg-emerald-50", iconBg: "bg-emerald-100", icon: "text-[#059669]" },
+};
+
+function StatTile({
+  icon: Icon,
+  color,
+  label,
+  value,
+}: {
+  icon: LucideIcon;
+  color: keyof typeof STAT_COLORS;
+  label: string;
+  value: number;
+}) {
+  const c = STAT_COLORS[color];
   return (
-    <div className="rounded-xl bg-white px-3 py-3">
-      <p className="text-[18px] font-bold text-[#0D1B39]">{value}</p>
-      <p className="text-[11px] font-semibold text-slate-500">{label}</p>
+    <div className={`${c.bg} rounded-2xl p-3.5 transition`}>
+      <div className={`${c.iconBg} mb-2 flex h-8 w-8 items-center justify-center rounded-lg`}>
+        <Icon className={`h-4 w-4 ${c.icon}`} />
+      </div>
+      <p className="text-[20px] font-bold leading-none text-[#0D1B39]">{value}</p>
+      <p className="mt-1 text-[11px] font-semibold text-gray-500">{label}</p>
     </div>
+  );
+}
+
+function SectionLabel({ children }: { children: React.ReactNode }) {
+  return (
+    <p className="mb-2 text-[11px] font-bold uppercase tracking-wider text-gray-400">{children}</p>
+  );
+}
+
+function ChannelToggle({
+  icon: Icon,
+  label,
+  hint,
+  active,
+  onClick,
+}: {
+  icon: LucideIcon;
+  label: string;
+  hint: string;
+  active: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`flex items-start gap-2.5 rounded-xl border p-3 text-left transition ${
+        active
+          ? "border-[#0A4FE8] bg-blue-50 ring-2 ring-blue-100"
+          : "border-gray-200 bg-white hover:border-blue-200 hover:bg-blue-50/40"
+      }`}
+    >
+      <span
+        className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${
+          active ? "bg-[#0A4FE8] text-white" : "bg-gray-100 text-gray-400"
+        }`}
+      >
+        <Icon className="h-4 w-4" />
+      </span>
+      <span className="min-w-0">
+        <span className="block text-[13px] font-bold text-[#0D1B39]">{label}</span>
+        <span className="block text-[11px] text-gray-500">{hint}</span>
+      </span>
+    </button>
   );
 }
 
@@ -395,13 +561,13 @@ function AudienceButton({
     <button
       type="button"
       onClick={onClick}
-      className={`rounded-3xl border p-4 text-left transition ${
+      className={`rounded-2xl border p-4 text-left transition ${
         active
-          ? "border-[#0A4FE8] bg-blue-50 text-[#0D1B39] ring-4 ring-blue-100"
-          : "border-slate-200 bg-white text-slate-500 hover:border-blue-200 hover:bg-blue-50/40"
+          ? "border-[#0A4FE8] bg-blue-50 text-[#0D1B39] ring-2 ring-blue-100"
+          : "border-gray-200 bg-white text-gray-500 hover:border-blue-200 hover:bg-blue-50/40"
       }`}
     >
-      <Icon className={`h-5 w-5 ${active ? "text-[#0A4FE8]" : "text-slate-400"}`} />
+      <Icon className={`h-5 w-5 ${active ? "text-[#0A4FE8]" : "text-gray-400"}`} />
       <p className="mt-3 text-[14px] font-bold">{label}</p>
       <p className="mt-1 text-[12px] leading-5">{description}</p>
     </button>
@@ -427,20 +593,32 @@ function Segmented({
   onChange: (value: string) => void;
 }) {
   return (
-    <div className="grid gap-1 rounded-2xl bg-slate-100 p-1" style={{ gridTemplateColumns: `repeat(${options.length}, minmax(0, 1fr))` }}>
+    <div className="grid gap-1 rounded-xl bg-gray-100 p-1" style={{ gridTemplateColumns: `repeat(${options.length}, minmax(0, 1fr))` }}>
       {options.map((option) => (
         <button
           key={option.value}
           type="button"
           onClick={() => onChange(option.value)}
-          className={`h-10 rounded-xl text-[12px] font-bold transition ${
-            value === option.value ? "bg-white text-[#0A4FE8] shadow-sm" : "text-slate-500 hover:text-[#0D1B39]"
+          className={`h-10 rounded-lg text-[12px] font-bold transition ${
+            value === option.value ? "bg-white text-[#0A4FE8] shadow-sm" : "text-gray-500 hover:text-[#0D1B39]"
           }`}
         >
           {option.label}
         </button>
       ))}
     </div>
+  );
+}
+
+function CheckBox({ selected }: { selected: boolean }) {
+  return (
+    <span
+      className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-md border ${
+        selected ? "border-[#0A4FE8] bg-[#0A4FE8]" : "border-gray-300 bg-white"
+      }`}
+    >
+      {selected && <Check className="h-3.5 w-3.5 text-white" />}
+    </span>
   );
 }
 
@@ -463,29 +641,25 @@ function Picker({
         value={query}
         onChange={(event) => onQuery(event.target.value)}
         placeholder={placeholder}
-        className="h-11 w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 text-[13px] font-medium text-[#0D1B39] outline-none focus:border-[#0A4FE8]/40 focus:ring-4 focus:ring-blue-100"
+        className="h-11 w-full rounded-xl border border-gray-200 bg-gray-50 px-4 text-[13px] font-medium text-[#0D1B39] outline-none focus:border-blue-300 focus:ring-2 focus:ring-blue-100"
       />
-      <div className="max-h-[320px] overflow-y-auto rounded-2xl border border-slate-100">
+      <div className="max-h-[320px] overflow-y-auto rounded-xl border border-gray-100">
         {items.length === 0 ? (
-          <p className="px-4 py-8 text-center text-[13px] text-slate-400">No recipients found.</p>
+          <p className="px-4 py-8 text-center text-[13px] text-gray-400">No recipients found.</p>
         ) : (
           items.map((item) => (
             <button
               key={item.id}
               type="button"
               onClick={() => onToggle(item.id)}
-              className={`flex w-full items-center gap-3 border-b border-slate-100 px-4 py-3 text-left transition last:border-b-0 ${
-                item.selected ? "bg-blue-50" : "bg-white hover:bg-slate-50"
+              className={`flex w-full items-center gap-3 border-b border-gray-100 px-4 py-3 text-left transition last:border-b-0 ${
+                item.selected ? "bg-blue-50" : "bg-white hover:bg-gray-50"
               }`}
             >
-              <span className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-md border ${
-                item.selected ? "border-[#0A4FE8] bg-[#0A4FE8]" : "border-slate-300 bg-white"
-              }`}>
-                {item.selected && <CheckCircle2 className="h-3.5 w-3.5 text-white" />}
-              </span>
+              <CheckBox selected={item.selected} />
               <span className="min-w-0">
                 <span className="block truncate text-[13px] font-bold text-[#0D1B39]">{item.label}</span>
-                <span className="block truncate text-[11px] text-slate-500">{item.subtitle}</span>
+                <span className="block truncate text-[11px] text-gray-500">{item.subtitle}</span>
               </span>
             </button>
           ))

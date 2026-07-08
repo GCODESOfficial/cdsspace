@@ -9,7 +9,7 @@
 //   - webp     -> q80
 // EXIF orientation is baked into pixels (.rotate()) before metadata is stripped,
 // so appearance is preserved. Writes back only when the result is smaller.
-// Lossy — originals are recoverable via git.
+// Lossy - originals are recoverable via git.
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import sharp from "sharp";
@@ -49,7 +49,7 @@ for await (const file of walk(root)) {
       after += out.length;
       savings.push({ file: path.relative(process.cwd(), file), inBytes: size, outBytes: out.length, saved: size - out.length });
     } else {
-      after += size; // re-encode didn't help — keep the original
+      after += size; // re-encode didn't help - keep the original
     }
   } catch (err) {
     failed++;

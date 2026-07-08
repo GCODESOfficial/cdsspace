@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { randomBytes, createHash } from "crypto";
-import nodemailer from "nodemailer";
+import { emailFrom, createEmailTransport, EMAIL_MODE } from "@/lib/email-from";
+import { brandedEmailHtml } from "@/lib/email-template";
 import { getSupabaseAdmin } from "@/lib/supabase";
 import { getAdminSession } from "@/app/api/admin-check/route";
 
@@ -59,7 +60,7 @@ export async function POST(req: NextRequest) {
     const tokenHash = hashToken(rawToken);
     const expiresAt = new Date(Date.now() + INVITE_TTL_DAYS * 24 * 60 * 60 * 1000);
 
-    // Invalidate any earlier unused invites for this sub-admin — only the
+    // Invalidate any earlier unused invites for this sub-admin - only the
     // latest link should work. Keep the history by just marking them used.
     await sb
         .from("sub_admin_invites")
@@ -82,18 +83,14 @@ export async function POST(req: NextRequest) {
     let emailSent = false;
     let emailError: string | undefined;
 
-    if (shouldEmail && process.env.EMAIL_USER && process.env.EMAIL_PASS) {
+    // Attempt when an HTTPS transport is active (Gmail API / Resend), or when
+    // SMTP creds are present. createEmailTransport() picks the right one.
+    if (shouldEmail && (EMAIL_MODE !== "smtp" || (process.env.EMAIL_USER && process.env.EMAIL_PASS))) {
         try {
-            const transporter = nodemailer.createTransport({
-                service: "gmail",
-                auth: {
-                    user: process.env.EMAIL_USER,
-                    pass: process.env.EMAIL_PASS,
-                },
-            });
+            const transporter = createEmailTransport();
 
             await transporter.sendMail({
-                from: `"CDS Space Admin" <${process.env.EMAIL_USER}>`,
+                from: emailFrom("CDS Space Admin"),
                 to: subAdmin.email,
                 subject: "You've been added as a CDS Space admin",
                 html: buildInviteHtml({
@@ -111,7 +108,7 @@ export async function POST(req: NextRequest) {
             emailSent = true;
         } catch (e) {
             emailError = e instanceof Error ? e.message : "Unknown email error";
-            // Non-fatal — the super admin can still copy the link from the UI.
+            // Non-fatal - the super admin can still copy the link from the UI.
         }
     }
 
@@ -124,40 +121,39 @@ export async function POST(req: NextRequest) {
 }
 
 function buildInviteHtml(opts: { name: string; email: string; inviteUrl: string; ttlDays: number }) {
-    return `
-    <div style="font-family: -apple-system, Segoe UI, sans-serif; color: #1f2937; max-width: 560px; margin: 0 auto; padding: 32px 24px;">
-        <h2 style="color: #0D1B39; margin-bottom: 12px;">Welcome to CDS Space admin, ${escapeHtml(opts.name)}.</h2>
-        <p style="line-height: 1.6;">
+    return brandedEmailHtml(
+        `
+        <h2 style="color:#0D1B39;margin:0 0 12px;">Welcome to CDS Space admin, ${escapeHtml(opts.name)}.</h2>
+        <p style="line-height:1.6;">
             You've been added as a sub-admin for <strong>cdsspace.pro</strong>.
-            Click the button below to sign in — your email and password will be filled in for you automatically.
+            Click the button below to sign in - your email and password will be filled in for you automatically.
         </p>
-        <p style="text-align: center; margin: 32px 0;">
+        <p style="text-align:center;margin:28px 0;">
             <a href="${opts.inviteUrl}"
-               style="background: linear-gradient(146deg, #0035C1, #0575FF); color: #fff; text-decoration: none; padding: 14px 28px; border-radius: 999px; font-weight: 600; display: inline-block;">
+               style="background:linear-gradient(146deg,#0035C1,#0575FF);color:#fff;text-decoration:none;padding:14px 28px;border-radius:999px;font-weight:600;display:inline-block;">
                 Open my admin dashboard
             </a>
         </p>
-        <p style="font-size: 13px; color: #6b7280; line-height: 1.6;">
+        <p style="font-size:13px;color:#6b7280;line-height:1.6;">
             This link is single-use and expires in ${opts.ttlDays} days. For your security, please sign in from a trusted device and change your password afterwards.
         </p>
-        <p style="font-size: 13px; color: #6b7280;">If you didn't expect this email, you can ignore it.</p>
-        <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 24px 0;" />
-        <p style="font-size: 12px; color: #9ca3af;">CDS Space — support@cdsspace.pro</p>
-    </div>
-    `;
+        <p style="font-size:13px;color:#6b7280;">If you didn't expect this email, you can ignore it.</p>
+      `,
+        { eyebrow: "Admin Invitation", preheader: "You've been added as a CDS Space admin." },
+    );
 }
 
 function buildInviteText(opts: { name: string; inviteUrl: string; ttlDays: number }) {
     return [
         `Welcome to CDS Space admin, ${opts.name}.`,
         "",
-        "You've been added as a sub-admin. Open this link to sign in — your credentials will be filled in automatically:",
+        "You've been added as a sub-admin. Open this link to sign in - your credentials will be filled in automatically:",
         opts.inviteUrl,
         "",
         `The link is single-use and expires in ${opts.ttlDays} days.`,
         "For your security, sign in from a trusted device and change your password afterwards.",
         "",
-        "— CDS Space",
+        "- CDS Space",
     ].join("\n");
 }
 

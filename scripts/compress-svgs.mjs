@@ -48,7 +48,7 @@ for await (const file of walk(root)) {
       after += outBytes;
       savings.push({ file: path.relative(process.cwd(), file), inBytes, outBytes, saved: inBytes - outBytes });
     } else {
-      after += inBytes; // no improvement — leave the original untouched
+      after += inBytes; // no improvement - leave the original untouched
     }
   } catch (err) {
     failed++;

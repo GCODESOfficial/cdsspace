@@ -1,5 +1,5 @@
 -- ============================================
--- CDS Space: Brand Briefs — public token flow
+-- CDS Space: Brand Briefs - public token flow
 -- Idempotent. Run in Supabase SQL editor.
 -- ============================================
 
@@ -51,7 +51,7 @@ create table if not exists public.brand_briefs (
 create index if not exists idx_brand_briefs_token on public.brand_briefs(public_token);
 create index if not exists idx_brand_briefs_status on public.brand_briefs(status);
 
--- RLS: enable with a permissive policy — the app uses the service-role key
+-- RLS: enable with a permissive policy - the app uses the service-role key
 -- server-side for admin ops and the anon key only through API routes we control.
 alter table public.brand_briefs enable row level security;
 

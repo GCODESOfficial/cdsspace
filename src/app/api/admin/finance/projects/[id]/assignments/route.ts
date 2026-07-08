@@ -1,10 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { financeDb, requireFinanceAdminAsync } from "@/lib/finance/api-auth";
+import { glashQuery } from "@/lib/glashdb/postgres";
 import { logActivity } from "@/lib/activity-log";
 import { notifyTeamMember, notifyMany } from "@/lib/notify-team";
+import { syncProjectChannelMembers } from "@/lib/team-chat-channels";
 
 /**
- * Project assignments — who can see this project in the team portal.
+ * Project assignments - who can see this project in the team portal.
  *
  *   GET    list assignments (joined with member + department info)
  *   POST   { team_member_id? | department?, role? }
@@ -19,7 +21,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     const { data, error } = await sb
         .from("project_assignments")
         .select(
-            "id, team_member_id, department, role, created_at, team_members:team_member_id (id, full_name, email, role_title, department, avatar_url, is_active)",
+            "id, project_id, team_member_id, department, role, created_at, team_members:team_member_id (id, full_name, email, role_title, department, avatar_url, is_active)",
         )
         .eq("project_id", id)
         .order("created_at", { ascending: true });
@@ -82,7 +84,14 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
             "id, team_member_id, department, role, created_at, team_members:team_member_id (id, full_name, email, role_title, department, avatar_url, is_active)",
         )
         .single();
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    if (error) {
+        // Unique-index violation (double click / concurrent assign) → treat as
+        // the friendly duplicate case instead of surfacing a raw SQL error.
+        if (error.code === "23505" || /duplicate key/i.test(error.message)) {
+            return NextResponse.json({ error: "That assignment already exists." }, { status: 409 });
+        }
+        return NextResponse.json({ error: error.message }, { status: 500 });
+    }
 
     const assignedMember = Array.isArray(data?.team_members)
         ? (data.team_members as unknown[])[0] as { full_name?: string; email?: string } | undefined
@@ -112,11 +121,33 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
             actor_is_admin: true,
         });
     } else if (department) {
-        const { data: deptMembers } = await sb
-            .from("team_members")
-            .select("id")
-            .eq("department", department)
-            .eq("is_active", true);
+        // Members belong to departments both via the legacy single
+        // `team_members.department` field and the many-to-many
+        // `team_member_departments` junction — notify the union of both.
+        let deptMembers: { id: string }[] = [];
+        try {
+            deptMembers = await glashQuery<{ id: string }>(
+                `select distinct m.id
+                   from public.team_members m
+                  where m.is_active
+                    and (
+                      lower(m.department) = lower($1)
+                      or exists (
+                        select 1 from public.team_member_departments tmd
+                        join public.departments d on d.id = tmd.department_id
+                       where tmd.team_member_id = m.id and lower(d.name) = lower($1)
+                      )
+                    )`,
+                [department],
+            );
+        } catch {
+            const { data } = await sb
+                .from("team_members")
+                .select("id")
+                .ilike("department", department)
+                .eq("is_active", true);
+            deptMembers = (data || []) as { id: string }[];
+        }
         const rows = (deptMembers || []).map((m: { id: string }) => ({
             recipient_id: m.id,
             kind: "project_assigned",
@@ -127,6 +158,9 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
         }));
         if (rows.length) await notifyMany(rows);
     }
+
+    // Keep the project chat room's membership in sync with assignments.
+    await syncProjectChannelMembers(id).catch(() => {});
 
     return NextResponse.json({ assignment: data });
 }

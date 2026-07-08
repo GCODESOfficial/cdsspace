@@ -1,5 +1,5 @@
 /**
- * Admin permission definitions — grouped & granular.
+ * Admin permission definitions - grouped & granular.
  *
  * Every top-level menu in the sidebar maps to a parent permission
  * (page access). Each parent also carries sub-permissions for the
@@ -47,6 +47,15 @@ export const PERMISSION_GROUPS: PermissionGroup[] = [
       { key: "upload_works.edit", label: "Edit Works", description: "Modify existing works" },
       { key: "upload_works.delete", label: "Delete Works", description: "Remove portfolio works" },
       { key: "upload_works.assign", label: "Assign Team", description: "Pick who works on a project" },
+    ],
+  },
+  {
+    key: "audit_report",
+    label: "Audit & Report",
+    route: "/admin/audit-report",
+    permissions: [
+      { key: "audit_report.view", label: "View Audit & Report", description: "See platform-wide activity, actor, and operations reports" },
+      { key: "audit_report.export", label: "Export Reports", description: "Download audit reports as PNG or PDF" },
     ],
   },
 
@@ -194,6 +203,19 @@ export const PERMISSION_GROUPS: PermissionGroup[] = [
     ],
   },
   {
+    key: "finance_pricelists",
+    label: "Pricelists",
+    route: "/admin/finance/pricelists",
+    permissions: [
+      { key: "finance_pricelists.view", label: "View Pricelists", description: "See the client pricelists" },
+      { key: "finance_pricelists.create", label: "Create Pricelists", description: "Upload a PDF or start a blank pricelist" },
+      { key: "finance_pricelists.edit", label: "Edit Pricelists", description: "Edit packages, tables, currencies and add-ons" },
+      { key: "finance_pricelists.publish", label: "Publish", description: "Publish or unpublish a client pricelist" },
+      { key: "finance_pricelists.send", label: "Send by Email", description: "Email a pricelist to a client directly from the dashboard" },
+      { key: "finance_pricelists.delete", label: "Delete Pricelists", description: "Permanently remove a pricelist" },
+    ],
+  },
+  {
     key: "finance_invoices",
     label: "Invoices",
     route: "/admin/finance/invoices",
@@ -204,6 +226,21 @@ export const PERMISSION_GROUPS: PermissionGroup[] = [
       { key: "finance_invoices.delete", label: "Delete Invoices", description: "Permanently remove invoices" },
       { key: "finance_invoices.mark_paid", label: "Mark Paid", description: "Update payment status" },
       { key: "finance_invoices.export", label: "Download / Share", description: "Export PDF and copy share links" },
+      { key: "finance_invoices.send", label: "Send by Email", description: "Email invoices to clients directly from the dashboard" },
+    ],
+  },
+  {
+    key: "finance_quotations",
+    label: "Quotations",
+    route: "/admin/finance/quotations",
+    permissions: [
+      { key: "finance_quotations.view", label: "View Quotations", description: "Read-only access to quotations" },
+      { key: "finance_quotations.create", label: "Create Quotations", description: "Create rough project estimates" },
+      { key: "finance_quotations.edit", label: "Edit Quotations", description: "Modify estimate items, metadata, delivery, and samples" },
+      { key: "finance_quotations.delete", label: "Delete Quotations", description: "Permanently remove quotations" },
+      { key: "finance_quotations.convert", label: "Convert to Invoice", description: "Turn an accepted quotation into a real invoice" },
+      { key: "finance_quotations.export", label: "Download / Share", description: "Export PDF and copy share links" },
+      { key: "finance_quotations.send", label: "Send by Email", description: "Email quotations to clients directly from the dashboard" },
     ],
   },
   {
@@ -273,7 +310,10 @@ export const PERMISSION_GROUPS: PermissionGroup[] = [
     label: "Applicants",
     route: "/admin/applications",
     permissions: [
-      { key: "applicants.view", label: "View Applicants", description: "See career applicants list" },
+      { key: "applicants.view", label: "View Applicants", description: "See career applicants, categorized by role, work type & staff type" },
+      { key: "applicants.email", label: "Email Applicants", description: "Send bulk emails that go out as individual messages" },
+      { key: "applicants.update_status", label: "Update Status", description: "Move applicants through new / reviewing / shortlisted / hired / rejected" },
+      { key: "applicants.screening", label: "Screening", description: "Schedule screening, set objective questions, rate practical & interview tests" },
       { key: "applicants.assign_role", label: "Assign Roles", description: "Assign role categories" },
       { key: "applicants.export", label: "Export CSV", description: "Download applicant data" },
       { key: "applicants.archive", label: "Archive", description: "Archive/restore applicants" },
@@ -296,6 +336,16 @@ export const PERMISSION_GROUPS: PermissionGroup[] = [
     ],
   },
   {
+    key: "team_today",
+    label: "Team Today",
+    route: "/admin/team-today",
+    permissions: [
+      { key: "team_today.view", label: "View Team Today", description: "See daily accountability: attendance, tasks, reports and blockers" },
+      { key: "team_today.assign", label: "Assign Tasks", description: "Assign daily tasks to team members" },
+      { key: "team_today.resolve_blockers", label: "Resolve Blockers", description: "Mark escalated blockers as resolved" },
+    ],
+  },
+  {
     key: "timebook",
     label: "Team Timebook",
     route: "/admin/timebook",
@@ -304,7 +354,33 @@ export const PERMISSION_GROUPS: PermissionGroup[] = [
       { key: "timebook.manage_schedules", label: "Manage Schedules", description: "Assign work modes and hybrid office days" },
       { key: "timebook.correct_entries", label: "Correct Entries", description: "Apply attendance corrections and exceptions" },
       { key: "timebook.review_leave", label: "Review Leave", description: "Approve or reject leave requests" },
+      { key: "timebook.manage_geofence", label: "Manage Geofence", description: "Edit the office location, address, and check-in radius" },
+      { key: "timebook.manage_bypass", label: "Manage Bypass Codes", description: "Generate and revoke geofence bypass codes for check-in" },
       { key: "timebook.export", label: "Export Reports", description: "Download payroll attendance exports" },
+    ],
+  },
+  {
+    key: "blog",
+    label: "Blog Manager",
+    route: "/admin/blog",
+    permissions: [
+      { key: "blog.view", label: "View Posts", description: "See the blog post list" },
+      { key: "blog.create", label: "Create & Edit", description: "Write, edit, and schedule articles" },
+      { key: "blog.publish", label: "Publish", description: "Publish or unpublish articles" },
+      { key: "blog.authors", label: "Manage Authors", description: "Create and edit blog authors" },
+      { key: "blog.delete", label: "Delete Posts", description: "Permanently remove articles" },
+    ],
+  },
+  {
+    key: "time_machine",
+    label: "Time Machine (Biometric)",
+    route: "/admin/time-machine",
+    permissions: [
+      { key: "time_machine.view", label: "View Station", description: "Open the biometric portal and attendance booklet" },
+      { key: "time_machine.enroll", label: "Enroll Fingerprints", description: "Capture and register team-member fingerprints" },
+      { key: "time_machine.operate", label: "Run Check-in/out", description: "Operate the scanner to record check-in and check-out" },
+      { key: "time_machine.correct", label: "Correct Records", description: "Manually fix biometric attendance entries" },
+      { key: "time_machine.export", label: "Export Booklet", description: "Download attendance and performance reports" },
     ],
   },
   {
@@ -358,6 +434,24 @@ export const PERMISSION_GROUPS: PermissionGroup[] = [
     ],
   },
 
+  // ─────────────── Content Hub ───────────────
+  {
+    key: "content_hub",
+    label: "Content Hub",
+    route: "/admin/content-hub",
+    permissions: [
+      { key: "content_hub.view", label: "View Content Hub", description: "Open the content hub and dashboard" },
+      { key: "content_hub.create", label: "Create Content", description: "Use the content creation wizard" },
+      { key: "content_hub.ai", label: "AI Tools", description: "Generate and enhance content with AI" },
+      { key: "content_hub.calendar", label: "Content Calendar", description: "View and manage the posting calendar" },
+      { key: "content_hub.approve", label: "Approve", description: "Approve content in the approval queue" },
+      { key: "content_hub.schedule", label: "Schedule", description: "Schedule approved content & assign publishers" },
+      { key: "content_hub.publish", label: "Publish / Mark Posted", description: "Copy, download assets, and mark content published" },
+      { key: "content_hub.studio", label: "BSD Studio", description: "Repurpose BSD videos into clips and posts" },
+      { key: "content_hub.settings", label: "Settings", description: "Manage branding presets and reminder defaults" },
+    ],
+  },
+
   // ─────────────── Workspace ───────────────
   {
     key: "workspace",
@@ -398,6 +492,7 @@ export function hasPermission(permissions: string[], key: string): boolean {
 export function getPermissionForRoute(pathname: string): string | null {
   // Most-specific routes first.
   if (pathname === "/admin") return "dashboard";
+  if (pathname.startsWith("/admin/audit-report")) return "audit_report";
   if (pathname.startsWith("/admin/upload-works")) return "upload_works";
   if (pathname.startsWith("/admin/works/")) return "upload_works";
   if (pathname.startsWith("/admin/ai-system")) return "workspace.ai_system";
@@ -406,6 +501,14 @@ export function getPermissionForRoute(pathname: string): string | null {
   if (pathname.startsWith("/admin/cdocs")) return "workspace";
   if (pathname.startsWith("/admin/csign")) return "workspace";
   if (pathname.startsWith("/admin/cresume")) return "workspace";
+
+  if (pathname.startsWith("/admin/content-hub/create")) return "content_hub.create";
+  if (pathname.startsWith("/admin/content-hub/calendar")) return "content_hub.calendar";
+  if (pathname.startsWith("/admin/content-hub/approvals")) return "content_hub.approve";
+  if (pathname.startsWith("/admin/content-hub/studio")) return "content_hub.studio";
+  if (pathname.startsWith("/admin/content-hub/ai")) return "content_hub.ai";
+  if (pathname.startsWith("/admin/content-hub/settings")) return "content_hub.settings";
+  if (pathname.startsWith("/admin/content-hub")) return "content_hub";
 
   if (pathname.startsWith("/admin/messages")) return "messages";
   if (pathname.startsWith("/admin/chat")) return "team_chat";
@@ -418,13 +521,16 @@ export function getPermissionForRoute(pathname: string): string | null {
   if (pathname.startsWith("/admin/faqs")) return "faqs";
   if (pathname.startsWith("/admin/legal")) return "legal";
   if (pathname.startsWith("/admin/brand-briefs")) return "brand_briefs";
+  if (pathname.startsWith("/admin/blog")) return "blog";
   if (pathname.startsWith("/admin/pricing")) return "pricing";
 
   if (pathname.startsWith("/admin/orders")) return "orders";
   if (pathname.startsWith("/admin/clients")) return "clients";
   if (pathname.startsWith("/admin/testimonials")) return "testimonials";
 
+  if (pathname.startsWith("/admin/finance/pricelists")) return "finance_pricelists";
   if (pathname.startsWith("/admin/finance/invoices")) return "finance_invoices";
+  if (pathname.startsWith("/admin/finance/quotations")) return "finance_quotations";
   if (pathname.startsWith("/admin/finance/price-list")) return "finance_pricelist";
   if (pathname.startsWith("/admin/finance/expenditures")) return "finance_expenditures";
   if (pathname.startsWith("/admin/finance/payroll")) return "finance_payroll";
@@ -434,13 +540,17 @@ export function getPermissionForRoute(pathname: string): string | null {
   if (pathname.startsWith("/admin/projects")) return "projects";
 
   if (pathname.startsWith("/admin/applications")) return "applicants";
+  if (pathname.startsWith("/admin/screening")) return "applicants";
   if (pathname.startsWith("/admin/hrm/roles")) return "applicants";
   if (pathname.startsWith("/admin/hrm/certifications")) return "applicants";
   if (pathname.startsWith("/admin/hrm")) return "applicants";
 
+  if (pathname.startsWith("/admin/team-today")) return "team_today";
   if (pathname.startsWith("/admin/team-members")) return "team_members";
   if (pathname.startsWith("/admin/timebook")) return "timebook";
+  if (pathname.startsWith("/admin/time-machine")) return "time_machine";
   if (pathname.startsWith("/admin/work-tracking")) return "work_tracking";
+  if (pathname.startsWith("/admin/team-reports")) return "all"; // super admin only
   if (pathname.startsWith("/admin/team-payroll")) return "team_payroll";
   if (pathname.startsWith("/admin/departments")) return "departments";
   if (pathname.startsWith("/admin/sub-admins")) return "sub_admins";

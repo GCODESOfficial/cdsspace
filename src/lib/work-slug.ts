@@ -1,6 +1,6 @@
 /**
  * Convert a project title into a URL-safe slug.
- *   "Adeesi — Premium Grain"  →  "adeesi-premium-grain"
+ *   "Adeesi - Premium Grain"  →  "adeesi-premium-grain"
  *
  * Pure; no dependencies. Safe to import from client or server.
  */

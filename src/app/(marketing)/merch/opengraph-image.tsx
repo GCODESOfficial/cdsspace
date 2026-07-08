@@ -14,7 +14,7 @@ export default async function Image() {
       eyebrow: "Merch",
       title: "Wear the Movement",
       description:
-        "Limited-run apparel and accessories from CDS Space — designed in-house, printed with care.",
+        "Limited-run apparel and accessories from CDS Space - designed in-house, printed with care.",
       tags: ["Apparel", "Print", "Drops"],
       domainPath: "/merch",
     }),

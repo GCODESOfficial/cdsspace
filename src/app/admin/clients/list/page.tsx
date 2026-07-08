@@ -288,7 +288,7 @@ export default function ClientsListPage() {
                   <td className="py-3 px-3">
                     {c.industry ? (
                       <span className="inline-block px-2.5 py-1 rounded-md bg-gray-100 text-gray-600 text-[11px] font-medium">{c.industry}</span>
-                    ) : <span className="text-gray-300 text-[12px]">—</span>}
+                    ) : <span className="text-gray-300 text-[12px]">-</span>}
                   </td>
                   <td className="py-3 px-3">
                     {c.email && <p className="text-[12px] text-gray-600 flex items-center gap-1"><Mail className="w-3 h-3 text-gray-300" />{c.email}</p>}

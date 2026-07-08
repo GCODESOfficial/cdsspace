@@ -7,7 +7,7 @@ export const dynamic = "force-dynamic";
  * GET /api/link-preview?url=https://example.com
  *
  * Fetches a URL and returns a small Open Graph summary. Used to render
- * rich previews under links shared in team chat. Anonymous — no auth
+ * rich previews under links shared in team chat. Anonymous - no auth
  * required because the data is already publicly reachable at the URL.
  *
  * Safeguards:

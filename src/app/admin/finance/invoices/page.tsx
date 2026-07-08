@@ -3,13 +3,14 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
-import { Plus, FileText, Search, CheckCircle2, Clock, Send, Trash2, X, Check, Copy, Share2 } from "lucide-react";
+import { Plus, FileText, Search, CheckCircle2, Clock, Send, Trash2, X, Check, Copy, Share2, Mail, Loader2 } from "lucide-react";
 import FinanceShell, { glassCard } from "@/components/finance/FinanceShell";
 import StatCard from "@/components/finance/StatCard";
 import ActivityPanel from "@/components/admin/ActivityPanel";
-import { Currency, formatMoney } from "@/lib/finance/types";
+import { Currency, formatFinanceDate, formatMoney } from "@/lib/finance/types";
 import { buildInvoiceShareMessage } from "@/lib/finance/share";
-import { appAlert, appConfirm, appPrompt } from "@/lib/app-notify";
+import { appAlert, appConfirm, appPrompt, appToast } from "@/lib/app-notify";
+import CreateProjectFromInvoiceModal, { type InvoiceForProject } from "@/components/finance/CreateProjectFromInvoiceModal";
 
 interface Row {
   id: string; invoice_number: string; client_name: string; currency: Currency;
@@ -31,6 +32,8 @@ export default function InvoicesPage() {
   const [search, setSearch] = useState("");
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [working, setWorking] = useState(false);
+  const [emailingId, setEmailingId] = useState<string | null>(null);
+  const [projectPrompt, setProjectPrompt] = useState<InvoiceForProject | null>(null);
 
   const load = () => {
     setLoading(true);
@@ -38,9 +41,16 @@ export default function InvoicesPage() {
   };
   useEffect(() => { load(); }, []);
 
-  const markPaid = async (id: string) => {
+  const markPaid = async (id: string, row?: Row) => {
     await fetch(`/api/admin/finance/invoices/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ status: "paid" }) });
     load();
+    // Offer to spin up a project - but only if the invoice isn't already linked.
+    if (row?.finance_projects) return;
+    try {
+      const res = await fetch(`/api/admin/finance/invoices/${id}`);
+      const { invoice } = await res.json();
+      if (invoice && !invoice.project_id) setProjectPrompt(invoice as InvoiceForProject);
+    } catch { /* skip the prompt if the invoice can't be re-read */ }
   };
 
   const toggleOne = (id: string) => {
@@ -131,6 +141,49 @@ export default function InvoicesPage() {
     clearSelection();
   };
 
+  // Email a single invoice to its stored client email (endpoint uses client_email).
+  const emailInvoice = async (id: string) => {
+    setEmailingId(id);
+    try {
+      const r = await fetch("/api/admin/finance/share", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ kind: "invoice", id }),
+      });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok || !j.ok) throw new Error(j.error || "Failed to send");
+      appToast({ message: `Invoice emailed to ${j.to}`, kind: "success" });
+    } catch (e) {
+      appAlert(e instanceof Error ? e.message : "Could not send the email");
+    } finally {
+      setEmailingId(null);
+    }
+  };
+
+  const bulkEmail = async () => {
+    setWorking(true);
+    let sent = 0;
+    let failed = 0;
+    await Promise.all(
+      Array.from(selected).map(async (id) => {
+        try {
+          const r = await fetch("/api/admin/finance/share", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ kind: "invoice", id }),
+          });
+          const j = await r.json().catch(() => ({}));
+          if (r.ok && j.ok) sent++; else failed++;
+        } catch {
+          failed++;
+        }
+      }),
+    );
+    setWorking(false);
+    clearSelection();
+    appAlert(`Emailed ${sent} invoice${sent === 1 ? "" : "s"}${failed ? ` · ${failed} skipped (no client email?)` : ""}.`);
+  };
+
   const filtered = rows.filter((r) =>
     r.invoice_number.toLowerCase().includes(search.toLowerCase()) ||
     r.client_name.toLowerCase().includes(search.toLowerCase())
@@ -200,6 +253,9 @@ export default function InvoicesPage() {
                 <button disabled={working} onClick={bulkDuplicate} className="text-[11px] font-semibold uppercase tracking-wider px-3 py-1.5 rounded-lg bg-white text-gray-700 ring-1 ring-gray-200 hover:bg-gray-50 transition disabled:opacity-50 inline-flex items-center gap-1.5">
                   <Copy className="w-3.5 h-3.5" /> Duplicate
                 </button>
+                <button disabled={working} onClick={bulkEmail} className="text-[11px] font-semibold uppercase tracking-wider px-3 py-1.5 rounded-lg bg-white text-gray-700 ring-1 ring-gray-200 hover:bg-gray-50 transition disabled:opacity-50 inline-flex items-center gap-1.5">
+                  <Mail className="w-3.5 h-3.5" /> Email
+                </button>
                 <button disabled={working} onClick={bulkShare} className="text-[11px] font-semibold uppercase tracking-wider px-3 py-1.5 rounded-lg bg-white text-gray-700 ring-1 ring-gray-200 hover:bg-gray-50 transition disabled:opacity-50 inline-flex items-center gap-1.5">
                   <Share2 className="w-3.5 h-3.5" /> Copy Messages
                 </button>
@@ -248,7 +304,7 @@ export default function InvoicesPage() {
                       </td>
                       <td className="px-5 py-4 font-mono font-semibold text-gray-900">{r.invoice_number}</td>
                       <td className="px-5 py-4">{r.client_name}</td>
-                      <td className="px-5 py-4 text-gray-500">{new Date(r.issue_date).toLocaleDateString()}</td>
+                      <td className="px-5 py-4 text-gray-500">{formatFinanceDate(r.issue_date)}</td>
                       <td className="px-5 py-4 font-semibold">{formatMoney(r.total, r.currency)}</td>
                       <td className="px-5 py-4">
                         <span className={`text-[10px] uppercase tracking-wider font-semibold px-2.5 py-1 rounded-full ${STATUS[r.status] ?? STATUS.draft}`}>{r.status}</span>
@@ -257,12 +313,20 @@ export default function InvoicesPage() {
                         <div className="flex items-center justify-end gap-2">
                           {r.status !== "paid" && r.status !== "cancelled" && (
                             <button
-                              onClick={() => markPaid(r.id)}
+                              onClick={() => markPaid(r.id, r)}
                               className="text-[11px] font-semibold uppercase tracking-wider px-3 py-1.5 rounded-lg bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200 hover:bg-emerald-100 transition"
                             >
                               Mark Paid
                             </button>
                           )}
+                          <button
+                            onClick={() => emailInvoice(r.id)}
+                            disabled={emailingId === r.id}
+                            title="Email to client"
+                            className="inline-flex items-center gap-1 text-[11px] font-semibold uppercase tracking-wider px-3 py-1.5 rounded-lg bg-white text-gray-700 ring-1 ring-gray-200 hover:bg-gray-50 transition disabled:opacity-50"
+                          >
+                            {emailingId === r.id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Mail className="w-3.5 h-3.5" />} Email
+                          </button>
                           <Link href={`/admin/finance/invoices/${r.id}`} className="text-blue-600 hover:underline text-xs font-medium">Open →</Link>
                         </div>
                       </td>
@@ -274,6 +338,14 @@ export default function InvoicesPage() {
           </div>
           <ActivityPanel page="finance/invoices" title="Invoice activity" />
         </>
+      )}
+
+      {projectPrompt && (
+        <CreateProjectFromInvoiceModal
+          invoice={projectPrompt}
+          onClose={() => setProjectPrompt(null)}
+          onCreated={() => { setProjectPrompt(null); load(); appAlert("Project created from invoice."); }}
+        />
       )}
     </FinanceShell>
   );

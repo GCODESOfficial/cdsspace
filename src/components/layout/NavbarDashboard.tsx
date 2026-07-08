@@ -76,11 +76,7 @@ export const NavbarDashboard = ({ onMenuClick }: NavbarDashboardProps) => {
                     <span className="text-[#8E99B7] text-[11px] 2xl:text-[12px] font-medium max-w-[180px] truncate">{userCompany}</span>
                 </div>
                 <div className="w-9 h-9 2xl:w-10 2xl:h-10 bg-brand-blue rounded-full flex items-center justify-center shadow-[0_2px_8px_rgba(28,78,209,0.2)] overflow-hidden relative transition-transform hover:scale-105">
-                    {userAvatar ? (
-                        <Image src={userAvatar} alt={userName} fill className="object-cover" />
-                    ) : (
-                        <span className="text-white text-[13px] 2xl:text-[14px] font-semibold tracking-wide">{userInitials}</span>
-                    )}
+                    <span className="text-white text-[13px] 2xl:text-[14px] font-semibold tracking-wide">{userInitials}</span>
                 </div>
             </div>
         </header>

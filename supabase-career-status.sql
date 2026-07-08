@@ -1,5 +1,5 @@
 -- ============================================
--- CDS Space: Career — application status tracking
+-- CDS Space: Career - application status tracking
 -- Run this in Supabase SQL Editor AFTER supabase-hrm.sql
 -- ============================================
 

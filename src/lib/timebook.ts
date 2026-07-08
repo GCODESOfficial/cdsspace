@@ -17,6 +17,9 @@ export const TIMEBOOK_SCHEDULE = {
   clockOutMinutes: 18 * 60,
 };
 
+// Maximum check-in/check-out cycles allowed per work day.
+export const MAX_DAILY_SESSIONS = 3;
+
 export const WORK_MODES = ["onsite", "hybrid", "remote", "field_assignment", "approved_leave"] as const;
 export type WorkMode = typeof WORK_MODES[number];
 
@@ -105,16 +108,27 @@ export function officeRequiredFor(mode: WorkMode | string, hybridDays: number[] 
   return false;
 }
 
-export function locationFlags(input: {
-  latitude?: number | null;
-  longitude?: number | null;
-  accuracy?: number | null;
-  clientCapturedAt?: string | null;
-}) {
+export interface OfficeGeofence {
+  latitude: number;
+  longitude: number;
+  radiusMeters: number;
+}
+
+export function locationFlags(
+  input: {
+    latitude?: number | null;
+    longitude?: number | null;
+    accuracy?: number | null;
+    clientCapturedAt?: string | null;
+  },
+  office: OfficeGeofence = TIMEBOOK_OFFICE,
+) {
   const flags: string[] = [];
   const hasCoords = Number.isFinite(input.latitude) && Number.isFinite(input.longitude);
-  const distance = hasCoords ? distanceMeters(Number(input.latitude), Number(input.longitude)) : null;
-  const inside = distance !== null ? distance <= TIMEBOOK_OFFICE.radiusMeters : false;
+  const distance = hasCoords
+    ? distanceMeters(Number(input.latitude), Number(input.longitude), office.latitude, office.longitude)
+    : null;
+  const inside = distance !== null ? distance <= office.radiusMeters : false;
 
   if (!hasCoords) flags.push("missing_location");
   if (Number(input.accuracy ?? 0) > 200) flags.push("low_gps_accuracy");
@@ -134,7 +148,10 @@ export function workMinutes(clockInAt?: string | null, clockOutAt?: string | nul
 
   let breakMs = 0;
   if (breakStartAt && breakEndAt) {
-    breakMs = Math.max(0, new Date(breakEndAt).getTime() - new Date(breakStartAt).getTime());
+    // Clamp the break to this work window so that, with multiple check-in
+    // sessions per day, a break taken in one session is not deducted again
+    // from a later session.
+    breakMs = Math.max(0, Math.min(end, new Date(breakEndAt).getTime()) - Math.max(start, new Date(breakStartAt).getTime()));
   } else {
     const date = lagosDate(new Date(clockInAt));
     const officialStart = new Date(`${date}T13:00:00+01:00`).getTime();

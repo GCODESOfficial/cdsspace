@@ -8,7 +8,7 @@
 
 CREATE EXTENSION IF NOT EXISTS "pgcrypto";
 
--- 1. Usage log — every AI generation call (success OR error)
+-- 1. Usage log - every AI generation call (success OR error)
 CREATE TABLE IF NOT EXISTS public.ai_usage_log (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   kind TEXT NOT NULL,                                     -- matches AIKind in src/lib/ai/prompts.ts
@@ -34,7 +34,7 @@ DROP POLICY IF EXISTS "allow_all_ai_usage_log" ON public.ai_usage_log;
 CREATE POLICY "allow_all_ai_usage_log" ON public.ai_usage_log
   FOR ALL USING (true) WITH CHECK (true);
 
--- 2. Templates — reusable, admin-editable prompts for cDocs & project docs
+-- 2. Templates - reusable, admin-editable prompts for cDocs & project docs
 CREATE TABLE IF NOT EXISTS public.ai_templates (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   slug TEXT NOT NULL UNIQUE,
@@ -60,7 +60,7 @@ DROP POLICY IF EXISTS "allow_all_ai_templates" ON public.ai_templates;
 CREATE POLICY "allow_all_ai_templates" ON public.ai_templates
   FOR ALL USING (true) WITH CHECK (true);
 
--- 3. Settings — single row. daily_token_cap applied cumulatively across actors.
+-- 3. Settings - single row. daily_token_cap applied cumulatively across actors.
 CREATE TABLE IF NOT EXISTS public.ai_settings (
   id INT PRIMARY KEY DEFAULT 1 CHECK (id = 1),
   enabled BOOLEAN NOT NULL DEFAULT true,
@@ -79,7 +79,7 @@ DROP POLICY IF EXISTS "allow_all_ai_settings" ON public.ai_settings;
 CREATE POLICY "allow_all_ai_settings" ON public.ai_settings
   FOR ALL USING (true) WITH CHECK (true);
 
--- 4. Knowledge documents — admin-uploaded files and notes that can be used
+-- 4. Knowledge documents - admin-uploaded files and notes that can be used
 -- as reference context during generation.
 CREATE TABLE IF NOT EXISTS public.ai_knowledge_documents (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -175,7 +175,7 @@ $$,
 
   ('one-on-one-agenda', '1:1 Agenda', 'cdocs', '👥',
    'A lightweight agenda for a manager ↔ direct report 1:1.',
-$$# 1:1 — {{manager}} & {{report}}
+$$# 1:1 - {{manager}} & {{report}}
 _{{date}}_
 
 ## Wins since last time
@@ -198,7 +198,7 @@ $$, NULL,
 
   ('product-brief', 'Product Brief (PRD)', 'cdocs', '📘',
    'A one-pager PRD: problem, user, success, scope.',
-$$# {{project_name}} — Product Brief
+$$# {{project_name}} - Product Brief
 
 ## Problem
 What are we solving and for whom?
@@ -227,7 +227,7 @@ $$,
 
   ('post-mortem', 'Post-mortem', 'cdocs', '🔍',
    'Blameless post-mortem for an incident or failed initiative.',
-$$# Post-mortem — {{incident}}
+$$# Post-mortem - {{incident}}
 
 ## What happened
 _Timeline of events_
@@ -252,7 +252,7 @@ $$, NULL,
 
   ('launch-plan', 'Launch Plan', 'cdocs', '🚀',
    'Plan a launch: positioning, channels, day-of checklist.',
-$$# {{launch_name}} — Launch Plan
+$$# {{launch_name}} - Launch Plan
 
 ## Positioning
 _One line: who it's for and what it does differently._
@@ -278,7 +278,7 @@ $$,
 
   ('design-review', 'Design Review', 'cdocs', '🎨',
    'Structured design critique with the CDS eye.',
-$$# Design Review — {{artifact}}
+$$# Design Review - {{artifact}}
 
 ## Intent
 _What is this trying to accomplish?_
@@ -300,7 +300,7 @@ $$, NULL,
 
   ('project-brief', 'Project Brief', 'project', '💼',
    'Internal brief for a new client project.',
-$$# {{project_name}} — Project Brief
+$$# {{project_name}} - Project Brief
 
 ## Client
 {{client_name}}
@@ -328,7 +328,7 @@ $$,
    true)
 ON CONFLICT (slug) DO NOTHING;
 
--- 6. Daily usage rollup — used by admin /ai settings page
+-- 6. Daily usage rollup - used by admin /ai settings page
 CREATE OR REPLACE VIEW public.v_ai_usage_daily AS
 SELECT
   date_trunc('day', created_at)::date                              AS day,
@@ -343,4 +343,4 @@ FROM public.ai_usage_log
 GROUP BY 1, 2
 ORDER BY 1 DESC, total_tokens DESC;
 
--- (No auto-cap on ai_usage_log — keep every row for audit + cost analysis.)
+-- (No auto-cap on ai_usage_log - keep every row for audit + cost analysis.)

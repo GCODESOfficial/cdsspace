@@ -4,7 +4,7 @@ import dynamic from "next/dynamic";
 import VideoPreviewPlayer from "@/components/VideoPreviewPlayer";
 import AnimatedTags from "@/components/AnimatedTags";
 
-// Below-the-fold sections — code-split so the hero paints fast.
+// Below-the-fold sections - code-split so the hero paints fast.
 const ExperienceCarousel = dynamic(() => import("@/components/ExperienceCarousel"));
 const Aboutus = dynamic(() => import("@/components/Aboutus"));
 const BrandsAndOurProjects = dynamic(() => import("@/components/BrandsAndOurProjects"));
@@ -181,7 +181,7 @@ export default function Home() {
             </h2>
 
             <p className="text-white text-sm md:text-lg mt-2 mx-auto max-w-[90%] leading-tight">
-              A transformation that speaks the language of today — where every
+              A transformation that speaks the language of today - where every
               pixel, color, and curve tells a modern story of progress,
               creativity, and digital confidence.
             </p>
@@ -501,7 +501,7 @@ export default function Home() {
               <h3 className=" group-hover:text-white font-semibold text-lg mb-2">Flexible Options</h3>
               <p className="group-hover:text-white text-sm text-[#555] leading-relaxed">
                 Your product needs to evolve, and so do we. Adjust your plan,
-                expand projects, or pause anytime — it’s flexibility built for
+                expand projects, or pause anytime - it’s flexibility built for
                 growth.
               </p>
             </div>

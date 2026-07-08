@@ -48,7 +48,7 @@ export async function POST(req: Request, ctx: { params: Promise<{ code: string }
         recipient_id: rid,
         kind: "cmeet_tag",
         title,
-        body: `Join the live room — code ${code}`,
+        body: `Join the live room - code ${code}`,
         link,
         actor_member_id: actor.kind === "team" ? (actor as any).id : null,
         actor_is_admin: actor.kind === "admin",

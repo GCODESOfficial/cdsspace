@@ -1,9 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSupabaseAdmin } from "@/lib/supabase";
-import { getAdminSession } from "@/app/api/admin-check/route";
+import { requireAdmin } from "@/lib/admin-api-auth";
 
 export async function GET(req: NextRequest) {
-  if (!getAdminSession(req)) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const { denied } = await requireAdmin(req, "consultations");
+  if (denied) return denied;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const sb: any = getSupabaseAdmin();
   const { data, error } = await sb.from("consultation_requests").select("*").order("created_at", { ascending: false });

@@ -1,48 +1,51 @@
-import { createClient as createSupabaseSdkClient } from "@supabase/supabase-js";
+import { createClient as createGlashCompatSdkClient } from "@supabase/supabase-js";
 import { createGlashBrowserQueryClient } from "@/lib/glashdb/query-browser";
 import { getGlashDbBrowserConfig, getGlashDbServiceRoleConfig } from "./env";
+import { getGlashRealtimeOptions } from "./realtime-transport";
 
-function createLegacyCompatClient(serviceRole = false) {
+function createGlashCompatClient(serviceRole = false) {
   try {
     const config = serviceRole ? getGlashDbServiceRoleConfig() : getGlashDbBrowserConfig();
-    const key = serviceRole ? config.serviceRoleKey : config.anonKey;
-    return createSupabaseSdkClient(config.url, key, {
+    const key = serviceRole ? getGlashDbServiceRoleConfig().serviceRoleKey : config.anonKey;
+    return createGlashCompatSdkClient(config.url, key, {
       auth: {
         persistSession: !serviceRole,
         autoRefreshToken: !serviceRole,
         storageKey: serviceRole ? "glashdb-service-compat" : "glashdb-browser-compat",
       },
+      realtime: getGlashRealtimeOptions(),
     });
   } catch {
     return null;
   }
 }
 
-const legacyBrowser = createLegacyCompatClient(false);
-const legacyAdmin = createLegacyCompatClient(true);
+const compatBrowser = createGlashCompatClient(false);
+const compatAdmin = createGlashCompatClient(true);
 
 export const glashdb = createGlashBrowserQueryClient({
-  auth: legacyBrowser?.auth,
-  storage: legacyBrowser?.storage,
-  channel: legacyBrowser?.channel.bind(legacyBrowser),
-  removeChannel: legacyBrowser?.removeChannel.bind(legacyBrowser),
-  getChannels: legacyBrowser?.getChannels.bind(legacyBrowser),
+  auth: compatBrowser?.auth,
+  storage: compatBrowser?.storage,
+  channel: compatBrowser?.channel.bind(compatBrowser),
+  removeChannel: compatBrowser?.removeChannel.bind(compatBrowser),
+  getChannels: compatBrowser?.getChannels.bind(compatBrowser),
 });
 
 export const glashdbAdmin = createGlashBrowserQueryClient({
-  auth: legacyAdmin?.auth,
-  storage: legacyAdmin?.storage,
-  channel: legacyAdmin?.channel.bind(legacyAdmin),
-  removeChannel: legacyAdmin?.removeChannel.bind(legacyAdmin),
-  getChannels: legacyAdmin?.getChannels.bind(legacyAdmin),
+  auth: compatAdmin?.auth,
+  storage: compatAdmin?.storage,
+  channel: compatAdmin?.channel.bind(compatAdmin),
+  removeChannel: compatAdmin?.removeChannel.bind(compatAdmin),
+  getChannels: compatAdmin?.getChannels.bind(compatAdmin),
 });
 
 export function getGlashDbAdmin() {
   return glashdbAdmin;
 }
 
-// Backward-compatible export names. Database methods on these objects now use
-// Glash Postgres through DATABASE_URL/DIRECT_URL, not the Supabase project URL.
+// Backward-compatible export names. Database methods on these objects use
+// Glash Postgres through DATABASE_URL/DIRECT_URL, while auth/storage/realtime
+// use the GlashDB endpoint configured in env.ts.
 export const supabase = glashdb;
 export const supabaseAdmin = glashdbAdmin;
 export const getSupabaseAdmin = getGlashDbAdmin;

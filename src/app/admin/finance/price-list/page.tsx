@@ -13,7 +13,7 @@ import { CURRENCIES, Currency, FinancePriceItem, formatMoney } from "@/lib/finan
 import { AIAssistButton } from "@/components/ai/AIAssistButton";
 import FinanceShell, { glassCard } from "@/components/finance/FinanceShell";
 import Image from "next/image";
-import { appAlert, appConfirm, appPrompt } from "@/lib/app-notify";
+import { appAlert, appConfirm } from "@/lib/app-notify";
 
 const EMPTY = { name: "", description: "", unit_price: "", currency: "NGN" as Currency, category: "", image_url: "" };
 
@@ -32,7 +32,18 @@ export default function PriceListPage() {
     setLoading(true);
     const r = await fetch("/api/admin/finance/price-list");
     const d = await r.json();
-    setItems(d.items ?? []);
+    const all: FinancePriceItem[] = d.items ?? [];
+    // Auto-delete items with no price (0 / null) — they clutter the catalog and
+    // aren't usable on invoices. Fire the deletes, then show only priced items.
+    const zeroPriced = all.filter((i) => Number(i.unit_price) <= 0);
+    if (zeroPriced.length) {
+      await Promise.all(
+        zeroPriced.map((i) =>
+          fetch(`/api/admin/finance/price-list/${i.id}`, { method: "DELETE" }).catch(() => {}),
+        ),
+      );
+    }
+    setItems(all.filter((i) => Number(i.unit_price) > 0));
     setLoading(false);
   };
   useEffect(() => { load(); }, []);
@@ -48,7 +59,10 @@ export default function PriceListPage() {
   };
 
   const save = async () => {
-    if (!form.name || !form.unit_price) return;
+    if (!form.name || Number(form.unit_price) <= 0) {
+      appAlert("Enter a name and a unit price greater than 0.");
+      return;
+    }
     const payload = { ...form, unit_price: Number(form.unit_price) };
     const url = editing ? `/api/admin/finance/price-list/${editing.id}` : "/api/admin/finance/price-list";
     const method = editing ? "PATCH" : "POST";
@@ -184,26 +198,43 @@ export default function PriceListPage() {
           <p className="text-gray-500 mt-1">Add a price item or import from CSV.</p>
         </div>
       ) : (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5">
-          {filtered.map((it) => (
-            <div key={it.id} className={`${glassCard} p-5`}>
-              <div className="flex gap-3">
-                <div className="w-16 h-16 rounded-xl bg-gray-50 overflow-hidden flex-shrink-0 grid place-items-center">
-                  {it.image_url ? <Image src={it.image_url} alt={it.name} width={64} height={64} className="object-cover w-16 h-16" /> : <Tag className="w-6 h-6 text-gray-300" />}
-                </div>
-                <div className="flex-1 min-w-0">
-                  <h3 className="font-semibold text-gray-900 truncate">{it.name}</h3>
-                  {it.category && <p className="text-xs text-gray-500">{it.category}</p>}
-                  <div className="text-blue-700 font-bold mt-1">{formatMoney(it.unit_price, it.currency)}</div>
-                </div>
-              </div>
-              {it.description && <p className="text-xs text-gray-500 mt-3 line-clamp-2">{it.description}</p>}
-              <div className="flex justify-end gap-1 mt-3">
-                <button onClick={() => openEdit(it)} className="w-8 h-8 rounded-lg hover:bg-blue-50 grid place-items-center text-gray-500 hover:text-blue-600"><Edit2 className="w-4 h-4" /></button>
-                <button onClick={() => remove(it.id)} className="w-8 h-8 rounded-lg hover:bg-red-50 grid place-items-center text-gray-500 hover:text-red-600"><Trash2 className="w-4 h-4" /></button>
-              </div>
-            </div>
-          ))}
+        <div className={`${glassCard} overflow-hidden`}>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="bg-white/50">
+                <tr className="text-left text-[11px] uppercase tracking-wider text-gray-500">
+                  <th className="pl-5 pr-2 py-3.5 w-14"></th>
+                  <th className="px-4 py-3.5">Item</th>
+                  <th className="px-4 py-3.5">Category</th>
+                  <th className="px-4 py-3.5 text-right">Unit Price</th>
+                  <th className="px-4 py-3.5 w-24"></th>
+                </tr>
+              </thead>
+              <tbody>
+                {filtered.map((it) => (
+                  <tr key={it.id} className="border-t border-white/60 transition hover:bg-white/50">
+                    <td className="pl-5 pr-2 py-3">
+                      <div className="w-10 h-10 rounded-lg bg-gray-50 overflow-hidden grid place-items-center flex-shrink-0">
+                        {it.image_url ? <Image src={it.image_url} alt={it.name} width={40} height={40} className="object-cover w-10 h-10" /> : <Tag className="w-4 h-4 text-gray-300" />}
+                      </div>
+                    </td>
+                    <td className="px-4 py-3 min-w-[220px]">
+                      <div className="font-semibold text-gray-900">{it.name}</div>
+                      {it.description && <div className="text-xs text-gray-500 truncate max-w-md">{it.description}</div>}
+                    </td>
+                    <td className="px-4 py-3 text-gray-600">{it.category || "—"}</td>
+                    <td className="px-4 py-3 text-right font-bold text-blue-700 whitespace-nowrap">{formatMoney(it.unit_price, it.currency)}</td>
+                    <td className="px-4 py-3">
+                      <div className="flex justify-end gap-1">
+                        <button onClick={() => openEdit(it)} className="w-8 h-8 rounded-lg hover:bg-blue-50 grid place-items-center text-gray-500 hover:text-blue-600"><Edit2 className="w-4 h-4" /></button>
+                        <button onClick={() => remove(it.id)} className="w-8 h-8 rounded-lg hover:bg-red-50 grid place-items-center text-gray-500 hover:text-red-600"><Trash2 className="w-4 h-4" /></button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </div>
       )}
     </FinanceShell>

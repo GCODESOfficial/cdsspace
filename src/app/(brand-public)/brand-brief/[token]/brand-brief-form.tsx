@@ -12,7 +12,6 @@ import {
     type BrandBrief,
     type BrandBriefDraft,
 } from "@/lib/brand-brief";
-import { exportBrandBriefToPdf } from "@/lib/brand-brief-pdf";
 
 interface Props {
     token: string;
@@ -114,7 +113,8 @@ export function BrandBriefForm({ token, initial }: Props) {
         }
     };
 
-    const download = () => {
+    const download = async () => {
+        const { exportBrandBriefToPdf } = await import("@/lib/brand-brief-pdf");
         exportBrandBriefToPdf(draft, {
             inviteLabel: initial.invite_label,
             status,
@@ -164,7 +164,7 @@ export function BrandBriefForm({ token, initial }: Props) {
                         Tell us about your brand.
                     </h1>
                     <p className="text-white/75 mt-3 text-[14px] sm:text-[15px] leading-relaxed max-w-xl">
-                        No account needed — fill in what you know, skip what you don't, and we'll take it from
+                        No account needed - fill in what you know, skip what you don't, and we'll take it from
                         there. You can download a copy as a PDF at any time.
                     </p>
 
@@ -186,7 +186,7 @@ export function BrandBriefForm({ token, initial }: Props) {
                         </div>
                         <div className="flex-1 min-w-0">
                             <p className="text-[15px] font-semibold text-[#0D1B39]">
-                                Thank you — your brief is with us.
+                                Thank you - your brief is with us.
                             </p>
                             <p className="text-[13px] text-gray-500 mt-0.5">
                                 We'll reach out to {draft.contact_email || "you"} within 1 business day. You can
@@ -206,7 +206,7 @@ export function BrandBriefForm({ token, initial }: Props) {
 
             {/* Form card */}
             <section className="max-w-3xl mx-auto px-5 md:px-6 py-8 md:py-12">
-                {/* Progress + save state — sticky on mobile */}
+                {/* Progress + save state - sticky on mobile */}
                 <div className="sticky top-0 z-30 -mx-5 md:mx-0 mb-6 md:mb-8 bg-brand-bg/90 backdrop-blur px-5 md:px-0 py-3 md:py-0 md:bg-transparent md:backdrop-blur-none">
                     <div className="flex items-center justify-between gap-3">
                         <div className="flex-1 min-w-0">
@@ -313,7 +313,7 @@ export function BrandBriefForm({ token, initial }: Props) {
                                 value={draft.target_audience}
                                 onChange={(e) => update("target_audience", e.target.value)}
                                 disabled={readOnly}
-                                placeholder="Describe your ideal customer — age, lifestyle, habits, where they live."
+                                placeholder="Describe your ideal customer - age, lifestyle, habits, where they live."
                                 className="input min-h-[100px]"
                             />
                         </Field>
@@ -352,7 +352,7 @@ export function BrandBriefForm({ token, initial }: Props) {
                                 value={draft.brand_values}
                                 onChange={(e) => update("brand_values", e.target.value)}
                                 disabled={readOnly}
-                                placeholder="What your brand stands for — culturally, ethically, creatively."
+                                placeholder="What your brand stands for - culturally, ethically, creatively."
                                 className="input min-h-[90px]"
                             />
                         </Field>
@@ -504,7 +504,7 @@ export function BrandBriefForm({ token, initial }: Props) {
                 </div>
             </section>
 
-            {/* Tailwind-style utility class via inline style tag — Satori-compatible scope */}
+            {/* Tailwind-style utility class via inline style tag - Satori-compatible scope */}
             <style>{`
                 .input {
                     width: 100%;
@@ -587,7 +587,7 @@ function SaveIndicator({ state, readOnly }: { state: SaveState; readOnly: boolea
     if (readOnly) {
         return (
             <span className="inline-flex items-center gap-1 text-[11px] text-emerald-600 font-semibold">
-                <Check className="w-3 h-3" /> Submitted — read-only
+                <Check className="w-3 h-3" /> Submitted - read-only
             </span>
         );
     }

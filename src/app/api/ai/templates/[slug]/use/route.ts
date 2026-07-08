@@ -34,7 +34,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ slug: s
     .update({ times_used: (tpl.times_used || 0) + 1 })
     .eq("id", tpl.id);
 
-  // Optional AI seed prompt — resolve it too
+  // Optional AI seed prompt - resolve it too
   let seed = tpl.ai_seed_prompt || null;
   if (seed) {
     seed = seed.replace(/\{\{\s*([a-z0-9_]+)\s*\}\}/gi, (_: string, k: string) => {

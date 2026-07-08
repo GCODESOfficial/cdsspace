@@ -12,7 +12,7 @@ import { isReservedUsername } from "@/lib/reserved-usernames";
 
 export const runtime = "nodejs";
 
-// GET — fetch invite metadata so the form can pre-fill suggested hints.
+// GET - fetch invite metadata so the form can pre-fill suggested hints.
 // Handles two token shapes:
 //   1. team_invites (blank self-serve invite)
 //   2. team_members.invite_token (admin pre-created a pending row)
@@ -103,7 +103,7 @@ export async function GET(_req: Request, ctx: { params: Promise<{ token: string 
   });
 }
 
-// POST — redeem: create a team_members row from the invitee-supplied fields
+// POST - redeem: create a team_members row from the invitee-supplied fields
 export async function POST(req: Request, ctx: { params: Promise<{ token: string }> }) {
   const { token } = await ctx.params;
   if (!token || !supabaseAdmin) {
@@ -166,7 +166,7 @@ export async function POST(req: Request, ctx: { params: Promise<{ token: string 
     }
   }
 
-  // Resolve department — either the invitee typed one or the admin pre-filled one
+  // Resolve department - either the invitee typed one or the admin pre-filled one
   let department_id: string | null = invite
     ? invite.suggested_department_id || null
     : pendingMember.department_id || null;
@@ -240,7 +240,7 @@ export async function POST(req: Request, ctx: { params: Promise<{ token: string 
     memberName = updated.full_name;
     memberUsername = updated.username;
   } else {
-    // Blank invite — create a fresh row
+    // Blank invite - create a fresh row
     const { data: member, error: memberErr } = await db
       .from("team_members")
       .insert({

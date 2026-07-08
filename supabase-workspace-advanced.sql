@@ -1,5 +1,5 @@
 -- ============================================================
--- CDS Space: Workspace tools — advanced schema
+-- CDS Space: Workspace tools - advanced schema
 -- ============================================================
 -- Adds the analytics, versioning, mentions, and multi-signer
 -- capabilities that put the workspace tools ahead of cdslabs.
@@ -11,7 +11,7 @@
 CREATE EXTENSION IF NOT EXISTS "pgcrypto";
 
 -- =============================================================
--- PROTECT DOCS — analytics
+-- PROTECT DOCS - analytics
 -- =============================================================
 -- team_protected_documents / team_protected_document_opens already
 -- exist. We add a dedicated download log and strengthen the open
@@ -46,7 +46,7 @@ LEFT JOIN public.team_protected_document_opens o
 GROUP BY d.id;
 
 -- =============================================================
--- CMEET — notes, agenda, recordings
+-- CMEET - notes, agenda, recordings
 -- =============================================================
 CREATE TABLE IF NOT EXISTS public.team_meeting_agenda_items (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -112,7 +112,7 @@ SELECT
 FROM public.team_meetings m;
 
 -- =============================================================
--- CDOCS — versions, comments, mentions, views
+-- CDOCS - versions, comments, mentions, views
 -- =============================================================
 ALTER TABLE public.team_cdocs
   ADD COLUMN IF NOT EXISTS slug TEXT,
@@ -250,7 +250,7 @@ SELECT
 FROM public.team_cdocs d;
 
 -- =============================================================
--- CSIGN — multi-field signing + audit trail
+-- CSIGN - multi-field signing + audit trail
 -- =============================================================
 ALTER TABLE public.team_signature_requests
   ADD COLUMN IF NOT EXISTS title TEXT,
@@ -353,7 +353,7 @@ GROUP BY 1
 ORDER BY 1 DESC;
 
 -- =============================================================
--- CRESUME — view analytics + peer endorsements
+-- CRESUME - view analytics + peer endorsements
 -- =============================================================
 CREATE TABLE IF NOT EXISTS public.team_resume_views (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -408,7 +408,7 @@ FROM public.team_members tm
 WHERE tm.is_active = true;
 
 -- =============================================================
--- GLOBAL — per-member workspace activity
+-- GLOBAL - per-member workspace activity
 -- =============================================================
 CREATE OR REPLACE VIEW public.v_team_member_activity AS
 SELECT
@@ -430,7 +430,7 @@ FROM public.team_members tm
 WHERE tm.is_active = true;
 
 -- =============================================================
--- GLOBAL — workspace-wide snapshot the admin dashboard can read
+-- GLOBAL - workspace-wide snapshot the admin dashboard can read
 -- =============================================================
 CREATE OR REPLACE VIEW public.v_workspace_overview AS
 SELECT

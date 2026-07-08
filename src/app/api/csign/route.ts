@@ -11,7 +11,7 @@ function accessToken() {
   return crypto.randomBytes(16).toString("hex");
 }
 
-// GET — list requests visible to the caller
+// GET - list requests visible to the caller
 export async function GET() {
   const actor = await getToolActor();
   if (!actor || !supabaseAdmin) return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
@@ -46,7 +46,7 @@ export async function GET() {
   return NextResponse.json({ ok: true, requests: enriched });
 }
 
-// POST — create one or many signature requests against a doc
+// POST - create one or many signature requests against a doc
 export async function POST(req: Request) {
   const actor = await getToolActor();
   if (!actor || !supabaseAdmin) return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
@@ -120,7 +120,7 @@ export async function POST(req: Request) {
   return NextResponse.json({ ok: true, requests: data });
 }
 
-// PATCH — bulk archive / unarchive
+// PATCH - bulk archive / unarchive
 export async function PATCH(req: Request) {
   const actor = await getToolActor();
   if (!actor || !supabaseAdmin) return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
@@ -136,7 +136,7 @@ export async function PATCH(req: Request) {
   return NextResponse.json({ ok: true });
 }
 
-// DELETE — soft/hard delete (but never for signed requests)
+// DELETE - soft/hard delete (but never for signed requests)
 export async function DELETE(req: Request) {
   const actor = await getToolActor();
   if (!actor || !supabaseAdmin) return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });

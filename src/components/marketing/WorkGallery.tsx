@@ -8,7 +8,6 @@ import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import {
     getWorkCoverShape,
-    measureImage,
     type WorkCoverShape,
 } from "./work-cover-layout";
 import { WorkMosaicItem } from "./WorkMosaicItem";
@@ -89,23 +88,6 @@ export const WorkGallery = ({ activeCategory, searchQuery = "", onOpen }: WorkGa
         };
     }, []);
 
-    useEffect(() => {
-        let cancelled = false;
-
-        works.forEach((work) => {
-            if (!work.cover_image) return;
-
-            measureImage(work.cover_image).then((shape) => {
-                if (cancelled || !shape) return;
-                setCoverShapes((prev) => (prev[work.id] ? prev : { ...prev, [work.id]: shape }));
-            });
-        });
-
-        return () => {
-            cancelled = true;
-        };
-    }, [works]);
-
     const activeFilter = CATEGORY_FILTERS.find((c) => c.id === activeCategory);
     const normalizedQuery = searchQuery.trim().toLowerCase();
 
@@ -167,6 +149,7 @@ export const ProjectCard = ({
     onImageShape?: (shape: WorkCoverShape) => void;
 }) => {
     const [localShape, setLocalShape] = useState<WorkCoverShape | null>(null);
+    const [imageFailed, setImageFailed] = useState(false);
     const effectiveShape = shape ?? localShape;
 
     const handleImageLoad = (event: React.SyntheticEvent<HTMLImageElement>) => {
@@ -191,7 +174,7 @@ export const ProjectCard = ({
                 className="relative block w-full h-full text-left rounded-[10px] overflow-hidden group border border-[#E3E8F4] cursor-pointer bg-[#050713] shadow-sm transition-shadow duration-500 hover:shadow-2xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue focus-visible:ring-offset-2"
             >
                 {/* Cover image */}
-                {work.cover_image ? (
+                {work.cover_image && !imageFailed ? (
                     <Image
                         src={work.cover_image}
                         alt={work.title}
@@ -203,10 +186,13 @@ export const ProjectCard = ({
                                 : "(min-width: 1536px) 360px, (min-width: 1024px) 33vw, (min-width: 640px) 50vw, 100vw"
                         }
                         onLoad={handleImageLoad}
+                        onError={() => setImageFailed(true)}
                         className="object-cover transform transition-transform duration-700 ease-out group-hover:scale-105"
                     />
                 ) : (
-                    <div className="absolute inset-0 bg-brand-stroke/30" />
+                    <div className="absolute inset-0 bg-[#050713]">
+                        <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_20%,rgba(28,78,209,0.22),transparent_38%)]" />
+                    </div>
                 )}
 
                 <div className="absolute inset-0 bg-black/0 group-hover:bg-black/35 group-focus-visible:bg-black/35 group-active:bg-black/35 transition-colors duration-300 pointer-events-none" />
@@ -265,7 +251,7 @@ function EmptyState({ isFiltered, query }: { isFiltered: boolean; query: string 
             <p className="text-brand-mute text-sm mt-1">
                 {isFiltered || query
                     ? "Try a different term or filter."
-                    : "Check back soon — we’re publishing new projects."}
+                    : "Check back soon - we’re publishing new projects."}
             </p>
         </div>
     );

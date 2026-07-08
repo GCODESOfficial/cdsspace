@@ -79,7 +79,7 @@ export default function DisplayAdCarousel() {
                   width={800}
                   height={200}
                   className="h-full w-full object-cover"
-                  priority
+                  loading="lazy"
                 />
               </a>
             )}

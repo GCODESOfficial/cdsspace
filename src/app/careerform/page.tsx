@@ -331,7 +331,7 @@ export default function CareerFormPage() {
       <Shell>
         <div className="space-y-1">
           <div className="text-[14px] font-semibold text-[#0F1A2A]">BioFrame</div>
-          <p className="text-[12px] leading-5 text-[#7A8699]">This section gathers your basic information — we want to know the person behind the profile.</p>
+          <p className="text-[12px] leading-5 text-[#7A8699]">This section gathers your basic information - we want to know the person behind the profile.</p>
         </div>
         <div className="mt-8 mb-5 flex items-center gap-3">
           <h2 className="text-[15px] font-semibold text-[#0F1A2A]">Tell us who you are</h2>
@@ -382,7 +382,7 @@ export default function CareerFormPage() {
           <LabeledInput label="In your own words, how would your previous team describe you?">
             <textarea value={teamDescribe} onChange={(e) => setTeamDescribe(e.target.value)} className={`${INPUT_CLASS} min-h-[120px] resize-none`} required />
           </LabeledInput>
-          <LabeledInput label="What personal value do you never compromise on — even at work?">
+          <LabeledInput label="What personal value do you never compromise on - even at work?">
             <textarea value={coreValue} onChange={(e) => setCoreValue(e.target.value)} className={`${INPUT_CLASS} min-h-[120px] resize-none`} required />
           </LabeledInput>
 

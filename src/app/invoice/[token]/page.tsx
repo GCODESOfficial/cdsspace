@@ -47,13 +47,13 @@ export async function generateMetadata({ params }: { params: Params }): Promise<
 
   if (!invoice) {
     return {
-      title: "Invoice — CDS Space",
+      title: "Invoice - CDS Space",
       alternates: { canonical: url },
       robots: { index: false, follow: false },
     };
   }
 
-  const title = `Invoice ${invoice.invoice_number} — ${invoice.client_name}`;
+  const title = `Invoice ${invoice.invoice_number} - ${invoice.client_name}`;
   const description = `Invoice ${invoice.invoice_number} for ${invoice.client_name} · Status: ${invoice.status.toUpperCase()} · Issued ${invoice.issue_date}${invoice.due_date ? ` · Due ${invoice.due_date}` : ""}.`;
 
   return {

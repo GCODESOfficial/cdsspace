@@ -4,7 +4,7 @@ import { NextRequest, NextResponse } from 'next/server';
 /**
  * Record one visit per IP per day.
  *
- * The table is kept at most 200 rows by a Postgres trigger — see
+ * The table is kept at most 200 rows by a Postgres trigger - see
  * supabase/migrations/traffic_logs_trim.sql. This route just inserts; the
  * trigger handles trimming atomically regardless of RLS.
  */

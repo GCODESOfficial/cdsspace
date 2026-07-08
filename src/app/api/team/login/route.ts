@@ -4,14 +4,9 @@ import {
   hashPassword,
   sessionCookieOptions,
 } from "@/lib/team-auth";
-import { createFaceChallenge } from "@/lib/face-verification";
 import { glashMaybeOne } from "@/lib/glashdb/postgres";
-import {
-  createTeamSession,
-  getLoginOfficeRequirement,
-  recordLoginAttendance,
-  validateTeamBypassCode,
-} from "@/lib/team-login-security";
+import { createTeamSession } from "@/lib/team-login-security";
+import { insertActivityLog } from "@/lib/activity-log";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -55,53 +50,29 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: false, error: "Invalid credentials" }, { status: 401 });
   }
 
-  const bypassCode = String(body?.bypass_code || "").trim();
-  if (bypassCode) {
-    try {
-      const bypass = await validateTeamBypassCode(bypassCode, member.id);
-      const { member: sessionMember, sessionToken, deviceType } = await createTeamSession(member.id, req);
-      await recordLoginAttendance({
-        req,
-        memberId: member.id,
-        faceVerified: false,
-        bypass,
-        bypassReason: bypass?.reason || "Team login bypass code",
-        flags: ["face_verification_bypass", "geofence_bypass"],
-      });
-      const res = NextResponse.json({ ok: true, bypassed: true, member: sessionMember, device_type: deviceType });
-      res.cookies.set(TEAM_SESSION_COOKIE, sessionToken, sessionCookieOptions());
-      return res;
-    } catch (error) {
-      return NextResponse.json(
-        { ok: false, error: error instanceof Error ? error.message : "Invalid team bypass code." },
-        { status: 403 },
-      );
-    }
-  }
-
-  const faceProfile = await glashMaybeOne<{ status: string }>(
-    "select status from public.team_face_profiles where team_member_id = $1 limit 1",
-    [member.id],
-  );
-  const faceReady = faceProfile?.status === "active";
-  const challenge = await createFaceChallenge(
-    member.id,
-    faceReady ? "verification" : "enrollment",
-    { login_identifier: id },
-  );
-  const requirement = await getLoginOfficeRequirement(member.id);
-
-  return NextResponse.json({
-    ok: false,
-    requires_face_setup: !faceReady,
-    requires_face_verification: faceReady,
-    requires_geofence_after_face: requirement.officeRequired,
-    face_challenge: challenge,
-    member: {
-      id: member.id,
-      full_name: member.full_name,
-      username: member.username,
-      is_sub_admin: member.is_sub_admin,
+  // Login only authenticates. Attendance/clock-in happens separately through
+  // the geofenced timebook flow (POST /api/team/timebook action=clock_in), so
+  // logging in never bypasses the office geofence check.
+  const { member: sessionMember, sessionToken, deviceType } = await createTeamSession(member.id, req);
+  void insertActivityLog({
+    actor_kind: "team",
+    actor_id: member.id,
+    actor_name: member.full_name || member.username,
+    actor_is_admin: false,
+    action: "team.login",
+    page: "team/login",
+    resource_type: "team_session",
+    resource_id: member.id,
+    resource_label: `${deviceType} login`,
+    metadata: {
+      source: "team_login",
+      device_type: deviceType,
+      user_agent: req.headers.get("user-agent") || null,
+      ip_address: req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || null,
     },
-  });
+  }).catch((err) => console.error("[audit] team login log failed:", err));
+
+  const res = NextResponse.json({ ok: true, member: sessionMember, device_type: deviceType });
+  res.cookies.set(TEAM_SESSION_COOKIE, sessionToken, sessionCookieOptions());
+  return res;
 }

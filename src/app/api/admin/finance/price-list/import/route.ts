@@ -9,7 +9,7 @@ function parseCsv(text: string) {
   const idx = (k: string) => header.indexOf(k);
   const out: Array<Record<string, string>> = [];
   for (let i = 1; i < lines.length; i++) {
-    // Naive CSV split — supports quoted fields with commas
+    // Naive CSV split - supports quoted fields with commas
     const row: string[] = [];
     let cur = "";
     let inQ = false;

@@ -186,7 +186,7 @@ export async function POST(req: Request) {
     const inputExcerpt = JSON.stringify(input).slice(0, 400);
 
     if (stream) {
-      // Streaming endpoint — can't log tokens accurately without a second call.
+      // Streaming endpoint - can't log tokens accurately without a second call.
       // Log a best-effort OK row and let the client show the text live.
       const body = await chatStream(messages, opts);
       logUsage({

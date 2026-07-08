@@ -1,5 +1,5 @@
 -- ============================================
--- CDS Space: Admin Roles — reusable permission bundles
+-- CDS Space: Admin Roles - reusable permission bundles
 -- Idempotent. Run in Supabase SQL editor.
 -- ============================================
 
@@ -35,7 +35,7 @@ create trigger trg_admin_roles_touch
   for each row execute function public.touch_admin_roles_updated_at();
 
 -- Link sub-admins (and team members acting as sub-admins) to a role.
--- The role.permissions array is treated as the authoritative grant set —
+-- The role.permissions array is treated as the authoritative grant set -
 -- the sub-admin's own `permissions` column stays as an override layer.
 alter table public.sub_admins        add column if not exists role_id uuid references public.admin_roles(id) on delete set null;
 alter table public.team_members      add column if not exists role_id uuid references public.admin_roles(id) on delete set null;

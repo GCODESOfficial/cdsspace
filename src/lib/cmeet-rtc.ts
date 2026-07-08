@@ -1,10 +1,10 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-// Full-mesh WebRTC with Supabase Realtime signaling.
+// Full-mesh WebRTC with GlashDB-compatible Realtime signaling.
 // Every peer has 1 RTCPeerConnection per other peer. Peer A creates the
-// offer when its peerId sorts lexicographically greater than peer B's —
+// offer when its peerId sorts lexicographically greater than peer B's -
 // that rule prevents both sides from creating offers simultaneously.
 //
-// Signaling messages are exchanged via a Supabase Realtime channel named
+// Signaling messages are exchanged via a Realtime channel named
 // `cmeet:<roomCode>`. Message shapes:
 //   { type: "join", peerId, name, hasVideo, hasAudio }
 //   { type: "leave", peerId }
@@ -19,8 +19,9 @@
 
 import { createClient, type RealtimeChannel } from "@supabase/supabase-js";
 import { getGlashDbBrowserConfig } from "@/lib/glashdb/env";
+import { getGlashRealtimeOptions } from "@/lib/glashdb/realtime-transport";
 
-// Use the public GlashDB/Supabase-compatible client (anon key) for Realtime signaling.
+// Use the public GlashDB-compatible client (anon key) for Realtime signaling.
 const { url, anonKey } = getGlashDbBrowserConfig();
 
 export type RemotePeer = {
@@ -69,7 +70,7 @@ export type CMeetEvents = {
 // ICE configuration. Always includes free Google STUN servers. When the
 // self-hosted TURN relay is configured (see deploy/coturn/), it's added
 // so peers behind symmetric NAT / corporate firewalls can connect too.
-// Zero third-party dependency — the TURN server runs on your own VPS.
+// Zero third-party dependency - the TURN server runs on your own VPS.
 function buildRtcConfig(): RTCConfiguration {
   const servers: RTCIceServer[] = [
     { urls: "stun:stun.l.google.com:19302" },
@@ -84,7 +85,7 @@ function buildRtcConfig(): RTCConfiguration {
   if (turnUrl && turnUser && turnCred) {
     servers.push({ urls: turnUrl, username: turnUser, credential: turnCred });
     // Also add a turns: (TLS) variant on port 5349 if the base URL is
-    // on port 3478 — covers networks that block non-443 UDP.
+    // on port 3478 - covers networks that block non-443 UDP.
     if (turnUrl.includes(":3478")) {
       servers.push({
         urls: turnUrl.replace("turn:", "turns:").replace(":3478", ":5349"),
@@ -98,20 +99,22 @@ function buildRtcConfig(): RTCConfiguration {
 const RTC_CONFIG = buildRtcConfig();
 
 export class CMeetClient {
-  private supa = createClient(url, anonKey);
+  private supa = createClient(url, anonKey, {
+    realtime: getGlashRealtimeOptions(),
+  });
   private channel: RealtimeChannel | null = null;
   private peers = new Map<string, RemotePeer>();
   private localStream: MediaStream | null = null;
   private events: CMeetEvents;
   // Queue ICE candidates that arrive before the remote description is set.
   // Adding an ICE candidate with no remote description throws in every
-  // browser, so the candidate silently disappears — which is why calls
+  // browser, so the candidate silently disappears - which is why calls
   // sometimes come up with one-way audio/video.
   private pendingIce = new Map<string, RTCIceCandidateInit[]>();
   // Peers we've heard are screen-sharing. Kept separately because the
   // signal arrives on a different channel message than the track itself.
   private sharingPeers = new Set<string>();
-  // Our own screen-sharing state — broadcast after a renegotiation so other
+  // Our own screen-sharing state - broadcast after a renegotiation so other
   // peers can render the rectangular tile.
   private iAmSharing = false;
   readonly peerId: string;
@@ -152,9 +155,9 @@ export class CMeetClient {
     this.localStream = localStream;
 
     // Grab fresh TURN/STUN creds before the first peer connection is made.
-    // Retry subscribe up to 5 times with exponential-ish backoff. Supabase
-    // Realtime frequently takes >8s to come up on cold connections (first
-    // tab load, mobile data hand-off, etc.) — three attempts at 8s each
+    // Retry subscribe up to 5 times with exponential-ish backoff. Realtime
+    // can take >8s to come up on cold connections (first
+    // tab load, mobile data hand-off, etc.) - three attempts at 8s each
     // wasn't enough, so calls timed out even though Realtime was fine.
     let lastError: string | null = null;
     for (let attempt = 1; attempt <= 5; attempt++) {
@@ -186,7 +189,7 @@ export class CMeetClient {
       } catch (err: any) {
         lastError = String(err?.message || err || "subscribe failed");
         // Always tear down the half-connected channel before retrying,
-        // otherwise supabase-js leaks state and the next attempt fails
+        // otherwise the compatibility SDK leaks state and the next attempt fails
         // even faster.
         try { if (ch) await this.supa.removeChannel(ch); } catch { /* noop */ }
         // Backoff: 600ms, 1.2s, 2.4s, 4s, 6s
@@ -198,7 +201,7 @@ export class CMeetClient {
     if (lastError) {
       const friendly =
         lastError === "CHANNEL_ERROR"
-          ? "Couldn't connect to the meeting. The realtime channel was rejected — your Supabase project is missing the cmeet broadcast policies. Run the 20260501_cmeet_realtime_broadcast migration, then refresh."
+          ? "Couldn't connect to the meeting. The realtime channel was rejected - the GlashDB-compatible realtime policies are missing. Run the 20260501_cmeet_realtime_broadcast migration, then refresh."
           : lastError === "TIMED_OUT"
             ? "Couldn't reach the realtime server. Check your internet connection and refresh."
             : `Couldn't connect to the meeting (${lastError}). Refresh and try again.`;
@@ -420,7 +423,7 @@ export class CMeetClient {
         const peer = this.peers.get(msg.from);
         // Buffer ICE candidates that arrive before remote description is
         // set. Without this buffer, addIceCandidate throws and the candidate
-        // is lost — the classic "peer connects but no media" failure.
+        // is lost - the classic "peer connects but no media" failure.
         if (!peer || !peer.connection.remoteDescription) {
           const q = this.pendingIce.get(msg.from) || [];
           q.push(msg.candidate);
@@ -550,7 +553,7 @@ export class CMeetClient {
       await peer.connection.setLocalDescription(offer);
       this.send({ type: "offer", from: this.peerId, to: peerId, name: this.name, sdp: offer.sdp });
     } catch {
-      /* ignore — will try again on next failure */
+      /* ignore - will try again on next failure */
     }
   }
 }

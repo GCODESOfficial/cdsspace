@@ -7,6 +7,8 @@ import { ArrowLeft } from "lucide-react";
 
 interface AuthLayoutProps {
     children: ReactNode;
+    /** Optional custom left branding panel. Defaults to the static art. */
+    brand?: ReactNode;
 }
 
 /**
@@ -17,7 +19,7 @@ interface AuthLayoutProps {
  * - Fixes the right-side form column to 630px width.
  * - Fixes the left-side branding card to 852px width.
  */
-export const AuthLayout = ({ children }: AuthLayoutProps) => {
+export const AuthLayout = ({ children, brand }: AuthLayoutProps) => {
     return (
         <div className="w-full min-h-screen bg-white flex items-center justify-center font-inter antialiased overflow-hidden">
             {/* Main Surface Container: Matches top/left 24px (p-6) offset from Figma */}
@@ -36,18 +38,20 @@ export const AuthLayout = ({ children }: AuthLayoutProps) => {
 
                     {/* LEFT SIDE: BRANDING CARD (Node 6279:11893) */}
                     <div className="hidden lg:block w-[45%] lg:max-w-[500px] xl:max-w-[700px] 2xl:max-w-[852px] h-full rounded-[32px] 2xl:rounded-[48px] relative overflow-hidden shrink-0 shadow-[0_24px_48px_rgba(0,0,0,0.1)]">
-                        {/* Background Frame (public/auth/Frame 2147238973.svg) */}
-                        <Image
-                            src="/auth/Side.svg"
-                            alt="Branding"
-                            fill
-                            className="object-cover"
-                            priority
-                        />
+                        {brand ?? (
+                            /* Default branding art (public/auth/Side.svg) */
+                            <Image
+                                src="/auth/Side.svg"
+                                alt="Branding"
+                                fill
+                                className="object-cover"
+                                priority
+                            />
+                        )}
                     </div>
 
                     {/* RIGHT SIDE: SCROLLABLE FORM (630px width strictly maintained on large screens) */}
-                    <div className="flex-1 w-full lg:max-w-[480px] xl:max-w-[540px] 2xl:max-w-[630px] h-full overflow-y-auto scrollbar-hide py-8 lg:py-12 pr-4 premium-scrollbar">
+                    <div className="flex-1 w-full lg:max-w-[480px] xl:max-w-[540px] 2xl:max-w-[630px] h-full overflow-y-auto no-scrollbar py-8 lg:py-12 pr-4">
                         {/* Centering Wrapper for the form content */}
                         <div className="w-full min-h-full flex flex-col justify-center">
                             {children}

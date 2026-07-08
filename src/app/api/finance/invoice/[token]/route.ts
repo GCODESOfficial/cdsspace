@@ -4,7 +4,7 @@ import { financeDb } from "@/lib/finance/api-auth";
 /**
  * Public invoice lookup. Accepts EITHER the shareable `public_token` OR the
  * human-readable `invoice_number` (e.g. INV-202604-7227) so pasted links
- * work either way. We still only expose the invoice itself — no admin fields.
+ * work either way. We still only expose the invoice itself - no admin fields.
  */
 export async function GET(_req: NextRequest, { params }: { params: Promise<{ token: string }> }) {
   const { token } = await params;

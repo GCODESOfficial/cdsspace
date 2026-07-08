@@ -3,6 +3,11 @@ import { getAdminSession } from "@/lib/admin-session";
 import { hasPermission } from "@/lib/admin-permissions";
 import { glashQuery } from "@/lib/glashdb/postgres";
 import { logActivity } from "@/lib/activity-log";
+import {
+  deliverAnnouncementToClientChat,
+  deliverAnnouncementToTeamChat,
+  deliverAnnouncementByEmail,
+} from "@/lib/announcement-delivery";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -28,6 +33,13 @@ function cleanUuidList(value: unknown) {
         .map((item) => String(item || "").trim())
         .filter((item) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(item)),
     ),
+  );
+}
+
+function cleanStringList(value: unknown) {
+  if (!Array.isArray(value)) return [];
+  return Array.from(
+    new Set(value.map((item) => String(item || "").trim()).filter(Boolean)),
   );
 }
 
@@ -128,29 +140,59 @@ export async function POST(req: NextRequest) {
 
   let recipientIds: string[] = [];
   let targetLabel = "";
+  const channelSummary: Record<string, unknown> = {};
 
   if (audience === "clients") {
     const mode = cleanText(body.clientMode) as ClientMode;
+    // Channels: in-app (dashboard notification + Messages copy) and/or email.
+    const wantInApp = body.channels?.inApp !== false; // default on
+    const wantEmail = body.channels?.email === true;
+    if (!wantInApp && !wantEmail) {
+      return NextResponse.json({ ok: false, error: "Choose at least one channel." }, { status: 400 });
+    }
+
+    let recipients: Array<{ id: string; email: string | null }> = [];
     if (mode === "selected") {
-      recipientIds = cleanUuidList(body.clientIds);
+      const ids = cleanUuidList(body.clientIds);
+      if (ids.length > 0) {
+        recipients = await glashQuery<{ id: string; email: string | null }>(
+          `select id, email from public.profiles where id = any($1::uuid[])`,
+          [ids],
+        );
+      }
     } else {
-      const rows = await glashQuery<{ id: string }>(
-        `select id
+      recipients = await glashQuery<{ id: string; email: string | null }>(
+        `select id, email
            from public.profiles
           where coalesce(lower(email), '') <> 'ceo@cdsspace.pro'
           order by created_at desc`,
       );
-      recipientIds = rows.map((row) => row.id);
     }
+    recipientIds = recipients.map((row) => row.id);
     if (recipientIds.length === 0) {
       return NextResponse.json({ ok: false, error: "No client recipients found." }, { status: 400 });
     }
-    await glashQuery(
-      `insert into public.notifications (user_id, type, title, message, link)
-       select unnest($1::uuid[]), 'status_change', $2, $3, $4`,
-      [recipientIds, title, message, link || "/dashboard"],
-    );
-    targetLabel = mode === "selected" ? `${recipientIds.length} selected clients` : "All clients";
+
+    if (wantInApp) {
+      await glashQuery(
+        `insert into public.notifications (user_id, type, title, message, link)
+         select unnest($1::uuid[]), 'status_change', $2, $3, $4`,
+        [recipientIds, title, message, link || "/dashboard"],
+      );
+      // Mirror into each client's dashboard Messages as a CDS Space message.
+      await deliverAnnouncementToClientChat(recipientIds, title, message).catch(() => 0);
+      channelSummary.in_app = recipientIds.length;
+    }
+    if (wantEmail) {
+      const emails = recipients.map((r) => r.email).filter((e): e is string => !!e);
+      const emailResult = await deliverAnnouncementByEmail(emails, title, message, link).catch(() => ({ sent: 0, failed: emails.length }));
+      channelSummary.email = emailResult;
+    }
+
+    const channelLabel = [wantInApp ? "in-app" : null, wantEmail ? "email" : null].filter(Boolean).join(" + ");
+    targetLabel =
+      (mode === "selected" ? `${recipientIds.length} selected clients` : "All clients") +
+      ` · ${channelLabel}`;
   }
 
   if (audience === "team") {
@@ -158,18 +200,26 @@ export async function POST(req: NextRequest) {
     if (mode === "selected") {
       recipientIds = cleanUuidList(body.teamMemberIds);
     } else if (mode === "department") {
-      const department = cleanText(body.department);
-      if (!department) {
-        return NextResponse.json({ ok: false, error: "Choose a department." }, { status: 400 });
+      // Multi-select departments (with single-department fallback for older clients).
+      const departments = cleanStringList(body.departments);
+      if (departments.length === 0) {
+        const single = cleanText(body.department);
+        if (single) departments.push(single);
+      }
+      if (departments.length === 0) {
+        return NextResponse.json({ ok: false, error: "Choose at least one department." }, { status: 400 });
       }
       const rows = await glashQuery<{ id: string }>(
         `select id from public.team_members
           where is_active = true
-            and lower(department) = lower($1)`,
-        [department],
+            and lower(department) = any($1::text[])`,
+        [departments.map((d) => d.toLowerCase())],
       );
       recipientIds = rows.map((row) => row.id);
-      targetLabel = `${department} department`;
+      targetLabel =
+        departments.length === 1
+          ? `${departments[0]} department`
+          : `${departments.length} departments (${departments.join(", ")})`;
     } else {
       const rows = await glashQuery<{ id: string }>(
         "select id from public.team_members where is_active = true order by full_name asc",
@@ -185,6 +235,8 @@ export async function POST(req: NextRequest) {
        select unnest($1::uuid[]), 'announcement', $2, $3, $4, true`,
       [recipientIds, title, message, link || "/team"],
     );
+    // Mirror into each member's chat as a CDS Space (Admin) Direct message.
+    await deliverAnnouncementToTeamChat(recipientIds, title, message).catch(() => 0);
     if (!targetLabel) targetLabel = `${recipientIds.length} selected team members`;
   }
 
@@ -210,6 +262,8 @@ export async function POST(req: NextRequest) {
        select unnest($1::uuid[]), 'project_announcement', $2, $3, $4, true`,
       [recipientIds, title, message, link || `/team/work?project=${project.id}`],
     );
+    // Mirror into each project member's chat as a CDS Space (Admin) message.
+    await deliverAnnouncementToTeamChat(recipientIds, title, message).catch(() => 0);
     targetLabel = `Project team: ${project.name}`;
   }
 
@@ -222,6 +276,7 @@ export async function POST(req: NextRequest) {
       audience,
       recipient_count: recipientIds.length,
       link,
+      channels: channelSummary,
     },
   });
 
@@ -229,5 +284,6 @@ export async function POST(req: NextRequest) {
     ok: true,
     recipient_count: recipientIds.length,
     target_label: targetLabel,
+    channels: channelSummary,
   });
 }

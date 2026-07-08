@@ -11,15 +11,30 @@ import { Eye, EyeOff, Loader2 } from "lucide-react";
 import { loginSchema, type LoginInput } from "@/lib/validations/auth";
 import { login, oauthLogin } from "@/lib/actions/auth";
 
+/** Human-friendly copy for the ?error= codes our OAuth routes redirect back with. */
+function oauthErrorMessage(code: string): string {
+    switch (code) {
+        case "google_disabled":
+            return "Google sign-in isn't enabled for this project yet. Use email and password, or try again shortly.";
+        case "google_start_failed":
+            return "We couldn't start Google sign-in. Please try again.";
+        case "auth_code_exchange_failed":
+            return "Google sign-in didn't complete. Please try again.";
+        default:
+            return decodeURIComponent(code).replace(/\+/g, " ");
+    }
+}
+
 /**
  * LoginForm - 1:1 Figma-aligned implementation with real auth logic.
  */
 export const LoginForm = () => {
     const [showPassword, setShowPassword] = useState(false);
     const [isLoading, setIsLoading] = useState(false);
-    const [error, setError] = useState<string | null>(null);
-    const router = useRouter();
     const searchParams = useSearchParams();
+    const oauthErrorParam = searchParams.get('error');
+    const [error, setError] = useState<string | null>(oauthErrorParam ? oauthErrorMessage(oauthErrorParam) : null);
+    const router = useRouter();
     const nextPath = searchParams.get('next') || '/dashboard';
 
     const {

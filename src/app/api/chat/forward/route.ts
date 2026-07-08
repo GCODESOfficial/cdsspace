@@ -18,7 +18,7 @@ export const dynamic = "force-dynamic";
  *   }
  *
  * The forwarded message stores the ORIGINAL sender's name + body in its
- * `forwarded` JSONB. We deliberately DO NOT record who forwarded it — only
+ * `forwarded` JSONB. We deliberately DO NOT record who forwarded it - only
  * who currently sent it (the admin performing the forward).
  */
 export async function POST(req: Request) {

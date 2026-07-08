@@ -8,7 +8,7 @@ import { financeDb, requireFinanceAdminAsync } from "@/lib/finance/api-auth";
  *          seeded with every assigned team member (direct + by department).
  *
  * Body: { title: string, agenda?: string, scheduled_for?: ISO string }
- *       — pass `scheduled_for` for scheduled; omit for immediate.
+ *       - pass `scheduled_for` for scheduled; omit for immediate.
  */
 
 function generateRoomCode() {

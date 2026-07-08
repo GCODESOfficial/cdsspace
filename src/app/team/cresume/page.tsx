@@ -3,7 +3,8 @@
 /* eslint-disable @next/next/no-img-element */
 
 import { useEffect, useState } from "react";
-import { UserRound, Save, Link2, Eye, Loader2, Plus, X as XIcon, Check, Brain } from "lucide-react";
+import { Save, Link2, Eye, Loader2, Plus, X as XIcon, Check, Brain } from "lucide-react";
+import { initials } from "@/lib/utils";
 import { SKILL_TABS } from "@/lib/cresume-skills";
 
 interface Role { company: string; title: string; start: string; end: string; description: string }
@@ -171,7 +172,7 @@ export default function CResumeEditor() {
       <div className="mb-6 flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
         <div>
           <h1 className="text-[26px] font-bold text-[#0D1B39] tracking-tight">cResume</h1>
-          <p className="text-gray-400 text-[13px] mt-1">Your public profile — brand yourself with a beautiful one-pager.</p>
+          <p className="text-gray-400 text-[13px] mt-1">Your public profile - brand yourself with a beautiful one-pager.</p>
         </div>
         <div className="flex w-full flex-col gap-2 sm:flex-row sm:flex-wrap md:w-auto md:justify-end">
           <label className="inline-flex items-center gap-2 rounded-xl border border-gray-200 bg-white px-3 py-2.5 text-[12.5px] cursor-pointer">
@@ -307,7 +308,7 @@ export default function CResumeEditor() {
         </div>
 
         <div className="flex flex-col gap-5 sm:flex-row sm:items-start">
-          <AvatarPicker url={resume.avatar_url} onChange={(url) => set("avatar_url", url)} />
+          <AvatarInitial name={memberName} />
           <div className="flex-1 grid grid-cols-1 md:grid-cols-2 gap-3">
             <Field label="Headline" value={resume.headline} onChange={(v) => set("headline", v)} placeholder="e.g. Brand designer · Product thinker" />
             <Field label="Location" value={resume.location} onChange={(v) => set("location", v)} />
@@ -372,34 +373,13 @@ function Field({ label, value, onChange, placeholder }: { label: string; value: 
   );
 }
 
-function AvatarPicker({ url, onChange }: { url: string | null; onChange: (url: string) => void }) {
-  const [uploading, setUploading] = useState(false);
-
-  async function upload(file: File) {
-    setUploading(true);
-    const reader = new FileReader();
-    reader.onload = async () => {
-      const dataUrl = reader.result as string;
-      onChange(dataUrl);
-      setUploading(false);
-    };
-    reader.readAsDataURL(file);
-  }
-
+function AvatarInitial({ name }: { name: string }) {
+  // Avatars are the member's initials now (no image uploads).
   return (
     <div className="shrink-0 text-center sm:text-left">
-      {url ? (
-        <img src={url} alt="Avatar" className="w-20 h-20 rounded-full object-cover border border-gray-200" />
-      ) : (
-        <div className="w-20 h-20 rounded-full bg-[#0A4FE8]/10 text-[#0A4FE8] flex items-center justify-center">
-          <UserRound className="w-7 h-7" />
-        </div>
-      )}
-      <label className="mt-2 inline-flex items-center gap-1 text-[11px] text-[#0A4FE8] cursor-pointer hover:underline">
-        {uploading ? <Loader2 className="w-3 h-3 animate-spin" /> : null}
-        {uploading ? "Uploading…" : "Change"}
-        <input type="file" accept="image/*" className="hidden" onChange={(e) => e.target.files?.[0] && upload(e.target.files[0])} />
-      </label>
+      <div className="w-20 h-20 rounded-full bg-[#0A4FE8] text-white flex items-center justify-center text-[26px] font-bold">
+        {initials(name)}
+      </div>
     </div>
   );
 }

@@ -1,8 +1,10 @@
 "use client";
 
 /* eslint-disable @next/next/no-img-element */
+/* eslint-disable @typescript-eslint/no-explicit-any */
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { appPrompt, appConfirm, appAlert } from "@/lib/app-notify";
 import {
   Send,
   Hash,
@@ -17,11 +19,8 @@ import {
   Search,
   Plus,
   Check,
-  Sparkles,
   Paperclip,
-  BrainCircuit,
   MessageSquarePlus,
-  Wand2,
   Phone,
   Video,
   SmilePlus,
@@ -47,7 +46,8 @@ import {
   AtSign,
   Clock3,
 } from "lucide-react";
-import { cn } from "@/lib/utils";
+import { cn, initials } from "@/lib/utils";
+import { validateChatUpload } from "@/lib/chat-upload-limits";
 import { Linkified, LinkPreview, firstUrl } from "@/components/chat/message-links";
 import {
   ContextMenu,
@@ -136,17 +136,13 @@ interface ViewerInfo {
   id: string | null;
   displayName: string;
   reactionKey: string;
+  isManagement?: boolean;
 }
 
 interface ClientRoom {
   roomId: string;
   client: { id: string; email: string; full_name: string | null } | null;
   lastMessage: string;
-}
-
-interface AiSuggestion {
-  label: string;
-  body: string;
 }
 
 interface ChatSearchResult {
@@ -296,6 +292,53 @@ function formatClock(dateString: string) {
   return new Date(dateString).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }
 
+function messageTime(m: { created_at: string }) {
+  const t = Date.parse(m.created_at);
+  return Number.isFinite(t) ? t : 0;
+}
+
+function sortByCreatedAt(a: Message, b: Message) {
+  const diff = messageTime(a) - messageTime(b);
+  if (diff !== 0) return diff;
+  return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
+}
+
+function optimisticSignature(m: {
+  body?: string | null;
+  sticker_key?: string | null;
+  attachment_url?: string | null;
+}) {
+  return `${(m.body || "").trim()}|${m.sticker_key || ""}|${m.attachment_url || ""}`;
+}
+
+/**
+ * Merge incremental sync results into the current list. Upserts by id, drops
+ * optimistic `temp_` rows once their persisted server twin has arrived (covers
+ * the race where delta sync delivers a just-sent message before the POST
+ * response swaps the temp id), and keeps everything ordered by created_at.
+ */
+function mergeMessages(prev: Message[], incoming: Message[]): Message[] {
+  const map = new Map<string, Message>();
+  for (const m of prev) map.set(m.id, m);
+  for (const m of incoming) {
+    const existing = map.get(m.id);
+    map.set(m.id, existing ? { ...existing, ...m } : m);
+  }
+  const all = Array.from(map.values());
+  const reals = all.filter((m) => !m.id.startsWith("temp_"));
+  const deduped = all.filter((m) => {
+    if (!m.id.startsWith("temp_")) return true;
+    return !reals.some(
+      (r) =>
+        r.sender_is_admin === m.sender_is_admin &&
+        r.sender_id === m.sender_id &&
+        optimisticSignature(r) === optimisticSignature(m) &&
+        Math.abs(messageTime(r) - messageTime(m)) < 25000,
+    );
+  });
+  return deduped.sort(sortByCreatedAt);
+}
+
 /** Shared team-chat UI. Same panel for admins and team members. */
 export function TeamChatPanel({ initialThreadId }: { initialThreadId?: string | null } = {}) {
   const [threads, setThreads] = useState<Thread[]>([]);
@@ -310,9 +353,6 @@ export function TeamChatPanel({ initialThreadId }: { initialThreadId?: string | 
   const [mobileShowThread, setMobileShowThread] = useState(!!initialThreadId);
   const [forwarding, setForwarding] = useState<Message | null>(null);
   const [showingNewChat, setShowingNewChat] = useState(false);
-  const [aiLoading, setAiLoading] = useState(false);
-  const [suggestions, setSuggestions] = useState<AiSuggestion[]>([]);
-  const [suggestionsLoading, setSuggestionsLoading] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
   const [composerPanel, setComposerPanel] = useState<ComposerPanel>(null);
@@ -329,7 +369,6 @@ export function TeamChatPanel({ initialThreadId }: { initialThreadId?: string | 
   const composerRef = useRef<HTMLTextAreaElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messageRefs = useRef<Record<string, HTMLLIElement | null>>({});
-  const lastRenderedThreadRef = useRef<string | null>(null);
   const syncBusyRef = useRef(false);
   const touchStateRef = useRef<{
     id: string;
@@ -338,8 +377,55 @@ export function TeamChatPanel({ initialThreadId }: { initialThreadId?: string | 
     longPressId: number | null;
   } | null>(null);
 
+  // --- Realtime delta-sync engine state ---------------------------------
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const cursorRef = useRef<string | null>(null); // last change-sync cursor
+  const atBottomRef = useRef(true); // is the viewport pinned to the latest message?
+  const [atBottom, setAtBottom] = useState(true);
+  const [jumpCount, setJumpCount] = useState(0); // new messages received while scrolled up
+  const [typingUsers, setTypingUsers] = useState<{ id: string; name: string }[]>([]);
+  const [readWatermark, setReadWatermark] = useState<string | null>(null); // latest time another participant has read up to
+  const [hasMore, setHasMore] = useState(false); // older history exists
+  const hasMoreRef = useRef(false);
+  const [loadingOlder, setLoadingOlder] = useState(false);
+  const loadingOlderRef = useRef(false);
+  // Refs mirror state so the [] -dependency sync callbacks never read stale values.
+  const selectedThreadRef = useRef<string | null>(selectedThread);
+  const viewerRef = useRef<ViewerInfo | null>(viewer);
+  const messagesRef = useRef<Message[]>([]);
+
+  useEffect(() => {
+    selectedThreadRef.current = selectedThread;
+  }, [selectedThread]);
+  useEffect(() => {
+    viewerRef.current = viewer;
+  }, [viewer]);
+  useEffect(() => {
+    messagesRef.current = messages;
+  }, [messages]);
+  useEffect(() => {
+    hasMoreRef.current = hasMore;
+  }, [hasMore]);
+
+  const isOwnMessage = useCallback((m: Message) => {
+    const v = viewerRef.current;
+    if (!v) return false;
+    return v.kind === "team" ? m.sender_id === v.id : v.kind === "admin" && m.sender_is_admin;
+  }, []);
+
+  const scrollToBottom = useCallback((behavior: ScrollBehavior = "smooth") => {
+    const el = scrollRef.current;
+    if (!el) return;
+    el.scrollTo({ top: el.scrollHeight, behavior });
+    atBottomRef.current = true;
+    setAtBottom(true);
+    setJumpCount(0);
+  }, []);
+
   const currentThread = threads.find((thread) => thread.id === selectedThread) || null;
   const currentTheme = CHAT_BACKGROUNDS[chatBackground];
+  // Announcement channels are read-only for everyone except management.
+  const composerLocked = !!currentThread?.is_announcement_only && !viewer?.isManagement;
 
   useEffect(() => {
     syncBusyRef.current = sending || uploading;
@@ -373,25 +459,121 @@ export function TeamChatPanel({ initialThreadId }: { initialThreadId?: string | 
     setThreadsLoading(false);
   }
 
-  const fetchMessages = useCallback(
-    async (force = false) => {
-      if (!selectedThread) return;
-      if (!force && syncBusyRef.current) return;
-      setMessagesLoading(true);
-      try {
-        const res = await fetch(`/api/team/chat/messages?threadId=${selectedThread}`, { cache: "no-store" });
-        const json = await res.json();
-        if (json.ok) {
-          setMessages(json.messages);
-          if (json.viewer) setViewer(json.viewer);
-        }
-      } catch {
-        /* ignore */
+  // Initial thread load (or a hard reload): fetch the latest page, reset the
+  // sync cursor, and pin to the newest message.
+  const loadInitial = useCallback(async (threadId: string) => {
+    setMessagesLoading(true);
+    try {
+      const res = await fetch(`/api/team/chat/messages?threadId=${threadId}&limit=50`, { cache: "no-store" });
+      const json = await res.json();
+      if (json.ok && selectedThreadRef.current === threadId) {
+        setMessages(json.messages);
+        cursorRef.current = json.cursor || null;
+        setHasMore(!!json.hasMore);
+        setJumpCount(0);
+        setTypingUsers(json.typing || []);
+        setReadWatermark(json.read_watermark || null);
+        if (json.viewer) setViewer(json.viewer);
+        // Double rAF: wait for the new messages to actually paint before pinning
+        // to the bottom, otherwise we'd scroll against a stale (empty) height.
+        requestAnimationFrame(() => requestAnimationFrame(() => scrollToBottom("auto")));
       }
-      setMessagesLoading(false);
-    },
-    [selectedThread],
-  );
+    } catch {
+      /* ignore */
+    }
+    setMessagesLoading(false);
+  }, [scrollToBottom]);
+
+  const reloadCurrent = useCallback(() => {
+    const threadId = selectedThreadRef.current;
+    if (threadId) loadInitial(threadId);
+  }, [loadInitial]);
+
+  // Incremental sync: pull only what changed since the cursor and merge it in,
+  // preserving scroll position. This is the polling replacement that makes the
+  // chat feel live without re-rendering the whole thread.
+  const syncDelta = useCallback(async () => {
+    const threadId = selectedThreadRef.current;
+    if (!threadId || !cursorRef.current) return;
+    if (syncBusyRef.current) return; // don't clobber an in-flight send/upload
+    try {
+      const res = await fetch(
+        `/api/team/chat/messages?threadId=${threadId}&since=${encodeURIComponent(cursorRef.current)}`,
+        { cache: "no-store" },
+      );
+      const json = await res.json();
+      if (!json.ok || selectedThreadRef.current !== threadId) return;
+      if (json.cursor) cursorRef.current = json.cursor;
+      if (json.viewer) setViewer(json.viewer);
+      // Presence updates land every tick, even when no new messages arrived.
+      setTypingUsers(json.typing || []);
+      setReadWatermark(json.read_watermark || null);
+      const incoming: Message[] = json.messages || [];
+      if (incoming.length === 0) return;
+
+      const wasAtBottom = atBottomRef.current;
+      setMessages((prev) => {
+        const beforeIds = new Set(prev.map((m) => m.id));
+        if (!wasAtBottom) {
+          const freshFromOthers = incoming.filter(
+            (m) => !beforeIds.has(m.id) && !isOwnMessage(m) && !m.deleted_at,
+          ).length;
+          if (freshFromOthers > 0) setJumpCount((c) => c + freshFromOthers);
+        }
+        return mergeMessages(prev, incoming);
+      });
+      if (wasAtBottom) requestAnimationFrame(() => scrollToBottom("smooth"));
+    } catch {
+      /* ignore */
+    }
+  }, [isOwnMessage, scrollToBottom]);
+
+  // History pagination: fetch an older page when the user scrolls to the top,
+  // then restore the scroll anchor so the viewport doesn't jump.
+  const loadOlder = useCallback(async () => {
+    const threadId = selectedThreadRef.current;
+    if (!threadId || loadingOlderRef.current || !hasMoreRef.current) return;
+    const oldest = messagesRef.current.find((m) => !m.id.startsWith("temp_"));
+    if (!oldest) return;
+    loadingOlderRef.current = true;
+    setLoadingOlder(true);
+    const el = scrollRef.current;
+    const prevHeight = el?.scrollHeight || 0;
+    const prevTop = el?.scrollTop || 0;
+    try {
+      const res = await fetch(
+        `/api/team/chat/messages?threadId=${threadId}&before=${encodeURIComponent(oldest.created_at)}&limit=40`,
+        { cache: "no-store" },
+      );
+      const json = await res.json();
+      if (json.ok && selectedThreadRef.current === threadId) {
+        const older: Message[] = json.messages || [];
+        setHasMore(!!json.hasMore && older.length > 0);
+        if (older.length) {
+          setMessages((prev) => mergeMessages(prev, older));
+          requestAnimationFrame(() => {
+            const node = scrollRef.current;
+            if (node) node.scrollTop = prevTop + (node.scrollHeight - prevHeight);
+          });
+        }
+      }
+    } catch {
+      /* ignore */
+    } finally {
+      loadingOlderRef.current = false;
+      setLoadingOlder(false);
+    }
+  }, []);
+
+  const handleScroll = useCallback(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const near = el.scrollHeight - el.scrollTop - el.clientHeight < 120;
+    atBottomRef.current = near;
+    setAtBottom(near);
+    if (near) setJumpCount((c) => (c > 0 ? 0 : c));
+    if (el.scrollTop < 80 && hasMoreRef.current && !loadingOlderRef.current) loadOlder();
+  }, [loadOlder]);
 
   const markThreadRead = useCallback(
     async (threadId: string) => {
@@ -410,75 +592,6 @@ export function TeamChatPanel({ initialThreadId }: { initialThreadId?: string | 
     [viewer?.kind],
   );
 
-  async function generateSuggestions() {
-    if (!messages.length || suggestionsLoading || !selectedThread) return;
-
-    const lastMsg = messages[messages.length - 1];
-    const amISender = viewer?.kind === "team" ? lastMsg.sender_id === viewer.id : lastMsg.sender_is_admin;
-    if (amISender) {
-      setSuggestions([]);
-      return;
-    }
-
-    setSuggestionsLoading(true);
-    try {
-      const historySummary = messages.slice(-5).map((message) => `${message.sender_name}: ${message.body}`).join("\n");
-      const res = await fetch("/api/ai/generate", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          kind: "chat_reply_suggestions",
-          input: {
-            channel: currentThread?.kind || "direct",
-            from: lastMsg.sender_name,
-            last_message: lastMsg.body,
-            history: historySummary,
-          },
-        }),
-      });
-      const json = await res.json();
-      if (json.ok && Array.isArray(json.data?.suggestions)) {
-        setSuggestions(json.data.suggestions);
-      }
-    } catch (error) {
-      console.error("AI Suggestions error:", error);
-    } finally {
-      setSuggestionsLoading(false);
-    }
-  }
-
-  async function triggerAiRewrite() {
-    if (!input.trim() || aiLoading) return;
-    setAiLoading(true);
-    try {
-      const res = await fetch("/api/ai/generate", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          kind: "chat_smart_compose",
-          input: { draft: input.trim() },
-        }),
-      });
-      const json = await res.json();
-      if (json.ok && json.text) {
-        setInput(json.text);
-      }
-    } catch (error) {
-      console.error("AI Rewrite error:", error);
-    } finally {
-      setAiLoading(false);
-    }
-  }
-
-  useEffect(() => {
-    if (messages.length > 0) {
-      const lastMessage = messages[messages.length - 1];
-      const amISender = viewer?.kind === "team" ? lastMessage.sender_id === viewer.id : lastMessage.sender_is_admin;
-      if (!amISender) generateSuggestions();
-      else setSuggestions([]);
-    }
-  }, [messages.length]);
-
   useEffect(() => {
     fetchThreads();
   }, []);
@@ -486,27 +599,41 @@ export function TeamChatPanel({ initialThreadId }: { initialThreadId?: string | 
   useEffect(() => {
     if (!selectedThread) {
       setMessages([]);
+      cursorRef.current = null;
+      setHasMore(false);
+      setJumpCount(0);
+      setTypingUsers([]);
+      setReadWatermark(null);
+      atBottomRef.current = true;
+      setAtBottom(true);
       return;
     }
+    setTypingUsers([]);
+    setReadWatermark(null);
 
-    lastRenderedThreadRef.current = null;
-    fetchMessages(true);
+    cursorRef.current = null;
+    loadInitial(selectedThread);
     markThreadRead(selectedThread);
 
+    // Fast incremental sync loop. Only new/changed rows come down each tick, so
+    // this is cheap enough to run frequently — ~1.8s feels near-live.
     const interval = setInterval(() => {
-      fetchMessages();
-      markThreadRead(selectedThread);
-    }, 5000);
+      if (document.hidden) return; // pause when the tab is backgrounded
+      syncDelta();
+      if (atBottomRef.current) markThreadRead(selectedThread);
+    }, 1800);
 
-    return () => clearInterval(interval);
-  }, [selectedThread, fetchMessages, markThreadRead]);
+    // Catch up instantly when the tab regains focus.
+    const onVisible = () => {
+      if (!document.hidden) syncDelta();
+    };
+    document.addEventListener("visibilitychange", onVisible);
 
-  useEffect(() => {
-    if (!selectedThread) return;
-    const justOpened = lastRenderedThreadRef.current !== selectedThread;
-    messagesEndRef.current?.scrollIntoView({ behavior: justOpened ? "auto" : "smooth", block: "end" });
-    if (messages.length > 0) lastRenderedThreadRef.current = selectedThread;
-  }, [messages.length, selectedThread]);
+    return () => {
+      clearInterval(interval);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
+  }, [selectedThread, loadInitial, syncDelta, markThreadRead]);
 
   useEffect(() => {
     if (!composerRef.current) return;
@@ -629,6 +756,7 @@ export function TeamChatPanel({ initialThreadId }: { initialThreadId?: string | 
     stickerKey?: string | null;
   } = {}) {
     if (!selectedThread || sending) return;
+    if (composerLocked) return; // announcement channel: only management can post
     if (editingMessageId && body === undefined && !attachmentUrl && !stickerKey) {
       await saveEdit();
       return;
@@ -671,8 +799,8 @@ export function TeamChatPanel({ initialThreadId }: { initialThreadId?: string | 
 
     setMessages((prev) => [...prev, optimisticMessage]);
     setInput("");
-    setSuggestions([]);
     resetComposerState();
+    requestAnimationFrame(() => scrollToBottom("smooth"));
 
     try {
       const res = await fetch("/api/team/chat/messages", {
@@ -688,7 +816,9 @@ export function TeamChatPanel({ initialThreadId }: { initialThreadId?: string | 
       });
       const json = await res.json();
       if (!res.ok || !json.ok) throw new Error(json.error || "Failed to send message");
-      setMessages((prev) => prev.map((message) => (message.id === tempId ? json.message : message)));
+      // Swap the optimistic row for the persisted one via merge so a delta tick
+      // that already delivered this message can't leave a duplicate behind.
+      setMessages((prev) => mergeMessages(prev.filter((m) => m.id !== tempId), [json.message]));
       await fetchThreads();
     } catch (error) {
       console.error(error);
@@ -705,8 +835,8 @@ export function TeamChatPanel({ initialThreadId }: { initialThreadId?: string | 
     try {
       const title =
         kind === "voice"
-          ? `Voice call — ${threadLabel(currentThread)}`
-          : `Video call — ${threadLabel(currentThread)}`;
+          ? `Voice call - ${threadLabel(currentThread)}`
+          : `Video call - ${threadLabel(currentThread)}`;
       const res = await fetch("/api/cmeet", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -715,12 +845,12 @@ export function TeamChatPanel({ initialThreadId }: { initialThreadId?: string | 
       const json = await res.json();
       const roomCode = json?.meeting?.room_code;
       if (!res.ok || !json.ok || !roomCode) throw new Error(json.error || "Couldn't start call");
-      // /meet/<code> is the actual cMeet pre-meeting page — it prompts
+      // /meet/<code> is the actual cMeet pre-meeting page - it prompts
       // the user for a display name, shows the camera/mic preview, then
       // transitions into the live room. /team/cmeet/<code> was wrong.
       const link = `${window.location.origin}/meet/${roomCode}`;
       await sendMessage({
-        body: kind === "voice" ? `📞 Voice call started — join: ${link}` : `🎥 Video call started — join: ${link}`,
+        body: kind === "voice" ? `📞 Voice call started - join: ${link}` : `🎥 Video call started - join: ${link}`,
       });
       window.open(link, "_blank");
     } catch (error) {
@@ -738,25 +868,35 @@ export function TeamChatPanel({ initialThreadId }: { initialThreadId?: string | 
     }
 
     const isImage = file.type.startsWith("image/");
+    const isVideo = file.type.startsWith("video/");
     const isPdf = file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf");
-    if (!isImage && !isPdf) {
-      alert("Only images and PDFs are supported.");
+    const isDoc =
+      /\.(docx?|pptx?|xlsx?|txt|csv)$/i.test(file.name) ||
+      file.type.includes("officedocument") ||
+      file.type.includes("msword");
+    if (!isImage && !isVideo && !isPdf && !isDoc) {
+      appAlert("Unsupported file type. You can share images, videos, PDFs and documents.");
       if (fileInputRef.current) fileInputRef.current.value = "";
       return;
     }
 
-    const maxBytes = isPdf ? 20 * 1024 * 1024 : 5 * 1024 * 1024;
-    if (file.size > maxBytes) {
-      alert(isPdf ? "PDFs must be 20 MB or smaller." : "Images must be 5 MB or smaller.");
+    // Size policy: images 6MB, videos 50MB. Bigger files should go to Google
+    // Drive (the message says so). Mirrors the server-side enforcement.
+    const sizeCheck = validateChatUpload(file.size, file.type || "");
+    if (!sizeCheck.ok) {
+      appAlert(sizeCheck.error || "File too large.");
       if (fileInputRef.current) fileInputRef.current.value = "";
       return;
     }
 
     let displayMode: "inline" | "file" = "file";
     if (isImage) {
-      const asInline = window.confirm(
-        "Show this image inline in the chat?\n\nOK = display as image\nCancel = send as file attachment",
-      );
+      const asInline = await appConfirm({
+        title: "Send image",
+        message: "Show this image inline in the chat, or send it as a file attachment?",
+        confirmLabel: "Display inline",
+        cancelLabel: "Send as file",
+      });
       displayMode = asInline ? "inline" : "file";
     }
 
@@ -778,7 +918,7 @@ export function TeamChatPanel({ initialThreadId }: { initialThreadId?: string | 
       await fetchThreads();
     } catch (error) {
       console.error("Upload error:", error);
-      alert("Failed to upload file.");
+      appAlert("Failed to upload file.");
     } finally {
       setUploading(false);
       if (fileInputRef.current) fileInputRef.current.value = "";
@@ -808,7 +948,7 @@ export function TeamChatPanel({ initialThreadId }: { initialThreadId?: string | 
       });
     } catch (error) {
       console.error(error);
-      fetchMessages(true);
+      reloadCurrent();
     }
   }
 
@@ -817,7 +957,7 @@ export function TeamChatPanel({ initialThreadId }: { initialThreadId?: string | 
     try {
       const payload: Record<string, unknown> = { action };
       if (action === "translate") {
-        const language = window.prompt("Translate this message to which language?", "English");
+        const language = await appPrompt({ title: "Translate message", message: "Translate this message to which language?", defaultValue: "English" });
         if (!language?.trim()) return;
         payload.language = language.trim();
       }
@@ -989,7 +1129,6 @@ export function TeamChatPanel({ initialThreadId }: { initialThreadId?: string | 
                     onClick={() => {
                       setSelectedThread(thread.id);
                       setMobileShowThread(true);
-                      setSuggestions([]);
                       resetComposerState();
                     }}
                     className={cn(
@@ -1158,10 +1297,24 @@ export function TeamChatPanel({ initialThreadId }: { initialThreadId?: string | 
                 }}
                 onStartCall={startCall}
                 onUpload={() => fileInputRef.current?.click()}
+                viewer={viewer}
+                onNewChat={() => setShowingNewChat(true)}
+                onThreadUpdated={fetchThreads}
               />
             )}
 
-            <div className="flex-1 overflow-y-auto px-3 sm:px-5 py-5 sm:py-6 relative" style={{ background: currentTheme.canvas }}>
+            <div className="relative flex-1 flex flex-col min-h-0">
+            <div
+              ref={scrollRef}
+              onScroll={handleScroll}
+              className="flex-1 overflow-y-auto px-3 sm:px-5 py-5 sm:py-6 relative"
+              style={{ background: currentTheme.canvas }}
+            >
+              {loadingOlder && (
+                <div className="flex justify-center pb-3">
+                  <Loader2 className="w-4 h-4 animate-spin text-[#0A4FE8]" />
+                </div>
+              )}
               {messagesLoading && messages.length === 0 ? (
                 <div className="flex justify-center pt-10">
                   <Loader2 className="w-5 h-5 animate-spin text-[#0A4FE8]" />
@@ -1169,9 +1322,9 @@ export function TeamChatPanel({ initialThreadId }: { initialThreadId?: string | 
               ) : messages.length === 0 ? (
                 <div className="flex flex-col items-center justify-center pt-20 text-center opacity-60">
                   <div className="w-12 h-12 rounded-2xl bg-gray-100 flex items-center justify-center mb-3">
-                    <BrainCircuit className="w-6 h-6 text-gray-400" />
+                    <MessageSquarePlus className="w-6 h-6 text-gray-400" />
                   </div>
-                  <p className={cn("text-sm", currentTheme.dark ? "text-slate-400" : "text-gray-400")}>Say hello — start the conversation.</p>
+                  <p className={cn("text-sm", currentTheme.dark ? "text-slate-400" : "text-gray-400")}>Say hello and start the conversation.</p>
                 </div>
               ) : (
                 <div className="space-y-6">
@@ -1215,13 +1368,9 @@ export function TeamChatPanel({ initialThreadId }: { initialThreadId?: string | 
                             >
                               {!mine && (
                                 <div className="shrink-0 mt-1">
-                                  {message.sender_avatar ? (
-                                    <img src={message.sender_avatar} alt="" className="w-8 h-8 rounded-2xl object-cover shadow-sm" />
-                                  ) : (
-                                    <div className="w-8 h-8 rounded-2xl bg-[#0A4FE8] text-white text-[11px] font-bold flex items-center justify-center shadow-sm">
-                                      {message.sender_name.charAt(0).toUpperCase()}
-                                    </div>
-                                  )}
+                                  <div className="w-8 h-8 rounded-2xl bg-[#0A4FE8] text-white text-[11px] font-bold flex items-center justify-center shadow-sm">
+                                    {initials(message.sender_name)}
+                                  </div>
                                 </div>
                               )}
 
@@ -1434,6 +1583,15 @@ export function TeamChatPanel({ initialThreadId }: { initialThreadId?: string | 
                                           <div className={cn("mt-2.5 flex items-center gap-2 text-[10px]", mine ? "justify-end text-white/70" : currentTheme.dark ? "text-slate-400" : "text-slate-400")}>
                                             {message.edited_at && !message.deleted_at && <span>edited</span>}
                                             <span>{formatClock(message.created_at)}</span>
+                                            {mine && !message.deleted_at && (
+                                              message.id.startsWith("temp_") ? (
+                                                <Check className="w-3.5 h-3.5 text-white/50" aria-label="Sending" />
+                                              ) : readWatermark && new Date(message.created_at).getTime() <= new Date(readWatermark).getTime() ? (
+                                                <CheckCheck className="w-3.5 h-3.5 text-cyan-300" aria-label="Read" />
+                                              ) : (
+                                                <CheckCheck className="w-3.5 h-3.5 text-white/50" aria-label="Sent" />
+                                              )
+                                            )}
                                           </div>
                                         </div>
                                       </div>
@@ -1587,27 +1745,22 @@ export function TeamChatPanel({ initialThreadId }: { initialThreadId?: string | 
               <div ref={messagesEndRef} />
             </div>
 
-            {suggestions.length > 0 && (
-              <div className="px-3 sm:px-5 py-2 flex flex-wrap gap-2 animate-in slide-in-from-bottom-2 duration-300" style={{ background: currentTheme.composer }}>
-                {suggestions.map((suggestion, index) => (
-                  <button
-                    key={index}
-                    onClick={() => {
-                      setInput(suggestion.body);
-                      setSuggestions([]);
-                    }}
-                    className="px-3.5 py-1.5 rounded-full bg-white border border-blue-100 text-[11.5px] font-medium text-[#0A4FE8] shadow-xs hover:bg-blue-50 hover:border-blue-200 transition-all flex items-center gap-1.5"
-                    title="Insert into message box"
-                  >
-                    <Wand2 className="w-3 h-3" />
-                    {suggestion.label}
-                  </button>
-                ))}
-                <button onClick={() => setSuggestions([])} className="p-1.5 text-gray-300 hover:text-gray-500">
-                  <X className="w-3 h-3" />
-                </button>
-              </div>
+            {!atBottom && (
+              <button
+                type="button"
+                onClick={() => scrollToBottom("smooth")}
+                aria-label="Jump to latest messages"
+                className="absolute bottom-4 right-4 z-10 flex items-center gap-1.5 rounded-full bg-[#0A4FE8] text-white py-2 pl-2.5 pr-2.5 shadow-lg shadow-blue-900/25 hover:bg-[#083DBE] active:scale-95 transition"
+              >
+                {jumpCount > 0 && (
+                  <span className="min-w-5 h-5 px-1 rounded-full bg-white text-[#0A4FE8] text-[11px] font-bold grid place-items-center">
+                    {jumpCount > 99 ? "99+" : jumpCount}
+                  </span>
+                )}
+                <ChevronLeft className="w-4 h-4 -rotate-90" />
+              </button>
             )}
+            </div>
 
             {composerPanel && (
               <div
@@ -1695,6 +1848,31 @@ export function TeamChatPanel({ initialThreadId }: { initialThreadId?: string | 
               </div>
             )}
 
+            {typingUsers.length > 0 && (
+              <div
+                className="border-t px-4 pt-2 -mb-1"
+                style={{
+                  background: currentTheme.composer,
+                  borderColor: currentTheme.dark ? "rgba(71,85,105,0.54)" : "rgba(226,232,240,0.72)",
+                }}
+              >
+                <div className="inline-flex items-center gap-2 text-[11px] font-semibold" style={{ color: currentTheme.accent }}>
+                  <span className="flex gap-0.5">
+                    <span className="h-1.5 w-1.5 rounded-full bg-current animate-bounce" style={{ animationDelay: "0ms" }} />
+                    <span className="h-1.5 w-1.5 rounded-full bg-current animate-bounce" style={{ animationDelay: "120ms" }} />
+                    <span className="h-1.5 w-1.5 rounded-full bg-current animate-bounce" style={{ animationDelay: "240ms" }} />
+                  </span>
+                  <span>
+                    {typingUsers.length === 1
+                      ? `${typingUsers[0].name} is typing...`
+                      : typingUsers.length === 2
+                        ? `${typingUsers[0].name} and ${typingUsers[1].name} are typing...`
+                        : `${typingUsers[0].name} and ${typingUsers.length - 1} others are typing...`}
+                  </span>
+                </div>
+              </div>
+            )}
+
             <div
               className="border-t p-3 sm:p-4 relative"
               style={{
@@ -1702,14 +1880,13 @@ export function TeamChatPanel({ initialThreadId }: { initialThreadId?: string | 
                 borderColor: currentTheme.dark ? "rgba(71,85,105,0.54)" : "rgba(226,232,240,0.72)",
               }}
             >
-              {suggestionsLoading && (
-                <div className="absolute -top-8 left-3 sm:left-6 flex items-center gap-2 bg-white/80 backdrop-blur-md border border-blue-50 px-3 py-1 rounded-full shadow-xs">
-                  <Loader2 className="w-3 h-3 animate-spin text-[#0A4FE8]" />
-                  <span className="text-[10px] font-bold text-[#0A4FE8] uppercase tracking-widest">AI Thinking...</span>
+              {composerLocked && (
+                <div className="flex items-center justify-center gap-2 rounded-2xl bg-amber-50 border border-amber-100 px-4 py-2.5 text-[12px] font-semibold text-amber-700">
+                  <Megaphone className="w-3.5 h-3.5" />
+                  Announcements channel - only management can post. You can read, react and acknowledge.
                 </div>
               )}
-
-              {(replyingTo || editingMessageId) && (
+              {!composerLocked && (replyingTo || editingMessageId) && (
                 <div
                   className={cn(
                     "mb-3 rounded-[22px] border px-4 py-3 flex items-start justify-between gap-3",
@@ -1737,7 +1914,7 @@ export function TeamChatPanel({ initialThreadId }: { initialThreadId?: string | 
               )}
 
               <div className="flex items-end gap-2 sm:gap-3">
-                <input type="file" ref={fileInputRef} onChange={handleFileChange} className="hidden" accept="image/*,.pdf" />
+                <input type="file" ref={fileInputRef} onChange={handleFileChange} className="hidden" accept="image/*,video/*,.pdf,.doc,.docx,.ppt,.pptx,.xls,.xlsx,.txt,.csv" />
 
                 {(viewer?.kind === "admin" || currentThread?.includes_admin) && (
                   <button
@@ -1806,7 +1983,8 @@ export function TeamChatPanel({ initialThreadId }: { initialThreadId?: string | 
                             sendMessage();
                           }
                         }}
-                        placeholder={editingMessageId ? "Edit your message..." : "Type a message..."}
+                        placeholder={composerLocked ? "Only management can post in this channel" : editingMessageId ? "Edit your message..." : "Type a message..."}
+                        readOnly={composerLocked}
                         className={cn(
                           "w-full bg-transparent px-2 py-2.5 text-[13px] focus:outline-none resize-none overflow-y-auto",
                           currentTheme.dark ? "text-white placeholder:text-slate-500" : "text-[#0D1B39] placeholder:text-slate-400",
@@ -1814,28 +1992,13 @@ export function TeamChatPanel({ initialThreadId }: { initialThreadId?: string | 
                         style={{ lineHeight: "1.55", maxHeight: 156 }}
                       />
 
-                      <div className="absolute right-1 bottom-2 flex items-center gap-1">
-                        {input.trim() && (
-                          <button
-                            onClick={triggerAiRewrite}
-                            disabled={aiLoading}
-                            className={cn(
-                              "p-2 rounded-xl transition",
-                              currentTheme.dark ? "text-sky-300 hover:bg-slate-800" : "text-[#0A4FE8] hover:bg-blue-50",
-                            )}
-                            title="AI Refine (Smart Compose)"
-                          >
-                            {aiLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}
-                          </button>
-                        )}
-                      </div>
                     </div>
                   </div>
                 </div>
 
                 <button
                   onClick={() => sendMessage()}
-                  disabled={!input.trim() || sending}
+                  disabled={!input.trim() || sending || composerLocked}
                   className="shrink-0 w-12 h-12 flex items-center justify-center bg-[#0A4FE8] text-white rounded-2xl hover:bg-[#083EC0] transition shadow-[0_4px_12px_rgba(10,79,232,0.25)] disabled:opacity-50 disabled:shadow-none"
                 >
                   {sending ? <Loader2 className="w-5 h-5 animate-spin" /> : editingMessageId ? <Check className="w-5 h-5" /> : <Send className="w-5 h-5" />}
@@ -1851,9 +2014,9 @@ export function TeamChatPanel({ initialThreadId }: { initialThreadId?: string | 
           message={forwarding}
           viewerKind={viewer?.kind || "team"}
           onClose={() => setForwarding(null)}
-          onDone={async () => {
+          onDone={() => {
             setForwarding(null);
-            await fetchMessages(true);
+            reloadCurrent();
           }}
         />
       )}
@@ -1927,6 +2090,9 @@ function AdvancedChatToolkit({
   onJump,
   onStartCall,
   onUpload,
+  viewer,
+  onNewChat,
+  onThreadUpdated,
 }: {
   thread: Thread;
   theme: (typeof CHAT_BACKGROUNDS)[ChatBackgroundKey];
@@ -1938,8 +2104,15 @@ function AdvancedChatToolkit({
   onJump: (messageId: string) => void;
   onStartCall: (kind: "voice" | "video") => void;
   onUpload: () => void;
+  viewer: ViewerInfo | null;
+  onNewChat: () => void;
+  onThreadUpdated: () => void;
 }) {
-  const features = [
+  const [activeTool, setActiveTool] = useState<string | null>(null);
+  const [savingThread, setSavingThread] = useState(false);
+  const isManagement = viewer?.kind === "admin" || !!viewer?.isManagement;
+
+  const features: { label: string; icon: typeof AtSign; state: string }[] = [
     { label: "DMs", icon: AtSign, state: "one-to-one + saved" },
     { label: "Groups", icon: UsersIcon, state: thread.visibility || "private" },
     { label: "Files", icon: FileStack, state: "versions + approval" },
@@ -1947,10 +2120,39 @@ function AdvancedChatToolkit({
     { label: "Polls", icon: Vote, state: "thread polls" },
     { label: "Events", icon: CalendarClock, state: "calendar-ready" },
     { label: "Voice", icon: Mic2, state: "cMeet rooms" },
-    { label: "AI", icon: BrainCircuit, state: "summaries + search" },
     { label: "Wiki", icon: BookOpenText, state: "knowledge base" },
     { label: "Security", icon: ShieldCheck, state: "audit + permissions" },
   ];
+
+  async function patchThread(payload: Record<string, unknown>) {
+    setSavingThread(true);
+    try {
+      const res = await fetch("/api/team/chat/threads", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ threadId: thread.id, ...payload }),
+      });
+      const json = await res.json();
+      if (!res.ok || !json.ok) throw new Error(json.error || "Update failed");
+      onThreadUpdated();
+      return true;
+    } catch (error) {
+      appAlert({ title: "Conversation", message: error instanceof Error ? error.message : "Update failed", kind: "error" });
+      return false;
+    } finally {
+      setSavingThread(false);
+    }
+  }
+
+  async function copyInvite() {
+    if (!thread.invite_code) return;
+    try {
+      await navigator.clipboard?.writeText(thread.invite_code);
+      appAlert({ title: "Invite", message: "Invite code copied to clipboard.", kind: "success" });
+    } catch {
+      /* clipboard blocked — no-op */
+    }
+  }
 
   return (
     <div
@@ -2027,11 +2229,43 @@ function AdvancedChatToolkit({
           <div className="mt-3 grid grid-cols-2 gap-2 text-[11px]">
             <div className={cn("rounded-2xl px-3 py-2", theme.dark ? "bg-slate-950/60 text-slate-300" : "bg-slate-50 text-slate-600")}>
               <span className="font-bold text-[#0A4FE8]">Invite</span>
-              <span className="block truncate">{thread.invite_code || "generated"}</span>
+              <div className="mt-0.5 flex items-center gap-1.5">
+                <span className="block flex-1 truncate font-mono">{thread.invite_code || "none"}</span>
+                {thread.invite_code && (
+                  <button onClick={copyInvite} className="rounded px-1.5 py-0.5 text-[10px] font-bold text-[#0A4FE8] hover:bg-[#0A4FE8]/10">Copy</button>
+                )}
+                {isManagement && (
+                  <button
+                    onClick={() => patchThread({ generateInvite: true })}
+                    disabled={savingThread}
+                    className="rounded px-1.5 py-0.5 text-[10px] font-bold text-[#0A4FE8] hover:bg-[#0A4FE8]/10 disabled:opacity-50"
+                  >
+                    {thread.invite_code ? "New" : "Generate"}
+                  </button>
+                )}
+              </div>
             </div>
             <div className={cn("rounded-2xl px-3 py-2", theme.dark ? "bg-slate-950/60 text-slate-300" : "bg-slate-50 text-slate-600")}>
               <span className="font-bold text-[#0A4FE8]">Mode</span>
-              <span className="block capitalize">{thread.is_announcement_only ? "announcements" : thread.visibility || "private"}</span>
+              {isManagement ? (
+                <select
+                  value={thread.is_announcement_only ? "announcements" : thread.visibility || "private"}
+                  disabled={savingThread}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    if (v === "announcements") patchThread({ is_announcement_only: true });
+                    else patchThread({ is_announcement_only: false, visibility: v });
+                  }}
+                  className={cn("mt-0.5 block w-full rounded-lg bg-transparent text-[11px] font-semibold capitalize outline-none", theme.dark ? "text-slate-200" : "text-slate-700")}
+                >
+                  <option value="private">Private</option>
+                  <option value="public">Public</option>
+                  <option value="invite_only">Invite-only</option>
+                  <option value="announcements">Announcements</option>
+                </select>
+              ) : (
+                <span className="block capitalize">{thread.is_announcement_only ? "announcements" : thread.visibility || "private"}</span>
+              )}
             </div>
           </div>
         </div>
@@ -2040,12 +2274,19 @@ function AdvancedChatToolkit({
       <div className="grid grid-cols-2 gap-2 sm:grid-cols-5 xl:grid-cols-10">
         {features.map((feature) => {
           const Icon = feature.icon;
+          const active = activeTool === feature.label;
           return (
-            <div
+            <button
               key={feature.label}
+              type="button"
+              onClick={() => setActiveTool(active ? null : feature.label)}
               className={cn(
-                "rounded-2xl border px-3 py-2.5",
-                theme.dark ? "border-slate-700 bg-slate-900/45" : "border-slate-200 bg-white/68",
+                "rounded-2xl border px-3 py-2.5 text-left transition",
+                active
+                  ? "border-[#0A4FE8] bg-[#0A4FE8]/10 ring-1 ring-[#0A4FE8]/30"
+                  : theme.dark
+                    ? "border-slate-700 bg-slate-900/45 hover:border-slate-600"
+                    : "border-slate-200 bg-white/68 hover:border-[#0A4FE8]/40 hover:bg-blue-50/50",
               )}
             >
               <div className="flex items-center gap-2">
@@ -2053,12 +2294,467 @@ function AdvancedChatToolkit({
                 <span className={cn("text-[11px] font-bold", theme.dark ? "text-white" : "text-[#0D1B39]")}>{feature.label}</span>
               </div>
               <p className={cn("mt-1 truncate text-[10px]", theme.dark ? "text-slate-500" : "text-slate-400")}>{feature.state}</p>
-            </div>
+            </button>
           );
         })}
       </div>
+
+      {activeTool && (
+        <CollabToolPanel
+          tool={activeTool}
+          thread={thread}
+          theme={theme}
+          viewer={viewer}
+          isManagement={isManagement}
+          savingThread={savingThread}
+          onClose={() => setActiveTool(null)}
+          onStartCall={onStartCall}
+          onUpload={onUpload}
+          onNewChat={onNewChat}
+          patchThread={patchThread}
+        />
+      )}
     </div>
   );
+}
+
+interface CollabData {
+  polls: any[];
+  events: any[];
+  files: any[];
+  tasks: any[];
+  calls: any[];
+  pins: any[];
+}
+
+/** Stable module-level shell for a tool panel. MUST live outside CollabToolPanel
+ * so it isn't re-created on every keystroke (which would remount inputs and drop
+ * focus). */
+function CollabToolShell({ title, theme, loading, onClose, children }: {
+  title: string;
+  theme: (typeof CHAT_BACKGROUNDS)[ChatBackgroundKey];
+  loading: boolean;
+  onClose: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className={cn("mt-1 rounded-[24px] border p-3", theme.dark ? "border-slate-700 bg-slate-900/40" : "border-slate-200 bg-white/60")}>
+      <div className="mb-3 flex items-center justify-between">
+        <p className={cn("text-[13px] font-bold", theme.dark ? "text-white" : "text-[#0D1B39]")}>{title}</p>
+        <button onClick={onClose} className={cn("rounded-full p-1", theme.dark ? "text-slate-400 hover:bg-slate-800" : "text-slate-400 hover:bg-slate-100")}>
+          <X className="h-4 w-4" />
+        </button>
+      </div>
+      {loading ? (
+        <div className="flex justify-center py-6"><Loader2 className="h-5 w-5 animate-spin text-[#0A4FE8]" /></div>
+      ) : (
+        children
+      )}
+    </div>
+  );
+}
+
+/** Interactive content for a selected toolkit tool. Wires the chips to the real
+ * /api/team/chat/collaboration + /threads backends. */
+function CollabToolPanel({
+  tool,
+  thread,
+  theme,
+  viewer,
+  isManagement,
+  savingThread,
+  onClose,
+  onStartCall,
+  onUpload,
+  onNewChat,
+  patchThread,
+}: {
+  tool: string;
+  thread: Thread;
+  theme: (typeof CHAT_BACKGROUNDS)[ChatBackgroundKey];
+  viewer: ViewerInfo | null;
+  isManagement: boolean;
+  savingThread: boolean;
+  onClose: () => void;
+  onStartCall: (kind: "voice" | "video") => void;
+  onUpload: () => void;
+  onNewChat: () => void;
+  patchThread: (payload: Record<string, unknown>) => Promise<boolean>;
+}) {
+  const [data, setData] = useState<CollabData>({ polls: [], events: [], files: [], tasks: [], calls: [], pins: [] });
+  const [loading, setLoading] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [draft, setDraft] = useState<Record<string, string>>({});
+  const setField = (key: string, value: string) => setDraft((prev) => ({ ...prev, [key]: value }));
+  const [renameValue, setRenameValue] = useState(thread.name || "");
+
+  const NEEDS_COLLAB = ["Files", "Tasks", "Polls", "Events", "Voice", "Security"].includes(tool) || tool === "Wiki";
+
+  const load = useCallback(async () => {
+    if (!NEEDS_COLLAB) return;
+    setLoading(true);
+    try {
+      const res = await fetch(`/api/team/chat/collaboration?threadId=${thread.id}`, { cache: "no-store" });
+      const json = await res.json();
+      if (json.ok && json.collaboration) setData(json.collaboration);
+    } catch {
+      /* ignore */
+    }
+    setLoading(false);
+  }, [thread.id, NEEDS_COLLAB]);
+
+  useEffect(() => {
+    load();
+  }, [load, tool]);
+
+  async function createItem(kind: string, payload: Record<string, unknown>) {
+    setBusy(true);
+    try {
+      const res = await fetch("/api/team/chat/collaboration", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ threadId: thread.id, kind, ...payload }),
+      });
+      const json = await res.json();
+      if (!res.ok || !json.ok) throw new Error(json.error || "Could not create");
+      setDraft({});
+      await load();
+      return true;
+    } catch (error) {
+      appAlert({ title: tool, message: error instanceof Error ? error.message : "Action failed", kind: "error" });
+      return false;
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function patchCollab(action: string, payload: Record<string, unknown>) {
+    setBusy(true);
+    try {
+      const res = await fetch("/api/team/chat/collaboration", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ threadId: thread.id, action, ...payload }),
+      });
+      const json = await res.json();
+      if (!res.ok || !json.ok) throw new Error(json.error || "Action failed");
+      await load();
+    } catch (error) {
+      appAlert({ title: tool, message: error instanceof Error ? error.message : "Action failed", kind: "error" });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const card = cn("rounded-[20px] border p-3 sm:p-4", theme.dark ? "border-slate-700 bg-slate-900/55" : "border-slate-200 bg-white/85");
+  const inputCls = cn(
+    "w-full rounded-xl border px-3 py-2 text-[13px] outline-none",
+    theme.dark ? "border-slate-700 bg-slate-950/60 text-white placeholder:text-slate-500" : "border-slate-200 bg-white text-[#0D1B39] placeholder:text-slate-400",
+  );
+  const btnPrimary = "inline-flex h-9 items-center justify-center gap-1.5 rounded-xl bg-[#0A4FE8] px-3.5 text-[12px] font-bold text-white disabled:opacity-50";
+  const label = cn("text-[10px] font-semibold uppercase tracking-wide", theme.dark ? "text-slate-500" : "text-slate-400");
+  const heading = cn("text-[13px] font-bold", theme.dark ? "text-white" : "text-[#0D1B39]");
+  const sub = cn("text-[12px]", theme.dark ? "text-slate-400" : "text-slate-500");
+  const emptyLine = cn("py-6 text-center text-[12px]", theme.dark ? "text-slate-500" : "text-slate-400");
+
+  if (tool === "DMs") {
+    return (
+      <CollabToolShell theme={theme} loading={loading && NEEDS_COLLAB} onClose={onClose} title="Direct messages">
+        <div className={card}>
+          <p className={sub}>Start a private one-to-one conversation with a teammate.</p>
+          <button onClick={onNewChat} className={cn(btnPrimary, "mt-3")}><Plus className="h-4 w-4" /> New direct message</button>
+        </div>
+      </CollabToolShell>
+    );
+  }
+
+  if (tool === "Groups") {
+    return (
+      <CollabToolShell theme={theme} loading={loading && NEEDS_COLLAB} onClose={onClose} title="Group settings">
+        <div className={cn(card, "space-y-3")}>
+          <div>
+            <p className={label}>Conversation name</p>
+            {isManagement ? (
+              <div className="mt-1 flex gap-2">
+                <input value={renameValue} onChange={(e) => setRenameValue(e.target.value)} className={inputCls} placeholder="Conversation name" />
+                <button
+                  disabled={savingThread || !renameValue.trim() || renameValue.trim() === (thread.name || "")}
+                  onClick={() => patchThread({ name: renameValue.trim() })}
+                  className={btnPrimary}
+                >
+                  Save
+                </button>
+              </div>
+            ) : (
+              <p className={cn("mt-1", heading)}>{thread.name || "Untitled"}</p>
+            )}
+          </div>
+          <div className="flex gap-6">
+            <div>
+              <p className={label}>Visibility</p>
+              <p className={cn("mt-1 capitalize", sub)}>{thread.visibility || "private"}</p>
+            </div>
+            <div>
+              <p className={label}>Posting</p>
+              <p className={cn("mt-1", sub)}>{thread.is_announcement_only ? "Announcements only" : "Everyone can post"}</p>
+            </div>
+          </div>
+          {isManagement && <p className={sub}>Change visibility and posting mode from the <b>Mode</b> tile above.</p>}
+        </div>
+      </CollabToolShell>
+    );
+  }
+
+  if (tool === "Files") {
+    return (
+      <CollabToolShell theme={theme} loading={loading && NEEDS_COLLAB} onClose={onClose} title="Shared files">
+        <div className={cn(card, "space-y-2")}>
+          <p className={label}>Add a file link</p>
+          <div className="grid gap-2 sm:grid-cols-[1fr_1.4fr_auto]">
+            <input value={draft.fileName || ""} onChange={(e) => setField("fileName", e.target.value)} className={inputCls} placeholder="Name" />
+            <input value={draft.fileUrl || ""} onChange={(e) => setField("fileUrl", e.target.value)} className={inputCls} placeholder="Paste a shared link" />
+            <button
+              disabled={busy || !draft.fileUrl?.trim()}
+              onClick={() => createItem("file", { fileUrl: draft.fileUrl?.trim(), fileName: draft.fileName?.trim() || draft.fileUrl?.trim(), folder: "Shared" })}
+              className={btnPrimary}
+            >
+              {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />} Add
+            </button>
+          </div>
+          <button onClick={onUpload} className={cn("text-[12px] font-semibold text-[#0A4FE8]")}>Or upload from device →</button>
+        </div>
+        <div className="mt-2 space-y-1.5">
+          {data.files.length === 0 ? (
+            <p className={emptyLine}>No shared files yet.</p>
+          ) : (
+            data.files.map((f) => (
+              <a key={f.id} href={f.file_url || "#"} target="_blank" rel="noreferrer" className={cn("flex items-center gap-2 rounded-xl px-3 py-2 transition", theme.dark ? "bg-slate-950/40 hover:bg-slate-900" : "bg-slate-50 hover:bg-blue-50")}>
+                <FileStack className="h-4 w-4 text-[#0A4FE8]" />
+                <span className={cn("flex-1 truncate text-[13px] font-medium", theme.dark ? "text-white" : "text-[#0D1B39]")}>{f.file_name || f.file_url}</span>
+                {f.folder && <span className={label}>{f.folder}</span>}
+              </a>
+            ))
+          )}
+        </div>
+      </CollabToolShell>
+    );
+  }
+
+  if (tool === "Tasks") {
+    return (
+      <CollabToolShell theme={theme} loading={loading && NEEDS_COLLAB} onClose={onClose} title="Tasks">
+        <div className={cn(card, "space-y-2")}>
+          <p className={label}>New task</p>
+          <div className="grid gap-2 sm:grid-cols-[1.6fr_1fr_auto]">
+            <input value={draft.taskTitle || ""} onChange={(e) => setField("taskTitle", e.target.value)} className={inputCls} placeholder="What needs doing?" />
+            <input type="date" value={draft.taskDue || ""} onChange={(e) => setField("taskDue", e.target.value)} className={inputCls} />
+            <button
+              disabled={busy || !draft.taskTitle?.trim()}
+              onClick={() => createItem("task", { title: draft.taskTitle?.trim(), dueDate: draft.taskDue || null, priority: "medium" })}
+              className={btnPrimary}
+            >
+              {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />} Add
+            </button>
+          </div>
+        </div>
+        <div className="mt-2 space-y-1.5">
+          {data.tasks.length === 0 ? (
+            <p className={emptyLine}>No tasks yet.</p>
+          ) : (
+            data.tasks.map((t) => {
+              const done = t.status === "completed";
+              return (
+                <div key={t.id} className={cn("flex items-center gap-2.5 rounded-xl px-3 py-2", theme.dark ? "bg-slate-950/40" : "bg-slate-50")}>
+                  <button
+                    disabled={busy}
+                    onClick={() => patchCollab("toggle_task", { taskId: t.id, status: done ? "not_started" : "completed" })}
+                    className={cn("grid h-5 w-5 shrink-0 place-items-center rounded-md border", done ? "border-emerald-500 bg-emerald-500 text-white" : theme.dark ? "border-slate-600" : "border-slate-300")}
+                  >
+                    {done && <Check className="h-3.5 w-3.5" />}
+                  </button>
+                  <span className={cn("flex-1 truncate text-[13px]", done ? "line-through opacity-50" : "", theme.dark ? "text-white" : "text-[#0D1B39]")}>{t.title}</span>
+                  {t.due_date && <span className={label}>{formatDayDivider(t.due_date)}</span>}
+                </div>
+              );
+            })
+          )}
+        </div>
+      </CollabToolShell>
+    );
+  }
+
+  if (tool === "Polls") {
+    return (
+      <CollabToolShell theme={theme} loading={loading && NEEDS_COLLAB} onClose={onClose} title="Polls">
+        <div className={cn(card, "space-y-2")}>
+          <p className={label}>New poll</p>
+          <input value={draft.pollQ || ""} onChange={(e) => setField("pollQ", e.target.value)} className={inputCls} placeholder="Ask a question…" />
+          <textarea
+            value={draft.pollOpts || ""}
+            onChange={(e) => setField("pollOpts", e.target.value)}
+            className={cn(inputCls, "min-h-[64px] resize-none")}
+            placeholder={"One option per line\nOption A\nOption B"}
+          />
+          <button
+            disabled={busy || !draft.pollQ?.trim() || (draft.pollOpts || "").split("\n").map((s) => s.trim()).filter(Boolean).length < 2}
+            onClick={() => createItem("poll", { question: draft.pollQ?.trim(), options: (draft.pollOpts || "").split("\n").map((s) => s.trim()).filter(Boolean) })}
+            className={btnPrimary}
+          >
+            {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />} Create poll
+          </button>
+        </div>
+        <div className="mt-2 space-y-2">
+          {data.polls.length === 0 ? (
+            <p className={emptyLine}>No polls yet.</p>
+          ) : (
+            data.polls.map((poll) => {
+              const options: string[] = Array.isArray(poll.options) ? poll.options : [];
+              const votes: Record<string, number> = poll.settings?.votes || {};
+              const myVote = viewer?.reactionKey ? votes[viewer.reactionKey] : undefined;
+              const total = Object.keys(votes).length;
+              return (
+                <div key={poll.id} className={cn(card, "space-y-2")}>
+                  <p className={heading}>{poll.question}</p>
+                  {options.map((opt, i) => {
+                    const count = Object.values(votes).filter((v) => v === i).length;
+                    const pct = total ? Math.round((count / total) * 100) : 0;
+                    const mine = myVote === i;
+                    return (
+                      <button
+                        key={i}
+                        disabled={busy}
+                        onClick={() => patchCollab("vote_poll", { pollId: poll.id, optionIndex: i })}
+                        className={cn("relative w-full overflow-hidden rounded-xl border px-3 py-2 text-left text-[13px]", mine ? "border-[#0A4FE8]" : theme.dark ? "border-slate-700" : "border-slate-200")}
+                      >
+                        <div className="absolute inset-y-0 left-0 bg-[#0A4FE8]/10" style={{ width: `${pct}%` }} />
+                        <div className="relative flex items-center justify-between gap-2">
+                          <span className={cn(mine ? "font-bold" : "", theme.dark ? "text-white" : "text-[#0D1B39]")}>{opt}</span>
+                          <span className={label}>{count} · {pct}%</span>
+                        </div>
+                      </button>
+                    );
+                  })}
+                  <p className={sub}>{total} vote{total === 1 ? "" : "s"}{myVote != null ? " · tap your choice again to undo" : ""}</p>
+                </div>
+              );
+            })
+          )}
+        </div>
+      </CollabToolShell>
+    );
+  }
+
+  if (tool === "Events") {
+    return (
+      <CollabToolShell theme={theme} loading={loading && NEEDS_COLLAB} onClose={onClose} title="Events">
+        <div className={cn(card, "space-y-2")}>
+          <p className={label}>New event</p>
+          <input value={draft.evTitle || ""} onChange={(e) => setField("evTitle", e.target.value)} className={inputCls} placeholder="Event title" />
+          <div className="grid gap-2 sm:grid-cols-[1fr_1fr_auto]">
+            <input type="datetime-local" value={draft.evAt || ""} onChange={(e) => setField("evAt", e.target.value)} className={inputCls} />
+            <input value={draft.evLoc || ""} onChange={(e) => setField("evLoc", e.target.value)} className={inputCls} placeholder="Location (optional)" />
+            <button
+              disabled={busy || !draft.evTitle?.trim() || !draft.evAt}
+              onClick={() => createItem("event", { title: draft.evTitle?.trim(), startsAt: new Date(draft.evAt).toISOString(), location: draft.evLoc?.trim() || null })}
+              className={btnPrimary}
+            >
+              {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />} Add
+            </button>
+          </div>
+        </div>
+        <div className="mt-2 space-y-1.5">
+          {data.events.length === 0 ? (
+            <p className={emptyLine}>No events scheduled.</p>
+          ) : (
+            data.events.map((ev) => (
+              <div key={ev.id} className={cn("flex items-center gap-3 rounded-xl px-3 py-2", theme.dark ? "bg-slate-950/40" : "bg-slate-50")}>
+                <CalendarClock className="h-4 w-4 text-[#0A4FE8]" />
+                <div className="flex-1">
+                  <p className={cn("text-[13px] font-medium", theme.dark ? "text-white" : "text-[#0D1B39]")}>{ev.title}</p>
+                  {ev.location && <p className={label}>{ev.location}</p>}
+                </div>
+                {ev.starts_at && <span className={sub}>{new Date(ev.starts_at).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}</span>}
+              </div>
+            ))
+          )}
+        </div>
+      </CollabToolShell>
+    );
+  }
+
+  if (tool === "Voice") {
+    return (
+      <CollabToolShell theme={theme} loading={loading && NEEDS_COLLAB} onClose={onClose} title="Voice & video">
+        <div className={cn(card, "flex gap-2")}>
+          <button onClick={() => onStartCall("voice")} className={btnPrimary}><Phone className="h-4 w-4" /> Start voice room</button>
+          <button onClick={() => onStartCall("video")} className={cn(btnPrimary, "bg-[#0D1B39]")}><Video className="h-4 w-4" /> Start video room</button>
+        </div>
+        <div className="mt-2 space-y-1.5">
+          <p className={label}>Recent rooms</p>
+          {data.calls.length === 0 ? (
+            <p className={emptyLine}>No recent calls.</p>
+          ) : (
+            data.calls.map((c) => (
+              <div key={c.id} className={cn("flex items-center gap-3 rounded-xl px-3 py-2", theme.dark ? "bg-slate-950/40" : "bg-slate-50")}>
+                <Mic2 className="h-4 w-4 text-[#0A4FE8]" />
+                <span className={cn("flex-1 text-[13px]", theme.dark ? "text-white" : "text-[#0D1B39]")}>{c.title || "cMeet room"}</span>
+                {c.created_at && <span className={sub}>{formatClock(c.created_at)}</span>}
+              </div>
+            ))
+          )}
+        </div>
+      </CollabToolShell>
+    );
+  }
+
+  if (tool === "Wiki") {
+    return (
+      <CollabToolShell theme={theme} loading={loading && NEEDS_COLLAB} onClose={onClose} title="Knowledge base">
+        <div className={cn(card, "space-y-2")}>
+          <p className={label}>Add a note</p>
+          <input value={draft.wikiTitle || ""} onChange={(e) => setField("wikiTitle", e.target.value)} className={inputCls} placeholder="Title" />
+          <textarea value={draft.wikiBody || ""} onChange={(e) => setField("wikiBody", e.target.value)} className={cn(inputCls, "min-h-[64px] resize-none")} placeholder="Write something the team should remember…" />
+          <button
+            disabled={busy || !draft.wikiTitle?.trim()}
+            onClick={() => createItem("ai_artifact", { artifactType: "note", title: draft.wikiTitle?.trim(), summary: draft.wikiBody?.trim() || null })}
+            className={btnPrimary}
+          >
+            {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />} Save note
+          </button>
+        </div>
+      </CollabToolShell>
+    );
+  }
+
+  if (tool === "Security") {
+    return (
+      <CollabToolShell theme={theme} loading={loading && NEEDS_COLLAB} onClose={onClose} title="Security & pins">
+        <div className={cn(card, "space-y-2")}>
+          <div className="grid grid-cols-3 gap-2 text-center">
+            <div><p className={label}>Visibility</p><p className={cn("mt-0.5 text-[13px] font-bold capitalize", heading)}>{thread.visibility || "private"}</p></div>
+            <div><p className={label}>Posting</p><p className={cn("mt-0.5 text-[13px] font-bold", heading)}>{thread.is_announcement_only ? "Locked" : "Open"}</p></div>
+            <div><p className={label}>Invite</p><p className={cn("mt-0.5 text-[13px] font-bold", heading)}>{thread.invite_code ? "Active" : "Off"}</p></div>
+          </div>
+        </div>
+        <div className="mt-2 space-y-1.5">
+          <p className={label}>Pinned messages</p>
+          {data.pins.length === 0 ? (
+            <p className={emptyLine}>Nothing pinned.</p>
+          ) : (
+            data.pins.map((p) => (
+              <div key={p.id} className={cn("flex items-center gap-2 rounded-xl px-3 py-2", theme.dark ? "bg-slate-950/40" : "bg-slate-50")}>
+                <Pin className="h-4 w-4 text-[#0A4FE8]" />
+                <span className={cn("flex-1 truncate text-[13px]", theme.dark ? "text-white" : "text-[#0D1B39]")}>{p.body || "Attachment"}</span>
+                {p.pinned_at && <span className={sub}>{formatClock(p.pinned_at)}</span>}
+              </div>
+            ))
+          )}
+        </div>
+      </CollabToolShell>
+    );
+  }
+
+  return null;
 }
 
 function MessageActionSheet({
@@ -2613,7 +3309,7 @@ function NewChatRoomDialog({
                   )}
                 >
                   <div className="w-8 h-8 rounded-lg bg-[#0A4FE8]/10 text-[#0A4FE8] flex items-center justify-center font-bold text-xs uppercase">
-                    {member.full_name?.charAt(0) || member.username.charAt(0)}
+                    {initials(member.full_name || member.username)}
                   </div>
                   <div className="flex-1 text-left min-w-0">
                     <div className="flex items-center gap-2">

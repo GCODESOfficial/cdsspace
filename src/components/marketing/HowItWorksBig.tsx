@@ -88,6 +88,7 @@ export const HowItWorksBig = () => {
                             src="/home/Frame 2147228357.svg"
                             alt="Vision"
                             fill
+                            sizes="(max-width: 1024px) 100vw, 320px"
                             className="object-cover grayscale group-hover:grayscale-0 transition-all duration-700"
                         />
                         <div className="absolute inset-0 bg-gradient-to-t from-brand-navy/30 via-transparent to-transparent pointer-events-none" />
@@ -96,7 +97,7 @@ export const HowItWorksBig = () => {
                             <h3 className="text-lg lg:text-[20px] font-semibold text-brand-navy mb-2 lg:mb-3 tracking-tight">Share your vision</h3>
                             <div className="flex items-center gap-2 md:gap-3 p-1.5 md:p-2 bg-white border border-brand-stroke rounded-full h-[40px] md:h-[48px]">
                                 <div className="w-6 lg:w-8 h-6 lg:h-8 rounded-full overflow-hidden relative border border-brand-stroke shrink-0">
-                                    <Image src="/home/9439678.svg" alt="User" fill className="object-cover" />
+                                    <Image src="/home/9439678.svg" alt="User" fill sizes="32px" className="object-cover" />
                                 </div>
                                 <span className="text-brand-body text-sm lg:text-base font-medium tracking-tight flex items-center shrink-0">
                                     <TypingText />
@@ -192,7 +193,7 @@ export const HowItWorksBig = () => {
 
                                     <div className="absolute left-[20px] top-3 bg-brand-blue text-white px-[12px] py-[4px] rounded-full flex items-center gap-[6px] whitespace-nowrap shadow-xl">
                                         <div className="w-[24px] h-[24px] rounded-full bg-white overflow-hidden relative shrink-0">
-                                            <Image src="/home/9439678.svg" alt="Avatar" fill className="object-cover" />
+                                            <Image src="/home/9439678.svg" alt="Avatar" fill sizes="24px" className="object-cover" />
                                         </div>
                                         <span className="text-[12px] font-medium tracking-tight">Styles</span>
                                     </div>
@@ -210,9 +211,10 @@ export const HowItWorksBig = () => {
                     <div className="bg-white w-full 2xl:w-[318.67px] h-[384px] rounded-[24px] border border-brand-stroke flex flex-col overflow-hidden animate-reveal opacity-0" style={{ animationDelay: '0.3s' }}>
                         <div className="relative h-[289px] bg-brand-bg flex items-center justify-center overflow-hidden">
                             <Image
-                                src="/home/ba82705d6180baeaf12851a590f702e0767c4847.gif"
-                                alt="Process Result"
+                                src="/deliver.gif"
+                                alt="We bring your brand to life"
                                 fill
+                                sizes="(max-width: 1024px) 100vw, 320px"
                                 className="object-contain transition-transform duration-700 group-hover:scale-105"
                                 unoptimized
                             />

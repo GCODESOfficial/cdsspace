@@ -183,7 +183,7 @@ export default function LegalEditorPage() {
                         )}
                     </h1>
                     <p className="text-sm text-gray-500 mt-1">
-                        Last updated {doc ? new Date(doc.updated_at).toLocaleString() : "—"}
+                        Last updated {doc ? new Date(doc.updated_at).toLocaleString() : "-"}
                         {doc?.updated_by && !isSeed ? ` by ${doc.updated_by}` : ""}
                     </p>
                 </div>

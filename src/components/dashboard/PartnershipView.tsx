@@ -28,13 +28,13 @@ import {
 import { cn } from "@/lib/utils";
 
 /**
- * Best Partner — full program view.
+ * Best Partner - full program view.
  *
  * Two states:
  *  - "landing": user is not a Best Partner yet → conversion-focused hero + benefits + paywall CTA.
  *  - "active":  user is a Best Partner → dashboard (link, earnings, payouts, KYC, ID card, share).
  *
- * Paystack integration is stubbed — see `handleJoin` and `handleWithdraw`.
+ * Paystack integration is stubbed - see `handleJoin` and `handleWithdraw`.
  */
 
 type PartnerStatus = "landing" | "active";
@@ -54,7 +54,7 @@ const BENEFITS = [
     {
         icon: IdCard,
         title: "Official Partner ID",
-        body: "Generate your ID card online — or request a printed copy delivered to you.",
+        body: "Generate your ID card online - or request a printed copy delivered to you.",
     },
     {
         icon: Share2,
@@ -66,11 +66,11 @@ const BENEFITS = [
 const HOW_IT_WORKS = [
     { step: "01", title: "Join the program", body: "One-time activation. Unlocks your partner dashboard, link & ID kit." },
     { step: "02", title: "Verify with NIN / ID", body: "Quick online KYC so payouts can clear without friction." },
-    { step: "03", title: "Share your link", body: "Drop your branded link anywhere — socials, DMs, decks, bios." },
+    { step: "03", title: "Share your link", body: "Drop your branded link anywhere - socials, DMs, decks, bios." },
     { step: "04", title: "Get paid", body: "5% Bits drop on every paid invoice. Withdraw anytime in working hours." },
 ];
 
-const JOIN_PRICE_NGN = 15000; // placeholder — Paystack will own truth
+const JOIN_PRICE_NGN = 15000; // placeholder - Paystack will own truth
 
 export const PartnershipView = () => {
     // TODO: replace with real fetch from supabase (partner row keyed by user.id)
@@ -83,7 +83,7 @@ export const PartnershipView = () => {
 };
 
 /* ────────────────────────────────────────────────────────────────────────── */
-/* LANDING — first-view conversion screen                                     */
+/* LANDING - first-view conversion screen                                     */
 /* ────────────────────────────────────────────────────────────────────────── */
 
 const BestPartnerLanding = ({ onJoined }: { onJoined: () => void }) => {
@@ -135,7 +135,7 @@ const BestPartnerLanding = ({ onJoined }: { onJoined: () => void }) => {
                                 disabled={joining}
                                 className="group inline-flex items-center gap-2 bg-gradient-to-r from-[#0035C1] to-[#0575FF] text-white text-[14px] lg:text-[15px] font-semibold rounded-full pl-6 pr-5 h-[52px] shadow-[0_12px_30px_rgba(0,53,193,0.28)] hover:shadow-[0_16px_36px_rgba(0,53,193,0.34)] transition-all active:scale-[0.98] disabled:opacity-60"
                             >
-                                {joining ? "Opening checkout…" : `Become a Best Partner — ₦${JOIN_PRICE_NGN.toLocaleString()}`}
+                                {joining ? "Opening checkout…" : `Become a Best Partner - ₦${JOIN_PRICE_NGN.toLocaleString()}`}
                                 <span className="w-7 h-7 rounded-full bg-white/15 flex items-center justify-center group-hover:translate-x-0.5 transition-transform">
                                     <ArrowRight className="w-4 h-4" />
                                 </span>
@@ -229,7 +229,7 @@ const TrustStat = ({ icon: Icon, label, value }: { icon: any; label: string; val
 );
 
 /* ────────────────────────────────────────────────────────────────────────── */
-/* DASHBOARD — active partner                                                 */
+/* DASHBOARD - active partner                                                 */
 /* ────────────────────────────────────────────────────────────────────────── */
 
 const BestPartnerDashboard = () => {
@@ -728,7 +728,7 @@ const KycModal = ({ status, onClose, onSubmit }: { status: KycStatus; onClose: (
             </Field>
             {status === "verified" && (
                 <div className="mt-3 flex items-center gap-2 text-green-600 text-[12px] font-semibold">
-                    <CheckCircle2 className="w-4 h-4" /> Already verified — re-submitting will replace your record.
+                    <CheckCircle2 className="w-4 h-4" /> Already verified - re-submitting will replace your record.
                 </div>
             )}
             <button

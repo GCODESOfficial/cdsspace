@@ -7,6 +7,9 @@ export interface TeamChatViewerPayload {
   id: string | null;
   displayName: string;
   reactionKey: string;
+  // "Management" = admins + sub-admins. Used client-side to gate posting in
+  // announcement-only channels (the server is the authoritative check).
+  isManagement: boolean;
 }
 
 export interface TeamChatMessageRecord {
@@ -64,6 +67,7 @@ export function getViewerPayload(viewer: ChatViewer): TeamChatViewerPayload {
     id: viewer.kind === "team" ? viewer.session.id : null,
     displayName: viewerDisplayName(viewer),
     reactionKey: getViewerReactionKey(viewer),
+    isManagement: viewer.kind === "admin" || (viewer.kind === "team" && !!viewer.session.is_sub_admin),
   };
 }
 

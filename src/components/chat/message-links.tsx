@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 
-/** Crude URL matcher — covers http/https + bare www. domains. */
+/** Crude URL matcher - covers http/https + bare www. domains. */
 const URL_REGEX = /\b((?:https?:\/\/|www\.)[^\s<]+[^\s<.,;:!?()])/gi;
 
 function normalizeHref(raw: string): string {
@@ -13,7 +13,7 @@ function normalizeHref(raw: string): string {
 /**
  * Split a message body into alternating text + link fragments and render
  * the links as real <a> tags. Preserves whitespace + linebreaks via
- * whitespace-pre-wrap on the outer span. Safe to use on user input —
+ * whitespace-pre-wrap on the outer span. Safe to use on user input -
  * React escapes text nodes, we only pull URLs from a tight regex.
  */
 export function Linkified({ text, className }: { text: string; className?: string }) {
@@ -53,7 +53,7 @@ export function Linkified({ text, className }: { text: string; className?: strin
 export function firstUrl(text: string | null | undefined): string | null {
     if (!text) return null;
     const m = URL_REGEX.exec(text);
-    URL_REGEX.lastIndex = 0; // reset — global regex shares state across calls
+    URL_REGEX.lastIndex = 0; // reset - global regex shares state across calls
     return m ? normalizeHref(m[1]) : null;
 }
 
@@ -100,7 +100,7 @@ export function LinkPreview({ url, variant = "light" }: { url: string; variant?:
     }, [url]);
 
     if (!preview) return null;
-    // Bail out if we got nothing useful — a title that's just the bare
+    // Bail out if we got nothing useful - a title that's just the bare
     // hostname with no description is not worth the card real estate.
     const hasBody = preview.title && (preview.description || preview.image);
     if (!hasBody) return null;

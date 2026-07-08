@@ -4,7 +4,7 @@
 -- src/lib/activity-log.ts. The ActivityPanel component queries this table
 -- filtered by `page` to render the per-page feed the ops team requested.
 --
--- The table is intentionally un-indexed beyond (page, created_at) — activity
+-- The table is intentionally un-indexed beyond (page, created_at) - activity
 -- volume is low compared to finance/chat tables and rows don't need
 -- cross-referenced queries beyond the page filter.
 --
@@ -27,7 +27,7 @@ CREATE TABLE IF NOT EXISTS admin_activity_log (
     resource_id TEXT,
     resource_label TEXT,
 
-    -- The admin page that triggered the mutation — this is what the
+    -- The admin page that triggered the mutation - this is what the
     -- ActivityPanel filters on, so keep the shape stable: "team-members",
     -- "finance/invoices", "finance/projects", etc.
     page TEXT NOT NULL,
@@ -45,7 +45,7 @@ CREATE INDEX IF NOT EXISTS idx_activity_resource
 CREATE INDEX IF NOT EXISTS idx_activity_actor_created
     ON admin_activity_log (actor_id, created_at DESC);
 
--- Keep the log light — prune anything older than 180 days. Running the
+-- Keep the log light - prune anything older than 180 days. Running the
 -- cleanup as a one-off delete is fine; the cron job is optional.
 -- (Uncomment if you have pg_cron:)
 -- SELECT cron.schedule(
@@ -55,4 +55,4 @@ CREATE INDEX IF NOT EXISTS idx_activity_actor_created
 -- );
 
 COMMENT ON TABLE admin_activity_log IS
-    'Audit trail for admin-side mutations — displayed per page via <ActivityPanel>';
+    'Audit trail for admin-side mutations - displayed per page via <ActivityPanel>';

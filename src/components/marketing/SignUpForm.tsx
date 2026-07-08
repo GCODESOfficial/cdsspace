@@ -3,14 +3,15 @@
 import { useState } from "react";
 import { useForm, Controller } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { motion } from "framer-motion";
 import { useRouter, useSearchParams } from "next/navigation";
 import NextLink from "next/link";
 import Image from "next/image";
 import { Eye, EyeOff, Loader2, CheckCircle2, Circle } from "lucide-react";
 import { signupSchema, type SignupInput } from "@/lib/validations/auth";
-import { signup, oauthLogin } from "@/lib/actions/auth";
+import { signup } from "@/lib/actions/auth";
 import { EmailConfirmationModal } from "./EmailConfirmationModal";
+import { LockedSocialButton } from "./LockedSocialButton";
+import { GoogleAuthButton } from "./GoogleAuthButton";
 import { PhoneInput } from "@/components/shared/PhoneInput";
 
 /**
@@ -24,7 +25,11 @@ export const SignUpForm = () => {
     const [userEmail, setUserEmail] = useState("");
     const router = useRouter();
     const searchParams = useSearchParams();
-    const nextPath = searchParams.get('next');
+    const requestedNextPath = searchParams.get('next');
+    const nextPath = requestedNextPath?.startsWith("/") && !requestedNextPath.startsWith("//")
+        ? requestedNextPath
+        : "/dashboard";
+    const loginHref = `/login?next=${encodeURIComponent(nextPath)}`;
 
     const {
         register,
@@ -43,7 +48,7 @@ export const SignUpForm = () => {
         setError(null);
         setUserEmail(data.email);
         try {
-            const result = await signup(data);
+            const result = await signup({ ...data, next: nextPath });
             if (result?.error) {
                 setError(result.error);
             } else {
@@ -56,26 +61,13 @@ export const SignUpForm = () => {
         }
     };
 
-    const handleSocialLogin = async (provider: 'google' | 'twitter' | 'facebook') => {
-        try {
-            const result = await oauthLogin(provider, nextPath || undefined);
-            if (result?.error) {
-                setError(result.error);
-            } else if (result?.url) {
-                window.location.href = result.url;
-            }
-        } catch (e) {
-            setError("Social login failed. Please try again.");
-        }
-    };
-
     return (
         <div className="w-full flex flex-col gap-6 lg:gap-8 xl:gap-[32px] 2xl:gap-[40px]">
             <EmailConfirmationModal
                 isOpen={isSuccess}
                 onClose={() => {
                     setIsSuccess(false);
-                    router.push(`/login${nextPath ? `?next=${nextPath}` : ''}`);
+                    router.push(loginHref);
                 }}
                 email={userEmail}
             />
@@ -221,64 +213,23 @@ export const SignUpForm = () => {
                     <div className="flex-1 h-px bg-brand-stroke opacity-10" />
                 </div>
 
-                {/* Social Login */}
+                {/* Social Login - Google live; others coming soon */}
                 <div className="w-full flex flex-col gap-2.5 lg:gap-3">
-                    <button
-                        type="button"
-                        onClick={() => handleSocialLogin('google')}
-                        className="w-full flex items-center justify-center gap-3 py-3 lg:py-3.5 2xl:py-4 bg-white border border-brand-stroke rounded-[10px] lg:rounded-[12px] 2xl:rounded-[16px] shadow-[0_4px_8px_rgba(0,0,0,0.04)] hover:shadow-md transition-all cursor-pointer group"
-                    >
-                        <Image
-                            src="/auth/Signup/flat-color-icons_google.svg"
-                            alt="Google"
-                            width={24}
-                            height={24}
-                            className="2xl:w-7 2xl:h-7"
-                        />
-                        <span className="text-brand-navy text-[14px] lg:text-[15px] 2xl:text-[16px] font-semibold group-hover:text-brand-blue transition-colors">
-                            Sign up with Google
-                        </span>
-                    </button>
-
-                    <button
-                        type="button"
-                        onClick={() => handleSocialLogin('twitter')}
-                        className="w-full flex items-center justify-center gap-3 py-3 lg:py-3.5 2xl:py-4 bg-white border border-brand-stroke rounded-[10px] lg:rounded-[12px] 2xl:rounded-[16px] shadow-[0_4px_8px_rgba(0,0,0,0.04)] hover:shadow-md transition-all cursor-pointer group"
-                    >
-                        <Image
-                            src="/auth/Signup/x-icon.svg"
-                            alt="X"
-                            width={22}
-                            height={22}
-                            className="2xl:w-6 2xl:h-6"
-                        />
-                        <span className="text-brand-navy text-[14px] lg:text-[15px] 2xl:text-[16px] font-semibold group-hover:text-brand-blue transition-colors">
-                            Sign up with X
-                        </span>
-                    </button>
-
-                    <button
-                        type="button"
-                        onClick={() => handleSocialLogin('facebook')}
-                        className="w-full flex items-center justify-center gap-3 py-3 lg:py-3.5 2xl:py-4 bg-white border border-brand-stroke rounded-[10px] lg:rounded-[12px] 2xl:rounded-[16px] shadow-[0_4px_8px_rgba(0,0,0,0.04)] hover:shadow-md transition-all cursor-pointer group"
-                    >
-                        <Image
-                            src="/auth/Signup/logos_facebook.svg"
-                            alt="Facebook"
-                            width={24}
-                            height={24}
-                            className="2xl:w-7 2xl:h-7"
-                        />
-                        <span className="text-brand-navy text-[14px] lg:text-[15px] 2xl:text-[16px] font-semibold group-hover:text-brand-blue transition-colors">
-                            Sign up with Facebook
-                        </span>
-                    </button>
+                    <GoogleAuthButton label="Sign up with Google" />
+                    <LockedSocialButton
+                        label="Sign up with X"
+                        icon={<Image src="/auth/Signup/x-icon.svg" alt="X" width={22} height={22} className="2xl:w-6 2xl:h-6" />}
+                    />
+                    <LockedSocialButton
+                        label="Sign up with Facebook"
+                        icon={<Image src="/auth/Signup/logos_facebook.svg" alt="Facebook" width={24} height={24} className="2xl:w-7 2xl:h-7" />}
+                    />
                 </div>
 
                 {/* Login Link */}
                 <div className="flex items-center gap-1.5 lg:gap-2 text-[13px] lg:text-[14px] 2xl:text-[15px]">
                     <span className="text-brand-body font-medium">Already have an account?</span>
-                    <NextLink href={`/login${nextPath ? `?next=${nextPath}` : ''}`} className="text-brand-blue font-semibold hover:underline decoration-2 underline-offset-4">
+                    <NextLink href={loginHref} className="text-brand-blue font-semibold hover:underline decoration-2 underline-offset-4">
                         Sign In
                     </NextLink>
                 </div>

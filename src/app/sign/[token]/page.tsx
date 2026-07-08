@@ -147,7 +147,7 @@ export default function SignPage() {
           <div className="w-14 h-14 mx-auto rounded-full bg-emerald-100 flex items-center justify-center mb-3">
             <Check className="w-6 h-6 text-emerald-600" />
           </div>
-          <p className="text-[16px] font-bold text-[#0D1B39]">Thank you — signature captured.</p>
+          <p className="text-[16px] font-bold text-[#0D1B39]">Thank you - signature captured.</p>
           <p className="text-[12px] text-gray-500 mt-1">You can close this page. The sender has been notified.</p>
         </div>
       </FullScreen>

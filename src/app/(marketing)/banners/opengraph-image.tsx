@@ -3,7 +3,7 @@ import { renderBrandCard, OG_SIZE, OG_CONTENT_TYPE } from "@/lib/og/brand-card";
 import { getOgFonts } from "@/lib/og/fonts";
 
 export const runtime = "nodejs";
-export const alt = "Banners & Environmental Print — CDS Space";
+export const alt = "Banners & Environmental Print - CDS Space";
 export const size = OG_SIZE;
 export const contentType = OG_CONTENT_TYPE;
 
@@ -14,7 +14,7 @@ export default async function Image() {
       eyebrow: "Industrial print",
       title: "Banners &\nEnvironmental Print",
       description:
-        "Large-format banners, out-of-home, and environmental branding — designed, produced, and installed end-to-end.",
+        "Large-format banners, out-of-home, and environmental branding - designed, produced, and installed end-to-end.",
       tags: ["Large Format", "OOH", "Installation", "Door-to-door"],
       domainPath: "/banners",
     }),

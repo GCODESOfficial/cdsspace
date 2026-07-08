@@ -7,6 +7,7 @@ import { I18nProvider, useTranslation } from "@/lib/i18n/context";
 import { TeamSidebar } from "@/components/team/TeamSidebar";
 import { NotificationBell } from "@/components/team/NotificationBell";
 import { LanguageSwitcher } from "@/components/team/LanguageSwitcher";
+import { WorkTracker } from "@/components/team/WorkTracker";
 
 interface Member {
   id: string;
@@ -19,6 +20,7 @@ interface Member {
   is_sub_admin: boolean;
   permissions: string[];
   language: string | null;
+  has_screening_assignment?: boolean;
 }
 
 export default function TeamLayout({ children }: { children: React.ReactNode }) {
@@ -102,6 +104,7 @@ function TeamLayoutInner({ children }: { children: React.ReactNode }) {
 
   return (
     <div className="min-h-screen bg-brand-bg flex">
+      <WorkTracker />
       <TeamSidebar member={member} onLogout={handleLogout} mobileOpen={mobileNavOpen} onClose={() => setMobileNavOpen(false)} />
 
       <div className="flex-1 min-w-0 flex flex-col">

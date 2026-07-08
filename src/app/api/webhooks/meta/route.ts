@@ -4,7 +4,7 @@ import { ingestMetaMessage } from "@/lib/meta/inbox";
 
 export const dynamic = "force-dynamic";
 
-// Meta webhook verification — matches the verify_token stored on either platform row.
+// Meta webhook verification - matches the verify_token stored on either platform row.
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const mode = searchParams.get("hub.mode");

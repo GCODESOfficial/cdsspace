@@ -166,11 +166,11 @@ export default function CertificationsPage() {
             <div className="px-6 py-5 space-y-3">
               <Detail label="Full Name" value={viewItem.full_name} />
               <Detail label="Email" value={viewItem.email} />
-              <Detail label="Phone" value={viewItem.phone || "—"} />
+              <Detail label="Phone" value={viewItem.phone || "-"} />
               <Detail label="Intern Role" value={viewItem.intern_role} />
-              <Detail label="Period" value={viewItem.internship_start && viewItem.internship_end ? `${new Date(viewItem.internship_start).toLocaleDateString()} → ${new Date(viewItem.internship_end).toLocaleDateString()}` : "—"} />
-              <Detail label="Supervisor" value={viewItem.supervisor_name || "—"} />
-              <Detail label="Notes" value={viewItem.notes || "—"} />
+              <Detail label="Period" value={viewItem.internship_start && viewItem.internship_end ? `${new Date(viewItem.internship_start).toLocaleDateString()} → ${new Date(viewItem.internship_end).toLocaleDateString()}` : "-"} />
+              <Detail label="Supervisor" value={viewItem.supervisor_name || "-"} />
+              <Detail label="Notes" value={viewItem.notes || "-"} />
               <Detail label="Status" value={viewItem.status.toUpperCase()} />
               <Detail label="Submitted" value={new Date(viewItem.created_at).toLocaleString()} />
             </div>

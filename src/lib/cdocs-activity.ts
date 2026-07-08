@@ -35,7 +35,7 @@ export async function logCDocActivity(
       },
     ]);
   } catch (err) {
-    // Activity logging is best-effort — never block the caller.
+    // Activity logging is best-effort - never block the caller.
     console.error("[cdocs-activity] log failed:", err);
   }
 }

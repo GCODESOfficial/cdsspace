@@ -70,7 +70,7 @@ export const WorkHero = ({ activeCategory, onCategoryChange, searchQuery, onSear
                         </motion.h1>
                     </div>
 
-                    {/* 2. Category Filter Bar — scrollable, starts at the first pill */}
+                    {/* 2. Category Filter Bar - scrollable, starts at the first pill */}
                     <div className="relative w-full border-t border-dashed border-[#C8D1E0] z-40 bg-brand-bg/80 backdrop-blur-md">
                         <div
                             ref={scrollRef}
@@ -98,7 +98,7 @@ export const WorkHero = ({ activeCategory, onCategoryChange, searchQuery, onSear
                         <div className="absolute left-0 top-0 bottom-0 w-6 bg-gradient-to-r from-brand-bg to-transparent pointer-events-none" />
                     </div>
 
-                    {/* 3. Search bar — full-frame width, filters title & category */}
+                    {/* 3. Search bar - full-frame width, filters title & category */}
                     <div className="w-full border-t border-dashed border-[#C8D1E0] bg-brand-bg/60 backdrop-blur-md">
                         <div className="flex items-center gap-3 px-4 sm:px-6 py-[14px]">
                             <Search className="w-[18px] h-[18px] text-brand-mute shrink-0" strokeWidth={2} />

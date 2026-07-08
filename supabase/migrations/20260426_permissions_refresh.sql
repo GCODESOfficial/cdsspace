@@ -4,7 +4,7 @@
 -- The source of truth for permission keys lives in
 -- src/lib/admin-permissions.ts. This migration:
 --   1. Makes sure sub_admins / team_members / admin_roles can store
---      the expanded keys (text[] already handles it — this is a safety
+--      the expanded keys (text[] already handles it - this is a safety
 --      re-check so the columns always exist and have the right type).
 --   2. Re-seeds the starter roles with the new granular keys for the
 --      newly-covered menus (Brand Briefs, Invoices, Clients, Team

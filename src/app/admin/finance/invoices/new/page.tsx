@@ -242,7 +242,7 @@ export default function NewInvoicePage() {
     return () => { cancelled = true; };
   }, [editDraftId]);
 
-  // Recovery from LocalStorage — only when we're NOT hydrating a specific draft.
+  // Recovery from LocalStorage - only when we're NOT hydrating a specific draft.
   useEffect(() => {
     if (editDraftId) return;
     const saved = localStorage.getItem("pending_invoice");
@@ -466,7 +466,7 @@ export default function NewInvoicePage() {
                 <Field label="Project">
                   <Select value={projectId} onValueChange={setProjectId}>
                     <SelectTrigger className="h-11 rounded-xl"><SelectValue placeholder="Select project" /></SelectTrigger>
-                    <SelectContent>{projects.map((p) => <SelectItem key={p.id} value={p.id}>{p.name} — {p.client}</SelectItem>)}</SelectContent>
+                    <SelectContent>{projects.map((p) => <SelectItem key={p.id} value={p.id}>{p.name} - {p.client}</SelectItem>)}</SelectContent>
                   </Select>
                 </Field>
                 {scope === "milestone" && (
@@ -518,7 +518,7 @@ export default function NewInvoicePage() {
                             ) : null}
                           </div>
                           <div className="text-[11.5px] text-gray-400 truncate">
-                            {[c.email, c.phone].filter(Boolean).join("  •  ") || (c.industry ?? "—")}
+                            {[c.email, c.phone].filter(Boolean).join("  •  ") || (c.industry ?? "-")}
                           </div>
                         </button>
                       ))}
@@ -552,7 +552,7 @@ export default function NewInvoicePage() {
               <h3 className="font-semibold text-gray-900">Items</h3>
               <Button onClick={addRow} variant="outline" size="sm" className="rounded-xl"><Plus className="w-4 h-4 mr-1" /> Add Item</Button>
             </div>
-            <p className="text-xs text-gray-500 mb-3">Type a name to search the price list, or enter a new item — new items are auto-saved to your price list.</p>
+            <p className="text-xs text-gray-500 mb-3">Type a name to search the price list, or enter a new item - new items are auto-saved to your price list.</p>
             <div className="space-y-3">
               {rows.map((r, i) => (
                 <div key={i} className="rounded-xl bg-white/60 border border-white/80 p-3">
@@ -585,7 +585,7 @@ export default function NewInvoicePage() {
                         </div>
                       </div>
                     </div>
-                    {/* Qty / unit / amount / delete — wraps on mobile, stays tight on desktop */}
+                    {/* Qty / unit / amount / delete - wraps on mobile, stays tight on desktop */}
                     <div className="flex items-start gap-2 md:flex-none md:w-auto">
                       <input
                         type="number"

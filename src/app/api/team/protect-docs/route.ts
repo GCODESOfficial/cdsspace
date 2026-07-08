@@ -14,7 +14,7 @@ function isMemberAllowed(doc: any, session: { id: string; department: string | n
   return false;
 }
 
-// GET — list documents visible to the current actor
+// GET - list documents visible to the current actor
 export async function GET() {
   if (!supabaseAdmin) return NextResponse.json({ ok: false, error: "Server not configured" }, { status: 500 });
   const db = supabaseAdmin as any;
@@ -40,7 +40,7 @@ export async function GET() {
   return NextResponse.json({ ok: true, actor: "team", documents: visible });
 }
 
-// POST — admin creates a protected document
+// POST - admin creates a protected document
 export async function POST(req: Request) {
   if (!supabaseAdmin) return NextResponse.json({ ok: false, error: "Server not configured" }, { status: 500 });
   const admin = await getAdminSession();
@@ -93,7 +93,7 @@ export async function POST(req: Request) {
   return NextResponse.json({ ok: true, id: data.id });
 }
 
-// PATCH — admin updates
+// PATCH - admin updates
 export async function PATCH(req: Request) {
   if (!supabaseAdmin) return NextResponse.json({ ok: false, error: "Server not configured" }, { status: 500 });
   const admin = await getAdminSession();
@@ -113,7 +113,7 @@ export async function PATCH(req: Request) {
   return NextResponse.json({ ok: true });
 }
 
-// DELETE — admin removes
+// DELETE - admin removes
 export async function DELETE(req: Request) {
   if (!supabaseAdmin) return NextResponse.json({ ok: false, error: "Server not configured" }, { status: 500 });
   const admin = await getAdminSession();

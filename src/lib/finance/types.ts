@@ -13,6 +13,24 @@ export function formatMoney(amount: number | string | null | undefined, currency
   return `${CURRENCY_SYMBOLS[currency]}${n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
+export function formatFinanceDate(
+  value: string | null | undefined,
+  options: Intl.DateTimeFormatOptions = { year: "numeric", month: "numeric", day: "numeric" },
+  locale = "en-US",
+) {
+  if (!value) return "-";
+  const dateOnly = /^(\d{4})-(\d{2})-(\d{2})/.exec(value);
+  try {
+    const date = dateOnly
+      ? new Date(Number(dateOnly[1]), Number(dateOnly[2]) - 1, Number(dateOnly[3]))
+      : new Date(value);
+    if (Number.isNaN(date.getTime())) return value;
+    return date.toLocaleDateString(locale, options);
+  } catch {
+    return value;
+  }
+}
+
 export interface FinanceProject {
   id: string;
   name: string;
@@ -77,6 +95,59 @@ export interface FinanceInvoice {
   delivery_period?: string | null;
 }
 
+export interface FinanceQuotationItem {
+  id?: string;
+  name: string;
+  description: string | null;
+  quantity: number;
+  unit_price: number;
+  total: number;
+  position: number;
+}
+
+export type FinanceQuotationStatus = "draft" | "sent" | "accepted" | "converted" | "cancelled";
+
+export interface FinanceQuotationSample {
+  id?: string;
+  kind: "image" | "link";
+  url: string;
+  label: string | null;
+  position: number;
+}
+
+export interface FinanceQuotation {
+  id: string;
+  quotation_number: string;
+  project_id: string | null;
+  milestone_id: string | null;
+  converted_invoice_id: string | null;
+  project_name: string;
+  client_name: string;
+  client_email: string | null;
+  client_address: string | null;
+  currency: Currency;
+  subtotal: number;
+  tax_rate: number;
+  tax_amount: number;
+  discount: number;
+  total: number;
+  status: FinanceQuotationStatus;
+  scope: "custom" | "project" | "milestone" | "monthly";
+  period_month: string | null;
+  issue_date: string;
+  valid_until: string | null;
+  notes: string | null;
+  estimate_note: string | null;
+  revisions_note: string | null;
+  working_hours: string | null;
+  delivery_period: string | null;
+  public_token: string;
+  converted_at: string | null;
+  created_at: string;
+  items?: FinanceQuotationItem[];
+  samples?: FinanceQuotationSample[];
+}
+
 export const DELIVERY_SPEEDS = [
   { value: "standard",      label: "Standard",      helper: "Client's regular schedule",   surchargeType: "none"  as const, defaultSurcharge: 0    },
   { value: "express",       label: "Express",       helper: "Priority handling",           surchargeType: "pct"   as const, defaultSurcharge: 15   },
@@ -97,6 +168,15 @@ export function deliverySpeedMeta(v: DeliverySpeed | null | undefined) {
 export const DEFAULT_PAYMENT_TERMS = "100% Upfront Payment. Payment is not Refundable";
 export const DEFAULT_REVISIONS_NOTE = "Designs are subject to Free 2 Revisions";
 export const DEFAULT_WORKING_HOURS = "9am–5:30pm Monday–Friday  UTC+1";
+export const DEFAULT_QUOTATION_ESTIMATE_NOTE = "This quotation is a rough estimate for the project delivery. Final scope, timeline, and cost may change after confirmation.";
+export const QUOTATION_DELIVERY_PERIODS = [
+  "5-7 days",
+  "2-3 weeks",
+  "4-6 weeks",
+  "7-10 weeks",
+  "3-6 months",
+  "12-18 months",
+] as const;
 
 // Bank accounts shown on every invoice
 export const CDS_BANK_ACCOUNTS = [
@@ -246,6 +326,13 @@ export function generateInvoiceNumber() {
   const ym = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, "0")}`;
   const rand = Math.floor(1000 + Math.random() * 9000);
   return `INV-${ym}-${rand}`;
+}
+
+export function generateQuotationNumber() {
+  const d = new Date();
+  const ym = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, "0")}`;
+  const rand = Math.floor(1000 + Math.random() * 9000);
+  return `QUO-${ym}-${rand}`;
 }
 
 export function randomToken(len = 32) {

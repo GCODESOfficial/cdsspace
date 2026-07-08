@@ -125,7 +125,7 @@ export default function ExpendituresPage() {
                   field="title"
                   value={form.title}
                   onChange={(v) => setForm({ ...form, title: v })}
-                  placeholder="Start typing — Fuel, Food, Transport…"
+                  placeholder="Start typing - Fuel, Food, Transport…"
                 />
               </Field>
               <div className="grid grid-cols-2 gap-4">
@@ -228,7 +228,7 @@ export default function ExpendituresPage() {
               {list.map((e) => (
                 <tr key={e.id} className="border-t border-white/60 hover:bg-white/50">
                   <td className="px-5 py-4 font-medium text-gray-900">{e.title}</td>
-                  <td className="px-5 py-4 text-gray-500">{e.category ?? "—"}</td>
+                  <td className="px-5 py-4 text-gray-500">{e.category ?? "-"}</td>
                   <td className="px-5 py-4 text-gray-500">{new Date(e.spent_on).toLocaleDateString()}</td>
                   <td className="px-5 py-4 font-semibold">{formatMoney(e.amount, e.currency)}</td>
                   <td className="px-5 py-4">

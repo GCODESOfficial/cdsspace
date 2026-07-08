@@ -1,31 +1,29 @@
 import { NextResponse } from "next/server";
-import nodemailer from "nodemailer";
+import { emailFrom, createEmailTransport } from "@/lib/email-from";
+import { brandedEmailHtml } from "@/lib/email-template";
 
 export async function POST(req: Request) {
   try {
     const body = await req.json();
 
-    const transporter = nodemailer.createTransport({
-      service: "gmail",
-      auth: {
-        user: process.env.EMAIL_USER,
-        pass: process.env.EMAIL_PASS,
-      },
-    });
+    const transporter = createEmailTransport();
 
     const mailOptions = {
-      from: `"Consultation Form" <${process.env.EMAIL_USER}>`,
+      from: emailFrom("Consultation Form"),
       to: process.env.EMAIL_RECEIVER,
       subject: "New Consultation Request",
-      html: `
-        <h2>New Consultation Submitted</h2>
+      html: brandedEmailHtml(
+        `
+        <h2 style="margin:0 0 12px;color:#0D1B39;">New Consultation Submitted</h2>
         ${Object.keys(body)
           .map(
             (key) =>
-              `<p><strong>${key}:</strong> ${body[key] ?? "Not provided"}</p>`
+              `<p style="margin:4px 0;"><strong>${key}:</strong> ${body[key] ?? "Not provided"}</p>`
           )
           .join("")}
       `,
+        { eyebrow: "New Consultation", preheader: "A new consultation request was submitted." },
+      ),
     };
 
     await transporter.sendMail(mailOptions);

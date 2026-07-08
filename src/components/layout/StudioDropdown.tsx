@@ -3,12 +3,14 @@
 import React from "react";
 import Link from "next/link";
 import { AnimatePresence, motion } from "framer-motion";
+import { ChevronDown } from "lucide-react";
+import { cn } from "@/lib/utils";
 
 const exploreItems = [
     {
         title: "Subscription",
         description: "Choose a design plan.",
-        href: "/login?next=/subscription",
+        accountHref: "/subscription",
     },
     {
         title: "Brand Brief",
@@ -27,26 +29,33 @@ const productCards = [
         title: "Banners",
         description: "Roll-up banners for your brand.",
         image: "/home/source/07fbbce755ed61ba1adec6b971cbda1650a2fb94.png",
-        href: "/banners",
+        accountHref: "/dashboard/banners",
     },
     {
         title: "Merch",
         description: "View & request your merch",
         image: "/home/source/54b250b0180289389a7faef542be363a9bb13baa.png",
-        href: "/merch",
+        accountHref: "/dashboard/merch",
     },
     {
         title: "Partnership",
         description: "Refer clients and earn",
         image: "/home/source/0b29fab281d7cfe7e98502c49ddc2794b06f2c3c.png",
-        href: "/partnership",
+        accountHref: "/partnership",
     },
 ];
 
-import { ChevronDown } from "lucide-react";
-import { cn } from "@/lib/utils";
+type StudioDropdownProps = {
+    isLoggedIn?: boolean;
+};
 
-export const StudioDropdown = () => {
+const getStudioHref = (item: { href?: string; accountHref?: string }, isLoggedIn?: boolean) => {
+    if (!item.accountHref) return item.href ?? "#";
+    if (isLoggedIn) return item.accountHref;
+    return `/signup?next=${encodeURIComponent(item.accountHref)}`;
+};
+
+export const StudioDropdown = ({ isLoggedIn = false }: StudioDropdownProps) => {
     return (
         <motion.div
             initial={{ opacity: 0, y: -10 }}
@@ -70,7 +79,7 @@ export const StudioDropdown = () => {
                         {exploreItems.map((item) => (
                             <Link
                                 key={item.title}
-                                href={item.href}
+                                href={getStudioHref(item, isLoggedIn)}
                                 className="group flex flex-col gap-1.5 p-4 rounded-xl hover:bg-[#f4f6fb] transition-colors"
                             >
                                 <span className="text-base 2xl:text-[18px] font-medium text-[#040b37] tracking-[-0.72px] group-hover:text-brand-blue transition-colors">
@@ -89,7 +98,7 @@ export const StudioDropdown = () => {
                     {productCards.map((card) => (
                         <Link
                             key={card.title}
-                            href={card.href}
+                            href={getStudioHref(card, isLoggedIn)}
                             className="flex flex-col gap-4 p-2.5 bg-white border border-[#e3e8f4] rounded-2xl hover:border-brand-blue/30 hover:shadow-lg transition-all"
                         >
                             {/* Image Container */}
@@ -118,7 +127,7 @@ export const StudioDropdown = () => {
     );
 };
 
-export const MobileStudioAccordion = ({ onClose }: { onClose: () => void }) => {
+export const MobileStudioAccordion = ({ isLoggedIn = false, onClose }: StudioDropdownProps & { onClose: () => void }) => {
     const [isOpen, setIsOpen] = React.useState(false);
 
     return (
@@ -151,7 +160,7 @@ export const MobileStudioAccordion = ({ onClose }: { onClose: () => void }) => {
                                 {exploreItems.map((item) => (
                                     <Link
                                         key={item.title}
-                                        href={item.href}
+                                        href={getStudioHref(item, isLoggedIn)}
                                         onClick={onClose}
                                         className="flex flex-col gap-1"
                                     >
@@ -166,7 +175,7 @@ export const MobileStudioAccordion = ({ onClose }: { onClose: () => void }) => {
                                 {productCards.map((card) => (
                                     <Link
                                         key={card.title}
-                                        href={card.href}
+                                        href={getStudioHref(card, isLoggedIn)}
                                         onClick={onClose}
                                         className="flex items-center gap-4 group"
                                     >

@@ -4,6 +4,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import { initials } from "@/lib/utils";
 import { UserRound, Loader2, Eye, Link2 } from "lucide-react";
 
 interface Member {
@@ -38,11 +39,7 @@ export default function AdminCResumePage() {
           <ul className="divide-y divide-gray-50">
             {members.map((m) => (
               <li key={m.id} className="px-5 py-3.5 flex items-center gap-3">
-                {m.avatar_url ? (
-                  <img src={m.avatar_url} alt="" className="w-10 h-10 rounded-full object-cover border border-gray-200" />
-                ) : (
-                  <div className="w-10 h-10 rounded-full bg-[#0A4FE8] text-white font-bold flex items-center justify-center">{m.full_name.charAt(0)}</div>
-                )}
+                <div className="w-10 h-10 rounded-full bg-[#0A4FE8] text-white font-bold flex items-center justify-center">{initials(m.full_name)}</div>
                 <div className="flex-1 min-w-0">
                   <p className="text-[13.5px] font-semibold text-[#0D1B39] truncate">{m.full_name}</p>
                   <p className="text-[11px] text-gray-400">@{m.username}{m.role_title && ` · ${m.role_title}`}{m.department && ` · ${m.department}`}</p>

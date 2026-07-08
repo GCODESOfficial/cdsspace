@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getAdminSession } from "@/app/api/admin-check/route";
+import { getAdminSessionAsync } from "@/app/api/admin-check/route";
 import { hasPermission } from "@/lib/admin-permissions";
 import { isLegalSlug } from "@/lib/legal/default-content";
 import { loadLegalDocument, upsertLegalDocument } from "@/lib/legal/server";
@@ -13,14 +13,14 @@ const MAX_SIZE_BYTES = 10 * 1024 * 1024; // 10 MB hard cap
  * Accepts a .docx upload, converts it to HTML with `mammoth`, and saves the
  * result as the new document content.
  *
- * The admin editor never sees the .docx — only the HTML mammoth produces.
+ * The admin editor never sees the .docx - only the HTML mammoth produces.
  * If the user wants finer formatting they can edit the HTML directly in the
  * textarea and save.
  */
 export async function POST(req: NextRequest, { params }: { params: Promise<{ slug: string }> }) {
-    const session = getAdminSession(req);
+    const session = await getAdminSessionAsync(req);
     if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    if (!hasPermission(session.permissions, "legal.edit")) {
+    if (session.role !== "super_admin" && !hasPermission(session.permissions, "legal.edit")) {
         return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
 

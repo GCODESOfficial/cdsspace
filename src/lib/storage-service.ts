@@ -103,10 +103,10 @@ export async function uploadFile(file: File, folder: string): Promise<string> {
 
 export async function deleteFile(url: string): Promise<void> {
 	try {
-		// Supabase public URLs follow /storage/v1/object/public/<bucket>/<path>
+		// GlashDB-compatible public URLs follow /storage/v1/object/public/<bucket>/<path>
 		// (and signed URLs use /storage/v1/object/sign/<bucket>/<path>).
 		// The previous parser read `pathname[1]` and tried to delete from a
-		// bucket called "storage" — which silently succeeded as a no-op and
+		// bucket called "storage" - which silently succeeded as a no-op and
 		// left the row undeletable whenever callers awaited its success.
 		const match = new URL(url).pathname.match(
 			/\/storage\/v1\/object\/(?:public|sign|authenticated)\/([^/]+)\/(.+)$/,
@@ -117,7 +117,7 @@ export async function deleteFile(url: string): Promise<void> {
 		if (error) throw error;
 	} catch (error) {
 		console.error("Error deleting file:", error);
-		// Don't block the caller — a stale/missing file shouldn't prevent
+		// Don't block the caller - a stale/missing file shouldn't prevent
 		// the DB row from being deleted. The DB is the source of truth.
 	}
 }
@@ -550,7 +550,7 @@ export async function deleteAdvertisement(
 	imageUrl?: string
 ): Promise<{ success: boolean; message: string }> {
 	try {
-		// 1. Delete image from Supabase storage
+		// 1. Delete image from GlashDB storage
 		if (imageUrl) {
 			await deleteFile(imageUrl);
 		}

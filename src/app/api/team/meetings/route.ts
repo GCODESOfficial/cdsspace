@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase";
 import { getTeamSession } from "@/lib/team-auth";
 import { getAdminSession } from "@/lib/admin-session";
+import { closeStaleCmeets } from "@/lib/cmeet-autoclose";
 
 export const runtime = "nodejs";
 
@@ -16,6 +17,7 @@ function generateRoomCode() {
 export async function GET() {
   if (!supabaseAdmin) return NextResponse.json({ ok: false, error: "Server not configured" }, { status: 500 });
   const db = supabaseAdmin as any;
+  await closeStaleCmeets();
 
   const admin = await getAdminSession();
   if (admin) {

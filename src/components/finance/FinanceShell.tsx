@@ -2,14 +2,16 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { ArrowDownToLine, ArrowLeft, BarChart3, Briefcase, FileText, Receipt, Tag, Users, Wallet } from "lucide-react";
+import { ArrowDownToLine, ArrowLeft, BarChart3, Briefcase, FileText, Receipt, ScrollText, Tag, Tags, Users, Wallet } from "lucide-react";
 import { ReactNode } from "react";
 
 const NAV = [
   { href: "/admin/finance", label: "Overview", icon: BarChart3, exact: true },
   { href: "/admin/finance/projects", label: "Projects", icon: Briefcase },
   { href: "/admin/finance/price-list", label: "Price List", icon: Tag },
+  { href: "/admin/finance/pricelists", label: "Pricelists", icon: Tags },
   { href: "/admin/finance/invoices", label: "Invoices", icon: FileText },
+  { href: "/admin/finance/quotations", label: "Quotations", icon: ScrollText },
   { href: "/admin/finance/subscriptions", label: "Inflow", icon: ArrowDownToLine },
   { href: "/admin/finance/contractors", label: "Contractors", icon: Users },
   { href: "/admin/finance/expenditures", label: "Expenditures", icon: Receipt },
@@ -22,12 +24,16 @@ export default function FinanceShell({
   back,
   actions,
   children,
+  hideNav = false,
 }: {
   title: string;
   subtitle?: string;
   back?: { href: string; label: string };
   actions?: ReactNode;
   children: ReactNode;
+  // Hide the finance sub-nav pill bar for pages that aren't finance panels
+  // (e.g. Brand Briefs) but still want the shell's look and header.
+  hideNav?: boolean;
 }) {
   const pathname = usePathname();
   return (
@@ -39,6 +45,7 @@ export default function FinanceShell({
 
       <div className="px-4 pt-4 pb-12 sm:px-6 sm:pt-6 lg:px-8 lg:pt-8 lg:pb-16 max-w-[1500px] mx-auto">
         {/* sub-nav pill bar */}
+        {!hideNav && (
         <nav className="mb-8 flex items-center gap-1.5 overflow-x-auto rounded-2xl bg-white/60 backdrop-blur-xl border border-white/70 shadow-[0_8px_30px_rgba(15,40,90,0.06)] p-1.5">
           {NAV.map((n) => {
             const active = n.exact ? pathname === n.href : pathname?.startsWith(n.href);

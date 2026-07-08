@@ -27,7 +27,7 @@ export default function SubmissionDetailPage() {
   return (
     <div className="max-w-3xl mx-auto p-6 bg-[#151D48]">
       <h1 className="text-xl font-bold mb-6">
-        {row.legal_name} — {row.role}
+        {row.legal_name} - {row.role}
       </h1>
       <div className="space-y-4">
         {Object.entries(fieldLabels).map(([key, label]) => (

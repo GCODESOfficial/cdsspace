@@ -43,8 +43,8 @@ export async function generateMetadata({ params }: { params: Promise<{ code: str
     const title = meeting?.title?.trim() || "Meeting Room";
     const host = meeting?.hostName?.trim();
     const description = host
-        ? `Join "${title}" hosted by ${host} on cMeet — CDS Space's live meeting room.`
-        : `Join "${title}" on cMeet — CDS Space's live meeting room.`;
+        ? `Join "${title}" hosted by ${host} on cMeet - CDS Space's live meeting room.`
+        : `Join "${title}" on cMeet - CDS Space's live meeting room.`;
     return buildProductMetadata({
         product: "cMeet",
         title: host ? `${title} with ${host}` : title,

@@ -1,5 +1,5 @@
 -- ============================================
--- CDS Space: Team Chat — Departments + Forwarding
+-- CDS Space: Team Chat - Departments + Forwarding
 -- Idempotent. Safe to re-run.
 -- ============================================
 

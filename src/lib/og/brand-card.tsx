@@ -35,11 +35,11 @@ export const SITE_URL = "https://cdsspace.pro";
  * Try each candidate path in order until one works. Next.js / Turbopack
  * sometimes resolves `new URL("...", import.meta.url)` to a path that
  * doesn't exist at runtime, and `process.cwd()` isn't always the project
- * root on Vercel serverless — so we try both.
+ * root on Vercel serverless - so we try both.
  */
 /**
  * Load a /public asset at module-evaluation time and cache the base64
- * data URI. Satori inlines data URIs directly so there's no runtime fetch —
+ * data URI. Satori inlines data URIs directly so there's no runtime fetch -
  * which means the same rendering works at build time (static prerender)
  * and at request time (serverless lambda) without any network dependency.
  * We try both the ESM `import.meta.url` anchor and the traditional
@@ -47,7 +47,7 @@ export const SITE_URL = "https://cdsspace.pro";
  */
 /**
  * Read a file from /public. IMPORTANT: use only `process.cwd()` as the
- * anchor. An earlier version also tried `new URL(..., import.meta.url)` —
+ * anchor. An earlier version also tried `new URL(..., import.meta.url)` -
  * Next.js's build tracer interprets that pattern as a dynamic asset
  * reference and pulls the ENTIRE /public/ tree (videos, high-res SVGs)
  * into every serverless function, which blows past the 300MB Vercel cap.
@@ -60,7 +60,7 @@ function readPublicAsset(_relFromHere: string, relFromCwd: string): Buffer | nul
     }
 }
 
-// Lazy lookups — DO NOT eagerly evaluate these at module load. Baking the
+// Lazy lookups - DO NOT eagerly evaluate these at module load. Baking the
 // ~374KB base64 PNG into a top-level const caused Vercel's tracer to
 // duplicate the bytes into every transitive consumer, blowing past the
 // 300MB function-size cap. Instead each OG render calls the getter on
@@ -180,7 +180,7 @@ function LogoLockup({ logoDataUri }: { logoDataUri: string }) {
         // eslint-disable-next-line @next/next/no-img-element
         <img
             src={logoDataUri}
-            alt="CDS Space — Branding Agency"
+            alt="CDS Space - Branding Agency"
             width={190}
             height={73}
             style={{ display: "block" }}
@@ -238,7 +238,7 @@ function FooterDomain() {
 interface BrandCardProps {
     title: string;
     description?: string;
-    tags?: string[];         // kept in the API for back-compat — not rendered
+    tags?: string[];         // kept in the API for back-compat - not rendered
     eyebrow?: string;        // shown as the status pill top-right
     domainPath?: string;     // kept for back-compat; footer always shows cdsspace.com
 }
@@ -283,7 +283,7 @@ export function renderBrandCard({
                 {eyebrow ? <StatusPill label={eyebrow} /> : <div style={{ display: "flex" }} />}
             </div>
 
-            {/* Title block — centered vertically between logo row and footer */}
+            {/* Title block - centered vertically between logo row and footer */}
             <div
                 style={{
                     display: "flex",
@@ -329,7 +329,7 @@ export function renderBrandCard({
 }
 
 /**
- * Work detail cards — the cover image IS the card. Minimal brand chrome so
+ * Work detail cards - the cover image IS the card. Minimal brand chrome so
  * the project visual reads cleanly. Kept for back-compat; /work/[slug] now
  * sends the raw cover URL as `og:image` rather than building this card.
  */

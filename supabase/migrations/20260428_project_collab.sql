@@ -1,7 +1,7 @@
 -- ============================================
 -- CDS Space: Project collaboration surfaces
---   1. project_assignments — assign a team member OR department to a project
---   2. project_documents   — link normal cDocs or Protect Docs to a project
+--   1. project_assignments - assign a team member OR department to a project
+--   2. project_documents   - link normal cDocs or Protect Docs to a project
 --   3. Annotate team_chat_threads + team_meetings with project_id so a
 --      project-scoped chat / call can live alongside the existing systems.
 --

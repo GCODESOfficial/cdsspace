@@ -56,3 +56,34 @@ export function invoiceOgUrl(opts: {
         status: opts.status,
     })}`;
 }
+
+/**
+ * Pricing-card OG URL. Pass the pricelist `slug` and a currency code
+ * (`ngn` | `usd` | `rwf`) so the shared card lists that pricelist's packages
+ * with prices in the requested currency.
+ */
+export function pricingOgUrl(opts: { slug: string; currency?: string; base?: string }): string {
+    const base = opts.base ?? SITE_URL;
+    return `${base}/api/og${qs({
+        variant: "pricing",
+        slug: opts.slug,
+        c: (opts.currency || "ngn").toLowerCase(),
+    })}`;
+}
+
+export function quotationOgUrl(opts: {
+    quotation: string;
+    project: string;
+    client: string;
+    status?: "draft" | "sent" | "accepted" | "converted" | "cancelled";
+    base?: string;
+}): string {
+    const base = opts.base ?? SITE_URL;
+    return `${base}/api/og${qs({
+        variant: "quotation",
+        quotation: opts.quotation,
+        project: opts.project,
+        client: opts.client,
+        status: opts.status,
+    })}`;
+}

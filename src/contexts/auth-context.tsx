@@ -1,8 +1,8 @@
 "use client"
 
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react"
-import { useRouter, usePathname } from "next/navigation"
-import { supabase } from "@/lib/supabase"
+import { useRouter } from "next/navigation"
+import { createClient } from "@/lib/supabase/client"
 import type { Session, User } from "@supabase/supabase-js"
 
 interface AuthContextType {
@@ -20,9 +20,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<Session | null>(null)
   const [isLoading, setIsLoading] = useState(true)
   const router = useRouter()
-  const pathname = usePathname()
 
   useEffect(() => {
+    const supabase = createClient()
+
     const setData = async () => {
       const {
         data: { session },
@@ -54,18 +55,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, [])
 
-  // Redirect if on dashboard page and not authenticated (admin has its own auth)
-  useEffect(() => {
-    if (!isLoading && !user && pathname?.startsWith("/dashboard")) {
-      router.push("/login")
-    }
-  }, [user, isLoading, pathname, router])
+  // Auth guarding for dashboard routes is handled server-side by middleware
+  // (src/middleware.ts → updateSession), which refreshes the session cookie
+  // and redirects only when there is genuinely no user. We intentionally do
+  // NOT redirect from the client here: a transient null during session hydration
+  // was bouncing logged-in clients back to /login while navigating.
 
   const signIn = async (email: string, password: string) => {
+    const supabase = createClient()
+
     try {
       const { error } = await supabase.auth.signInWithPassword({ email, password })
       if (!error) {
-        router.push("/admin")
+        router.push("/dashboard")
+        router.refresh()
       }
       return { error }
     } catch (error) {
@@ -74,8 +77,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
 
   const signOut = async () => {
+    const supabase = createClient()
+
     await supabase.auth.signOut()
     router.push("/login")
+    router.refresh()
   }
 
   const value = {

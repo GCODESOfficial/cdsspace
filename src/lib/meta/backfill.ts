@@ -31,7 +31,7 @@ interface MessageNode {
 export async function runBackfillStep(integ: MetaIntegration) {
   if (!integ.page_access_token) throw new Error("Missing page access token");
   if (integ.platform === "instagram" && !integ.ig_business_id) {
-    throw new Error("Missing Instagram business ID — link your IG account to the Page first");
+    throw new Error("Missing Instagram business ID - link your IG account to the Page first");
   }
 
   const container =
@@ -76,7 +76,7 @@ export async function runBackfillStep(integ: MetaIntegration) {
       conversationsSeen += 1;
       const convUpdatedMs = new Date(conv.updated_time).getTime();
 
-      // Conversations are ordered by updated_time DESC — once we pass the cutoff we can stop.
+      // Conversations are ordered by updated_time DESC - once we pass the cutoff we can stop.
       if (convUpdatedMs < sinceMs) {
         cursor = undefined;
         await persist({

@@ -58,7 +58,7 @@ function timeAgo(iso: string): string {
 
 /**
  * Per-page activity feed. Drop this component at the bottom of any admin
- * page to render a scoped audit trail — pass the page slug ("team-members",
+ * page to render a scoped audit trail - pass the page slug ("team-members",
  * "finance/invoices", etc.) to filter.
  */
 export default function ActivityPanel({
@@ -126,7 +126,7 @@ export default function ActivityPanel({
                         </div>
                     ) : items.length === 0 ? (
                         <p className="text-center text-[12px] text-gray-400 py-8 px-4">
-                            No activity yet — actions on this page will show up here.
+                            No activity yet - actions on this page will show up here.
                         </p>
                     ) : (
                         <ul className="divide-y divide-gray-50">

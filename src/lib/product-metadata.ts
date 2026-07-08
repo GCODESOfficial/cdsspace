@@ -18,7 +18,7 @@ export function buildProductMetadata(opts: {
     const { title, description, path, image, imageAlt, product } = opts;
     const url = path.startsWith("http") ? path : `${SITE}${path}`;
     const imageUrl = image || FALLBACK_IMAGE;
-    const ogTitle = `${title} · ${product} — CDS Space`;
+    const ogTitle = `${title} · ${product} - CDS Space`;
     return {
         title: `${title} · ${product}`,
         description,

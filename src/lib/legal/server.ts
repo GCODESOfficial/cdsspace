@@ -14,7 +14,7 @@ export interface LegalDocumentRow {
 }
 
 /**
- * Load a legal document from Supabase. Falls back to the seed content in
+ * Load a legal document from GlashDB. Falls back to the seed content in
  * `default-content.ts` if the row doesn't exist yet. This keeps /privacy
  * and /terms rendering before the admin has initialised the table.
  */

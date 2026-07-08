@@ -10,6 +10,9 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { X, Loader2, Maximize2, Share2, Check, Link as LinkIcon, Mail } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { slugifyTitle } from "@/lib/work-slug";
+import { isPdfUrl } from "@/lib/work-asset";
+import WorkAsset from "@/components/marketing/WorkAsset";
+import { appPrompt } from "@/lib/app-notify";
 
 interface WorkRow {
     id: number;
@@ -45,7 +48,7 @@ interface WorkDetailOverlayProps {
  *   3. The work's `cover_image`.
  *   4. The first row from `work_images`.
  *
- * Dimensions are read client-side with `new Image()` — no DB column needed.
+ * Dimensions are read client-side with `new Image()` - no DB column needed.
  */
 export function WorkDetailOverlay({ workId, onClose }: WorkDetailOverlayProps) {
     const [work, setWork] = useState<WorkRow | null>(null);
@@ -53,6 +56,7 @@ export function WorkDetailOverlay({ workId, onClose }: WorkDetailOverlayProps) {
     const [heroUrl, setHeroUrl] = useState<string | null>(null);
     const [loading, setLoading] = useState(false);
     const [copied, setCopied] = useState(false);
+    const [failedImages, setFailedImages] = useState<Set<string>>(() => new Set());
 
     const router = useRouter();
     const pathname = usePathname();
@@ -90,17 +94,18 @@ export function WorkDetailOverlay({ workId, onClose }: WorkDetailOverlayProps) {
             setCopied(true);
             setTimeout(() => setCopied(false), 1800);
         } catch {
-            window.prompt("Copy this link:", shareUrl);
+            appPrompt({ title: "Copy this link", message: "Select and copy the link below:", defaultValue: shareUrl, confirmLabel: "Done" });
         }
     };
 
     // Close the share menu when workId changes (another card opened)
     useEffect(() => {
         setShareOpen(false);
+        setFailedImages(new Set());
     }, [workId]);
 
     const shareText = work?.title
-        ? `${work.title} — by CDS Space`
+        ? `${work.title} - by CDS Space`
         : "Check out this project by CDS Space.";
     const encodedUrl = encodeURIComponent(shareUrl);
     const encodedText = encodeURIComponent(shareText);
@@ -194,7 +199,8 @@ export function WorkDetailOverlay({ workId, onClose }: WorkDetailOverlayProps) {
         let cancelled = false;
 
         (async () => {
-            const urls = images.map((i) => i.image_url).filter(Boolean);
+            // PDFs aren't images - never measure them or pick them as the hero.
+            const urls = images.map((i) => i.image_url).filter((u) => u && !isPdfUrl(u));
 
             // Measure each candidate once, up-front.
             const measured = await Promise.all(
@@ -226,8 +232,8 @@ export function WorkDetailOverlay({ workId, onClose }: WorkDetailOverlayProps) {
                 return;
             }
 
-            // 3. cover_image, 4. first work_image
-            setHeroUrl(work?.cover_image ?? urls[0] ?? null);
+            // 3. cover_image (if it's an image), 4. first non-PDF work_image
+            setHeroUrl((work?.cover_image && !isPdfUrl(work.cover_image) ? work.cover_image : null) ?? urls[0] ?? null);
         })();
 
         return () => {
@@ -278,7 +284,7 @@ export function WorkDetailOverlay({ workId, onClose }: WorkDetailOverlayProps) {
                         <header className="sticky top-0 z-20 bg-white/95 backdrop-blur px-5 md:px-10 py-4 flex items-center justify-between gap-3 border-b border-gray-100">
                             <div className="min-w-0 flex items-center gap-3">
                                 <h2 className="text-[#040B37] text-[18px] md:text-[22px] font-semibold tracking-tight truncate">
-                                    {work?.title ?? (loading ? "Loading…" : "—")}
+                                    {work?.title ?? (loading ? "Loading…" : "-")}
                                 </h2>
                                 {work?.category && (
                                     <span className="shrink-0 hidden sm:inline-block px-2.5 py-0.5 rounded-full bg-emerald-50 text-emerald-700 text-[11px] font-semibold uppercase tracking-wide">
@@ -391,6 +397,7 @@ export function WorkDetailOverlay({ workId, onClose }: WorkDetailOverlayProps) {
                                             priority
                                             quality={92}
                                             sizes="(min-width: 960px) 960px, 100vw"
+                                            onError={() => setHeroUrl(null)}
                                             className="object-cover"
                                         />
                                     </div>
@@ -432,12 +439,24 @@ export function WorkDetailOverlay({ workId, onClose }: WorkDetailOverlayProps) {
                                                         key={img.id}
                                                         className="relative w-full rounded-xl md:rounded-2xl overflow-hidden bg-gray-100"
                                                     >
-                                                        <img
-                                                            src={img.image_url}
-                                                            alt=""
-                                                            loading="lazy"
-                                                            className="w-full h-auto block"
-                                                        />
+                                                        {isPdfUrl(img.image_url) ? (
+                                                            <WorkAsset url={img.image_url} alt={work?.title ?? ""} />
+                                                        ) : failedImages.has(img.image_url) ? (
+                                                            <div className="flex min-h-[220px] items-center justify-center bg-[#050713] px-6 text-center text-sm font-medium text-white/45">
+                                                                Project image unavailable
+                                                            </div>
+                                                        ) : (
+                                                            <img
+                                                                src={img.image_url}
+                                                                alt=""
+                                                                loading="lazy"
+                                                                decoding="async"
+                                                                onError={() =>
+                                                                    setFailedImages((prev) => new Set(prev).add(img.image_url))
+                                                                }
+                                                                className="w-full h-auto block"
+                                                            />
+                                                        )}
                                                     </div>
                                                 ))}
                                             </div>
@@ -475,7 +494,7 @@ function Meta({ label, lines }: { label: string; lines: string[] | null }) {
                     ))}
                 </ul>
             ) : (
-                <p className="text-[#9CA3AF] text-sm md:text-[15px] font-medium">—</p>
+                <p className="text-[#9CA3AF] text-sm md:text-[15px] font-medium">-</p>
             )}
         </div>
     );

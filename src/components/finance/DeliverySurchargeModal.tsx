@@ -76,7 +76,7 @@ export default function DeliverySurchargeModal({
               <Icon className="w-5 h-5 text-white" />
             </div>
             <div>
-              <h2 className="text-[15px] font-bold text-gray-900">{meta.label} — Delivery Surcharge</h2>
+              <h2 className="text-[15px] font-bold text-gray-900">{meta.label} - Delivery Surcharge</h2>
               <p className="text-[12px] text-gray-500 mt-0.5">{meta.helper} comes with an extra cost. Confirm how much to add.</p>
             </div>
           </div>

@@ -38,7 +38,7 @@ begin
 end;
 $$;
 
--- `after insert ... for each statement` — one trim per insert statement,
+-- `after insert ... for each statement` - one trim per insert statement,
 -- not per row. A single INSERT that adds 5 rows triggers exactly one trim
 -- instead of five redundant ones.
 drop trigger if exists trim_traffic_logs_trigger on public.traffic_logs;

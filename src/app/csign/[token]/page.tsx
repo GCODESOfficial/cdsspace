@@ -46,7 +46,7 @@ export async function generateMetadata({ params }: { params: Promise<{ token: st
         : `You have a signature request on "${title}". Review & sign securely on cSign by CDS Space.`;
     return buildProductMetadata({
         product: "cSign",
-        title: requester ? `${title} — from ${requester}` : title,
+        title: requester ? `${title} - from ${requester}` : title,
         description,
         path: `/csign/${token}`,
     });

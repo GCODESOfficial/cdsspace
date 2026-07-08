@@ -1,12 +1,16 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { NextResponse } from "next/server";
+import { randomUUID } from "crypto";
 import { getChatViewer } from "@/lib/team-chat-auth";
 import { describeTeamMessage, getTeamChatDb, getViewerPayload } from "@/lib/team-chat-server";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-// GET — list threads the viewer can see, newest-activity first.
+const THREAD_COLUMNS =
+  "id, kind, name, department, includes_admin, visibility, description, rules, invite_code, is_announcement_only, is_voice_room, is_voice_channel, pinned_message_id, project_id, created_at, updated_at";
+
+// GET - list threads the viewer can see, newest-activity first.
 //   - Super Admin: sees all Group/Dept/Broadcast threads, plus Direct threads involving an admin.
 //   - Sub-Admin / Team Member: only sees threads they're an explicit participant in, plus broadcasts.
 export async function GET() {
@@ -83,7 +87,7 @@ export async function GET() {
         .in("thread_id", threadIds)
         .order("created_at", { ascending: false }),
       db.from("team_chat_participants")
-        .select("thread_id, team_member_id, team_members(full_name)")
+        .select("thread_id, team_member_id")
         .in("thread_id", threadIds)
     ]);
 
@@ -94,21 +98,32 @@ export async function GET() {
 
     const threadParts = partsRes.data || [];
 
+    // Resolve member names via a separate lookup — the GlashDB shim does not
+    // support PostgREST embedded joins (team_members(full_name)), so we fetch
+    // names by id, the same way hydrateTeamMessages does.
+    const memberIds = Array.from(
+      new Set(threadParts.map((p: any) => p.team_member_id).filter(Boolean)),
+    ) as string[];
+    const nameById: Record<string, string> = {};
+    if (memberIds.length) {
+      const { data: members } = await db.from("team_members").select("id, full_name").in("id", memberIds);
+      (members || []).forEach((m: any) => {
+        if (m.full_name) nameById[m.id] = m.full_name;
+      });
+    }
+
     // For direct threads, find the "other" person's name
     threads?.forEach((t: any) => {
       if (t.kind === "direct") {
         const parts = threadParts.filter((p: any) => p.thread_id === t.id);
         if (viewer.kind === "admin") {
-          const other = parts.find((p: any) => p.team_members?.full_name);
-          if (other) participantNames[t.id] = other.team_members.full_name;
+          const other = parts.find((p: any) => nameById[p.team_member_id]);
+          if (other) participantNames[t.id] = nameById[other.team_member_id];
         } else {
-          if (t.includes_admin) {
-            participantNames[t.id] = "Admin";
-          } else {
-            const myId = viewer.kind === "team" ? viewer.session.id : null;
-            const other = parts.find((p: any) => p.team_member_id !== myId && p.team_members?.full_name);
-            if (other) participantNames[t.id] = other.team_members.full_name;
-          }
+          const myId = viewer.kind === "team" ? viewer.session.id : null;
+          const other = parts.find((p: any) => p.team_member_id !== myId && nameById[p.team_member_id]);
+          if (other) participantNames[t.id] = nameById[other.team_member_id];
+          else if (t.includes_admin) participantNames[t.id] = "Admin";
         }
       }
     });
@@ -157,7 +172,7 @@ export async function GET() {
   });
 }
 
-// POST — unchanged
+// POST - unchanged
 export async function POST(req: Request) {
   const viewer = await getChatViewer();
   const db = getTeamChatDb();
@@ -301,4 +316,56 @@ export async function POST(req: Request) {
   if (rows.length) await db.from("team_chat_participants").insert(rows).select();
 
   return NextResponse.json({ ok: true, thread_id: thread.id });
+}
+
+// PATCH - manage an existing thread: rename, change visibility ("Mode"),
+// toggle announcement mode, and generate/clear the invite code ("Invite").
+// Allowed for admins, the thread's creator, or management (sub-admins).
+export async function PATCH(req: Request) {
+  const viewer = await getChatViewer();
+  const db = getTeamChatDb();
+  if (!viewer || !db) {
+    return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
+  }
+  const body = await req.json().catch(() => ({}));
+  const threadId = String(body?.threadId || body?.thread_id || "");
+  if (!threadId) return NextResponse.json({ ok: false, error: "threadId required" }, { status: 400 });
+
+  const { data: thread } = await db
+    .from("team_chat_threads")
+    .select("id, created_by")
+    .eq("id", threadId)
+    .maybeSingle();
+  if (!thread) return NextResponse.json({ ok: false, error: "Thread not found" }, { status: 404 });
+
+  const isAdmin = viewer.kind === "admin";
+  const isCreator = viewer.kind === "team" && thread.created_by === viewer.session.id;
+  const isManagement = isAdmin || (viewer.kind === "team" && !!viewer.session.is_sub_admin);
+  if (!isAdmin && !isCreator && !isManagement) {
+    return NextResponse.json({ ok: false, error: "You do not manage this conversation." }, { status: 403 });
+  }
+
+  const updates: Record<string, any> = {};
+  if (typeof body.name === "string" && body.name.trim()) updates.name = body.name.trim();
+  if (typeof body.description === "string") updates.description = body.description.trim() || null;
+  if (["public", "private", "invite_only"].includes(String(body.visibility))) {
+    updates.visibility = String(body.visibility);
+  }
+  if (typeof body.is_announcement_only === "boolean") updates.is_announcement_only = body.is_announcement_only;
+  if (body.generateInvite === true) updates.invite_code = randomUUID().replace(/-/g, "").slice(0, 10);
+  if (body.clearInvite === true) updates.invite_code = null;
+
+  if (Object.keys(updates).length === 0) {
+    return NextResponse.json({ ok: false, error: "No changes provided." }, { status: 400 });
+  }
+
+  const { data: updated, error } = await db
+    .from("team_chat_threads")
+    .update(updates)
+    .eq("id", threadId)
+    .select(THREAD_COLUMNS)
+    .single();
+  if (error) return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
+
+  return NextResponse.json({ ok: true, thread: updated });
 }

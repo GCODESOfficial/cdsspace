@@ -1,4 +1,4 @@
--- #Family House — the company-wide group chat every team member lives in.
+-- #Family House - the company-wide group chat every team member lives in.
 --
 -- Creates a single team_chat_threads row (kind='group', name='#Family House',
 -- includes_admin=true) and back-fills team_chat_participants with every

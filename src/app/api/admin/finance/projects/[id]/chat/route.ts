@@ -71,7 +71,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
         .from("team_chat_threads")
         .insert({
             kind: "group",
-            name: `${projectName} — Project Chat`,
+            name: `${projectName} - Project Chat`,
             project_id: id,
             includes_admin: true,
         })

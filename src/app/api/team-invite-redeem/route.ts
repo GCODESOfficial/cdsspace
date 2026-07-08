@@ -11,7 +11,7 @@ export const runtime = "nodejs";
  *
  * After this endpoint returns credentials, the invite_token is cleared
  * and a DB trigger (see supabase-team-invite-credentials.sql) also
- * blanks invite_temp_password — so a replay cannot retrieve them again.
+ * blanks invite_temp_password - so a replay cannot retrieve them again.
  */
 export async function POST(req: Request) {
   const body = await req.json().catch(() => null);
@@ -47,7 +47,7 @@ export async function POST(req: Request) {
 
   const tempPassword = String(member.invite_temp_password);
 
-  // Clear the invite_token — the DB trigger will also blank invite_temp_password
+  // Clear the invite_token - the DB trigger will also blank invite_temp_password
   // and we flip invite_filled so the member is considered active.
   const { error: updateError } = await db
     .from("team_members")

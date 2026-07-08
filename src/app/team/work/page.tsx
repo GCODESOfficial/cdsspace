@@ -2,18 +2,25 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
+import { initials } from "@/lib/utils";
 import {
   AlertTriangle,
   Archive,
+  ArrowLeft,
+  ArrowRight,
   BriefcaseBusiness,
   CalendarDays,
+  Check,
   CheckCircle2,
   ChevronRight,
   Clock3,
+  FileText,
   FileUp,
   Filter,
   FolderKanban,
+  Link2,
   Loader2,
+  Lock,
   MessageSquare,
   Milestone,
   Plus,
@@ -21,9 +28,19 @@ import {
   Send,
   ShieldCheck,
   Sparkles,
+  Unlink,
   Users,
+  X,
+  CalendarRange,
+  Command as CommandIcon,
+  CornerDownLeft,
+  LayoutGrid,
+  List as ListIcon,
+  UserRound,
 } from "lucide-react";
+import { AnimatePresence, motion } from "framer-motion";
 import { appAlert } from "@/lib/app-notify";
+import { BRAND_BRIEF_FIELD_LABELS } from "@/lib/brand-brief";
 
 type ProjectStatus = "new" | "active" | "paused" | "delayed" | "awaiting_client" | "under_review" | "completed" | "archived";
 type TaskStatus = "not_started" | "in_progress" | "under_review" | "needs_revision" | "approved" | "completed" | "delayed";
@@ -107,6 +124,45 @@ interface ProjectDocument {
   created_at: string;
 }
 
+interface BrandBriefSummary {
+  id: string;
+  project_id: string | null;
+  brand_name: string | null;
+  brand_tagline: string | null;
+  industry: string | null;
+  brand_description: string | null;
+  contact_name: string | null;
+  contact_email: string | null;
+  contact_phone: string | null;
+  target_audience: string | null;
+  competitors: string | null;
+  unique_selling_point: string | null;
+  brand_personality: string | null;
+  brand_values: string | null;
+  design_preferences: string | null;
+  inspiration_references: string | null;
+  assets_needed: string[] | null;
+  goals: string | null;
+  long_term_vision: string | null;
+  // Only present for management viewers; the server nulls it for everyone else.
+  budget_range: string | null;
+  timeline: string | null;
+  additional_notes: string | null;
+  status: string | null;
+  submitted_at: string | null;
+  created_at: string;
+}
+
+interface AttachableBrief {
+  id: string;
+  project_id: string | null;
+  brand_name: string | null;
+  invite_label: string | null;
+  contact_name: string | null;
+  status: string | null;
+  submitted_at: string | null;
+}
+
 interface ApprovalRow {
   id: string;
   project_id: string;
@@ -163,13 +219,15 @@ interface WorkData {
   milestones: MilestoneRow[];
   tasks: TaskRow[];
   documents: ProjectDocument[];
+  briefs: BrandBriefSummary[];
+  attachable_briefs: AttachableBrief[];
   approvals: ApprovalRow[];
   activity: ActivityRow[];
   calendar_events: CalendarEvent[];
   chat_threads: ChatThread[];
   team_members: TeamMemberOption[];
   departments: string[];
-  capabilities: { can_create_project: boolean; can_manage_projects: boolean };
+  capabilities: { can_create_project: boolean; can_manage_projects: boolean; can_view_budget: boolean };
   stats: {
     total: number;
     active: number;
@@ -283,6 +341,13 @@ const emptyTaskForm = {
   due_date: "",
 };
 
+const emptyMilestoneForm = {
+  description: "",
+  duration_start: "",
+  due_date: "",
+  assigned_to: "",
+};
+
 const emptyDocForm = {
   title: "",
   file_url: "",
@@ -323,13 +388,39 @@ export default function TeamWorkPage() {
   const [priorityFilter, setPriorityFilter] = useState("all");
   const [categoryFilter, setCategoryFilter] = useState("all");
   const [deadlineFilter, setDeadlineFilter] = useState("all");
-  const [tab, setTab] = useState("overview");
   const [createOpen, setCreateOpen] = useState(false);
   const [projectForm, setProjectForm] = useState(emptyProjectForm);
   const [taskForm, setTaskForm] = useState(emptyTaskForm);
+  const [milestoneForm, setMilestoneForm] = useState(emptyMilestoneForm);
   const [docForm, setDocForm] = useState(emptyDocForm);
   const [approvalForm, setApprovalForm] = useState(emptyApprovalForm);
   const [commentDrafts, setCommentDrafts] = useState<Record<string, string>>({});
+  const [tab, setTabState] = useState("overview");
+  const [taskView, setTaskView] = useState<"list" | "board">("list");
+  const [lens, setLens] = useState<"projects" | "my_work">("projects");
+  const [paletteOpen, setPaletteOpen] = useState(false);
+  const [myId, setMyId] = useState("");
+  const setTab = (next: string) => { setTabState(next); setLens("projects"); };
+
+  // Identify the signed-in member so the "My Work" lens can filter across projects.
+  useEffect(() => {
+    fetch("/api/team/session", { credentials: "include", cache: "no-store" })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((json) => { if (json?.member?.id) setMyId(json.member.id); })
+      .catch(() => {});
+  }, []);
+
+  // ⌘K / Ctrl-K toggles the command palette anywhere on the page.
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
+        event.preventDefault();
+        setPaletteOpen((open) => !open);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
 
   const load = async () => {
     setLoading(true);
@@ -398,6 +489,10 @@ export default function TeamWorkPage() {
     () => (data?.documents ?? []).filter((document) => document.project_id === selectedProject?.id),
     [data?.documents, selectedProject?.id],
   );
+  const projectBrief = useMemo(
+    () => (data?.briefs ?? []).find((brief) => brief.project_id === selectedProject?.id) ?? null,
+    [data?.briefs, selectedProject?.id],
+  );
   const projectApprovals = useMemo(
     () => (data?.approvals ?? []).filter((approval) => approval.project_id === selectedProject?.id),
     [data?.approvals, selectedProject?.id],
@@ -415,7 +510,11 @@ export default function TeamWorkPage() {
     [data?.chat_threads, selectedProject?.id],
   );
 
-  const postAction = async (action: string, payload: Record<string, unknown>) => {
+  const postAction = async (
+    action: string,
+    payload: Record<string, unknown>,
+    opts: { silent?: boolean } = {},
+  ) => {
     setWorking(action);
     try {
       const res = await fetch("/api/team/work", {
@@ -429,7 +528,9 @@ export default function TeamWorkPage() {
         "The project workspace API returned an invalid response.",
       );
       if (!res.ok || !json.ok) throw new Error(json.error || "Action failed.");
-      await load();
+      // `silent` callers patch local state themselves so only the affected card
+      // re-renders instead of the whole page reloading behind a spinner.
+      if (!opts.silent) await load();
       return json;
     } catch (error) {
       await appAlert({
@@ -445,7 +546,8 @@ export default function TeamWorkPage() {
 
   const createProject = async (event: React.FormEvent) => {
     event.preventDefault();
-    const json = await postAction("create_project", projectForm);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const json = (await postAction("create_project", projectForm)) as any;
     if (json?.project?.id) {
       setSelectedProjectId(json.project.id);
       setCreateOpen(false);
@@ -456,8 +558,27 @@ export default function TeamWorkPage() {
   const createTask = async (event: React.FormEvent) => {
     event.preventDefault();
     if (!selectedProject) return;
-    const json = await postAction("create_task", { ...taskForm, project_id: selectedProject.id });
-    if (json?.task) setTaskForm(emptyTaskForm);
+    const json = await postAction("create_task", { ...taskForm, project_id: selectedProject.id }, { silent: true });
+    if (json?.task) {
+      const created = json.task as TaskRow;
+      // The insert returns assignee_name = null; resolve it from the roster so
+      // the new card renders correctly without a full reload.
+      const assignee = data?.team_members?.find((member) => member.id === created.assignee_id);
+      const enriched: TaskRow = { ...created, assignee_name: assignee?.full_name ?? null };
+      setData((prev) => (prev ? { ...prev, tasks: [enriched, ...prev.tasks] } : prev));
+      setTaskForm(emptyTaskForm);
+    }
+  };
+
+  const createMilestone = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!selectedProject) return;
+    const json = await postAction("create_milestone", { ...milestoneForm, project_id: selectedProject.id }, { silent: true });
+    if (json?.milestone) {
+      const created = json.milestone as MilestoneRow;
+      setData((prev) => (prev ? { ...prev, milestones: [...prev.milestones, created] } : prev));
+      setMilestoneForm(emptyMilestoneForm);
+    }
   };
 
   const addDocument = async (event: React.FormEvent) => {
@@ -467,6 +588,16 @@ export default function TeamWorkPage() {
     if (json?.document) setDocForm(emptyDocForm);
   };
 
+  const attachBrief = async (briefId: string) => {
+    if (!selectedProject || !briefId) return;
+    await postAction("attach_brief", { project_id: selectedProject.id, brief_id: briefId });
+  };
+
+  const detachBrief = async () => {
+    if (!selectedProject) return;
+    await postAction("detach_brief", { project_id: selectedProject.id });
+  };
+
   const requestApproval = async (event: React.FormEvent) => {
     event.preventDefault();
     if (!selectedProject) return;
@@ -474,9 +605,41 @@ export default function TeamWorkPage() {
     if (json?.approval) setApprovalForm(emptyApprovalForm);
   };
 
+  // Optimistic task update: patch local state instantly, sync in the background,
+  // and only re-fetch if the write fails. Uses the task's own project_id so it
+  // works from the board, the list, and the cross-project "My Work" lens alike.
   const updateTask = async (task: TaskRow, patch: Record<string, unknown>) => {
-    if (!selectedProject) return;
-    await postAction("update_task", { project_id: selectedProject.id, task_id: task.id, ...patch });
+    setData((current) =>
+      current
+        ? { ...current, tasks: current.tasks.map((row) => (row.id === task.id ? ({ ...row, ...patch } as TaskRow) : row)) }
+        : current,
+    );
+    try {
+      const res = await fetch("/api/team/work", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ action: "update_task", project_id: task.project_id, task_id: task.id, ...patch }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok || !json.ok) throw new Error(json.error || "Could not update the task.");
+    } catch (error) {
+      await load();
+      void appAlert({
+        title: "Project workspace",
+        message: error instanceof Error ? error.message : "Could not update the task.",
+        kind: "error",
+      });
+    }
+  };
+
+  const quickAddTask = async (title: string) => {
+    if (!selectedProject || !title.trim()) return;
+    const json = await postAction("create_task", { project_id: selectedProject.id, title: title.trim(), priority: "medium" }, { silent: true });
+    if (json?.task) {
+      const created = json.task as TaskRow;
+      setData((prev) => (prev ? { ...prev, tasks: [{ ...created, assignee_name: null }, ...prev.tasks] } : prev));
+    }
   };
 
   const addComment = async (task: TaskRow) => {
@@ -498,7 +661,8 @@ export default function TeamWorkPage() {
       router.push(`/team/chat?thread=${projectThread.id}`);
       return;
     }
-    const json = await postAction("ensure_project_chat", { project_id: selectedProject.id });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const json = (await postAction("ensure_project_chat", { project_id: selectedProject.id })) as any;
     if (json?.thread?.id) router.push(`/team/chat?thread=${json.thread.id}`);
   };
 
@@ -529,19 +693,54 @@ export default function TeamWorkPage() {
             Manage team assignments, tasks, milestones, files, approvals, deadlines, and project communication in one workspace.
           </p>
         </div>
-        {data.capabilities.can_create_project && (
+        <div className="flex shrink-0 items-center gap-2.5">
           <button
             type="button"
-            onClick={() => setCreateOpen(true)}
-            className="inline-flex h-12 items-center justify-center gap-2 rounded-2xl bg-brand-blue px-5 text-[14px] font-bold text-white shadow-lg shadow-blue-600/20 transition hover:bg-[#083EC0]"
+            onClick={() => setPaletteOpen(true)}
+            className="group inline-flex h-12 items-center gap-2 rounded-full border border-brand-stroke/60 bg-brand-bg/60 px-4 text-[13px] font-semibold text-brand-body/70 transition hover:border-brand-blue/40 hover:bg-white hover:text-brand-navy"
           >
-            <Plus className="h-4 w-4" />
-            New Project
+            <Search className="h-4 w-4" />
+            <span className="hidden sm:inline">Quick jump</span>
+            <kbd className="hidden items-center gap-0.5 rounded-md border border-brand-stroke/60 bg-white px-1.5 py-0.5 text-[10px] font-bold text-brand-body/60 sm:inline-flex">
+              <CommandIcon className="h-2.5 w-2.5" />K
+            </kbd>
           </button>
-        )}
+          {data.capabilities.can_create_project && (
+            <button
+              type="button"
+              onClick={() => setCreateOpen(true)}
+              className="inline-flex h-12 items-center justify-center gap-2 rounded-full bg-gradient-to-b from-blue-600 to-blue-700 px-6 text-[14px] font-bold text-white shadow-lg shadow-blue-600/25 transition hover:from-blue-700 hover:to-blue-800 active:scale-95"
+            >
+              <Plus className="h-4 w-4" />
+              <span className="hidden sm:inline">New Project</span>
+              <span className="sm:hidden">New</span>
+            </button>
+          )}
+        </div>
       </header>
 
-      <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-7">
+      {data.projects.length === 0 ? (
+        <section className="flex flex-col items-center justify-center rounded-2xl border border-white/80 bg-white px-6 py-16 text-center shadow-sm">
+          <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-blue-50 text-brand-blue">
+            <BriefcaseBusiness className="h-7 w-7" />
+          </div>
+          <h2 className="mt-4 text-[18px] font-bold text-brand-navy">Work has not been assigned to you yet</h2>
+          <p className="mt-1 max-w-md text-[13.5px] leading-6 text-brand-body/60">
+            Once a project or task is assigned to you, it will show up here. Check back soon.
+          </p>
+          {data.capabilities.can_create_project && (
+            <button
+              type="button"
+              onClick={() => setCreateOpen(true)}
+              className="mt-5 inline-flex h-11 items-center gap-2 rounded-full bg-gradient-to-b from-blue-600 to-blue-700 px-6 text-[13.5px] font-bold text-white shadow-lg shadow-blue-600/25 transition hover:from-blue-700 hover:to-blue-800 active:scale-95"
+            >
+              <Plus className="h-4 w-4" /> Create the first project
+            </button>
+          )}
+        </section>
+      ) : (
+        <>
+      <section className="no-scrollbar flex gap-3 overflow-x-auto pb-1 sm:grid sm:grid-cols-4 sm:overflow-visible sm:pb-0 xl:grid-cols-7">
         <Metric icon={BriefcaseBusiness} label="Total" value={data.stats.total} />
         <Metric icon={FolderKanban} label="Active" value={data.stats.active} />
         <Metric icon={CheckCircle2} label="Completed" value={data.stats.completed} />
@@ -551,6 +750,31 @@ export default function TeamWorkPage() {
         <Metric icon={Clock3} label="Overdue" value={data.stats.overdue_tasks} tone="danger" />
       </section>
 
+      <div className="flex items-center gap-1 self-start rounded-full bg-brand-bg/70 p-1">
+        {([["projects", "Projects", FolderKanban], ["my_work", "My Work", UserRound]] as const).map(([key, text, Icon]) => (
+          <button
+            key={key}
+            type="button"
+            onClick={() => setLens(key)}
+            className={`inline-flex items-center gap-2 rounded-full px-4 py-2 text-[12.5px] font-semibold transition ${
+              lens === key ? "bg-white text-brand-navy shadow-sm" : "text-brand-body/70 hover:text-brand-navy"
+            }`}
+          >
+            <Icon className="h-3.5 w-3.5" /> {text}
+          </button>
+        ))}
+      </div>
+
+      {lens === "my_work" ? (
+        <MyWorkView
+          tasks={data.tasks}
+          projects={data.projects}
+          myId={myId}
+          onUpdateTask={updateTask}
+          onOpenProject={(id) => { setSelectedProjectId(id); setTabState("tasks"); setLens("projects"); }}
+        />
+      ) : (
+      <>
       <section className="rounded-2xl border border-white/80 bg-white p-3 shadow-sm sm:p-4">
         <div className="grid gap-3 lg:grid-cols-[minmax(260px,1fr)_repeat(4,minmax(150px,180px))]">
           <div className="relative">
@@ -570,7 +794,7 @@ export default function TeamWorkPage() {
       </section>
 
       <main className="grid gap-4 xl:grid-cols-[360px_minmax(0,1fr)]">
-        <aside className="rounded-2xl border border-white/80 bg-white p-3 shadow-sm sm:p-4">
+        <aside className="rounded-2xl border border-white/80 bg-white p-3 shadow-sm sm:p-4 xl:sticky xl:top-4 xl:self-start">
           <div className="mb-3 flex items-center justify-between gap-3">
             <div>
               <h2 className="text-[15px] font-bold text-brand-navy">Projects</h2>
@@ -578,7 +802,9 @@ export default function TeamWorkPage() {
             </div>
             <Filter className="h-4 w-4 text-brand-body/40" />
           </div>
-          <div className="space-y-2 xl:max-h-[calc(100dvh-360px)] xl:overflow-y-auto">
+          {/* Grow to fit every project card; only scroll internally when the
+              list is taller than the viewport, so cards are never cut off. */}
+          <div className="space-y-2 xl:max-h-[calc(100dvh-2rem)] xl:overflow-y-auto">
             {filteredProjects.length === 0 ? (
               <EmptyState icon={Archive} title="No projects found" body="Try a different search or filter." />
             ) : (
@@ -603,14 +829,14 @@ export default function TeamWorkPage() {
 
             <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_320px]">
               <div className="min-w-0 rounded-2xl border border-white/80 bg-white p-3 shadow-sm sm:p-4">
-                <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap">
-                  {["overview", "tasks", "milestones", "files", "approvals", "calendar"].map((item) => (
+                <div className="no-scrollbar flex gap-1 overflow-x-auto rounded-full bg-brand-bg/70 p-1">
+                  {["overview", "tasks", "milestones", "timeline", "files", "approvals", "calendar"].map((item) => (
                     <button
                       key={item}
                       type="button"
                       onClick={() => setTab(item)}
-                      className={`h-10 rounded-2xl px-3 text-[12px] font-bold transition ${
-                        tab === item ? "bg-brand-blue text-white shadow-md shadow-blue-600/15" : "bg-brand-bg/70 text-brand-body hover:bg-blue-50 hover:text-brand-blue"
+                      className={`shrink-0 rounded-full px-4 py-2 text-[12.5px] font-semibold transition ${
+                        tab === item ? "bg-white text-brand-navy shadow-sm" : "text-brand-body/70 hover:text-brand-navy"
                       }`}
                     >
                       {label(item)}
@@ -618,7 +844,15 @@ export default function TeamWorkPage() {
                   ))}
                 </div>
 
-                <div className="mt-4">
+                <AnimatePresence mode="wait">
+                  <motion.div
+                    key={tab}
+                    initial={{ opacity: 0, y: 6 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -6 }}
+                    transition={{ duration: 0.16, ease: "easeOut" }}
+                    className="mt-4"
+                  >
                   {tab === "overview" && (
                     <OverviewTab
                       project={selectedProject}
@@ -636,13 +870,25 @@ export default function TeamWorkPage() {
                       setForm={setTaskForm}
                       onSubmit={createTask}
                       onUpdateTask={updateTask}
+                      onQuickAdd={quickAddTask}
+                      view={taskView}
+                      setView={setTaskView}
                       working={working}
                       commentDrafts={commentDrafts}
                       setCommentDrafts={setCommentDrafts}
                       addComment={addComment}
                     />
                   )}
-                  {tab === "milestones" && <MilestonesTab milestones={projectMilestones} />}
+                  {tab === "milestones" && (
+                    <MilestonesTab
+                      milestones={projectMilestones}
+                      form={milestoneForm}
+                      setForm={setMilestoneForm}
+                      onSubmit={createMilestone}
+                      working={working}
+                    />
+                  )}
+                  {tab === "timeline" && <TimelineTab milestones={projectMilestones} tasks={projectTasks} />}
                   {tab === "files" && (
                     <FilesTab
                       documents={projectDocuments}
@@ -650,6 +896,11 @@ export default function TeamWorkPage() {
                       setForm={setDocForm}
                       onSubmit={addDocument}
                       working={working}
+                      brief={projectBrief}
+                      canManageBriefs={data.capabilities.can_view_budget}
+                      attachableBriefs={data.attachable_briefs}
+                      onAttachBrief={attachBrief}
+                      onDetachBrief={detachBrief}
                     />
                   )}
                   {tab === "approvals" && (
@@ -666,7 +917,8 @@ export default function TeamWorkPage() {
                     />
                   )}
                   {tab === "calendar" && <CalendarTab events={projectCalendar} />}
-                </div>
+                  </motion.div>
+                </AnimatePresence>
               </div>
 
               <aside className="space-y-4">
@@ -710,17 +962,38 @@ export default function TeamWorkPage() {
           </section>
         )}
       </main>
-
-      {createOpen && data.capabilities.can_create_project && (
-        <ProjectCreateModal
-          form={projectForm}
-          setForm={setProjectForm}
-          members={data.team_members}
-          working={working === "create_project"}
-          onClose={() => setCreateOpen(false)}
-          onSubmit={createProject}
-        />
+      </>
       )}
+        </>
+      )}
+
+      <AnimatePresence>
+        {createOpen && data.capabilities.can_create_project && (
+          <ProjectCreateModal
+            form={projectForm}
+            setForm={setProjectForm}
+            members={data.team_members}
+            working={working === "create_project"}
+            onClose={() => setCreateOpen(false)}
+            onSubmit={createProject}
+          />
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {paletteOpen && (
+          <CommandPalette
+            projects={data.projects}
+            canCreateProject={data.capabilities.can_create_project}
+            onClose={() => setPaletteOpen(false)}
+            onSelectProject={(id) => { setSelectedProjectId(id); setTab("overview"); }}
+            onNewProject={data.capabilities.can_create_project ? () => setCreateOpen(true) : undefined}
+            onNewTask={() => setTab("tasks")}
+            onTab={setTab}
+            onMyWork={() => setLens("my_work")}
+          />
+        )}
+      </AnimatePresence>
     </div>
   );
 }
@@ -893,6 +1166,9 @@ function TasksTab({
   setForm,
   onSubmit,
   onUpdateTask,
+  onQuickAdd,
+  view,
+  setView,
   working,
   commentDrafts,
   setCommentDrafts,
@@ -905,43 +1181,76 @@ function TasksTab({
   setForm: (form: typeof emptyTaskForm) => void;
   onSubmit: (event: React.FormEvent) => void;
   onUpdateTask: (task: TaskRow, patch: Record<string, unknown>) => void;
+  onQuickAdd: (title: string) => void;
+  view: "list" | "board";
+  setView: (view: "list" | "board") => void;
   working: string | null;
   commentDrafts: Record<string, string>;
   setCommentDrafts: React.Dispatch<React.SetStateAction<Record<string, string>>>;
   addComment: (task: TaskRow) => void;
 }) {
+  const [quick, setQuick] = useState("");
+  const [showWizard, setShowWizard] = useState(false);
+  const submitQuick = () => {
+    const title = quick.trim();
+    if (!title) return;
+    onQuickAdd(title);
+    setQuick("");
+  };
   return (
     <div className="grid gap-4">
-      <form onSubmit={onSubmit} className="rounded-3xl bg-brand-bg/60 p-4">
-        <div className="grid gap-3 lg:grid-cols-2">
-          <TextInput value={form.title} onChange={(title) => setForm({ ...form, title })} placeholder="Task title" required />
-          <TextInput value={form.due_date} onChange={(due_date) => setForm({ ...form, due_date })} type="date" />
-          <select value={form.assignee_id} onChange={(event) => setForm({ ...form, assignee_id: event.target.value })} className={inputClass}>
-            <option value="">Assign member</option>
-            {members.map((member) => <option key={member.id} value={member.id}>{member.full_name}</option>)}
-          </select>
-          <select value={form.department} onChange={(event) => setForm({ ...form, department: event.target.value })} className={inputClass}>
-            <option value="">Department</option>
-            {departments.map((department) => <option key={department} value={department}>{department}</option>)}
-          </select>
-          <select value={form.priority} onChange={(event) => setForm({ ...form, priority: event.target.value })} className={inputClass}>
-            {PRIORITY_OPTIONS.map((priority) => <option key={priority} value={priority}>{label(priority)}</option>)}
-          </select>
-          <button type="submit" disabled={working === "create_task"} className="inline-flex h-12 items-center justify-center gap-2 rounded-2xl bg-brand-blue px-4 text-[13px] font-bold text-white disabled:opacity-60">
-            {working === "create_task" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
-            Add Task
-          </button>
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+        <div className="relative flex-1">
+          <Plus className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-brand-body/35" />
+          <input
+            value={quick}
+            onChange={(event) => setQuick(event.target.value)}
+            onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); submitQuick(); } }}
+            placeholder="Quick-add a task, then press Enter"
+            className="h-11 w-full rounded-2xl border border-brand-stroke/50 bg-brand-bg/50 pl-9 pr-24 text-[13px] font-medium outline-none transition focus:border-brand-blue/40 focus:bg-white focus:ring-4 focus:ring-blue-100"
+          />
+          {quick.trim() && (
+            <button type="button" onClick={submitQuick} className="absolute right-1.5 top-1/2 inline-flex -translate-y-1/2 items-center gap-1 rounded-xl bg-brand-navy px-3 py-1.5 text-[11px] font-bold text-white">
+              Add <CornerDownLeft className="h-3 w-3" />
+            </button>
+          )}
         </div>
-        <textarea
-          value={form.description}
-          onChange={(event) => setForm({ ...form, description: event.target.value })}
-          placeholder="Task description"
-          className={`${inputClass} mt-3 min-h-[88px] py-3`}
-        />
-      </form>
+        <div className="flex items-center gap-1 rounded-full bg-brand-bg/70 p-1">
+          {([["list", "List", ListIcon], ["board", "Board", LayoutGrid]] as const).map(([key, text, Icon]) => (
+            <button
+              key={key}
+              type="button"
+              onClick={() => setView(key)}
+              className={`inline-flex items-center gap-1.5 rounded-full px-3.5 py-1.5 text-[12px] font-semibold transition ${
+                view === key ? "bg-white text-brand-navy shadow-sm" : "text-brand-body/70 hover:text-brand-navy"
+              }`}
+            >
+              <Icon className="h-3.5 w-3.5" /> {text}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="rounded-2xl border border-brand-stroke/40 bg-white">
+        <button
+          type="button"
+          onClick={() => setShowWizard((open) => !open)}
+          className="flex w-full items-center gap-2 px-4 py-3 text-[13px] font-bold text-brand-navy"
+        >
+          <Plus className="h-4 w-4 text-brand-blue" /> Detailed task (assignee, due date, description)
+          <ChevronRight className={`ml-auto h-4 w-4 text-brand-body/40 transition ${showWizard ? "rotate-90" : ""}`} />
+        </button>
+        {showWizard && (
+          <div className="border-t border-brand-stroke/40 p-4">
+            <TaskWizard form={form} setForm={setForm} members={members} departments={departments} onSubmit={onSubmit} working={working} embedded />
+          </div>
+        )}
+      </div>
 
       {tasks.length === 0 ? (
-        <EmptyState icon={Milestone} title="No tasks yet" body="Create the first task and assign responsibility." />
+        <EmptyState icon={Milestone} title="No tasks yet" body="Quick-add above, or open the detailed form to assign responsibility." />
+      ) : view === "board" ? (
+        <TaskBoard tasks={tasks} onUpdateTask={onUpdateTask} />
       ) : (
         <div className="grid gap-3">
           {tasks.map((task) => (
@@ -995,39 +1304,293 @@ function TasksTab({
   );
 }
 
-function MilestonesTab({ milestones }: { milestones: MilestoneRow[] }) {
-  if (milestones.length === 0) return <EmptyState icon={Milestone} title="No milestones" body="Milestones created for this project will show here." />;
+function TaskWizard({ form, setForm, members, departments, onSubmit, working, embedded = false }: {
+  form: typeof emptyTaskForm;
+  setForm: (form: typeof emptyTaskForm) => void;
+  members: TeamMemberOption[];
+  departments: string[];
+  onSubmit: (event: React.FormEvent) => void;
+  working: string | null;
+  embedded?: boolean;
+}) {
+  const steps = ["Task", "Details"];
+  const [step, setStep] = useState(0);
+  const canNext = step !== 0 || !!form.title.trim();
   return (
-    <div className="grid gap-3">
-      {milestones.map((milestone, index) => (
-        <div key={milestone.id} className="flex gap-3 rounded-3xl border border-brand-stroke/40 bg-white p-4">
-          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-blue-50 text-[13px] font-bold text-brand-blue">
-            {index + 1}
-          </div>
-          <div className="min-w-0 flex-1">
-            <div className="flex flex-wrap gap-1.5">
-              <Pill value={label(milestone.status)} className={statusClass(milestone.status)} />
-              <Pill value={`${milestone.progress || 0}%`} />
-              <Pill value={label(milestone.approval_status)} />
+    <form onSubmit={(e) => { onSubmit(e); setStep(0); }} className={embedded ? "" : "rounded-2xl border border-brand-stroke/40 bg-white p-4 sm:p-5"}>
+      <div className="flex items-center justify-between gap-3">
+        {embedded ? <span /> : <p className="text-[13px] font-bold text-brand-navy">New task</p>}
+        <div className="w-36 sm:w-52"><Stepper steps={steps} current={step} /></div>
+      </div>
+      <div className="mt-4">
+        {step === 0 && (
+          <div className="grid gap-3">
+            <Field label="Task title"><TextInput value={form.title} onChange={(title) => setForm({ ...form, title })} placeholder="What needs doing?" required /></Field>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <Field label="Assign to member"><select value={form.assignee_id} onChange={(e) => setForm({ ...form, assignee_id: e.target.value })} className={inputClass}><option value="">Unassigned</option>{members.map((m) => <option key={m.id} value={m.id}>{m.full_name}</option>)}</select></Field>
+              <Field label="Assign to department"><select value={form.department} onChange={(e) => setForm({ ...form, department: e.target.value })} className={inputClass}><option value="">No department</option>{departments.map((d) => <option key={d} value={d}>{d}</option>)}</select></Field>
             </div>
-            <h3 className="mt-2 text-[15px] font-bold text-brand-navy">{milestone.description}</h3>
-            <p className="mt-1 text-[12px] text-brand-body/55">
-              {milestone.assigned_to || "Unassigned"} · Due {formatDate(milestone.due_date || milestone.duration_end)}
-            </p>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <Field label="Priority"><select value={form.priority} onChange={(e) => setForm({ ...form, priority: e.target.value })} className={inputClass}>{PRIORITY_OPTIONS.map((p) => <option key={p} value={p}>{label(p)}</option>)}</select></Field>
+              <Field label="Due date"><TextInput value={form.due_date} onChange={(due_date) => setForm({ ...form, due_date })} type="date" /></Field>
+            </div>
           </div>
+        )}
+        {step === 1 && (
+          <div className="grid gap-3">
+            <Field label="Description"><textarea value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} placeholder="Details (optional)" className={`${inputClass} min-h-[80px] py-2.5`} /></Field>
+          </div>
+        )}
+      </div>
+      <WizardNav step={step} total={steps.length} onBack={() => setStep((s) => Math.max(0, s - 1))} onNext={() => setStep((s) => Math.min(steps.length - 1, s + 1))} submitLabel="Add task" submitting={working === "create_task"} canNext={canNext} />
+    </form>
+  );
+}
+
+function MilestonesTab({ milestones, form, setForm, onSubmit, working }: {
+  milestones: MilestoneRow[];
+  form: typeof emptyMilestoneForm;
+  setForm: (form: typeof emptyMilestoneForm) => void;
+  onSubmit: (event: React.FormEvent) => void;
+  working: string | null;
+}) {
+  const [showForm, setShowForm] = useState(false);
+  return (
+    <div className="grid gap-4">
+      <div className="rounded-2xl border border-brand-stroke/40 bg-white">
+        <button
+          type="button"
+          onClick={() => setShowForm((open) => !open)}
+          className="flex w-full items-center gap-2 px-4 py-3 text-[13px] font-bold text-brand-navy"
+        >
+          <Plus className="h-4 w-4 text-brand-blue" /> Add milestone (start &amp; due date)
+          <ChevronRight className={`ml-auto h-4 w-4 text-brand-body/40 transition ${showForm ? "rotate-90" : ""}`} />
+        </button>
+        {showForm && (
+          <form onSubmit={onSubmit} className="grid gap-3 border-t border-brand-stroke/40 p-4">
+            <Field label="Milestone title"><TextInput value={form.description} onChange={(description) => setForm({ ...form, description })} placeholder="e.g. Design handoff" required /></Field>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <Field label="Start date"><TextInput value={form.duration_start} onChange={(duration_start) => setForm({ ...form, duration_start })} type="date" /></Field>
+              <Field label="Due date"><TextInput value={form.due_date} onChange={(due_date) => setForm({ ...form, due_date })} type="date" /></Field>
+            </div>
+            <Field label="Owner (optional)"><TextInput value={form.assigned_to} onChange={(assigned_to) => setForm({ ...form, assigned_to })} placeholder="Person or department" /></Field>
+            <div className="flex justify-end">
+              <button
+                type="submit"
+                disabled={working === "create_milestone" || !form.description.trim()}
+                className="inline-flex items-center gap-2 rounded-2xl bg-brand-navy px-4 py-2.5 text-[13px] font-bold text-white disabled:opacity-50"
+              >
+                {working === "create_milestone" ? "Adding…" : "Add milestone"}
+              </button>
+            </div>
+          </form>
+        )}
+      </div>
+
+      {milestones.length === 0 ? (
+        <EmptyState icon={Milestone} title="No milestones" body="Add a milestone above to start tracking phases with their start and due dates." />
+      ) : (
+        <div className="grid gap-3">
+          {milestones.map((milestone, index) => (
+            <div key={milestone.id} className="flex gap-3 rounded-3xl border border-brand-stroke/40 bg-white p-4">
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-blue-50 text-[13px] font-bold text-brand-blue">
+                {index + 1}
+              </div>
+              <div className="min-w-0 flex-1">
+                <div className="flex flex-wrap gap-1.5">
+                  <Pill value={label(milestone.status)} className={statusClass(milestone.status)} />
+                  <Pill value={`${milestone.progress || 0}%`} />
+                  <Pill value={label(milestone.approval_status)} />
+                </div>
+                <h3 className="mt-2 text-[15px] font-bold text-brand-navy">{milestone.description}</h3>
+                <p className="mt-1 text-[12px] text-brand-body/55">
+                  {milestone.assigned_to || "Unassigned"}
+                  {milestone.duration_start ? ` · Start ${formatDate(milestone.duration_start)}` : ""}
+                  {` · Due ${formatDate(milestone.due_date || milestone.duration_end)}`}
+                </p>
+              </div>
+            </div>
+          ))}
         </div>
-      ))}
+      )}
     </div>
   );
 }
 
-function FilesTab({ documents, form, setForm, onSubmit, working }: {
+// Read-only display order for a linked brand brief. `assets_needed` is rendered
+// separately as chips; `budget_range` only arrives from the server for
+// management viewers, so it simply won't appear for anyone else.
+const BRIEF_DISPLAY_FIELDS: (keyof BrandBriefSummary)[] = [
+  "industry",
+  "brand_description",
+  "target_audience",
+  "competitors",
+  "unique_selling_point",
+  "brand_personality",
+  "brand_values",
+  "design_preferences",
+  "inspiration_references",
+  "goals",
+  "long_term_vision",
+  "timeline",
+  "additional_notes",
+  "contact_name",
+  "contact_email",
+  "contact_phone",
+];
+
+function briefOptionLabel(brief: AttachableBrief) {
+  return brief.invite_label?.trim() || brief.brand_name?.trim() || brief.contact_name?.trim() || "Untitled brief";
+}
+
+function BrandBriefPanel({ brief, canManage, attachableBriefs, onAttach, onDetach, working }: {
+  brief: BrandBriefSummary | null;
+  canManage: boolean;
+  attachableBriefs: AttachableBrief[];
+  onAttach: (briefId: string) => void;
+  onDetach: () => void;
+  working: string | null;
+}) {
+  const [picking, setPicking] = useState(false);
+  const [chosen, setChosen] = useState("");
+  const busy = working === "attach_brief" || working === "detach_brief";
+
+  // Nothing to show and nothing to do → stay out of the way entirely.
+  if (!brief && !canManage) return null;
+
+  if (!brief) {
+    // Management, but no brief linked yet → offer the attach picker.
+    return (
+      <div className="rounded-2xl border border-dashed border-brand-stroke/60 bg-brand-bg/40 p-4 sm:p-5">
+        <div className="flex items-center gap-2.5">
+          <span className="grid h-9 w-9 place-items-center rounded-xl bg-blue-50 text-brand-blue"><FileText className="h-4.5 w-4.5" /></span>
+          <div>
+            <p className="text-[13px] font-bold text-brand-navy">Brand brief</p>
+            <p className="text-[12px] text-brand-body/60">Link the client&apos;s submitted brief so the team can work from it here.</p>
+          </div>
+        </div>
+        <div className="mt-3 flex flex-col gap-2 sm:flex-row">
+          <select
+            value={chosen}
+            onChange={(e) => setChosen(e.target.value)}
+            className={inputClass}
+          >
+            <option value="">Select a submitted brief…</option>
+            {attachableBriefs.map((b) => (
+              <option key={b.id} value={b.id}>
+                {briefOptionLabel(b)}{b.project_id ? " · linked elsewhere" : ""}
+              </option>
+            ))}
+          </select>
+          <button
+            type="button"
+            disabled={!chosen || busy}
+            onClick={() => chosen && onAttach(chosen)}
+            className="inline-flex h-11 shrink-0 items-center justify-center gap-2 rounded-full bg-gradient-to-b from-blue-600 to-blue-700 px-5 text-[13px] font-bold text-white shadow-lg shadow-blue-600/25 transition hover:from-blue-700 hover:to-blue-800 active:scale-95 disabled:opacity-60"
+          >
+            {working === "attach_brief" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Link2 className="h-4 w-4" />} Link brief
+          </button>
+        </div>
+        {attachableBriefs.length === 0 && (
+          <p className="mt-2 text-[12px] text-brand-body/50">No submitted briefs available to link yet.</p>
+        )}
+      </div>
+    );
+  }
+
+  const assets = (brief.assets_needed || []).filter(Boolean);
+
+  return (
+    <div className="rounded-2xl border border-brand-stroke/40 bg-white p-4 sm:p-5">
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex items-center gap-2.5">
+          <span className="grid h-9 w-9 place-items-center rounded-xl bg-blue-50 text-brand-blue"><FileText className="h-4.5 w-4.5" /></span>
+          <div>
+            <div className="flex items-center gap-2">
+              <p className="text-[14px] font-bold text-brand-navy">{brief.brand_name?.trim() || "Brand brief"}</p>
+              <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-emerald-600">
+                {brief.status === "submitted" ? "Filled by client" : brief.status || "Brief"}
+              </span>
+            </div>
+            {brief.brand_tagline?.trim() && <p className="text-[12px] text-brand-body/60">{brief.brand_tagline}</p>}
+          </div>
+        </div>
+        {canManage && (
+          <div className="flex items-center gap-1.5">
+            <select
+              value=""
+              disabled={busy}
+              onChange={(e) => e.target.value && onAttach(e.target.value)}
+              className="h-9 rounded-full border border-brand-stroke/50 bg-white px-3 text-[12px] font-semibold text-brand-body/70"
+              title="Replace with a different brief"
+            >
+              <option value="">Change…</option>
+              {attachableBriefs.filter((b) => b.id !== brief.id).map((b) => (
+                <option key={b.id} value={b.id}>{briefOptionLabel(b)}</option>
+              ))}
+            </select>
+            <button
+              type="button"
+              disabled={busy}
+              onClick={onDetach}
+              className="inline-flex h-9 items-center gap-1.5 rounded-full border border-brand-stroke/50 px-3 text-[12px] font-semibold text-brand-body/60 transition hover:border-rose-300 hover:text-rose-500 disabled:opacity-60"
+            >
+              {working === "detach_brief" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Unlink className="h-3.5 w-3.5" />} Unlink
+            </button>
+          </div>
+        )}
+      </div>
+
+      {assets.length > 0 && (
+        <div className="mt-4">
+          <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-brand-body/45">{BRAND_BRIEF_FIELD_LABELS.assets_needed}</p>
+          <div className="flex flex-wrap gap-1.5">
+            {assets.map((asset) => (
+              <span key={asset} className="rounded-full bg-brand-bg px-2.5 py-1 text-[12px] font-medium text-brand-navy">{asset}</span>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <div className="mt-4 grid gap-x-6 gap-y-3 sm:grid-cols-2">
+        {BRIEF_DISPLAY_FIELDS.map((key) => {
+          const value = brief[key];
+          const text = typeof value === "string" ? value.trim() : "";
+          if (!text) return null;
+          return (
+            <div key={key}>
+              <p className="mb-0.5 text-[11px] font-semibold uppercase tracking-wide text-brand-body/45">{BRAND_BRIEF_FIELD_LABELS[key] || key}</p>
+              <p className="whitespace-pre-wrap text-[13px] leading-relaxed text-brand-navy">{text}</p>
+            </div>
+          );
+        })}
+        {brief.budget_range?.trim() && (
+          <div>
+            <p className="mb-0.5 flex items-center gap-1 text-[11px] font-semibold uppercase tracking-wide text-brand-body/45">
+              {BRAND_BRIEF_FIELD_LABELS.budget_range}
+              <span className="inline-flex items-center gap-0.5 rounded bg-amber-50 px-1.5 py-0.5 text-[9px] font-bold text-amber-600"><Lock className="h-2.5 w-2.5" /> Admin only</span>
+            </p>
+            <p className="text-[13px] font-semibold leading-relaxed text-brand-navy">{brief.budget_range}</p>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function FilesTab({ documents, form, setForm, onSubmit, working, brief, canManageBriefs, attachableBriefs, onAttachBrief, onDetachBrief }: {
   documents: ProjectDocument[];
   form: typeof emptyDocForm;
   setForm: (form: typeof emptyDocForm) => void;
   onSubmit: (event: React.FormEvent) => void;
   working: string | null;
+  brief: BrandBriefSummary | null;
+  canManageBriefs: boolean;
+  attachableBriefs: AttachableBrief[];
+  onAttachBrief: (briefId: string) => void;
+  onDetachBrief: () => void;
 }) {
+  const [open, setOpen] = useState(false);
   const grouped = documents.reduce<Record<string, ProjectDocument[]>>((acc, document) => {
     const folder = document.folder || "Client Files";
     acc[folder] = [...(acc[folder] || []), document];
@@ -1035,17 +1598,36 @@ function FilesTab({ documents, form, setForm, onSubmit, working }: {
   }, {});
   return (
     <div className="grid gap-4">
-      <form onSubmit={onSubmit} className="grid gap-3 rounded-3xl bg-brand-bg/60 p-4 lg:grid-cols-2">
-        <TextInput value={form.title} onChange={(title) => setForm({ ...form, title })} placeholder="Document title" required />
-        <TextInput value={form.file_url} onChange={(file_url) => setForm({ ...form, file_url })} placeholder="File URL or shared link" required />
-        <select value={form.folder} onChange={(event) => setForm({ ...form, folder: event.target.value })} className={inputClass}>
-          {DOCUMENT_FOLDERS.map((folder) => <option key={folder} value={folder}>{folder}</option>)}
-        </select>
-        <button type="submit" disabled={working === "add_document"} className="inline-flex h-12 items-center justify-center gap-2 rounded-2xl bg-brand-blue px-4 text-[13px] font-bold text-white disabled:opacity-60">
-          {working === "add_document" ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileUp className="h-4 w-4" />}
-          Add File
+      <BrandBriefPanel
+        brief={brief}
+        canManage={canManageBriefs}
+        attachableBriefs={attachableBriefs}
+        onAttach={onAttachBrief}
+        onDetach={onDetachBrief}
+        working={working}
+      />
+      {open ? (
+        <form onSubmit={(e) => { onSubmit(e); }} className="rounded-2xl border border-brand-stroke/40 bg-white p-4 sm:p-5">
+          <div className="mb-4 flex items-center justify-between">
+            <p className="text-[13px] font-bold text-brand-navy">Add a file</p>
+            <button type="button" onClick={() => setOpen(false)} className="rounded-full p-1.5 text-brand-body/50 transition hover:bg-brand-bg"><X className="h-4 w-4" /></button>
+          </div>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <Field label="Title"><TextInput value={form.title} onChange={(title) => setForm({ ...form, title })} placeholder="Document name" required /></Field>
+            <Field label="File URL / link"><TextInput value={form.file_url} onChange={(file_url) => setForm({ ...form, file_url })} placeholder="Paste a shared link" required /></Field>
+            <Field label="Folder"><select value={form.folder} onChange={(e) => setForm({ ...form, folder: e.target.value })} className={inputClass}>{DOCUMENT_FOLDERS.map((f) => <option key={f} value={f}>{f}</option>)}</select></Field>
+          </div>
+          <div className="mt-4 flex justify-end">
+            <button type="submit" disabled={working === "add_document"} className="inline-flex h-11 items-center gap-2 rounded-full bg-gradient-to-b from-blue-600 to-blue-700 px-6 text-[13px] font-bold text-white shadow-lg shadow-blue-600/25 transition hover:from-blue-700 hover:to-blue-800 active:scale-95 disabled:opacity-60">
+              {working === "add_document" ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileUp className="h-4 w-4" />} Add file
+            </button>
+          </div>
+        </form>
+      ) : (
+        <button type="button" onClick={() => setOpen(true)} className="flex items-center justify-center gap-2 rounded-2xl border border-dashed border-brand-stroke/60 bg-brand-bg/40 py-3.5 text-[13px] font-semibold text-brand-blue transition hover:border-brand-blue/50 hover:bg-blue-50">
+          <FileUp className="h-4 w-4" /> Add a file
         </button>
-      </form>
+      )}
       {documents.length === 0 ? (
         <EmptyState icon={FileUp} title="No files yet" body="Add briefs, brand assets, contracts, and final deliverable links." />
       ) : (
@@ -1079,27 +1661,32 @@ function ApprovalsTab({ approvals, tasks, milestones, members, form, setForm, on
   decideApproval: (approval: ApprovalRow, status: string) => void;
   working: string | null;
 }) {
+  const [open, setOpen] = useState(false);
   return (
     <div className="grid gap-4">
-      <form onSubmit={onSubmit} className="grid gap-3 rounded-3xl bg-brand-bg/60 p-4 lg:grid-cols-2">
-        <select value={form.task_id} onChange={(event) => setForm({ ...form, task_id: event.target.value, milestone_id: "" })} className={inputClass}>
-          <option value="">Task for approval</option>
-          {tasks.map((task) => <option key={task.id} value={task.id}>{task.title}</option>)}
-        </select>
-        <select value={form.milestone_id} onChange={(event) => setForm({ ...form, milestone_id: event.target.value, task_id: "" })} className={inputClass}>
-          <option value="">Milestone for approval</option>
-          {milestones.map((milestone) => <option key={milestone.id} value={milestone.id}>{milestone.description}</option>)}
-        </select>
-        <select value={form.reviewer_member_id} onChange={(event) => setForm({ ...form, reviewer_member_id: event.target.value })} className={inputClass}>
-          <option value="">Reviewer</option>
-          {members.map((member) => <option key={member.id} value={member.id}>{member.full_name}</option>)}
-        </select>
-        <TextInput value={form.note} onChange={(note) => setForm({ ...form, note })} placeholder="Approval note" />
-        <button type="submit" disabled={working === "request_approval"} className="inline-flex h-12 items-center justify-center gap-2 rounded-2xl bg-brand-blue px-4 text-[13px] font-bold text-white disabled:opacity-60 lg:col-span-2">
-          {working === "request_approval" ? <Loader2 className="h-4 w-4 animate-spin" /> : <ShieldCheck className="h-4 w-4" />}
-          Request Approval
+      {open ? (
+        <form onSubmit={(e) => { onSubmit(e); }} className="rounded-2xl border border-brand-stroke/40 bg-white p-4 sm:p-5">
+          <div className="mb-4 flex items-center justify-between">
+            <p className="text-[13px] font-bold text-brand-navy">Request an approval</p>
+            <button type="button" onClick={() => setOpen(false)} className="rounded-full p-1.5 text-brand-body/50 transition hover:bg-brand-bg"><X className="h-4 w-4" /></button>
+          </div>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <Field label="Task"><select value={form.task_id} onChange={(e) => setForm({ ...form, task_id: e.target.value, milestone_id: "" })} className={inputClass}><option value="">Select a task…</option>{tasks.map((t) => <option key={t.id} value={t.id}>{t.title}</option>)}</select></Field>
+            <Field label="or Milestone"><select value={form.milestone_id} onChange={(e) => setForm({ ...form, milestone_id: e.target.value, task_id: "" })} className={inputClass}><option value="">Select a milestone…</option>{milestones.map((m) => <option key={m.id} value={m.id}>{m.description}</option>)}</select></Field>
+            <Field label="Reviewer"><select value={form.reviewer_member_id} onChange={(e) => setForm({ ...form, reviewer_member_id: e.target.value })} className={inputClass}><option value="">Select…</option>{members.map((m) => <option key={m.id} value={m.id}>{m.full_name}</option>)}</select></Field>
+            <Field label="Note"><TextInput value={form.note} onChange={(note) => setForm({ ...form, note })} placeholder="What needs review?" /></Field>
+          </div>
+          <div className="mt-4 flex justify-end">
+            <button type="submit" disabled={working === "request_approval"} className="inline-flex h-11 items-center gap-2 rounded-full bg-gradient-to-b from-blue-600 to-blue-700 px-6 text-[13px] font-bold text-white shadow-lg shadow-blue-600/25 transition hover:from-blue-700 hover:to-blue-800 active:scale-95 disabled:opacity-60">
+              {working === "request_approval" ? <Loader2 className="h-4 w-4 animate-spin" /> : <ShieldCheck className="h-4 w-4" />} Request approval
+            </button>
+          </div>
+        </form>
+      ) : (
+        <button type="button" onClick={() => setOpen(true)} className="flex items-center justify-center gap-2 rounded-2xl border border-dashed border-brand-stroke/60 bg-brand-bg/40 py-3.5 text-[13px] font-semibold text-brand-blue transition hover:border-brand-blue/50 hover:bg-blue-50">
+          <ShieldCheck className="h-4 w-4" /> Request an approval
         </button>
-      </form>
+      )}
       {approvals.length === 0 ? (
         <EmptyState icon={ShieldCheck} title="No approvals yet" body="Request internal reviews, manager approvals, or final sign-off." />
       ) : (
@@ -1163,56 +1750,63 @@ function ProjectCreateModal({ form, setForm, members, working, onClose, onSubmit
   onClose: () => void;
   onSubmit: (event: React.FormEvent) => void;
 }) {
+  const steps = ["Basics", "Timeline", "Team"];
+  const [step, setStep] = useState(0);
+  const canNext = step !== 0 || (!!form.name.trim() && !!form.client.trim());
+
   return (
-    <div className="fixed inset-0 z-50 flex items-end justify-center bg-[#07143B]/35 p-3 backdrop-blur-sm sm:items-center sm:p-6">
-      <form onSubmit={onSubmit} className="max-h-[92dvh] w-full max-w-3xl overflow-y-auto rounded-2xl bg-white p-4 shadow-2xl sm:p-6">
-        <div className="flex items-start justify-between gap-4">
-          <div>
-            <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-brand-blue">New Project</p>
-            <h2 className="mt-1 text-[24px] font-bold text-brand-navy">Create Project Workspace</h2>
+    <div className="fixed inset-0 z-50 flex items-end justify-center bg-[#07143B]/40 p-0 backdrop-blur-sm sm:items-center sm:p-6">
+      <form onSubmit={onSubmit} className="flex max-h-[94dvh] w-full max-w-xl flex-col overflow-hidden rounded-t-3xl bg-white shadow-2xl sm:rounded-3xl">
+        {/* Header + stepper */}
+        <div className="border-b border-brand-stroke/30 p-5 sm:p-6">
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-brand-blue">New Project</p>
+              <h2 className="mt-0.5 text-[20px] font-bold text-brand-navy sm:text-[22px]">Create a workspace</h2>
+            </div>
+            <button type="button" onClick={onClose} className="rounded-full p-2 text-brand-body/60 transition hover:bg-brand-bg"><X className="h-5 w-5" /></button>
           </div>
-          <button type="button" onClick={onClose} className="h-10 rounded-2xl bg-brand-bg px-4 text-[12px] font-bold text-brand-body">Close</button>
+          <div className="mt-4"><Stepper steps={steps} current={step} /></div>
         </div>
-        <div className="mt-5 grid gap-3 md:grid-cols-2">
-          <TextInput value={form.name} onChange={(name) => setForm({ ...form, name })} placeholder="Project name" required />
-          <TextInput value={form.client} onChange={(client) => setForm({ ...form, client })} placeholder="Client name" required />
-          <select value={form.category} onChange={(event) => setForm({ ...form, category: event.target.value })} className={inputClass}>
-            {CATEGORIES.map((category) => <option key={category} value={category}>{category}</option>)}
-          </select>
-          <select value={form.priority} onChange={(event) => setForm({ ...form, priority: event.target.value })} className={inputClass}>
-            {PRIORITY_OPTIONS.map((priority) => <option key={priority} value={priority}>{label(priority)} Priority</option>)}
-          </select>
-          <TextInput value={form.duration_start} onChange={(duration_start) => setForm({ ...form, duration_start })} type="date" />
-          <TextInput value={form.client_delivery_date} onChange={(client_delivery_date) => setForm({ ...form, client_delivery_date, duration_end: client_delivery_date })} type="date" />
-          <TextInput value={form.internal_deadline} onChange={(internal_deadline) => setForm({ ...form, internal_deadline })} type="date" />
-          <select value={form.project_manager_id} onChange={(event) => setForm({ ...form, project_manager_id: event.target.value })} className={inputClass}>
-            <option value="">Project manager</option>
-            {members.map((member) => <option key={member.id} value={member.id}>{member.full_name}</option>)}
-          </select>
-          <select value={form.department_lead_id} onChange={(event) => setForm({ ...form, department_lead_id: event.target.value })} className={inputClass}>
-            <option value="">Department lead</option>
-            {members.map((member) => <option key={member.id} value={member.id}>{member.full_name}</option>)}
-          </select>
-          <label className="flex min-h-12 items-center gap-3 rounded-2xl border border-brand-stroke/50 bg-brand-bg/50 px-4 text-[13px] font-bold text-brand-navy">
-            <input
-              type="checkbox"
-              checked={form.seed_milestones}
-              onChange={(event) => setForm({ ...form, seed_milestones: event.target.checked })}
-              className="h-4 w-4 accent-brand-blue"
-            />
-            Add default milestones
-          </label>
-          <textarea
-            value={form.description}
-            onChange={(event) => setForm({ ...form, description: event.target.value })}
-            placeholder="Project description"
-            className={`${inputClass} min-h-[112px] py-3 md:col-span-2`}
-          />
+
+        {/* Step body */}
+        <div className="flex-1 overflow-y-auto p-5 sm:p-6">
+          {step === 0 && (
+            <div className="grid gap-4">
+              <Field label="Project name"><TextInput value={form.name} onChange={(name) => setForm({ ...form, name })} placeholder="e.g. Arcadia Branding" required /></Field>
+              <Field label="Client"><TextInput value={form.client} onChange={(client) => setForm({ ...form, client })} placeholder="Client or company name" required /></Field>
+              <div className="grid gap-4 sm:grid-cols-2">
+                <Field label="Category"><select value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })} className={inputClass}>{CATEGORIES.map((c) => <option key={c} value={c}>{c}</option>)}</select></Field>
+                <Field label="Priority"><select value={form.priority} onChange={(e) => setForm({ ...form, priority: e.target.value })} className={inputClass}>{PRIORITY_OPTIONS.map((p) => <option key={p} value={p}>{label(p)} priority</option>)}</select></Field>
+              </div>
+            </div>
+          )}
+          {step === 1 && (
+            <div className="grid gap-4">
+              <Field label="Start date"><TextInput value={form.duration_start} onChange={(duration_start) => setForm({ ...form, duration_start })} type="date" /></Field>
+              <Field label="Client delivery date"><TextInput value={form.client_delivery_date} onChange={(client_delivery_date) => setForm({ ...form, client_delivery_date, duration_end: client_delivery_date })} type="date" /></Field>
+              <Field label="Internal deadline"><TextInput value={form.internal_deadline} onChange={(internal_deadline) => setForm({ ...form, internal_deadline })} type="date" /></Field>
+            </div>
+          )}
+          {step === 2 && (
+            <div className="grid gap-4">
+              <div className="grid gap-4 sm:grid-cols-2">
+                <Field label="Project manager"><select value={form.project_manager_id} onChange={(e) => setForm({ ...form, project_manager_id: e.target.value })} className={inputClass}><option value="">Select…</option>{members.map((m) => <option key={m.id} value={m.id}>{m.full_name}</option>)}</select></Field>
+                <Field label="Department lead"><select value={form.department_lead_id} onChange={(e) => setForm({ ...form, department_lead_id: e.target.value })} className={inputClass}><option value="">Select…</option>{members.map((m) => <option key={m.id} value={m.id}>{m.full_name}</option>)}</select></Field>
+              </div>
+              <Field label="Description"><textarea value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} placeholder="What is this project about?" className={`${inputClass} min-h-[100px] py-2.5`} /></Field>
+              <label className="flex cursor-pointer items-center gap-3 rounded-xl border border-brand-stroke/50 bg-brand-bg/50 px-4 py-3 text-[13px] font-semibold text-brand-navy">
+                <input type="checkbox" checked={form.seed_milestones} onChange={(e) => setForm({ ...form, seed_milestones: e.target.checked })} className="h-4 w-4 accent-brand-blue" />
+                Add default milestones
+              </label>
+            </div>
+          )}
         </div>
-        <button type="submit" disabled={working} className="mt-5 inline-flex h-12 w-full items-center justify-center gap-2 rounded-2xl bg-brand-blue px-5 text-[14px] font-bold text-white disabled:opacity-60">
-          {working ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
-          Create Project
-        </button>
+
+        {/* Footer */}
+        <div className="border-t border-brand-stroke/30 p-4 sm:px-6">
+          <WizardNav step={step} total={steps.length} onBack={() => setStep((s) => Math.max(0, s - 1))} onNext={() => setStep((s) => Math.min(steps.length - 1, s + 1))} submitLabel="Create project" submitting={working} canNext={canNext} />
+        </div>
       </form>
     </div>
   );
@@ -1254,13 +1848,10 @@ function Pill({ value, className = "bg-brand-bg text-brand-body ring-brand-strok
 }
 
 function Avatar({ name, src }: { name: string; src: string | null }) {
-  if (src) {
-    // eslint-disable-next-line @next/next/no-img-element
-    return <img src={src} alt={name} className="h-9 w-9 rounded-full object-cover" />;
-  }
+  void src;
   return (
     <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-brand-blue text-[12px] font-bold text-white">
-      {name.charAt(0).toUpperCase()}
+      {initials(name)}
     </div>
   );
 }
@@ -1275,8 +1866,62 @@ function EmptyState({ icon: Icon, title, body }: { icon: React.ElementType; titl
   );
 }
 
-const inputClass = "h-12 w-full rounded-2xl border border-brand-stroke/50 bg-white px-4 text-[13px] font-semibold text-brand-navy outline-none transition focus:border-brand-blue/40 focus:ring-4 focus:ring-blue-100";
+const inputClass = "h-11 w-full rounded-xl border border-brand-stroke/60 bg-white px-3.5 text-[13px] font-medium text-brand-navy outline-none transition focus:border-brand-blue focus:ring-4 focus:ring-blue-100 placeholder:text-brand-body/40";
 const smallInputClass = "h-10 w-full rounded-xl border border-brand-stroke/50 bg-white px-3 text-[12px] font-semibold text-brand-navy outline-none focus:border-brand-blue/40";
+
+/** Labelled form field wrapper for the wizards. */
+function Field({ label: fieldLabel, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div>
+      <label className="mb-1.5 block text-[11px] font-semibold uppercase tracking-wide text-brand-body/55">{fieldLabel}</label>
+      {children}
+    </div>
+  );
+}
+
+/** Compact numbered progress stepper for the wizards. */
+function Stepper({ steps, current }: { steps: string[]; current: number }) {
+  return (
+    <div className="flex items-center">
+      {steps.map((s, i) => (
+        <div key={s} className={`flex items-center ${i < steps.length - 1 ? "flex-1" : ""}`}>
+          <div className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-[12px] font-bold transition ${i < current ? "bg-brand-blue text-white" : i === current ? "bg-brand-blue text-white ring-4 ring-blue-100" : "bg-brand-bg text-brand-body/40"}`}>
+            {i < current ? <Check className="h-3.5 w-3.5" /> : i + 1}
+          </div>
+          <span className={`ml-2 hidden text-[12px] font-semibold sm:block ${i <= current ? "text-brand-navy" : "text-brand-body/40"}`}>{s}</span>
+          {i < steps.length - 1 && <div className={`mx-2 h-0.5 flex-1 rounded ${i < current ? "bg-brand-blue" : "bg-brand-stroke/40"}`} />}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/** Shared wizard footer buttons (Back / Next / submit). */
+function WizardNav({ step, total, onBack, onNext, submitLabel, submitting, canNext = true }: {
+  step: number; total: number; onBack: () => void; onNext: () => void;
+  submitLabel: string; submitting: boolean; canNext?: boolean;
+}) {
+  const isLast = step === total - 1;
+  return (
+    <div className="mt-5 flex items-center justify-between gap-3">
+      <button type="button" onClick={onBack} disabled={step === 0}
+        className="inline-flex h-11 items-center gap-1.5 rounded-full px-4 text-[13px] font-semibold text-brand-body transition hover:bg-brand-bg disabled:opacity-0">
+        <ArrowLeft className="h-4 w-4" /> Back
+      </button>
+      {isLast ? (
+        <button type="submit" disabled={submitting}
+          className="inline-flex h-11 items-center gap-2 rounded-full bg-gradient-to-b from-blue-600 to-blue-700 px-6 text-[13px] font-bold text-white shadow-lg shadow-blue-600/25 transition hover:from-blue-700 hover:to-blue-800 active:scale-95 disabled:opacity-60">
+          {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />} {submitLabel}
+        </button>
+      ) : (
+        <button type="button" onClick={onNext} disabled={!canNext}
+          className="inline-flex h-11 items-center gap-2 rounded-full bg-brand-navy px-6 text-[13px] font-bold text-white transition hover:bg-brand-navy/90 active:scale-95 disabled:opacity-40">
+          Next <ArrowRight className="h-4 w-4" />
+        </button>
+      )}
+    </div>
+  );
+}
 
 function TextInput({ value, onChange, placeholder, type = "text", required = false }: {
   value: string;
@@ -1294,5 +1939,398 @@ function TextInput({ value, onChange, placeholder, type = "text", required = fal
       required={required}
       className={inputClass}
     />
+  );
+}
+
+// ── Kanban board ────────────────────────────────────────────────────────────
+// Four honest columns; statuses that don't map 1:1 are bucketed for display but
+// dragging always writes the exact column status.
+const BOARD_COLUMNS: { key: TaskStatus; label: string }[] = [
+  { key: "not_started", label: "To do" },
+  { key: "in_progress", label: "In progress" },
+  { key: "under_review", label: "Review" },
+  { key: "completed", label: "Done" },
+];
+
+function boardBucket(status: TaskStatus): TaskStatus {
+  if (status === "delayed") return "in_progress";
+  if (status === "needs_revision") return "under_review";
+  if (status === "approved") return "completed";
+  return status;
+}
+
+function TaskBoard({ tasks, onUpdateTask }: {
+  tasks: TaskRow[];
+  onUpdateTask: (task: TaskRow, patch: Record<string, unknown>) => void;
+}) {
+  const [dragId, setDragId] = useState<string | null>(null);
+  const [overCol, setOverCol] = useState<TaskStatus | null>(null);
+  return (
+    <div className="no-scrollbar -mx-1 flex gap-3 overflow-x-auto px-1 pb-1">
+      {BOARD_COLUMNS.map((col) => {
+        const items = tasks.filter((task) => boardBucket(task.status) === col.key);
+        return (
+          <div
+            key={col.key}
+            onDragOver={(event) => { event.preventDefault(); setOverCol(col.key); }}
+            onDragLeave={() => setOverCol((current) => (current === col.key ? null : current))}
+            onDrop={() => {
+              setOverCol(null);
+              const task = tasks.find((t) => t.id === dragId);
+              setDragId(null);
+              if (task && boardBucket(task.status) !== col.key) onUpdateTask(task, { status: col.key });
+            }}
+            className={`flex w-[240px] shrink-0 flex-col rounded-2xl border p-2.5 transition ${
+              overCol === col.key ? "border-brand-blue bg-blue-50/60" : "border-brand-stroke/40 bg-brand-bg/40"
+            }`}
+          >
+            <div className="mb-2 flex items-center justify-between px-1">
+              <span className="text-[12px] font-bold text-brand-navy">{col.label}</span>
+              <span className="rounded-full bg-white px-2 py-0.5 text-[10px] font-bold text-brand-body/50">{items.length}</span>
+            </div>
+            <div className="flex flex-col gap-2">
+              {items.length === 0 ? (
+                <p className="rounded-xl border border-dashed border-brand-stroke/50 px-3 py-6 text-center text-[11px] text-brand-body/40">Drop tasks here</p>
+              ) : (
+                items.map((task) => (
+                  <div
+                    key={task.id}
+                    draggable
+                    onDragStart={() => setDragId(task.id)}
+                    onDragEnd={() => { setDragId(null); setOverCol(null); }}
+                    className={`cursor-grab rounded-xl border border-brand-stroke/40 bg-white p-3 shadow-sm transition active:cursor-grabbing ${
+                      dragId === task.id ? "opacity-40" : "hover:border-brand-blue/40"
+                    }`}
+                  >
+                    <div className="flex flex-wrap gap-1">
+                      <Pill value={label(task.priority)} />
+                      {task.department && <Pill value={task.department} />}
+                    </div>
+                    <p className="mt-1.5 text-[12.5px] font-bold leading-snug text-brand-navy">{task.title}</p>
+                    <p className="mt-1 text-[10.5px] text-brand-body/50">
+                      {task.assignee_name || "Unassigned"} · {task.due_date ? formatDate(task.due_date) : "No date"}
+                    </p>
+                    {task.progress > 0 && (
+                      <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-brand-bg">
+                        <div className="h-full rounded-full bg-brand-blue" style={{ width: `${task.progress}%` }} />
+                      </div>
+                    )}
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+// ── My Work: every task assigned to me, across all projects ─────────────────
+const MY_WORK_FILTERS = [
+  { key: "active", label: "Active" },
+  { key: "overdue", label: "Overdue" },
+  { key: "done", label: "Done" },
+  { key: "all", label: "All" },
+] as const;
+type MyWorkFilter = (typeof MY_WORK_FILTERS)[number]["key"];
+
+function MyWorkView({ tasks, projects, myId, onUpdateTask, onOpenProject }: {
+  tasks: TaskRow[];
+  projects: Project[];
+  myId: string;
+  onUpdateTask: (task: TaskRow, patch: Record<string, unknown>) => void;
+  onOpenProject: (projectId: string) => void;
+}) {
+  const [filter, setFilter] = useState<MyWorkFilter>("active");
+  // Restore the last-used lens so it behaves like a saved view.
+  useEffect(() => {
+    const saved = typeof window !== "undefined" ? window.localStorage.getItem("work_mywork_filter") : null;
+    if (saved && MY_WORK_FILTERS.some((f) => f.key === saved)) setFilter(saved as MyWorkFilter);
+  }, []);
+  const setSavedFilter = (next: MyWorkFilter) => {
+    setFilter(next);
+    try { window.localStorage.setItem("work_mywork_filter", next); } catch { /* ignore */ }
+  };
+
+  const mine = useMemo(() => {
+    const isDone = (s: TaskStatus) => s === "completed" || s === "approved";
+    const overdue = (task: TaskRow) => {
+      const days = daysUntil(task.due_date);
+      return days != null && days < 0 && !isDone(task.status);
+    };
+    return (tasks || [])
+      .filter((task) => myId && task.assignee_id === myId)
+      .filter((task) => {
+        if (filter === "all") return true;
+        if (filter === "done") return isDone(task.status);
+        if (filter === "overdue") return overdue(task);
+        return !isDone(task.status); // active
+      });
+  }, [tasks, myId, filter]);
+
+  const projectName = (id: string) => projects.find((p) => p.id === id)?.name || "Project";
+  const grouped = useMemo(() => {
+    const map = new Map<string, TaskRow[]>();
+    for (const task of mine) {
+      const list = map.get(task.project_id) || [];
+      list.push(task);
+      map.set(task.project_id, list);
+    }
+    return [...map.entries()];
+  }, [mine]);
+
+  const counts = useMemo(() => {
+    const isDone = (s: TaskStatus) => s === "completed" || s === "approved";
+    const owned = (tasks || []).filter((t) => myId && t.assignee_id === myId);
+    return {
+      active: owned.filter((t) => !isDone(t.status)).length,
+      overdue: owned.filter((t) => { const d = daysUntil(t.due_date); return d != null && d < 0 && !isDone(t.status); }).length,
+      done: owned.filter((t) => isDone(t.status)).length,
+    };
+  }, [tasks, myId]);
+
+  return (
+    <section className="space-y-4">
+      <div className="grid gap-3 sm:grid-cols-3">
+        <Metric icon={FolderKanban} label="Active" value={counts.active} />
+        <Metric icon={AlertTriangle} label="Overdue" value={counts.overdue} tone={counts.overdue ? "danger" : "default"} />
+        <Metric icon={CheckCircle2} label="Done" value={counts.done} />
+      </div>
+
+      <div className="flex flex-wrap items-center gap-2 rounded-2xl border border-white/80 bg-white p-3 shadow-sm">
+        <UserRound className="h-4 w-4 text-brand-blue" />
+        <span className="mr-1 text-[13px] font-bold text-brand-navy">My tasks</span>
+        <div className="flex items-center gap-1 rounded-full bg-brand-bg/70 p-1">
+          {MY_WORK_FILTERS.map((f) => (
+            <button
+              key={f.key}
+              type="button"
+              onClick={() => setSavedFilter(f.key)}
+              className={`rounded-full px-3 py-1.5 text-[12px] font-semibold transition ${
+                filter === f.key ? "bg-white text-brand-navy shadow-sm" : "text-brand-body/70 hover:text-brand-navy"
+              }`}
+            >
+              {f.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {!myId ? (
+        <EmptyState icon={UserRound} title="Identifying your work" body="Loading the tasks assigned to you." />
+      ) : grouped.length === 0 ? (
+        <EmptyState icon={CheckCircle2} title="Nothing here" body="No tasks match this view. Nice and clear." />
+      ) : (
+        <div className="space-y-4">
+          {grouped.map(([projectId, list]) => (
+            <div key={projectId} className="rounded-2xl border border-white/80 bg-white p-4 shadow-sm">
+              <button
+                type="button"
+                onClick={() => onOpenProject(projectId)}
+                className="mb-3 inline-flex items-center gap-1.5 text-[14px] font-bold text-brand-navy transition hover:text-brand-blue"
+              >
+                {projectName(projectId)} <ArrowRight className="h-3.5 w-3.5" />
+              </button>
+              <div className="grid gap-2">
+                {list.map((task) => {
+                  const days = daysUntil(task.due_date);
+                  const isDone = task.status === "completed" || task.status === "approved";
+                  return (
+                    <div key={task.id} className="flex flex-col gap-2 rounded-xl border border-brand-stroke/40 bg-brand-bg/30 p-3 sm:flex-row sm:items-center sm:justify-between">
+                      <div className="min-w-0">
+                        <p className="truncate text-[13px] font-bold text-brand-navy">{task.title}</p>
+                        <p className="mt-0.5 text-[11px] text-brand-body/55">
+                          {task.due_date ? `Due ${formatDate(task.due_date)}` : "No due date"}
+                          {days != null && !isDone && days < 0 && <span className="ml-1 font-bold text-rose-600">· {Math.abs(days)}d overdue</span>}
+                        </p>
+                      </div>
+                      <select
+                        value={task.status}
+                        onChange={(event) => onUpdateTask(task, { status: event.target.value })}
+                        className={`${smallInputClass} sm:w-44`}
+                      >
+                        {TASK_STATUS_OPTIONS.map((status) => <option key={status} value={status}>{label(status)}</option>)}
+                      </select>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
+// ── Timeline (lightweight Gantt) ────────────────────────────────────────────
+function TimelineTab({ milestones, tasks }: { milestones: MilestoneRow[]; tasks: TaskRow[] }) {
+  const rows = useMemo(() => {
+    return milestones
+      .map((m) => {
+        const startRaw = m.duration_start || m.due_date || m.duration_end;
+        const endRaw = m.due_date || m.duration_end || m.duration_start;
+        return startRaw && endRaw
+          ? { id: m.id, label: m.description, status: m.status, progress: m.progress || 0, start: new Date(startRaw).getTime(), end: new Date(endRaw).getTime() }
+          : null;
+      })
+      .filter((r): r is NonNullable<typeof r> => r != null && !Number.isNaN(r.start) && !Number.isNaN(r.end));
+  }, [milestones]);
+
+  const dueTasks = useMemo(
+    () => tasks.filter((t) => t.due_date).map((t) => ({ id: t.id, label: t.title, at: new Date(t.due_date as string).getTime() })).filter((t) => !Number.isNaN(t.at)),
+    [tasks],
+  );
+
+  if (rows.length === 0) {
+    return <EmptyState icon={CalendarRange} title="No dated milestones" body="Add start and due dates to milestones to see them on the timeline." />;
+  }
+
+  const min = Math.min(...rows.map((r) => r.start), ...dueTasks.map((t) => t.at));
+  const max = Math.max(...rows.map((r) => r.end), ...dueTasks.map((t) => t.at));
+  const span = Math.max(1, max - min);
+  const pct = (value: number) => `${Math.min(100, Math.max(0, ((value - min) / span) * 100))}%`;
+  const today = Date.now();
+  const todayInRange = today >= min && today <= max;
+
+  return (
+    <div className="rounded-2xl border border-brand-stroke/40 bg-white p-4 sm:p-5">
+      <div className="mb-3 flex items-center justify-between text-[11px] font-bold uppercase tracking-wide text-brand-body/50">
+        <span>{formatDate(new Date(min).toISOString())}</span>
+        <span>{formatDate(new Date(max).toISOString())}</span>
+      </div>
+      <div className="relative space-y-3">
+        {todayInRange && (
+          <div className="pointer-events-none absolute inset-y-0 z-10 w-px bg-brand-blue/60" style={{ left: pct(today) }}>
+            <span className="absolute -top-1 -translate-x-1/2 rounded-full bg-brand-blue px-1.5 py-0.5 text-[8px] font-bold text-white">TODAY</span>
+          </div>
+        )}
+        {rows.map((row) => {
+          const left = ((row.start - min) / span) * 100;
+          const width = Math.max(4, ((row.end - row.start) / span) * 100);
+          return (
+            <div key={row.id}>
+              <p className="mb-1 truncate text-[12px] font-semibold text-brand-navy">{row.label}</p>
+              <div className="relative h-7 rounded-full bg-brand-bg">
+                <div
+                  className="absolute inset-y-0 flex items-center overflow-hidden rounded-full bg-gradient-to-r from-blue-600 to-blue-500"
+                  style={{ left: `${left}%`, width: `${width}%` }}
+                >
+                  <div className="h-full rounded-full bg-blue-800/40" style={{ width: `${row.progress}%` }} />
+                  <span className="absolute left-2 text-[10px] font-bold text-white">{row.progress}%</span>
+                </div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// ── Command palette (⌘K) ────────────────────────────────────────────────────
+function CommandPalette({ projects, canCreateProject, onClose, onSelectProject, onNewProject, onNewTask, onTab, onMyWork }: {
+  projects: Project[];
+  canCreateProject: boolean;
+  onClose: () => void;
+  onSelectProject: (id: string) => void;
+  onNewProject?: () => void;
+  onNewTask: () => void;
+  onTab: (tab: string) => void;
+  onMyWork: () => void;
+}) {
+  const [q, setQ] = useState("");
+  const [active, setActive] = useState(0);
+
+  type Cmd = { id: string; label: string; hint: string; icon: React.ElementType; run: () => void };
+  const commands = useMemo<Cmd[]>(() => {
+    const list: Cmd[] = [];
+    if (canCreateProject && onNewProject) list.push({ id: "new-project", label: "New project", hint: "Create", icon: Plus, run: onNewProject });
+    list.push({ id: "new-task", label: "New task", hint: "Tasks", icon: Plus, run: onNewTask });
+    list.push({ id: "my-work", label: "My Work", hint: "Lens", icon: UserRound, run: onMyWork });
+    for (const t of ["overview", "tasks", "milestones", "timeline", "files", "approvals", "calendar"]) {
+      list.push({ id: `tab-${t}`, label: `Go to ${label(t)}`, hint: "Tab", icon: ArrowRight, run: () => onTab(t) });
+    }
+    for (const p of projects) {
+      list.push({ id: `project-${p.id}`, label: p.name, hint: p.client || "Project", icon: FolderKanban, run: () => onSelectProject(p.id) });
+    }
+    return list;
+  }, [projects, canCreateProject, onNewProject, onNewTask, onTab, onMyWork, onSelectProject]);
+
+  const filtered = useMemo(() => {
+    const needle = q.trim().toLowerCase();
+    if (!needle) return commands;
+    return commands.filter((c) => `${c.label} ${c.hint}`.toLowerCase().includes(needle));
+  }, [commands, q]);
+
+  useEffect(() => { setActive(0); }, [q]);
+
+  const runAt = (index: number) => {
+    const cmd = filtered[index];
+    if (!cmd) return;
+    cmd.run();
+    onClose();
+  };
+
+  return (
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      transition={{ duration: 0.12 }}
+      className="fixed inset-0 z-[80] flex items-start justify-center bg-brand-navy/40 px-4 pt-[12vh] backdrop-blur-sm"
+      onClick={onClose}
+    >
+      <motion.div
+        initial={{ opacity: 0, y: -8, scale: 0.98 }}
+        animate={{ opacity: 1, y: 0, scale: 1 }}
+        exit={{ opacity: 0, y: -8, scale: 0.98 }}
+        transition={{ duration: 0.16, ease: "easeOut" }}
+        onClick={(event) => event.stopPropagation()}
+        className="w-full max-w-xl overflow-hidden rounded-2xl border border-white/80 bg-white shadow-2xl"
+      >
+        <div className="flex items-center gap-2 border-b border-brand-stroke/40 px-4">
+          <Search className="h-4 w-4 shrink-0 text-brand-body/40" />
+          <input
+            autoFocus
+            value={q}
+            onChange={(event) => setQ(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "ArrowDown") { event.preventDefault(); setActive((a) => Math.min(filtered.length - 1, a + 1)); }
+              else if (event.key === "ArrowUp") { event.preventDefault(); setActive((a) => Math.max(0, a - 1)); }
+              else if (event.key === "Enter") { event.preventDefault(); runAt(active); }
+              else if (event.key === "Escape") { event.preventDefault(); onClose(); }
+            }}
+            placeholder="Jump to a project, task, or action..."
+            className="h-14 w-full bg-transparent text-[14px] font-medium text-brand-navy outline-none placeholder:text-brand-body/40"
+          />
+          <kbd className="hidden shrink-0 rounded-md border border-brand-stroke/60 bg-brand-bg px-1.5 py-0.5 text-[10px] font-bold text-brand-body/50 sm:block">ESC</kbd>
+        </div>
+        <div className="max-h-[52vh] overflow-y-auto p-2">
+          {filtered.length === 0 ? (
+            <p className="px-3 py-8 text-center text-[13px] text-brand-body/50">No matches.</p>
+          ) : (
+            filtered.map((cmd, index) => (
+              <button
+                key={cmd.id}
+                type="button"
+                onMouseEnter={() => setActive(index)}
+                onClick={() => runAt(index)}
+                className={`flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left transition ${
+                  active === index ? "bg-blue-50" : "hover:bg-brand-bg/60"
+                }`}
+              >
+                <span className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${active === index ? "bg-brand-blue text-white" : "bg-brand-bg text-brand-body/50"}`}>
+                  <cmd.icon className="h-4 w-4" />
+                </span>
+                <span className="min-w-0 flex-1 truncate text-[13px] font-semibold text-brand-navy">{cmd.label}</span>
+                <span className="shrink-0 text-[10px] font-bold uppercase tracking-wide text-brand-body/40">{cmd.hint}</span>
+              </button>
+            ))
+          )}
+        </div>
+      </motion.div>
+    </motion.div>
   );
 }

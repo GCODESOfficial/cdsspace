@@ -104,7 +104,7 @@ export default function TeamInvitePage() {
         );
       }
     } catch {
-      // sessionStorage blocked (private mode) — login page will render blank
+      // sessionStorage blocked (private mode) - login page will render blank
       // and user can type their freshly-chosen credentials manually.
     }
     router.replace("/team/login?welcome=invite");

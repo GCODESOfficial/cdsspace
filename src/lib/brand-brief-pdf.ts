@@ -1,13 +1,14 @@
 "use client";
 
 import jsPDF from "jspdf";
+import { installBrandFont } from "./pdf/pdf-fonts";
 import { BRAND_BRIEF_FIELD_LABELS, BrandBriefDraft } from "./brand-brief";
 
 /**
  * Client-side PDF export for a brand brief.
  *
  * Keeps the layout plain and readable: title band, section groupings, and a
- * CDS Space footer. No SVG / canvas rasterization needed — jsPDF can render
+ * CDS Space footer. No SVG / canvas rasterization needed - jsPDF can render
  * everything we want with text primitives.
  */
 export function exportBrandBriefToPdf(draft: BrandBriefDraft, opts?: {
@@ -16,6 +17,7 @@ export function exportBrandBriefToPdf(draft: BrandBriefDraft, opts?: {
     submittedAt?: string | null;
 }) {
     const doc = new jsPDF({ unit: "pt", format: "a4" });
+    installBrandFont(doc);
     const pageWidth = doc.internal.pageSize.getWidth();
     const pageHeight = doc.internal.pageSize.getHeight();
     const margin = 48;
@@ -27,25 +29,25 @@ export function exportBrandBriefToPdf(draft: BrandBriefDraft, opts?: {
     doc.setFillColor(4, 11, 55);
     doc.rect(0, 0, pageWidth, 90, "F");
     doc.setTextColor(255, 255, 255);
-    doc.setFont("helvetica", "bold");
+    doc.setFont("NeueCampton", "bold");
     doc.setFontSize(20);
     doc.text("Brand Brief", margin, 48);
-    doc.setFont("helvetica", "normal");
+    doc.setFont("NeueCampton", "normal");
     doc.setFontSize(11);
     doc.setTextColor(200, 220, 255);
-    doc.text("CDS Space — Branding Agency", margin, 68);
+    doc.text("CDS Space - Branding Agency", margin, 68);
 
     y = 120;
 
     // Meta row
     const title = draft.brand_name?.trim() || opts?.inviteLabel?.trim() || "Untitled brief";
     doc.setTextColor(13, 27, 57);
-    doc.setFont("helvetica", "bold");
+    doc.setFont("NeueCampton", "bold");
     doc.setFontSize(16);
     doc.text(title, margin, y);
     y += 18;
 
-    doc.setFont("helvetica", "normal");
+    doc.setFont("NeueCampton", "normal");
     doc.setFontSize(10);
     doc.setTextColor(100, 116, 139);
     const meta: string[] = [];
@@ -92,7 +94,7 @@ export function exportBrandBriefToPdf(draft: BrandBriefDraft, opts?: {
         doc.setLineWidth(0.5);
         doc.line(margin, y, pageWidth - margin, y);
         y += 18;
-        doc.setFont("helvetica", "bold");
+        doc.setFont("NeueCampton", "bold");
         doc.setFontSize(12);
         doc.setTextColor(10, 79, 232);
         doc.text(section.title.toUpperCase(), margin, y);
@@ -102,10 +104,10 @@ export function exportBrandBriefToPdf(draft: BrandBriefDraft, opts?: {
             const label = BRAND_BRIEF_FIELD_LABELS[key] ?? String(key);
             const raw = draft[key] as string | string[];
             const value = Array.isArray(raw) ? raw.join(", ") : (raw as string);
-            const display = value?.toString().trim() ? value.toString().trim() : "—";
+            const display = value?.toString().trim() ? value.toString().trim() : "-";
 
             // Label
-            doc.setFont("helvetica", "bold");
+            doc.setFont("NeueCampton", "bold");
             doc.setFontSize(10);
             doc.setTextColor(71, 85, 105);
             const labelLines = doc.splitTextToSize(label, innerWidth);
@@ -114,7 +116,7 @@ export function exportBrandBriefToPdf(draft: BrandBriefDraft, opts?: {
             y += labelLines.length * 12;
 
             // Value
-            doc.setFont("helvetica", "normal");
+            doc.setFont("NeueCampton", "normal");
             doc.setFontSize(11);
             doc.setTextColor(13, 27, 57);
             const valueLines = doc.splitTextToSize(display, innerWidth);
@@ -131,7 +133,7 @@ export function exportBrandBriefToPdf(draft: BrandBriefDraft, opts?: {
         doc.setPage(i);
         doc.setDrawColor(226, 232, 240);
         doc.line(margin, pageHeight - 50, pageWidth - margin, pageHeight - 50);
-        doc.setFont("helvetica", "normal");
+        doc.setFont("NeueCampton", "normal");
         doc.setFontSize(9);
         doc.setTextColor(148, 163, 184);
         doc.text("cdsspace.pro  •  Branding · Design · Build", margin, pageHeight - 32);

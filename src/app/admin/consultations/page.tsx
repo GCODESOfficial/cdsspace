@@ -5,8 +5,11 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
-import { Calendar, Mail, Phone, Building2, DollarSign, MessageSquare, Paperclip, Trash2, Search } from "lucide-react";
-import { appAlert, appConfirm, appPrompt } from "@/lib/app-notify";
+import { Calendar, Mail, Phone, Building2, DollarSign, MessageSquare, Paperclip, Trash2, Search, Video, Copy, Check, ExternalLink, Loader2, CalendarClock } from "lucide-react";
+import { appConfirm } from "@/lib/app-notify";
+import { toast } from "sonner";
+
+type MeetingType = "none" | "cmeet" | "zoom" | "google_meet" | "other";
 
 interface Consultation {
   id: string;
@@ -20,7 +23,23 @@ interface Consultation {
   status: "new" | "reviewing" | "scheduled" | "completed" | "archived";
   notes: string | null;
   scheduled_at: string | null;
+  meeting_type?: MeetingType | null;
+  meeting_link?: string | null;
   created_at: string;
+}
+
+function toLocalInput(iso: string | null) {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (!Number.isFinite(d.getTime())) return "";
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+function fullMeetingUrl(link: string | null | undefined) {
+  if (!link) return "";
+  if (/^https?:\/\//i.test(link)) return link;
+  if (typeof window !== "undefined") return `${window.location.origin}${link}`;
+  return link;
 }
 
 const STATUS_STYLES: Record<string, string> = {
@@ -37,6 +56,23 @@ export default function ConsultationsPage() {
   const [active, setActive] = useState<Consultation | null>(null);
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState<string>("all");
+
+  // Meeting scheduling (local edit state for the open request)
+  const [meet, setMeet] = useState<{ scheduled_at: string; meeting_type: MeetingType; meeting_link: string }>({ scheduled_at: "", meeting_type: "none", meeting_link: "" });
+  const [savingMeet, setSavingMeet] = useState(false);
+  const [genning, setGenning] = useState(false);
+  const [copied, setCopied] = useState(false);
+
+  useEffect(() => {
+    if (active) {
+      setMeet({
+        scheduled_at: toLocalInput(active.scheduled_at),
+        meeting_type: (active.meeting_type as MeetingType) || "none",
+        meeting_link: active.meeting_link || "",
+      });
+      setCopied(false);
+    }
+  }, [active]);
 
   const load = async () => {
     setLoading(true);
@@ -58,6 +94,54 @@ export default function ConsultationsPage() {
     if (!(await appConfirm("Delete this consultation request?"))) return;
     await fetch(`/api/admin/consultations/${id}`, { method: "DELETE" });
     setActive(null); load();
+  };
+
+  const patchActive = async (id: string, patch: Record<string, unknown>): Promise<Consultation | null> => {
+    const r = await fetch(`/api/admin/consultations/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(patch),
+    });
+    const d = await r.json();
+    if (!r.ok) { toast.error(d.error || "Failed"); return null; }
+    return d.consultation as Consultation;
+  };
+
+  const saveMeeting = async () => {
+    if (!active) return;
+    const scheduledIso = meet.scheduled_at ? new Date(meet.scheduled_at).toISOString() : null;
+    if (meet.meeting_type !== "none" && meet.meeting_type !== "cmeet" && !meet.meeting_link.trim()) {
+      toast.error("Paste the meeting link (Zoom / Google Meet / other).");
+      return;
+    }
+    setSavingMeet(true);
+    const updated = await patchActive(active.id, {
+      scheduled_at: scheduledIso,
+      meeting_type: meet.meeting_type,
+      meeting_link: meet.meeting_type === "none" ? null : meet.meeting_link.trim() || null,
+    });
+    setSavingMeet(false);
+    if (updated) { setActive(updated); load(); toast.success("Meeting saved"); }
+  };
+
+  const generateCmeet = async () => {
+    if (!active) return;
+    const scheduledIso = meet.scheduled_at ? new Date(meet.scheduled_at).toISOString() : null;
+    setGenning(true);
+    const updated = await patchActive(active.id, { generate_cmeet: true, scheduled_at: scheduledIso });
+    setGenning(false);
+    if (updated) {
+      setActive(updated);
+      setMeet((m) => ({ ...m, meeting_type: "cmeet", meeting_link: updated.meeting_link || "" }));
+      load();
+      toast.success("cMeet link created");
+    }
+  };
+
+  const copyLink = () => {
+    const url = fullMeetingUrl(active?.meeting_link);
+    if (!url) return;
+    navigator.clipboard.writeText(url).then(() => { setCopied(true); setTimeout(() => setCopied(false), 1800); }).catch(() => {});
   };
 
   const filtered = list.filter((c) => {
@@ -136,8 +220,8 @@ export default function ConsultationsPage() {
                   <tr key={c.id} className="border-t border-white/60 hover:bg-white/50 transition cursor-pointer" onClick={() => setActive(c)}>
                     <td className="px-5 py-4 font-semibold text-gray-900">{c.full_name}</td>
                     <td className="px-5 py-4 text-gray-600">{c.email}</td>
-                    <td className="px-5 py-4 text-gray-500">{c.company ?? "—"}</td>
-                    <td className="px-5 py-4 text-gray-500">{c.budget_range ?? "—"}</td>
+                    <td className="px-5 py-4 text-gray-500">{c.company ?? "-"}</td>
+                    <td className="px-5 py-4 text-gray-500">{c.budget_range ?? "-"}</td>
                     <td className="px-5 py-4 text-gray-500">{new Date(c.created_at).toLocaleDateString()}</td>
                     <td className="px-5 py-4">
                       <span className={`text-[10px] uppercase tracking-wider font-semibold px-2.5 py-1 rounded-full ${STATUS_STYLES[c.status]}`}>{c.status}</span>
@@ -200,6 +284,91 @@ export default function ConsultationsPage() {
                   </div>
                 )}
 
+                {/* Schedule a meeting */}
+                <div className="rounded-xl border border-violet-100 bg-violet-50/60 p-4 space-y-3">
+                  <div className="flex items-center gap-2 text-[10px] uppercase tracking-wider text-violet-700 font-semibold">
+                    <CalendarClock className="w-3.5 h-3.5" /> Schedule a meeting
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label className="text-[11px] uppercase tracking-wide text-gray-500">Date &amp; time</label>
+                      <input
+                        type="datetime-local"
+                        value={meet.scheduled_at}
+                        onChange={(e) => setMeet({ ...meet, scheduled_at: e.target.value })}
+                        className="mt-1.5 h-11 w-full rounded-xl border border-gray-200 bg-white px-3 text-sm outline-none focus:border-violet-400"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[11px] uppercase tracking-wide text-gray-500">Platform</label>
+                      <Select value={meet.meeting_type} onValueChange={(v) => setMeet({ ...meet, meeting_type: v as MeetingType })}>
+                        <SelectTrigger className="h-11 rounded-xl mt-1.5 bg-white"><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="none">No meeting yet</SelectItem>
+                          <SelectItem value="cmeet">cMeet (built-in)</SelectItem>
+                          <SelectItem value="zoom">Zoom</SelectItem>
+                          <SelectItem value="google_meet">Google Meet</SelectItem>
+                          <SelectItem value="other">Other link</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+
+                  {meet.meeting_type === "cmeet" && (
+                    <div>
+                      <button
+                        type="button"
+                        onClick={generateCmeet}
+                        disabled={genning}
+                        className="inline-flex items-center gap-2 rounded-xl bg-violet-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-violet-700 disabled:opacity-60"
+                      >
+                        {genning ? <Loader2 className="w-4 h-4 animate-spin" /> : <Video className="w-4 h-4" />}
+                        {active.meeting_link && active.meeting_type === "cmeet" ? "Regenerate cMeet link" : "Generate cMeet link"}
+                      </button>
+                      <p className="mt-1.5 text-[11px] text-gray-500">Creates a scheduled cMeet room now so you can share the link ahead of the meeting date.</p>
+                    </div>
+                  )}
+
+                  {(meet.meeting_type === "zoom" || meet.meeting_type === "google_meet" || meet.meeting_type === "other") && (
+                    <div>
+                      <label className="text-[11px] uppercase tracking-wide text-gray-500">
+                        {meet.meeting_type === "zoom" ? "Zoom link" : meet.meeting_type === "google_meet" ? "Google Meet link" : "Meeting link"}
+                      </label>
+                      <input
+                        type="url"
+                        value={meet.meeting_link}
+                        onChange={(e) => setMeet({ ...meet, meeting_link: e.target.value })}
+                        placeholder="https://…"
+                        className="mt-1.5 h-11 w-full rounded-xl border border-gray-200 bg-white px-3 text-sm outline-none focus:border-violet-400"
+                      />
+                    </div>
+                  )}
+
+                  {/* Current saved link */}
+                  {active.meeting_link && (
+                    <div className="flex items-center gap-2 rounded-lg bg-white border border-violet-100 px-3 py-2">
+                      <Video className="w-4 h-4 text-violet-600 shrink-0" />
+                      <span className="flex-1 truncate text-[13px] text-gray-700">{fullMeetingUrl(active.meeting_link)}</span>
+                      <button type="button" onClick={copyLink} className="p-1.5 rounded-md hover:bg-gray-100" title="Copy link">
+                        {copied ? <Check className="w-4 h-4 text-emerald-600" /> : <Copy className="w-4 h-4 text-gray-500" />}
+                      </button>
+                      <a href={fullMeetingUrl(active.meeting_link)} target="_blank" rel="noopener noreferrer" className="p-1.5 rounded-md hover:bg-gray-100" title="Open">
+                        <ExternalLink className="w-4 h-4 text-gray-500" />
+                      </a>
+                    </div>
+                  )}
+
+                  <button
+                    type="button"
+                    onClick={saveMeeting}
+                    disabled={savingMeet}
+                    className="inline-flex items-center gap-2 rounded-xl border border-violet-200 bg-white px-4 py-2.5 text-sm font-semibold text-violet-700 hover:bg-violet-50 disabled:opacity-60"
+                  >
+                    {savingMeet ? <Loader2 className="w-4 h-4 animate-spin" /> : <CalendarClock className="w-4 h-4" />} Save meeting
+                  </button>
+                </div>
+
                 <div className="grid grid-cols-1 gap-3">
                   <div>
                     <label className="text-xs uppercase tracking-wide text-gray-500">Status</label>
@@ -229,7 +398,7 @@ export default function ConsultationsPage() {
                   <Button variant="outline" className="rounded-xl text-red-600 border-red-200 hover:bg-red-50" onClick={() => remove(active.id)}>
                     <Trash2 className="w-4 h-4 mr-1.5" /> Delete
                   </Button>
-                  <a href={`mailto:${active.email}`} className="inline-flex items-center gap-2 h-11 px-5 rounded-xl bg-gradient-to-b from-blue-600 to-blue-700 text-white font-medium shadow-lg shadow-blue-600/30 hover:from-blue-600 hover:to-blue-800 transition">
+                  <a href={buildReplyMailto(active)} className="inline-flex items-center gap-2 h-11 px-5 rounded-xl bg-gradient-to-b from-blue-600 to-blue-700 text-white font-medium shadow-lg shadow-blue-600/30 hover:from-blue-600 hover:to-blue-800 transition">
                     <Mail className="w-4 h-4" /> Reply by Email
                   </a>
                 </div>
@@ -240,6 +409,19 @@ export default function ConsultationsPage() {
       </Dialog>
     </div>
   );
+}
+
+function buildReplyMailto(c: Consultation) {
+  const subject = "Your CDS Space consultation";
+  const lines = [`Hi ${c.full_name.split(" ")[0]},`, ""];
+  if (c.scheduled_at) {
+    lines.push(`Your consultation is scheduled for ${new Date(c.scheduled_at).toLocaleString()}.`);
+  }
+  if (c.meeting_link) {
+    lines.push(`Join here: ${fullMeetingUrl(c.meeting_link)}`);
+  }
+  lines.push("", "Best regards,", "CDS Space");
+  return `mailto:${c.email}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(lines.join("\n"))}`;
 }
 
 function Info({ icon: Icon, label, children }: { icon: React.ComponentType<{ className?: string }>; label: string; children: React.ReactNode }) {

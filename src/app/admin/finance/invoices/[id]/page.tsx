@@ -5,14 +5,14 @@ import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Copy, Download, Trash2, ExternalLink, Truck, Rocket, Zap, Clock as ClockIcon, Check, Share2, Pencil, History, RotateCcw, Loader2 } from "lucide-react";
-import { exportInvoiceToPdf } from "@/lib/invoice-pdf";
+import { Copy, Download, Trash2, ExternalLink, Truck, Rocket, Zap, Clock as ClockIcon, Check, Share2, Pencil, History, RotateCcw, Loader2, Mail } from "lucide-react";
 import FinanceShell, { glassCard } from "@/components/finance/FinanceShell";
 import InvoiceDocument from "@/components/finance/InvoiceDocument";
 import { DELIVERY_SPEEDS, type DeliverySpeed, type FinanceInvoice, type FinanceInvoiceItem } from "@/lib/finance/types";
 import { buildInvoiceShareMessage } from "@/lib/finance/share";
 import DeliverySurchargeModal from "@/components/finance/DeliverySurchargeModal";
-import { appAlert, appConfirm } from "@/lib/app-notify";
+import CreateProjectFromInvoiceModal, { type InvoiceForProject } from "@/components/finance/CreateProjectFromInvoiceModal";
+import { appAlert, appConfirm, appToast, appPrompt } from "@/lib/app-notify";
 
 interface VersionRow {
   id: string;
@@ -48,10 +48,12 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
   const [shareOpen, setShareOpen] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [historyOpen, setHistoryOpen] = useState(false);
+  const [projectPrompt, setProjectPrompt] = useState<InvoiceForProject | null>(null);
   const [versions, setVersions] = useState<VersionRow[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [historyError, setHistoryError] = useState<string | null>(null);
   const [restoringVersionId, setRestoringVersionId] = useState<string | null>(null);
+  const [emailing, setEmailing] = useState(false);
 
   const onSpeedClick = (value: DeliverySpeed) => {
     if (invoice?.delivery_speed === value) return;
@@ -160,6 +162,10 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
   const updateStatus = async (status: string) => {
     await fetch(`/api/admin/finance/invoices/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ status }) });
     load();
+    // Offer to create a project once it's settled (unless already linked).
+    if (status === "paid" && invoice && !(invoice as { project_id?: string | null }).project_id) {
+      setProjectPrompt(invoice as unknown as InvoiceForProject);
+    }
   };
 
   const patchInvoice = async (patch: Partial<FinanceInvoice>) => {
@@ -182,6 +188,34 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
     navigator.clipboard.writeText(shareMessage);
     setCopied(true);
     setTimeout(() => setCopied(false), 1500);
+  };
+
+  const sendViaEmail = async () => {
+    if (!invoice) return;
+    const to = await appPrompt({
+      title: "Email invoice",
+      message: `Send ${invoice.invoice_number} to:`,
+      defaultValue: invoice.client_email || "",
+      placeholder: "client@email.com",
+      inputType: "email",
+      confirmLabel: "Send",
+    });
+    if (!to || !to.trim()) return;
+    setEmailing(true);
+    try {
+      const r = await fetch("/api/admin/finance/share", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ kind: "invoice", id, to: to.trim() }),
+      });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok || !j.ok) throw new Error(j.error || "Failed to send");
+      appToast({ message: `Invoice emailed to ${j.to}`, kind: "success" });
+    } catch (e) {
+      appAlert(e instanceof Error ? e.message : "Could not send the email");
+    } finally {
+      setEmailing(false);
+    }
   };
 
   if (loadError) {
@@ -235,7 +269,7 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
           <Button
             variant="outline"
             className="h-11 px-4 rounded-xl"
-            onClick={() => invoice && exportInvoiceToPdf(invoice, items)}
+            onClick={async () => { if (invoice) { const { exportInvoiceToPdf } = await import("@/lib/invoice-pdf"); exportInvoiceToPdf(invoice, items); } }}
           >
             <Download className="w-4 h-4 mr-1.5" /> PDF
           </Button>
@@ -249,6 +283,9 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
           <div className="text-sm font-mono text-gray-700 truncate">{publicUrl}</div>
         </div>
         <div className="flex gap-2 items-center">
+          <Button variant="outline" size="sm" className="rounded-lg" onClick={sendViaEmail} disabled={emailing}>
+            {emailing ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : <Mail className="w-4 h-4 mr-1" />}Email
+          </Button>
           <Button variant="outline" size="sm" className="rounded-lg" onClick={copyLink}><Copy className="w-4 h-4 mr-1" />{copied ? "Copied" : "Copy"}</Button>
           <a href={publicUrl} target="_blank" rel="noopener noreferrer">
             <Button variant="outline" size="sm" className="rounded-lg"><ExternalLink className="w-4 h-4 mr-1" />Open</Button>
@@ -453,6 +490,14 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
           currency={invoice.currency}
           onCancel={() => setPendingSpeed(null)}
           onConfirm={confirmSurcharge}
+        />
+      )}
+
+      {projectPrompt && (
+        <CreateProjectFromInvoiceModal
+          invoice={projectPrompt}
+          onClose={() => setProjectPrompt(null)}
+          onCreated={() => { setProjectPrompt(null); load(); appAlert("Project created from invoice."); }}
         />
       )}
     </FinanceShell>

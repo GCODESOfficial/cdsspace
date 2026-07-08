@@ -41,7 +41,7 @@ export async function verifyAdmin() {
       .maybeSingle();
 
     let id = profile?.id as string | undefined;
-    // Sub-admins may not have a profiles row — attribute their sends to the
+    // Sub-admins may not have a profiles row - attribute their sends to the
     // super-admin profile so the FK holds and UI labels them as admin.
     if (!id) {
       const { data: superAdminProfile } = await supabaseAdmin

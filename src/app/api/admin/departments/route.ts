@@ -1,23 +1,17 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { NextResponse } from "next/server";
-import { cookies } from "next/headers";
 import { supabaseAdmin } from "@/lib/supabase";
+import { getAdminSession } from "@/lib/admin-session";
+import { glashQuery } from "@/lib/glashdb/postgres";
 
 export const runtime = "nodejs";
 
+// Canonical resolver: admin_session cookie OR sub-admin team_session.
 async function verifyAdmin() {
-  const store = await cookies();
-  const raw = store.get("admin_session")?.value;
-  if (!raw) return null;
-  try {
-    const s = JSON.parse(raw);
-    return s.role === "super_admin" || s.role === "sub_admin" ? s : null;
-  } catch {
-    return null;
-  }
+  return getAdminSession();
 }
 
-// GET — list departments with member + message counts
+// GET - list departments with member + message counts
 export async function GET() {
   const admin = await verifyAdmin();
   if (!admin || !supabaseAdmin) {
@@ -31,17 +25,29 @@ export async function GET() {
     .order("name");
   if (error) return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
 
-  // Hydrate counts
+  // Hydrate member counts from the many-to-many junction. Falls back to the
+  // legacy department_id count if the junction migration hasn't been applied.
   const depIds = (deps || []).map((d: any) => d.id);
   const counts: Record<string, number> = {};
   if (depIds.length) {
-    const { data: members } = await db
-      .from("team_members")
-      .select("department_id")
-      .in("department_id", depIds);
-    (members || []).forEach((m: any) => {
-      counts[m.department_id] = (counts[m.department_id] || 0) + 1;
-    });
+    try {
+      const rows = await glashQuery<{ department_id: string; n: number }>(
+        `select department_id, count(*)::int as n
+           from public.team_member_departments
+          where department_id = any($1::uuid[])
+          group by department_id`,
+        [depIds],
+      );
+      rows.forEach((r) => { counts[r.department_id] = r.n; });
+    } catch {
+      const { data: members } = await db
+        .from("team_members")
+        .select("department_id")
+        .in("department_id", depIds);
+      (members || []).forEach((m: any) => {
+        counts[m.department_id] = (counts[m.department_id] || 0) + 1;
+      });
+    }
   }
 
   return NextResponse.json({
@@ -50,7 +56,7 @@ export async function GET() {
   });
 }
 
-// POST — create a department + auto-create its team chat thread
+// POST - create a department + auto-create its team chat thread
 export async function POST(req: Request) {
   const admin = await verifyAdmin();
   if (!admin || !supabaseAdmin) {
@@ -91,15 +97,33 @@ export async function POST(req: Request) {
 
   await db.from("departments").update({ thread_id: thread.id }).eq("id", dep.id);
 
-  // Optionally seed members now. The DB trigger will also attach them to the thread.
+  // Optionally seed members now — via the junction (additive), plus set their
+  // primary department if unset, and add them to the new chat channel.
   if (Array.isArray(member_ids) && member_ids.length) {
-    await db.from("team_members").update({ department_id: dep.id, department: dep.name }).in("id", member_ids);
+    const ids = member_ids.map(String);
+    await glashQuery(
+      `insert into public.team_member_departments (team_member_id, department_id)
+       select unnest($1::uuid[]), $2::uuid
+       on conflict (team_member_id, department_id) do nothing`,
+      [ids, dep.id],
+    );
+    await glashQuery(
+      `update public.team_members set department_id = $2, department = $3
+        where id = any($1::uuid[]) and department_id is null`,
+      [ids, dep.id, dep.name],
+    );
+    await glashQuery(
+      `insert into public.team_chat_participants (thread_id, team_member_id, role)
+       select $1::uuid, unnest($2::uuid[]), 'member'
+       on conflict (thread_id, team_member_id) do nothing`,
+      [thread.id, ids],
+    );
   }
 
   return NextResponse.json({ ok: true, department: { ...dep, thread_id: thread.id } });
 }
 
-// PATCH — rename / update description
+// PATCH - rename / update description
 export async function PATCH(req: Request) {
   const admin = await verifyAdmin();
   if (!admin || !supabaseAdmin) {
@@ -125,7 +149,7 @@ export async function PATCH(req: Request) {
   return NextResponse.json({ ok: true });
 }
 
-// DELETE — remove a department. Unlinks members (department_id → null) and
+// DELETE - remove a department. Unlinks members (department_id → null) and
 // deletes the chat thread (cascades participants + messages).
 export async function DELETE(req: Request) {
   const admin = await verifyAdmin();

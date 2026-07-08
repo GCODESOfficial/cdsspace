@@ -26,8 +26,18 @@ interface SubAdmin {
   created_at: string;
 }
 
+interface TeamAdmin {
+  id: string;
+  full_name: string;
+  email: string | null;
+  role_title: string | null;
+  permissions: string[] | null;
+  is_active: boolean;
+}
+
 export default function SubAdminsPage() {
   const [subAdmins, setSubAdmins] = useState<SubAdmin[]>([]);
+  const [teamAdmins, setTeamAdmins] = useState<TeamAdmin[]>([]);
   const [isFetching, setIsFetching] = useState(true);
   const [isCreating, setIsCreating] = useState(false);
   const [showForm, setShowForm] = useState(false);
@@ -178,11 +188,17 @@ export default function SubAdminsPage() {
 
   async function fetchSubAdmins() {
     setIsFetching(true);
-    const { data, error } = await supabase
-      .from("sub_admins")
-      .select("*")
-      .order("created_at", { ascending: false });
+    const [{ data, error }, teamRes] = await Promise.all([
+      supabase.from("sub_admins").select("*").order("created_at", { ascending: false }),
+      // Team members who have been granted an admin role (is_sub_admin) show here too.
+      supabase
+        .from("team_members")
+        .select("id, full_name, email, role_title, permissions, is_active")
+        .eq("is_sub_admin", true)
+        .order("full_name", { ascending: true }),
+    ]);
     if (!error) setSubAdmins(data || []);
+    if (!teamRes.error) setTeamAdmins((teamRes.data as TeamAdmin[]) || []);
     setIsFetching(false);
   }
 
@@ -474,14 +490,14 @@ export default function SubAdminsPage() {
             {roles.length > 0 && (
               <div>
                 <label className="block text-xs font-medium text-gray-500 mb-1.5">
-                  Apply a role (optional) <span className="text-gray-300">— fills the permission list below</span>
+                  Apply a role (optional) <span className="text-gray-300">- fills the permission list below</span>
                 </label>
                 <select
                   value={selectedRoleId}
                   onChange={(e) => applyRoleToSubAdminForm(e.target.value)}
                   className="w-full px-4 py-2.5 rounded-xl bg-gray-50 border border-gray-200 text-sm text-gray-800 focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-300 transition"
                 >
-                  <option value="">— Start from scratch —</option>
+                  <option value="">- Start from scratch -</option>
                   {roles.map((r) => (
                     <option key={r.id} value={r.id}>
                       {r.name} ({r.permissions.length} perm{r.permissions.length === 1 ? "" : "s"})
@@ -496,7 +512,7 @@ export default function SubAdminsPage() {
               </div>
             )}
 
-            {/* Permissions — grouped */}
+            {/* Permissions - grouped */}
             <div>
               <div className="flex items-center justify-between mb-3">
                 <label className="text-xs font-medium text-gray-500">
@@ -600,7 +616,7 @@ export default function SubAdminsPage() {
       <div className="bg-white rounded-2xl border border-gray-100 shadow-sm">
         <div className="px-6 py-4 border-b border-gray-100">
           <h2 className="text-[15px] font-semibold text-[#0D1B39]">
-            Team Members <span className="text-gray-400 font-normal">({subAdmins.length})</span>
+            Team Members <span className="text-gray-400 font-normal">({subAdmins.length + teamAdmins.length})</span>
           </h2>
         </div>
 
@@ -608,11 +624,11 @@ export default function SubAdminsPage() {
           <div className="flex justify-center py-12">
             <Loader2 className="w-6 h-6 animate-spin text-blue-400" />
           </div>
-        ) : subAdmins.length === 0 ? (
+        ) : subAdmins.length === 0 && teamAdmins.length === 0 ? (
           <div className="text-center py-12">
             <Shield className="w-10 h-10 text-gray-200 mx-auto mb-3" />
-            <p className="text-gray-400 text-sm">No sub-admins yet</p>
-            <p className="text-gray-300 text-xs mt-1">Click &quot;Add Sub-Admin&quot; to create one</p>
+            <p className="text-gray-400 text-sm">No admin team members yet</p>
+            <p className="text-gray-300 text-xs mt-1">Add a sub-admin, or give a team member an admin role</p>
           </div>
         ) : (
           <div className="divide-y divide-gray-50">
@@ -686,6 +702,60 @@ export default function SubAdminsPage() {
                 </div>
               </div>
             ))}
+
+            {/* Team members granted an admin role (managed under Team Members) */}
+            {teamAdmins.map((member) => {
+              const perms = member.permissions || [];
+              return (
+                <div key={`team-${member.id}`} className="px-6 py-4 hover:bg-gray-50/50 transition">
+                  <div className="flex items-start justify-between">
+                    <div className="flex items-start gap-3">
+                      <div className={`w-10 h-10 rounded-xl flex items-center justify-center text-sm font-bold flex-shrink-0 ${
+                        member.is_active ? "bg-violet-50 text-violet-600" : "bg-gray-100 text-gray-400"
+                      }`}>
+                        {member.full_name.charAt(0).toUpperCase()}
+                      </div>
+                      <div>
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <p className="text-[14px] font-semibold text-[#0D1B39]">{member.full_name}</p>
+                          <span className="px-2 py-0.5 rounded-md bg-violet-50 text-violet-600 text-[10px] font-semibold">
+                            TEAM MEMBER
+                          </span>
+                          {member.role_title && (
+                            <span className="px-2 py-0.5 rounded-md bg-gray-100 text-gray-500 text-[10px] font-medium">{member.role_title}</span>
+                          )}
+                          {!member.is_active && (
+                            <span className="px-2 py-0.5 rounded-md bg-gray-100 text-gray-400 text-[10px] font-medium">DISABLED</span>
+                          )}
+                        </div>
+                        <p className="text-[12px] text-gray-400 mt-0.5">{member.email || "-"}</p>
+                        <div className="flex flex-wrap gap-1.5 mt-2">
+                          {perms.length === 0 ? (
+                            <span className="text-[11px] text-gray-300">No permissions assigned</span>
+                          ) : perms.map((perm) => {
+                            const subPerm = ALL_PERMISSIONS.find((p) => p.key === perm);
+                            const groupPerm = PERMISSION_GROUPS.find((g) => g.key === perm);
+                            const permLabel = subPerm?.label || groupPerm?.label || perm;
+                            return (
+                              <span key={perm} className="px-2 py-0.5 rounded-md bg-blue-50 text-[#0A4FE8] text-[10px] font-medium">
+                                {permLabel}
+                              </span>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    </div>
+                    <a
+                      href="/admin/team-members"
+                      className="flex-shrink-0 inline-flex items-center gap-1.5 rounded-lg border border-gray-200 px-3 py-1.5 text-[12px] font-semibold text-gray-500 hover:border-[#0A4FE8] hover:text-[#0A4FE8] transition"
+                      title="Manage this team member"
+                    >
+                      <Pencil className="w-3.5 h-3.5" /> Manage
+                    </a>
+                  </div>
+                </div>
+              );
+            })}
           </div>
         )}
       </div>
@@ -702,7 +772,7 @@ export default function SubAdminsPage() {
                 <h2 className="text-lg font-bold text-[#0D1B39]">Invite link ready</h2>
                 <p className="text-sm text-gray-500 mt-1">
                   Share this with <strong>{invite.name}</strong> ({invite.email}).
-                  When they click it, the login page fills in their email and password automatically — once.
+                  When they click it, the login page fills in their email and password automatically - once.
                 </p>
               </div>
               <button
@@ -743,7 +813,7 @@ export default function SubAdminsPage() {
             </div>
 
             <div className="mt-4 pt-4 border-t border-gray-100 text-[11px] text-gray-500 leading-snug">
-              <strong>Security:</strong> this link is single-use. The password is never in the URL — the server only returns it once, when the new sub-admin opens the link.
+              <strong>Security:</strong> this link is single-use. The password is never in the URL - the server only returns it once, when the new sub-admin opens the link.
             </div>
           </div>
         </div>

@@ -91,7 +91,7 @@ export default function ContractorDetailPage({ params }: { params: Promise<{ id:
             </div>
             <div>
               <h3 className="font-semibold text-gray-900">{contractor.name}</h3>
-              <p className="text-xs text-gray-500">Since {contractor.start_date ? new Date(contractor.start_date).toLocaleDateString() : "—"}</p>
+              <p className="text-xs text-gray-500">Since {contractor.start_date ? new Date(contractor.start_date).toLocaleDateString() : "-"}</p>
             </div>
           </div>
           <div className="space-y-2 text-sm">
@@ -128,7 +128,7 @@ export default function ContractorDetailPage({ params }: { params: Promise<{ id:
                   setAssignForm({ ...assignForm, project_id: v, currency: p?.currency ?? "NGN" });
                 }}>
                   <SelectTrigger className="h-11 rounded-xl"><SelectValue placeholder="Select project" /></SelectTrigger>
-                  <SelectContent>{projects.map((p) => <SelectItem key={p.id} value={p.id}>{p.name} — {p.client}</SelectItem>)}</SelectContent>
+                  <SelectContent>{projects.map((p) => <SelectItem key={p.id} value={p.id}>{p.name} - {p.client}</SelectItem>)}</SelectContent>
                 </Select>
               </Field>
               <Field label={`Agreed Amount (${assignForm.currency})`}><Input type="number" className="h-11 rounded-xl" value={assignForm.agreed_amount} onChange={(e) => setAssignForm({ ...assignForm, agreed_amount: e.target.value })} /></Field>
@@ -179,7 +179,7 @@ export default function ContractorDetailPage({ params }: { params: Promise<{ id:
                   <SelectTrigger className="h-11 rounded-xl"><SelectValue placeholder="No project" /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="_none">No project</SelectItem>
-                    {projects.map((p) => <SelectItem key={p.id} value={p.id}>{p.name} — {p.client}</SelectItem>)}
+                    {projects.map((p) => <SelectItem key={p.id} value={p.id}>{p.name} - {p.client}</SelectItem>)}
                   </SelectContent>
                 </Select>
               </Field>

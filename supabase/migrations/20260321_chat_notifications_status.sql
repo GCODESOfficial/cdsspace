@@ -1,5 +1,5 @@
 -- ═══════════════════════════════════════════════════════════════════════
--- CDS Space — Full Database Setup (Supabase)
+-- CDS Space - Full Database Setup (Supabase)
 -- Run this in your Supabase SQL Editor
 -- ═══════════════════════════════════════════════════════════════════════
 

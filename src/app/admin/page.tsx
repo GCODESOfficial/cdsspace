@@ -1,14 +1,18 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import dynamic from "next/dynamic";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
-import { CarrierLinkModal } from "@/components/carrier-link-modal";
-import { AdvertisementModal } from "@/components/advertisement-modal";
-import { FeaturedWorksModal } from "@/components/featured-brands-modal";
 import { UploadedWorksTable } from "@/components/uploaded-works-table";
 import { FeaturedWorksList } from "@/components/featured-brands-list";
-import { getWorks } from "@/lib/storage-service";
+import { supabase } from "@/lib/supabase";
+
+// Modals only render on interaction — lazy-load them so they stay out of the
+// initial dashboard bundle.
+const CarrierLinkModal = dynamic(() => import("@/components/carrier-link-modal").then((m) => m.CarrierLinkModal), { ssr: false });
+const AdvertisementModal = dynamic(() => import("@/components/advertisement-modal").then((m) => m.AdvertisementModal), { ssr: false });
+const FeaturedWorksModal = dynamic(() => import("@/components/featured-brands-modal").then((m) => m.FeaturedWorksModal), { ssr: false });
 import { Search, Star, Megaphone, Link2, TrendingUp, Globe, FolderOpen, BarChart3, ShieldCheck, Mail, BriefcaseBusiness, Building2, KeyRound, CheckCircle2, ArrowRight, ArrowRightLeft } from "lucide-react";
 import { logVisit } from "@/utils/logVisit";
 import AdminNotificationBell from "@/components/notifications/admin-notification-bell";
@@ -47,7 +51,7 @@ export default function AdminDashboard() {
 			setLast7days(data.last7days || []);
 		};
 		fetchTraffic();
-		const interval = setInterval(fetchTraffic, 10000);
+		const interval = setInterval(() => { if (!document.hidden) fetchTraffic(); }, 30000);
 		return () => clearInterval(interval);
 	}, [hasDashboardAccess]);
 
@@ -56,8 +60,9 @@ export default function AdminDashboard() {
 		const fetchWorkCount = async () => {
 			try {
 				setIsLoading(true);
-				const works = await getWorks();
-				setWorkCount(works.length);
+				// Count only — don't fetch every work row just to read .length.
+				const { count } = await supabase.from("works").select("id", { count: "exact", head: true });
+				setWorkCount(count ?? 0);
 			} catch (error) {
 				console.error("Error fetching work count:", error);
 			} finally {
@@ -174,10 +179,10 @@ export default function AdminDashboard() {
 				</div>
 			</div>
 
-			{/* Modals */}
-			<CarrierLinkModal isOpen={isCarrierModalOpen} onClose={() => setIsCarrierModalOpen(false)} />
-			<AdvertisementModal isOpen={isAdModalOpen} onClose={() => setIsAdModalOpen(false)} />
-			<FeaturedWorksModal isOpen={isBrandsModalOpen} onClose={() => setIsBrandsModalOpen(false)} />
+			{/* Modals — mounted only when open so their code loads on demand. */}
+			{isCarrierModalOpen && <CarrierLinkModal isOpen={isCarrierModalOpen} onClose={() => setIsCarrierModalOpen(false)} />}
+			{isAdModalOpen && <AdvertisementModal isOpen={isAdModalOpen} onClose={() => setIsAdModalOpen(false)} />}
+			{isBrandsModalOpen && <FeaturedWorksModal isOpen={isBrandsModalOpen} onClose={() => setIsBrandsModalOpen(false)} />}
 		</div>
 	);
 }

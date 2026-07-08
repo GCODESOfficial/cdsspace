@@ -2,7 +2,6 @@
 
 import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
-import Image from "next/image";
 import { cn } from "@/lib/utils";
 import { supabase } from "@/lib/supabase";
 
@@ -15,27 +14,9 @@ interface Testimonial {
 
 const TestimonialCard = ({ testimonial }: { testimonial: Testimonial }) => (
     <div className="bg-[#EAEFF7] p-4 md:p-6 pb-8 rounded-[24px] flex flex-col gap-6 w-full">
-        <div className="flex items-center gap-2">
-            <div className="relative w-11 h-11 rounded-[16px] overflow-hidden bg-brand-stroke-ii/50 shrink-0">
-                {testimonial.picture_url ? (
-                    <Image
-                        src={testimonial.picture_url}
-                        alt={testimonial.name}
-                        fill
-                        quality={90}
-                        sizes="44px"
-                        className="object-cover"
-                    />
-                ) : (
-                    <div className="w-full h-full bg-[#C8D1E0] flex items-center justify-center text-white text-lg font-bold">
-                        {testimonial.name.charAt(0).toUpperCase()}
-                    </div>
-                )}
-            </div>
-            <span className="text-[18px] font-semibold text-brand-navy tracking-tight">
-                {testimonial.name}
-            </span>
-        </div>
+        <span className="text-[18px] font-semibold text-brand-navy tracking-tight">
+            {testimonial.name}
+        </span>
         <p className="text-[16px] font-medium text-brand-body leading-relaxed tracking-tight">
             {testimonial.review}
         </p>

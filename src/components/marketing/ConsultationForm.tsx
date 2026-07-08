@@ -122,7 +122,7 @@ export const ConsultationForm = () => {
                         <div className="mb-6 flex items-start gap-3 rounded-2xl bg-emerald-50 border border-emerald-200 p-4">
                             <CheckCircle2 className="w-6 h-6 text-emerald-600 flex-shrink-0 mt-0.5" />
                             <div>
-                                <p className="font-bold text-emerald-900">Thanks — we&apos;ve received your request!</p>
+                                <p className="font-bold text-emerald-900">Thanks - we&apos;ve received your request!</p>
                                 <p className="text-sm text-emerald-800 mt-0.5">Our team will reach out within 24 hours to schedule your session.</p>
                             </div>
                         </div>

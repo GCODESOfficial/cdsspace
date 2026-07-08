@@ -3,6 +3,11 @@ import { financeDb, requireFinanceAdminAsync } from "@/lib/finance/api-auth";
 import { isMissingInvoiceExtensionColumn, stripInvoiceExtensionFields } from "@/lib/finance/invoice-schema-fallback";
 import { logActivity } from "@/lib/activity-log";
 import { recordResourceVersion } from "@/lib/admin-versioning";
+import { sendEmail } from "@/lib/email-from";
+import { brandedEmailHtml } from "@/lib/email-template";
+import { formatMoney } from "@/lib/finance/types";
+
+const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL?.replace(/\/$/, "") || "https://cdsspace.pro";
 
 async function getInvoiceSnapshot(sb: any, id: string) {
   const { data: invoice, error } = await sb
@@ -42,7 +47,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     : "finance_invoices.edit";
   const denied = await requireFinanceAdminAsync(req, permissionKey); if (denied) return denied;
   const allowed = [
-    "status", "client_name", "client_email", "client_address", "due_date", "notes",
+    "status", "client_name", "client_email", "client_address", "issue_date", "due_date", "notes",
     "payment_terms", "revisions_note", "working_hours", "delivery_speed", "delivery_period",
     "currency", "tax_rate", "discount", "scope", "period_month", "project_id", "milestone_id",
   ];
@@ -120,6 +125,39 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     after_data: { invoice: data, items: afterItems ?? before.items },
     metadata: { patch },
   });
+
+  // Payment-confirmation email - fires only on the transition INTO "paid", and
+  // only when the invoice carries a client email. Best-effort (never blocks the
+  // status update).
+  if (patch.status === "paid" && before.invoice.status !== "paid" && data?.client_email) {
+    try {
+      const url = `${SITE_URL}/invoice/${data.public_token}`;
+      const html = brandedEmailHtml(
+        `
+        <h2 style="margin:0 0 12px;color:#0D1B39;">Payment confirmed</h2>
+        <p>Hi ${data.client_name || "there"},</p>
+        <p>We've received your payment for <strong>Invoice ${data.invoice_number}</strong> (${formatMoney(data.total, data.currency)}). It is now marked <strong>paid</strong> - thank you!</p>
+        <p style="text-align:center;margin:24px 0;"><a href="${url}" style="display:inline-block;background:linear-gradient(146deg,#0035C1,#0575FF);color:#fff;text-decoration:none;padding:14px 28px;border-radius:999px;font-weight:700;">View invoice</a></p>
+        <p style="color:#6b7280;font-size:13px;">This email confirms your payment has been received and recorded. No further action is needed.</p>
+      `,
+        { eyebrow: "Payment Confirmed", preheader: `Payment received for Invoice ${data.invoice_number}` },
+      );
+      await sendEmail({
+        to: data.client_email,
+        subject: `Payment confirmed - Invoice ${data.invoice_number}`,
+        html,
+      });
+      await logActivity({
+        action: "invoice.payment_confirmation_email",
+        page: "finance/invoices",
+        resource_type: "invoice",
+        resource_id: id,
+        resource_label: `${data.invoice_number} → ${data.client_email}`,
+      });
+    } catch {
+      // Non-fatal: the invoice is still marked paid even if the email fails.
+    }
+  }
 
   return NextResponse.json({ invoice: data });
 }

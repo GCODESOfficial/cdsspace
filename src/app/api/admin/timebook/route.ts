@@ -5,8 +5,12 @@ import { getAdminSession } from "@/lib/admin-session";
 import { hasPermission } from "@/lib/admin-permissions";
 import { logActivity } from "@/lib/activity-log";
 import { glashMaybeOne, glashOne, glashQuery } from "@/lib/glashdb/postgres";
+import { getTimebookOffice, saveTimebookOffice } from "@/lib/timebook-office";
+import { sendEmail } from "@/lib/email-from";
+import { brandedEmailHtml } from "@/lib/email-template";
 import {
   attendanceScores,
+  formatWorkMode,
   isEarlyLogout,
   isWorkDay,
   lagosDate,
@@ -32,7 +36,12 @@ function normalizeDate(value: string | null, fallback = lagosDate()) {
 
 function dateKey(value: unknown, fallback = lagosDate()) {
   if (typeof value === "string") return value.slice(0, 10);
-  if (value instanceof Date) return value.toISOString().slice(0, 10);
+  // The pg driver returns `date` columns as a JS Date at Lagos midnight (e.g.
+  // work_date 2026-07-08 arrives as 2026-07-07T23:00:00Z). Reading it back with
+  // toISOString() would slice off the UTC day and land one day early — so a
+  // member who checked in *today* would key to yesterday and show up ABSENT.
+  // Format the instant in Lagos time to recover the real calendar work_date.
+  if (value instanceof Date) return lagosDate(value);
   return fallback;
 }
 
@@ -146,6 +155,8 @@ export async function GET(req: NextRequest) {
       : null,
   }));
 
+  const office = await getTimebookOffice();
+
   return NextResponse.json({
     ok: true,
     date,
@@ -155,6 +166,7 @@ export async function GET(req: NextRequest) {
     entries: entries ?? [],
     leave_requests: leaveRequests ?? [],
     bypass_codes: hydratedBypassCodes,
+    office,
     stats,
     actor: session?.name,
   });
@@ -167,12 +179,41 @@ export async function POST(req: NextRequest) {
   const body = await req.json().catch(() => ({}));
   const action = String(body?.action || "");
 
+  if (action === "save_office") {
+    if (session?.role !== "super_admin" && !hasPermission(session?.permissions ?? [], "timebook.manage_geofence")) {
+      return NextResponse.json({ ok: false, error: "You need the Manage Geofence permission to edit the office geofence." }, { status: 403 });
+    }
+    const lat = Number(body.latitude);
+    const lng = Number(body.longitude);
+    if (!Number.isFinite(lat) || lat < -90 || lat > 90 || !Number.isFinite(lng) || lng < -180 || lng > 180) {
+      return NextResponse.json({ ok: false, error: "Enter valid latitude (-90..90) and longitude (-180..180)." }, { status: 400 });
+    }
+    const office = await saveTimebookOffice(
+      { name: body.name, address: body.address, latitude: lat, longitude: lng, radiusMeters: Number(body.radius_meters) },
+      session?.name ?? session?.email ?? null,
+    );
+    await logActivity({
+      action: "timebook.save_office",
+      page: "timebook",
+      resource_type: "team_timebook_office",
+      resource_label: `${office.name} (${office.radiusMeters}m)`,
+      metadata: office,
+    });
+    return NextResponse.json({ ok: true, office });
+  }
+
   if (action === "generate_bypass_code") {
-    if (session?.role !== "super_admin") {
-      return NextResponse.json({ ok: false, error: "Only super admins can generate team bypass codes." }, { status: 403 });
+    if (session?.role !== "super_admin" && !hasPermission(session?.permissions ?? [], "timebook.manage_bypass")) {
+      return NextResponse.json({ ok: false, error: "You need the Manage Bypass Codes permission to generate bypass codes." }, { status: 403 });
     }
     const code = generateBypassCode();
-    const expiresMinutes = Math.max(5, Math.min(5 * 24 * 60, Number(body.expires_minutes || 30)));
+    // Bypass codes live at most 365 days (min 5 minutes). Callers may pass
+    // expires_minutes directly or expires_days (converted to minutes).
+    const requestedMinutes = body.expires_days != null
+      ? Number(body.expires_days) * 24 * 60
+      : Number(body.expires_minutes || 30);
+    const MAX_MINUTES = 365 * 24 * 60;
+    const expiresMinutes = Math.max(5, Math.min(MAX_MINUTES, requestedMinutes || 30));
     const expiresAt = new Date(Date.now() + expiresMinutes * 60 * 1000).toISOString();
     const assignedMemberId = body.member_id || null;
     const data = await glashOne(
@@ -186,7 +227,7 @@ export async function POST(req: NextRequest) {
         session?.email ?? null,
         session?.name ?? null,
         assignedMemberId,
-        body.reason || "Team login/geofence bypass approved by super admin",
+        body.reason || "Team login/geofence bypass approved by admin",
         expiresAt,
       ],
     );
@@ -202,8 +243,8 @@ export async function POST(req: NextRequest) {
   }
 
   if (action === "revoke_bypass_code") {
-    if (session?.role !== "super_admin") {
-      return NextResponse.json({ ok: false, error: "Only super admins can revoke team bypass codes." }, { status: 403 });
+    if (session?.role !== "super_admin" && !hasPermission(session?.permissions ?? [], "timebook.manage_bypass")) {
+      return NextResponse.json({ ok: false, error: "You need the Manage Bypass Codes permission to revoke bypass codes." }, { status: 403 });
     }
     const codeId = body.code_id;
     if (!codeId) return NextResponse.json({ ok: false, error: "code_id is required." }, { status: 400 });
@@ -299,6 +340,64 @@ export async function POST(req: NextRequest) {
            notes = excluded.notes`,
         [leave.team_member_id, day, JSON.stringify(attendanceScores("approved_leave", 0, 0)), `${leave.leave_type} leave approved`],
       )));
+    }
+
+    // Notify the team member — in-app + email — with the full decision details.
+    const approved = status === "approved";
+    const workingDays = eachDate(dateKey(leave.start_date), dateKey(leave.end_date)).filter((d) => isWorkDay(d)).length;
+    const reviewNote = (body.review_note || "").toString().trim();
+
+    await glashQuery(
+      `insert into public.team_notifications (recipient_id, kind, title, body, link, actor_is_admin)
+       values ($1, $2, $3, $4, '/team/timebook', true)`,
+      [
+        leave.team_member_id,
+        approved ? "leave_approved" : "leave_rejected",
+        `Leave ${approved ? "approved" : "declined"}: ${formatWorkMode(leave.leave_type)}`,
+        `${leave.start_date} to ${leave.end_date}${reviewNote ? ` · ${reviewNote}` : ""}`,
+      ],
+    ).catch(() => {});
+
+    try {
+      const member = await glashMaybeOne<{ full_name: string | null; email: string | null }>(
+        "select full_name, email from public.team_members where id = $1 limit 1",
+        [leave.team_member_id],
+      );
+      if (member?.email) {
+        const fmtDate = (d: any) => {
+          const dd = new Date(d);
+          return Number.isFinite(dd.getTime())
+            ? dd.toLocaleDateString("en-US", { weekday: "short", year: "numeric", month: "long", day: "numeric" })
+            : String(d);
+        };
+        const row = (label: string, value: string) =>
+          `<tr><td style="padding:8px 0;border-bottom:1px solid #f1f5f9;color:#374151;font-weight:600;width:150px;vertical-align:top;">${label}</td><td style="padding:8px 0;border-bottom:1px solid #f1f5f9;color:#111827;">${value}</td></tr>`;
+        const color = approved ? "#059669" : "#dc2626";
+        const html = brandedEmailHtml(
+          `
+          <h2 style="margin:0 0 12px;color:#0D1B39;">Leave request ${approved ? "approved" : "declined"}</h2>
+          <p>Hi ${member.full_name || "there"},</p>
+          <p>Your leave request has been <strong style="color:${color};">${approved ? "approved" : "declined"}</strong>. Full details below.</p>
+          <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;margin-top:8px;">
+            ${row("Type", formatWorkMode(leave.leave_type))}
+            ${row("Dates", `${fmtDate(leave.start_date)} &ndash; ${fmtDate(leave.end_date)}`)}
+            ${row("Working days", String(workingDays))}
+            ${row("Reason", leave.reason ? String(leave.reason) : "&mdash;")}
+            ${row("Status", approved ? "Approved" : "Declined")}
+            ${reviewNote ? row("Note from reviewer", reviewNote) : ""}
+          </table>
+          <p style="margin-top:16px;">${approved ? "Enjoy your time off." : "If you have questions about this decision, please reply to this email or contact HR."}</p>
+        `,
+          { eyebrow: "Leave Request", preheader: `Your ${formatWorkMode(leave.leave_type)} leave was ${approved ? "approved" : "declined"}` },
+        );
+        await sendEmail({
+          to: member.email,
+          subject: `Your ${formatWorkMode(leave.leave_type)} leave has been ${approved ? "approved" : "declined"}`,
+          html,
+        });
+      }
+    } catch {
+      // Non-fatal: the decision is saved even if the email fails.
     }
 
     await logActivity({

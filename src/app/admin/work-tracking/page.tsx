@@ -7,6 +7,7 @@ import {
   BarChart3,
   Brain,
   CalendarDays,
+  ChevronDown,
   Clock,
   Download,
   Eye,
@@ -75,6 +76,9 @@ export default function AdminWorkTrackingPage() {
   const [data, setData] = useState<WorkTrackingAdminData | null>(null);
   const [loading, setLoading] = useState(true);
   const [working, setWorking] = useState<string | null>(null);
+  const [showAllMembers, setShowAllMembers] = useState(false);
+  const [overviewCollapsed, setOverviewCollapsed] = useState(false);
+  const [accessLogCollapsed, setAccessLogCollapsed] = useState(true);
 
   const load = async () => {
     setLoading(true);
@@ -109,6 +113,24 @@ export default function AdminWorkTrackingPage() {
   const selectedWeekly = weeklyByMember.get(memberId) as any | undefined;
   const selectedComparison = comparisonByMember.get(memberId) as any | undefined;
   const selectedSnapshots = (data?.snapshots || []).filter((snapshot) => snapshot.team_member_id === memberId);
+
+  // Daily Team Overview shows members with an active tracking session or
+  // captures first (sorted by captures); everyone else collapses behind the
+  // "See all team members" toggle.
+  const overviewMembers = useMemo(() => {
+    const members = data?.members || [];
+    const captures = (id: string) => Number((sessionByMember.get(id) as any)?.screenshot_count || 0);
+    const isTracking = (id: string) => {
+      const session = sessionByMember.get(id) as any;
+      return captures(id) > 0 || session?.status === "active" || session?.status === "paused";
+    };
+    const tracking = members.filter((member) => isTracking(member.id)).sort((a, b) => captures(b.id) - captures(a.id));
+    const rest = members.filter((member) => !isTracking(member.id));
+    return { tracking, rest };
+  }, [data?.members, sessionByMember]);
+  const visibleOverviewMembers = showAllMembers
+    ? [...overviewMembers.tracking, ...overviewMembers.rest]
+    : overviewMembers.tracking;
 
   const chartRows = useMemo(() => (data?.members || []).map((member) => {
     const report = reportByMember.get(member.id) as any;
@@ -281,10 +303,22 @@ export default function AdminWorkTrackingPage() {
 
             <section className="overflow-hidden rounded-2xl border border-white/80 bg-white shadow-sm">
               <div className="flex flex-col gap-3 border-b border-gray-100 px-5 py-4 lg:flex-row lg:items-center lg:justify-between">
-                <div>
-                  <h2 className="text-lg font-bold text-[#0D1B39]">Daily Team Overview</h2>
-                  <p className="mt-0.5 text-xs text-gray-500">{data.date}</p>
-                </div>
+                <button
+                  type="button"
+                  onClick={() => setOverviewCollapsed((prev) => !prev)}
+                  className="flex items-center gap-3 text-left"
+                  aria-expanded={!overviewCollapsed}
+                  title={overviewCollapsed ? "Expand table" : "Collapse table"}
+                >
+                  <ChevronDown className={`h-5 w-5 text-gray-400 transition-transform ${overviewCollapsed ? "-rotate-90" : ""}`} />
+                  <div>
+                    <h2 className="text-lg font-bold text-[#0D1B39]">Daily Team Overview</h2>
+                    <p className="mt-0.5 text-xs text-gray-500">
+                      {data.date}
+                      {overviewCollapsed && ` · ${overviewMembers.tracking.length} tracking`}
+                    </p>
+                  </div>
+                </button>
                 <div className="flex flex-wrap gap-2">
                   <ActionButton label="Daily Report" icon={Brain} loading={working === "generate_daily_report"} onClick={() => runAction("generate_daily_report")} />
                   <ActionButton label="Weekly Rollup" icon={CalendarDays} loading={working === "generate_weekly_report"} onClick={() => runAction("generate_weekly_report")} />
@@ -292,6 +326,7 @@ export default function AdminWorkTrackingPage() {
                   <ActionButton label="Purge Expired" icon={Trash2} loading={working === "purge_expired_screenshots"} onClick={() => runAction("purge_expired_screenshots")} />
                 </div>
               </div>
+              {!overviewCollapsed && (
               <div className="overflow-x-auto">
                 <table className="w-full min-w-[1100px] text-sm">
                   <thead className="bg-gray-50 text-left text-[11px] uppercase tracking-wider text-gray-500">
@@ -305,7 +340,14 @@ export default function AdminWorkTrackingPage() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-100">
-                    {data.members.map((member) => {
+                    {visibleOverviewMembers.length === 0 && (
+                      <tr>
+                        <td colSpan={6} className="px-5 py-10 text-center text-sm text-gray-400">
+                          No one is tracking on this date yet.
+                        </td>
+                      </tr>
+                    )}
+                    {visibleOverviewMembers.map((member) => {
                       const entry = entryByMember.get(member.id) as any;
                       const session = sessionByMember.get(member.id) as any;
                       const report = reportByMember.get(member.id) as any;
@@ -348,6 +390,17 @@ export default function AdminWorkTrackingPage() {
                   </tbody>
                 </table>
               </div>
+              )}
+              {!overviewCollapsed && overviewMembers.rest.length > 0 && (
+                <button
+                  onClick={() => setShowAllMembers((prev) => !prev)}
+                  className="w-full border-t border-gray-100 px-5 py-3 text-center text-xs font-semibold text-[#0A4FE8] transition hover:bg-blue-50/50"
+                >
+                  {showAllMembers
+                    ? "Show active members only"
+                    : `See all team members (${overviewMembers.rest.length} more)`}
+                </button>
+              )}
             </section>
 
             <div className="grid gap-4 xl:grid-cols-3">
@@ -434,18 +487,28 @@ export default function AdminWorkTrackingPage() {
             </div>
 
             <section className="rounded-2xl border border-white/80 bg-white p-5 shadow-sm">
-              <div className="mb-4 flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setAccessLogCollapsed((prev) => !prev)}
+                className="flex w-full items-center gap-2 text-left"
+                aria-expanded={!accessLogCollapsed}
+                title={accessLogCollapsed ? "Show access log" : "Hide access log"}
+              >
                 <Eye className="h-5 w-5 text-[#0A4FE8]" />
                 <h2 className="text-lg font-bold text-[#0D1B39]">Privacy Access Log</h2>
-              </div>
-              <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
-                {data.access_logs.map((log) => (
-                  <div key={log.id} className="rounded-xl bg-gray-50 p-3">
-                    <p className="text-sm font-semibold text-[#0D1B39]">{log.action.replace(/_/g, " ")}</p>
-                    <p className="mt-1 text-xs text-gray-500">{log.actor_name || "System"} · {new Date(log.created_at).toLocaleString()}</p>
-                  </div>
-                ))}
-              </div>
+                <span className="ml-1 rounded-full bg-gray-100 px-2 py-0.5 text-[11px] font-bold text-gray-500">{data.access_logs.length}</span>
+                <ChevronDown className={`ml-auto h-5 w-5 text-gray-400 transition-transform ${accessLogCollapsed ? "-rotate-90" : ""}`} />
+              </button>
+              {!accessLogCollapsed && (
+                <div className="mt-4 grid gap-2 md:grid-cols-2 xl:grid-cols-3">
+                  {data.access_logs.map((log) => (
+                    <div key={log.id} className="rounded-xl bg-gray-50 p-3">
+                      <p className="text-sm font-semibold text-[#0D1B39]">{log.action.replace(/_/g, " ")}</p>
+                      <p className="mt-1 text-xs text-gray-500">{log.actor_name || "System"} · {new Date(log.created_at).toLocaleString()}</p>
+                    </div>
+                  ))}
+                </div>
+              )}
             </section>
           </>
         )}

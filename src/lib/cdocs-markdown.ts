@@ -1,6 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 // Tiny markdown-lite parser used by both the public cDoc share page and
-// the PDF exporter. Intentionally narrow — we only support what the
+// the PDF exporter. Intentionally narrow - we only support what the
 // editor's formatting buttons produce:
 //
 //   # Heading 1
@@ -168,7 +168,7 @@ export function cdocHtmlToMarkdown(html: string): string {
 
   const lines: string[] = [];
 
-  // Walk top-level children. Browsers emit mixed block sets — h1/h2/p/div/ul/li —
+  // Walk top-level children. Browsers emit mixed block sets - h1/h2/p/div/ul/li -
   // so we handle them explicitly and fall back to inlining stray text.
   const emitInline = (node: Node): string => {
     if (node.nodeType === Node.TEXT_NODE) return node.textContent || "";
@@ -181,12 +181,12 @@ export function cdocHtmlToMarkdown(html: string): string {
     if (tag === "strong" || tag === "b") return `**${inner}**`;
     if (tag === "u") return `__${inner}__`;
     if (tag === "em" || tag === "i") return `**${inner}**`; // treat italics as bold
-    // Any other inline wrapper (span, font, etc.) — return contents.
+    // Any other inline wrapper (span, font, etc.) - return contents.
     return inner;
   };
 
   const pushLine = (raw: string) => {
-    // Browsers sometimes append a trailing \u00A0 or stray <br> — normalize.
+    // Browsers sometimes append a trailing \u00A0 or stray <br> - normalize.
     const s = raw.replace(/\u00A0/g, " ").replace(/\s+$/g, "");
     lines.push(s);
   };
@@ -224,7 +224,7 @@ export function cdocHtmlToMarkdown(html: string): string {
       for (const ln of trimmed.split("\n")) pushLine(ln);
       return;
     }
-    // Unknown block — inline it.
+    // Unknown block - inline it.
     const inner = emitInline(el);
     for (const ln of inner.split("\n")) pushLine(ln);
   };

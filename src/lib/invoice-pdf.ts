@@ -1,6 +1,7 @@
 "use client";
 
 import jsPDF from "jspdf";
+import { installBrandFont } from "./pdf/pdf-fonts";
 import type { FinanceInvoice, FinanceInvoiceItem } from "./finance/types";
 import {
     CDS_BANK_ACCOUNTS,
@@ -8,6 +9,7 @@ import {
     DEFAULT_REVISIONS_NOTE,
     DEFAULT_WORKING_HOURS,
     deliverySpeedLabel,
+    formatFinanceDate,
 } from "./finance/types";
 
 const CURRENCY_SYMBOLS: Record<string, string> = { NGN: "N", USD: "$", RWF: "FRw " };
@@ -19,12 +21,7 @@ function fmtMoney(n: number | string | null | undefined, currency: string) {
 }
 
 function fmtDate(iso: string | null | undefined) {
-    if (!iso) return "—";
-    try {
-        return new Date(iso).toLocaleDateString("en-US", { year: "numeric", month: "short", day: "numeric" });
-    } catch {
-        return iso;
-    }
+    return formatFinanceDate(iso, { year: "numeric", month: "short", day: "numeric" });
 }
 
 /**
@@ -110,7 +107,7 @@ async function loadImageAsDataUri(
  *   - CDS seal stamp next to totals
  *   - Navy "Payment Details" panel with bank accounts + terms / revisions /
  *     delivery / working hours
- *   - "Truly Best attracts Best — CDS Space" footer
+ *   - "Truly Best attracts Best - CDS Space" footer
  */
 export async function exportInvoiceToPdf(invoice: FinanceInvoice, items: FinanceInvoiceItem[]) {
     const [logoImg, sealImg, ...bankImgs] = await Promise.all([
@@ -120,6 +117,7 @@ export async function exportInvoiceToPdf(invoice: FinanceInvoice, items: Finance
     ]);
 
     const doc = new jsPDF({ unit: "pt", format: "a4" });
+    installBrandFont(doc);
     const pageWidth = doc.internal.pageSize.getWidth();
     const pageHeight = doc.internal.pageSize.getHeight();
     const margin = 48;
@@ -138,25 +136,25 @@ export async function exportInvoiceToPdf(invoice: FinanceInvoice, items: Finance
             doc.addImage(logoImg.data, logoImg.format, margin, headerTop + 4, logoW, logoH);
             textLeft = margin + logoW + 14;
         } catch {
-            // ignore — fall back to text-only header
+            // ignore - fall back to text-only header
         }
     }
-    doc.setFont("helvetica", "bold");
+    doc.setFont("NeueCampton", "bold");
     doc.setFontSize(16);
     doc.setTextColor(13, 27, 57);
     doc.text("CDS Space", textLeft, headerTop + 18);
-    doc.setFont("helvetica", "normal");
+    doc.setFont("NeueCampton", "normal");
     doc.setFontSize(10);
     doc.setTextColor(107, 114, 128);
     doc.text("Branding & Digital Agency", textLeft, headerTop + 34);
 
     // Right: INVOICE eyebrow + number + status pill
-    doc.setFont("helvetica", "normal");
+    doc.setFont("NeueCampton", "normal");
     doc.setFontSize(9);
     doc.setTextColor(156, 163, 175);
     doc.text("INVOICE", pageWidth - margin, headerTop + 10, { align: "right" });
 
-    doc.setFont("helvetica", "bold");
+    doc.setFont("NeueCampton", "bold");
     doc.setFontSize(20);
     doc.setTextColor(13, 27, 57);
     doc.text(invoice.invoice_number, pageWidth - margin, headerTop + 32, { align: "right" });
@@ -171,7 +169,7 @@ export async function exportInvoiceToPdf(invoice: FinanceInvoice, items: Finance
         CANCELLED: { bg: [226, 232, 240], fg: [71, 85, 105] },
     };
     const pill = statusColors[statusLabel] ?? statusColors.DRAFT;
-    doc.setFont("helvetica", "bold");
+    doc.setFont("NeueCampton", "bold");
     doc.setFontSize(8);
     const pillTextWidth = doc.getTextWidth(statusLabel);
     const pillPaddingX = 8;
@@ -191,24 +189,24 @@ export async function exportInvoiceToPdf(invoice: FinanceInvoice, items: Finance
     y += 24;
 
     // Bill-to + Issued / Due
-    doc.setFont("helvetica", "bold");
+    doc.setFont("NeueCampton", "bold");
     doc.setFontSize(9);
     doc.setTextColor(156, 163, 175);
     doc.text("BILLED TO", margin, y);
     doc.text("ISSUED / DUE", pageWidth - margin, y, { align: "right" });
 
-    doc.setFont("helvetica", "bold");
+    doc.setFont("NeueCampton", "bold");
     doc.setFontSize(12);
     doc.setTextColor(13, 27, 57);
-    doc.text(invoice.client_name || "—", margin, y + 18);
+    doc.text(invoice.client_name || "-", margin, y + 18);
 
-    doc.setFont("helvetica", "normal");
+    doc.setFont("NeueCampton", "normal");
     doc.setFontSize(10);
     doc.setTextColor(75, 85, 99);
     doc.text(fmtDate(invoice.issue_date), pageWidth - margin, y + 18, { align: "right" });
 
     let billY = y + 34;
-    doc.setFont("helvetica", "normal");
+    doc.setFont("NeueCampton", "normal");
     doc.setFontSize(10);
     doc.setTextColor(75, 85, 99);
     if (invoice.client_email && invoice.client_email !== "---") {
@@ -238,7 +236,7 @@ export async function exportInvoiceToPdf(invoice: FinanceInvoice, items: Finance
 
     doc.setFillColor(248, 250, 252);
     doc.rect(margin, y, innerWidth, 26, "F");
-    doc.setFont("helvetica", "bold");
+    doc.setFont("NeueCampton", "bold");
     doc.setFontSize(9);
     doc.setTextColor(156, 163, 175);
     doc.text("ITEM", col.name, y + 17);
@@ -255,7 +253,7 @@ export async function exportInvoiceToPdf(invoice: FinanceInvoice, items: Finance
     };
 
     items.forEach((it, i) => {
-        const nameLines = doc.splitTextToSize(it.name || "—", innerWidth * 0.52);
+        const nameLines = doc.splitTextToSize(it.name || "-", innerWidth * 0.52);
         const descLines = it.description
             ? doc.splitTextToSize(it.description, innerWidth * 0.52)
             : [];
@@ -271,25 +269,25 @@ export async function exportInvoiceToPdf(invoice: FinanceInvoice, items: Finance
             doc.rect(margin, y, innerWidth, rowHeight, "F");
         }
 
-        doc.setFont("helvetica", "bold");
+        doc.setFont("NeueCampton", "bold");
         doc.setFontSize(11);
         doc.setTextColor(13, 27, 57);
         doc.text(nameLines, col.name, y + 16);
 
         if (descLines.length) {
-            doc.setFont("helvetica", "normal");
+            doc.setFont("NeueCampton", "normal");
             doc.setFontSize(9);
             doc.setTextColor(107, 114, 128);
             doc.text(descLines, col.name, y + 16 + nameLines.length * 12);
         }
 
-        doc.setFont("helvetica", "normal");
+        doc.setFont("NeueCampton", "normal");
         doc.setFontSize(10);
         doc.setTextColor(75, 85, 99);
         doc.text(String(it.quantity ?? 1), col.qty, y + 16, { align: "right" });
         doc.text(fmtMoney(it.unit_price, currency), col.unit, y + 16, { align: "right" });
 
-        doc.setFont("helvetica", "bold");
+        doc.setFont("NeueCampton", "bold");
         doc.setFontSize(10);
         doc.setTextColor(13, 27, 57);
         doc.text(fmtMoney(it.total, currency), col.total, y + 16, { align: "right" });
@@ -317,7 +315,7 @@ export async function exportInvoiceToPdf(invoice: FinanceInvoice, items: Finance
     const totalsW = 220;
     let totalsY = y + 8;
     const drawTotalRow = (label: string, value: string, strong = false) => {
-        doc.setFont("helvetica", strong ? "bold" : "normal");
+        doc.setFont("NeueCampton", strong ? "bold" : "normal");
         doc.setFontSize(strong ? 14 : 11);
         doc.setTextColor(strong ? 13 : 107, strong ? 27 : 114, strong ? 57 : 128);
         doc.text(label, totalsX, totalsY);
@@ -348,18 +346,18 @@ export async function exportInvoiceToPdf(invoice: FinanceInvoice, items: Finance
         ensureSpace(noteH + 16);
         doc.setFillColor(239, 246, 255);
         doc.roundedRect(margin, y, innerWidth, noteH, 10, 10, "F");
-        doc.setFont("helvetica", "bold");
+        doc.setFont("NeueCampton", "bold");
         doc.setFontSize(9);
         doc.setTextColor(156, 163, 175);
         doc.text("NOTES", margin + 14, y + 18);
-        doc.setFont("helvetica", "normal");
+        doc.setFont("NeueCampton", "normal");
         doc.setFontSize(10);
         doc.setTextColor(55, 65, 81);
         doc.text(noteLines, margin + 14, y + 34);
         y += noteH + 20;
     }
 
-    // Payment Details panel — navy card, bank accounts, terms
+    // Payment Details panel - navy card, bank accounts, terms
     const panelStart = y;
     ensureSpace(240);
     const bankRowH = 78;
@@ -371,7 +369,7 @@ export async function exportInvoiceToPdf(invoice: FinanceInvoice, items: Finance
     // Header pill
     doc.setFillColor(10, 79, 232);
     const pdPillText = "Payment Details";
-    doc.setFont("helvetica", "bold");
+    doc.setFont("NeueCampton", "bold");
     doc.setFontSize(10);
     const pdPillTextW = doc.getTextWidth(pdPillText);
     const pdPillW = pdPillTextW + 22;
@@ -401,31 +399,31 @@ export async function exportInvoiceToPdf(invoice: FinanceInvoice, items: Finance
             doc.setFillColor(10, 79, 232);
             doc.roundedRect(colX, rowY, 46, 46, 8, 8, "F");
             doc.setTextColor(255, 255, 255);
-            doc.setFont("helvetica", "bold");
+            doc.setFont("NeueCampton", "bold");
             doc.setFontSize(24);
             doc.text(b.initial, colX + 23, rowY + 32, { align: "center" });
         }
 
         // Bank text
         const textX = colX + 58;
-        doc.setFont("helvetica", "normal");
+        doc.setFont("NeueCampton", "normal");
         doc.setFontSize(9);
         doc.setTextColor(200, 210, 230);
         doc.text(b.bank, textX, rowY + 12);
 
-        doc.setFont("helvetica", "bold");
+        doc.setFont("NeueCampton", "bold");
         doc.setFontSize(16);
         doc.setTextColor(255, 255, 255);
         doc.text(b.account_number, textX, rowY + 32);
 
-        doc.setFont("helvetica", "normal");
+        doc.setFont("NeueCampton", "normal");
         doc.setFontSize(8.5);
         doc.setTextColor(200, 210, 230);
         const nameLines = doc.splitTextToSize(b.account_name, bankColW - 62);
         doc.text(nameLines, textX, rowY + 46);
     });
 
-    // Divider + Terms block — faint line inside the navy panel
+    // Divider + Terms block - faint line inside the navy panel
     const termsY = bankTop + bankRowH - 10;
     doc.setDrawColor(40, 55, 110);
     doc.setLineWidth(0.5);
@@ -435,16 +433,16 @@ export async function exportInvoiceToPdf(invoice: FinanceInvoice, items: Finance
     const revisions = invoice.revisions_note || DEFAULT_REVISIONS_NOTE;
     const hours = invoice.working_hours || DEFAULT_WORKING_HOURS;
     const speed = deliverySpeedLabel(invoice.delivery_speed || "standard");
-    const period = invoice.delivery_period || "—";
+    const period = invoice.delivery_period || "-";
 
     let tY = termsY + 16;
     const drawTermsLine = (label: string, value: string) => {
-        doc.setFont("helvetica", "normal");
+        doc.setFont("NeueCampton", "normal");
         doc.setFontSize(9.5);
         doc.setTextColor(200, 210, 230);
         const labelW = doc.getTextWidth(label + "  ");
         doc.text(label, margin + 20, tY);
-        doc.setFont("helvetica", "bold");
+        doc.setFont("NeueCampton", "bold");
         doc.setTextColor(255, 255, 255);
         doc.text(value, margin + 20 + labelW, tY);
         tY += 14;
@@ -458,16 +456,16 @@ export async function exportInvoiceToPdf(invoice: FinanceInvoice, items: Finance
 
     // Footer tagline
     ensureSpace(30);
-    doc.setFont("helvetica", "italic");
+    doc.setFont("NeueCampton", "italic");
     doc.setFontSize(9);
     doc.setTextColor(156, 163, 175);
-    doc.text("Truly Best attracts Best — CDS Space", pageWidth / 2, y + 10, { align: "center" });
+    doc.text("Truly Best attracts Best - CDS Space", pageWidth / 2, y + 10, { align: "center" });
 
     // Page numbers on every page
     const pageCount = doc.getNumberOfPages();
     for (let i = 1; i <= pageCount; i++) {
         doc.setPage(i);
-        doc.setFont("helvetica", "normal");
+        doc.setFont("NeueCampton", "normal");
         doc.setFontSize(8);
         doc.setTextColor(156, 163, 175);
         doc.text(`Page ${i} of ${pageCount}`, pageWidth - margin, pageHeight - 24, { align: "right" });

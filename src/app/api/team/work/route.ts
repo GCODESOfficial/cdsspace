@@ -99,6 +99,50 @@ type DocumentRow = {
   created_at: string;
 };
 
+// A client-submitted brand brief linked to a project. `budget_range` is stripped
+// to null for non-management viewers before this leaves the server.
+type BriefRow = {
+  id: string;
+  project_id: string | null;
+  brand_name: string | null;
+  brand_tagline: string | null;
+  industry: string | null;
+  brand_description: string | null;
+  contact_name: string | null;
+  contact_email: string | null;
+  contact_phone: string | null;
+  target_audience: string | null;
+  competitors: string | null;
+  unique_selling_point: string | null;
+  brand_personality: string | null;
+  brand_values: string | null;
+  design_preferences: string | null;
+  inspiration_references: string | null;
+  assets_needed: string[] | null;
+  goals: string | null;
+  long_term_vision: string | null;
+  budget_range: string | null;
+  timeline: string | null;
+  additional_notes: string | null;
+  status: string | null;
+  submitted_at: string | null;
+  created_at: string;
+};
+
+const BRIEF_COLUMNS =
+  "id, project_id, brand_name, brand_tagline, industry, brand_description, contact_name, contact_email, contact_phone, target_audience, competitors, unique_selling_point, brand_personality, brand_values, design_preferences, inspiration_references, assets_needed, goals, long_term_vision, budget_range, timeline, additional_notes, status, submitted_at, created_at";
+
+// A lightweight summary used to populate the admin "Attach brand brief" picker.
+type AttachableBriefRow = {
+  id: string;
+  project_id: string | null;
+  brand_name: string | null;
+  invite_label: string | null;
+  contact_name: string | null;
+  status: string | null;
+  submitted_at: string | null;
+};
+
 type ApprovalRow = {
   id: string;
   project_id: string;
@@ -221,15 +265,25 @@ function computeProjectProgress(project: ProjectRow, tasks: TaskRow[], milestone
   return project.status === "completed" ? 100 : 0;
 }
 
+// Postgres date/timestamptz columns come back from node-postgres as JS Date
+// objects, so normalise every event_date to an ISO string before we sort or
+// return it (Date has no .localeCompare, which was crashing the workspace).
+function toEventDate(value: unknown): string {
+  if (!value) return "";
+  if (value instanceof Date) return value.toISOString();
+  return String(value);
+}
+
 function derivedProjectEvents(projects: ProjectRow[], tasks: TaskRow[], milestones: MilestoneRow[], stored: CalendarEvent[]) {
-  const events: CalendarEvent[] = [...stored];
-  const add = (project_id: string, source_type: string, title: string, event_date: string | null, event_kind: string, status = "scheduled") => {
-    if (!event_date) return;
+  const events: CalendarEvent[] = stored.map((event) => ({ ...event, event_date: toEventDate(event.event_date) }));
+  const add = (project_id: string, source_type: string, title: string, event_date: string | Date | null, event_kind: string, status = "scheduled") => {
+    const date = toEventDate(event_date);
+    if (!date) return;
     events.push({
-      id: `${source_type}-${project_id}-${event_date}-${title}`,
+      id: `${source_type}-${project_id}-${date}-${title}`,
       project_id,
       title,
-      event_date,
+      event_date: date,
       event_kind,
       status,
       source_type,
@@ -277,7 +331,14 @@ async function visibleProjects(session: TeamSession) {
                pa.team_member_id = $1::uuid
                or (
                  pa.department is not null
-                 and lower(pa.department) = lower(coalesce($3::text, ''))
+                 and (
+                   lower(pa.department) = lower(coalesce($3::text, ''))
+                   or exists (
+                     select 1 from public.team_member_departments tmd
+                       join public.departments d on d.id = tmd.department_id
+                      where tmd.team_member_id = $1::uuid and lower(d.name) = lower(pa.department)
+                   )
+                 )
                )
              )
         )
@@ -302,7 +363,14 @@ async function projectIsVisible(session: TeamSession, projectId: string) {
              where pa.project_id = p.id
                and (
                  pa.team_member_id = $1::uuid
-                 or (pa.department is not null and lower(pa.department) = lower(coalesce($3::text, '')))
+                 or (pa.department is not null and (
+                       lower(pa.department) = lower(coalesce($3::text, ''))
+                       or exists (
+                         select 1 from public.team_member_departments tmd
+                           join public.departments d on d.id = tmd.department_id
+                          where tmd.team_member_id = $1::uuid and lower(d.name) = lower(pa.department)
+                       )
+                    ))
                )
           )
         )
@@ -355,11 +423,21 @@ async function projectRecipients(projectId: string) {
         where pa.project_id = $1
      ),
      department_members as (
+       -- Members of an assigned department: primary-department name match OR any
+       -- of the member's departments via the many-to-many junction.
        select m.id
          from public.project_assignments pa
-         join public.team_members m on lower(m.department) = lower(pa.department) and m.is_active = true
+         join public.team_members m on m.is_active = true
         where pa.project_id = $1
           and pa.department is not null
+          and (
+            lower(m.department) = lower(pa.department)
+            or exists (
+              select 1 from public.team_member_departments tmd
+                join public.departments d on d.id = tmd.department_id
+               where tmd.team_member_id = m.id and lower(d.name) = lower(pa.department)
+            )
+          )
      )
      select distinct id
        from (
@@ -378,17 +456,27 @@ export async function GET() {
     return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
   }
 
-  const projects = await visibleProjects(session);
+  try {
+  // Run the two independent lookups together. Note the avatar_url guard: some
+  // members have their avatar stored as a multi-MB base64 data-URI, which made
+  // this list ~3MB and the page take ~8s. We never ship data-URIs in bulk lists
+  // (the UI falls back to initials); real hosted URLs still come through.
+  const [projects, teamMembers] = await Promise.all([
+    visibleProjects(session),
+    glashQuery<TeamMemberOption>(
+      `select id, full_name, username, department, role_title,
+              case when avatar_url like 'data:%' then null else avatar_url end as avatar_url
+         from public.team_members
+        where is_active = true
+        order by full_name asc`,
+    ).catch(() => []),
+  ]);
   const projectIds = projects.map((project) => project.id);
   const canManage = canEditProjects(session);
   const canCreate = canCreateProjects(session);
-
-  const teamMembers = await glashQuery<TeamMemberOption>(
-    `select id, full_name, username, department, role_title, avatar_url
-       from public.team_members
-      where is_active = true
-      order by full_name asc`,
-  );
+  // Budget on a brand brief is finance-sensitive: only management (those who can
+  // view all projects) may see it. Everyone else gets it stripped server-side.
+  const canViewBudget = canViewAllProjects(session);
   const departments = Array.from(new Set(teamMembers.map((member) => member.department).filter((value): value is string => Boolean(value))));
 
   if (!projectIds.length) {
@@ -399,18 +487,20 @@ export async function GET() {
       milestones: [],
       tasks: [],
       documents: [],
+      briefs: [],
+      attachable_briefs: [],
       approvals: [],
       activity: [],
       calendar_events: [],
       chat_threads: [],
       team_members: canCreate || canManage ? teamMembers : [],
       departments,
-      capabilities: { can_create_project: canCreate, can_manage_projects: canManage },
+      capabilities: { can_create_project: canCreate, can_manage_projects: canManage, can_view_budget: canViewBudget },
       stats: { total: 0, active: 0, completed: 0, delayed: 0, upcoming_deadlines: 0, pending_approvals: 0, overdue_tasks: 0 },
     });
   }
 
-  const [assignments, milestones, tasks, documents, approvals, activity, storedEvents, chatThreads] = await Promise.all([
+  const [assignments, milestones, tasks, documents, approvals, activity, storedEvents, chatThreads, rawBriefs, attachableBriefs] = await Promise.all([
     glashQuery<AssignmentRow>(
       `with deduped as (
          select distinct on (
@@ -431,7 +521,7 @@ export async function GET() {
               m.email as member_email,
               m.role_title as member_role_title,
               m.department as member_department,
-              m.avatar_url as member_avatar_url
+              case when m.avatar_url like 'data:%' then null else m.avatar_url end as member_avatar_url
          from deduped pa
          left join public.team_members m on m.id = pa.team_member_id
         order by pa.created_at asc`,
@@ -462,7 +552,7 @@ export async function GET() {
         where project_id = any($1::uuid[])
         order by created_at desc`,
       [projectIds],
-    ),
+    ).catch(() => []),
     glashQuery<ApprovalRow>(
       `select a.*,
               requester.full_name as requested_by_name,
@@ -473,7 +563,7 @@ export async function GET() {
         where a.project_id = any($1::uuid[])
         order by a.requested_at desc`,
       [projectIds],
-    ),
+    ).catch(() => []),
     glashQuery<ActivityRow>(
       `select e.*,
               m.full_name as actor_name
@@ -483,22 +573,45 @@ export async function GET() {
         order by e.created_at desc
         limit 80`,
       [projectIds],
-    ),
+    ).catch(() => []),
     glashQuery<CalendarEvent>(
       `select id::text, project_id, title, event_date::text, event_kind, status, coalesce(source_type, 'manual') as source_type
          from public.project_calendar_events
         where project_id = any($1::uuid[])
         order by event_date asc`,
       [projectIds],
-    ),
+    ).catch(() => []),
     glashQuery<{ id: string; project_id: string; name: string | null; created_at: string }>(
       `select id, project_id, name, created_at
          from public.team_chat_threads
         where project_id = any($1::uuid[])
         order by created_at desc`,
       [projectIds],
-    ),
+    ).catch(() => []),
+    // Brand briefs linked to these projects. Fallback keeps the panel working if
+    // glashdb-brief-project-link.sql hasn't been applied (project_id missing).
+    glashQuery<BriefRow>(
+      `select ${BRIEF_COLUMNS}
+         from public.brand_briefs
+        where project_id = any($1::uuid[])
+        order by submitted_at desc nulls last, created_at desc`,
+      [projectIds],
+    ).catch(() => [] as BriefRow[]),
+    // Management-only picker source: submitted briefs available to attach.
+    canViewBudget
+      ? glashQuery<AttachableBriefRow>(
+          `select id, project_id, brand_name, invite_label, contact_name, status, submitted_at
+             from public.brand_briefs
+            where status = 'submitted'
+            order by submitted_at desc nulls last, created_at desc
+            limit 200`,
+        ).catch(() => [] as AttachableBriefRow[])
+      : Promise.resolve([] as AttachableBriefRow[]),
   ]);
+
+  // Budget is management-only. Strip it before it leaves the server so it can
+  // never reach a non-management client, even in the network payload.
+  const briefs = rawBriefs.map((brief) => (canViewBudget ? brief : { ...brief, budget_range: null }));
 
   const today = new Date().toISOString().slice(0, 10);
   const inSevenDays = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
@@ -528,18 +641,44 @@ export async function GET() {
     milestones,
     tasks,
     documents,
+    briefs,
+    attachable_briefs: attachableBriefs,
     approvals,
     activity,
     calendar_events: calendarEvents,
     chat_threads: chatThreads,
     team_members: canCreate || canManage ? teamMembers : [],
     departments,
-    capabilities: { can_create_project: canCreate, can_manage_projects: canManage },
+    capabilities: { can_create_project: canCreate, can_manage_projects: canManage, can_view_budget: canViewBudget },
     stats,
   });
+  } catch (error) {
+    // Surface a clear JSON error instead of an HTML 500 (which the client
+    // reports as an "invalid response"). Usually means the project-work
+    // migration (20260608_project_work_management.sql) hasn't been applied.
+    return NextResponse.json(
+      { ok: false, error: error instanceof Error ? error.message : "Failed to load the project workspace." },
+      { status: 500 },
+    );
+  }
 }
 
 export async function POST(req: NextRequest) {
+  try {
+    return await handleWorkAction(req);
+  } catch (error) {
+    // Surface a clear JSON error instead of an HTML 500 (which the client
+    // reports as "The project workspace API returned an invalid response.").
+    // Usually a schema mismatch — e.g. inserting a status the DB check
+    // constraint doesn't yet permit.
+    return NextResponse.json(
+      { ok: false, error: error instanceof Error ? error.message : "Project workspace action failed." },
+      { status: 500 },
+    );
+  }
+}
+
+async function handleWorkAction(req: NextRequest): Promise<NextResponse> {
   const session = await getTeamSession();
   if (!session) {
     return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
@@ -768,6 +907,32 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: true, task });
   }
 
+  if (action === "create_milestone") {
+    // Any team member or lead with visibility on the project (guarded above by
+    // projectIsVisible) can add a milestone with a start + due date.
+    const description = cleanText(body.description) || cleanText(body.title);
+    if (!description) {
+      return NextResponse.json({ ok: false, error: "Milestone title is required." }, { status: 400 });
+    }
+    const startDate = cleanDate(body.duration_start);
+    const dueDate = cleanDate(body.due_date) || cleanDate(body.duration_end);
+    const milestone = await glashOne<MilestoneRow>(
+      `insert into public.finance_milestones
+         (project_id, description, assigned_to, position, milestone_key, duration_start, duration_end, due_date)
+       values (
+         $1, $2, $3,
+         (select coalesce(max(position), 0) + 1 from public.finance_milestones where project_id = $1),
+         lower(regexp_replace($2, '\\s+', '_', 'g')),
+         $4, $5, $6
+       )
+       returning id, project_id, description, assigned_to, duration_start, duration_end, status,
+                 position, milestone_key, due_date, approval_status, progress`,
+      [projectId, description, nullableText(body.assigned_to), startDate, dueDate, dueDate],
+    );
+    await addActivity({ projectId, session, action: "milestone.create", title: `Created milestone: ${milestone.description}`, metadata: { milestone_id: milestone.id } });
+    return NextResponse.json({ ok: true, milestone });
+  }
+
   if (action === "update_task") {
     const taskId = cleanUuid(body.task_id);
     if (!taskId) return NextResponse.json({ ok: false, error: "task_id is required." }, { status: 400 });
@@ -866,6 +1031,51 @@ export async function POST(req: NextRequest) {
     const recipients = await projectRecipients(projectId);
     await notifyMembers(projectId, recipients, `Project file added: ${document.title}`, document.folder || "Open the project workspace.", "project_file");
     return NextResponse.json({ ok: true, document });
+  }
+
+  if (action === "attach_brief") {
+    // Linking a client brief to a project is a management action (same tier that
+    // may view the budget). One brief per project.
+    if (!canViewAllProjects(session)) {
+      return NextResponse.json({ ok: false, error: "You do not have permission to attach a brand brief." }, { status: 403 });
+    }
+    const briefId = cleanUuid(body.brief_id);
+    if (!briefId) {
+      return NextResponse.json({ ok: false, error: "brief_id is required." }, { status: 400 });
+    }
+    try {
+      // Enforce one-brief-per-project: detach whatever is currently linked here,
+      // then link the chosen brief (moving it off any other project).
+      await glashQuery(`update public.brand_briefs set project_id = null where project_id = $1`, [projectId]);
+      const linked = await glashMaybeOne<{ id: string }>(
+        `update public.brand_briefs set project_id = $1 where id = $2 returning id`,
+        [projectId, briefId],
+      );
+      if (!linked) return NextResponse.json({ ok: false, error: "Brand brief not found." }, { status: 404 });
+    } catch {
+      return NextResponse.json(
+        { ok: false, error: "Brand brief linking is not available yet. Apply glashdb-brief-project-link.sql first." },
+        { status: 503 },
+      );
+    }
+    await addActivity({ projectId, session, action: "brief.attach", title: "Linked a brand brief to this project", body: null });
+    return NextResponse.json({ ok: true });
+  }
+
+  if (action === "detach_brief") {
+    if (!canViewAllProjects(session)) {
+      return NextResponse.json({ ok: false, error: "You do not have permission to detach a brand brief." }, { status: 403 });
+    }
+    try {
+      await glashQuery(`update public.brand_briefs set project_id = null where project_id = $1`, [projectId]);
+    } catch {
+      return NextResponse.json(
+        { ok: false, error: "Brand brief linking is not available yet. Apply glashdb-brief-project-link.sql first." },
+        { status: 503 },
+      );
+    }
+    await addActivity({ projectId, session, action: "brief.detach", title: "Removed the linked brand brief", body: null });
+    return NextResponse.json({ ok: true });
   }
 
   if (action === "request_approval") {

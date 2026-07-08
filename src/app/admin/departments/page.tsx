@@ -4,6 +4,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import { initials } from "@/lib/utils";
 import {
   Loader2,
   Plus,
@@ -455,22 +456,12 @@ function DepartmentDetail({
 }
 
 function MemberAvatar({ m, size = 32 }: { m: Member; size?: number }) {
-  if (m.avatar_url) {
-    return (
-      <img
-        src={m.avatar_url}
-        alt={m.full_name}
-        className="rounded-full object-cover border border-gray-200 shrink-0"
-        style={{ width: size, height: size }}
-      />
-    );
-  }
   return (
     <div
       className="rounded-full bg-[#0A4FE8] text-white font-bold flex items-center justify-center shrink-0"
       style={{ width: size, height: size, fontSize: Math.max(10, size / 3) }}
     >
-      {m.full_name.charAt(0).toUpperCase()}
+      {initials(m.full_name)}
     </div>
   );
 }

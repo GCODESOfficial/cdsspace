@@ -206,7 +206,7 @@ export default function WhatsAppIntegrationPage() {
         />
         <ModeCard
           title="WhatsApp Web QR"
-          blurb="Scan a QR with your phone to link — same as WhatsApp Web. Requires a running bridge process."
+          blurb="Scan a QR with your phone to link - same as WhatsApp Web. Requires a running bridge process."
           icon={<QrCode className="w-5 h-5" />}
           active={activeMode === "web_qr"}
           onActivate={() => activate("web_qr")}
@@ -282,7 +282,7 @@ export default function WhatsAppIntegrationPage() {
               onClick={resetQrSession}
               disabled={saving}
               className="text-[12px] text-gray-500 hover:text-[#0A4FE8] flex items-center gap-1"
-              title="Force a fresh QR — clears any linked device"
+              title="Force a fresh QR - clears any linked device"
             >
               <RefreshCw className="w-3.5 h-3.5" /> Reset session
             </button>
@@ -360,9 +360,9 @@ function QrDisplay({ qr, onStart, starting }: { qr: QrState | null; onStart: () 
       <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-[13px] text-emerald-800 flex items-start gap-2">
         <CheckCircle2 className="w-4 h-4 mt-0.5" />
         <div>
-          <p className="font-semibold">Linked as {qr.qr_linked_phone || "—"}</p>
+          <p className="font-semibold">Linked as {qr.qr_linked_phone || "-"}</p>
           <p className="text-[11.5px] mt-1">
-            Last heartbeat: {qr.qr_last_seen_at ? new Date(qr.qr_last_seen_at).toLocaleTimeString() : "—"}
+            Last heartbeat: {qr.qr_last_seen_at ? new Date(qr.qr_last_seen_at).toLocaleTimeString() : "-"}
           </p>
         </div>
       </div>

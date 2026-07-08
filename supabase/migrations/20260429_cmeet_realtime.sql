@@ -1,5 +1,5 @@
 -- ============================================
--- CDS Space: cMeet — enable Supabase Realtime broadcast
+-- CDS Space: cMeet - enable Supabase Realtime broadcast
 --
 -- The live meeting client (`src/lib/cmeet-rtc.ts`) subscribes to a Realtime
 -- broadcast channel named `cmeet:<roomCode>` to exchange WebRTC signaling
@@ -14,7 +14,7 @@
 --
 -- This migration adds the minimal policies so any anon / authenticated user
 -- can read AND publish broadcast messages on `cmeet:*` topics (ephemeral
--- WebRTC signaling — no DB rows, no PII, no persistence).
+-- WebRTC signaling - no DB rows, no PII, no persistence).
 --
 -- Idempotent: safe to re-run. No-op on projects where Realtime
 -- Authorization is already permissive.
@@ -23,7 +23,7 @@
 -- Realtime schema is owned by Supabase; it always exists.
 do $$
 begin
-  -- Only enable RLS if the table exists (defensive — on very old projects
+  -- Only enable RLS if the table exists (defensive - on very old projects
   -- `realtime.messages` may not be provisioned until Realtime is used).
   if exists (
     select 1 from information_schema.tables

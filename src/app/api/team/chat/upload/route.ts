@@ -1,13 +1,15 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { NextResponse } from "next/server";
-import { supabaseAdmin } from "@/lib/supabase";
+import { getGlashDbAdmin } from "@/lib/glashdb";
 import { getChatViewer } from "@/lib/team-chat-auth";
+import { validateChatUpload } from "@/lib/chat-upload-limits";
 
 export const runtime = "nodejs";
 
 export async function POST(req: Request) {
   const viewer = await getChatViewer();
-  if (!viewer || !supabaseAdmin) {
+  const db = getGlashDbAdmin() as any;
+  if (!viewer || !db) {
     return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
   }
 
@@ -18,12 +20,18 @@ export async function POST(req: Request) {
       return NextResponse.json({ ok: false, error: "No file provided" }, { status: 400 });
     }
 
+    // Authoritative size/type enforcement (images 6MB, videos 50MB) - the
+    // client checks too, but never trust the client. 413 = Payload Too Large.
+    const check = validateChatUpload(file.size, file.type || "");
+    if (!check.ok) {
+      return NextResponse.json({ ok: false, error: check.error }, { status: 413 });
+    }
+
     const buffer = Buffer.from(await file.arrayBuffer());
     const fileExt = file.name.split(".").pop();
     const fileName = `${Math.random().toString(36).substring(2)}-${Date.now()}.${fileExt}`;
     const filePath = `chat-attachments/${fileName}`;
 
-    const db = supabaseAdmin as any;
     const { data: upload, error: uploadError } = await db.storage
       .from("media")
       .upload(filePath, buffer, {

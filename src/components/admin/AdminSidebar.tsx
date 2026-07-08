@@ -17,7 +17,6 @@ import {
   Quote,
   LogOut,
   ShieldCheck,
-  ImagePlus,
   HelpCircle,
   Wallet,
   ChevronDown,
@@ -36,6 +35,8 @@ import {
   UserPlus,
   Calendar,
   Clock,
+  CalendarCheck,
+  ListChecks,
   Scale,
   Video,
   PenLine,
@@ -45,19 +46,51 @@ import {
   Brain,
   X,
   Megaphone,
+  Fingerprint,
+  Newspaper,
+  Sparkles,
+  Archive,
+  Settings as SettingsIcon,
+  Clapperboard,
+  GraduationCap,
 } from "lucide-react";
 
 const topLevelItems = [
   { label: "Dashboard", href: "/admin", icon: LayoutDashboard, permission: "dashboard" },
-  { label: "Upload Works", href: "/admin/upload-works", icon: Upload, permission: "upload_works" },
+];
+
+const communicationNavItems = [
   { label: "Client Conversation", href: "/admin/messages", icon: MessageSquare, permission: "messages" },
   { label: "Team Chat", href: "/admin/chat", icon: MessageSquare, permission: "team_chat" },
   { label: "Announcements", href: "/admin/announcements", icon: Megaphone, permission: "team_chat.broadcast" },
-  { label: "Consultations", href: "/admin/consultations", icon: Calendar, permission: "consultations" },
-  { label: "Portfolio", href: "/admin/portfolio-designs", icon: ImagePlus, permission: "dashboard" },
+];
+
+const contentWebNavItems = [
+  { label: "Upload Works", href: "/admin/upload-works", icon: Upload, permission: "upload_works" },
+  { label: "Blog", href: "/admin/blog", icon: Newspaper, permission: "blog" },
   { label: "FAQs", href: "/admin/faqs", icon: HelpCircle, permission: "dashboard" },
-  { label: "Legal Documents", href: "/admin/legal", icon: Scale, permission: "legal" },
+];
+
+const clientEngagementNavItems = [
+  { label: "Consultations", href: "/admin/consultations", icon: Calendar, permission: "consultations" },
   { label: "Brand Briefs", href: "/admin/brand-briefs", icon: FileText, permission: "dashboard" },
+];
+
+const complianceNavItems = [
+  { label: "Audit & Report", href: "/admin/audit-report", icon: ClipboardCheck, permission: "audit_report" },
+  { label: "Legal Documents", href: "/admin/legal", icon: Scale, permission: "legal" },
+];
+
+const contentHubNavItems = [
+  { label: "Dashboard", href: "/admin/content-hub", icon: LayoutDashboard, permission: "content_hub" },
+  { label: "Content Calendar", href: "/admin/content-hub/calendar", icon: Calendar, permission: "content_hub.calendar" },
+  { label: "Content Library", href: "/admin/content-hub/library", icon: Boxes, permission: "content_hub" },
+  { label: "Create Content", href: "/admin/content-hub/create", icon: PenLine, permission: "content_hub.create" },
+  { label: "BSD Studio", href: "/admin/content-hub/studio", icon: Clapperboard, permission: "content_hub.studio" },
+  { label: "AI Assistant", href: "/admin/content-hub/ai", icon: Sparkles, permission: "content_hub.ai" },
+  { label: "Approval Queue", href: "/admin/content-hub/approvals", icon: ClipboardCheck, permission: "content_hub.approve" },
+  { label: "Archived", href: "/admin/content-hub/archived", icon: Archive, permission: "content_hub" },
+  { label: "Settings", href: "/admin/content-hub/settings", icon: SettingsIcon, permission: "content_hub.settings" },
 ];
 
 const workspaceNavItems = [
@@ -72,11 +105,16 @@ const workspaceNavItems = [
 const hrmNavItems = [
   { label: "Overview", href: "/admin/hrm", icon: BarChart3, permission: "applicants" },
   { label: "Team Members", href: "/admin/team-members", icon: UserPlus, permission: "team_members" },
+  { label: "Team Today", href: "/admin/team-today", icon: CalendarCheck, permission: "team_today" },
+  { label: "Daily Tasks", href: "/admin/daily-tasks", icon: ListChecks, permission: "team_today" },
   { label: "Timebook", href: "/admin/timebook", icon: Clock, permission: "timebook" },
+  { label: "Time Machine", href: "/admin/time-machine", icon: Fingerprint, permission: "time_machine" },
   { label: "Work Tracking", href: "/admin/work-tracking", icon: Activity, permission: "work_tracking" },
+  { label: "Team Reports", href: "/admin/team-reports", icon: BarChart3, permission: "all" },
   { label: "Departments", href: "/admin/departments", icon: Building2, permission: "departments" },
   { label: "Sub-admins", href: "/admin/sub-admins", icon: ShieldCheck, permission: "sub_admins" },
   { label: "Applications", href: "/admin/applications", icon: Users, permission: "applicants" },
+  { label: "Screening", href: "/admin/screening", icon: GraduationCap, permission: "applicants.screening" },
   { label: "Open Roles", href: "/admin/hrm/roles", icon: BriefcaseIcon, permission: "applicants" },
   { label: "Certifications", href: "/admin/hrm/certifications", icon: Award, permission: "applicants" },
 ];
@@ -84,7 +122,8 @@ const hrmNavItems = [
 const financeNavItems = [
   { label: "Overview", href: "/admin/finance", icon: BarChart3, permission: "finance" },
   { label: "Invoice", href: "/admin/finance/invoices", icon: FileText, permission: "finance_invoices" },
-  { label: "Pricelist", href: "/admin/finance/price-list", icon: Tag, permission: "finance_pricelist" },
+  { label: "Quotation", href: "/admin/finance/quotations", icon: FileText, permission: "finance_quotations" },
+  { label: "Pricelists", href: "/admin/finance/pricelists", icon: Tag, permission: "finance_pricelist" },
   { label: "Expenditure", href: "/admin/finance/expenditures", icon: Receipt, permission: "finance_expenditures" },
   { label: "Payroll", href: "/admin/finance/payroll", icon: Wallet, permission: "finance_payroll" },
   { label: "Team Payroll", href: "/admin/team-payroll", icon: Wallet, permission: "team_payroll" },
@@ -124,6 +163,12 @@ interface NavGroupProps {
   onNavigate?: () => void;
 }
 
+// Remembers which nav groups are expanded, keyed by label. Module-level so the
+// state survives the sidebar re-mounting on navigation (same reason the scroll
+// position is persisted) — so an expanded menu stays open after you click into
+// one of its items instead of collapsing.
+const OPEN_NAV_GROUPS = new Set<string>();
+
 function NavGroup({ label, icon: GroupIcon, items, pathname, permissions, isSuperAdmin, onNavigate }: NavGroupProps) {
   const exactRoutes = ["/admin/finance", "/admin/projects", "/admin/clients", "/admin/hrm"];
 
@@ -137,7 +182,25 @@ function NavGroup({ label, icon: GroupIcon, items, pathname, permissions, isSupe
   const isAnyActive = visibleItems.some((i) =>
     exactRoutes.includes(i.href) ? pathname === i.href : pathname?.startsWith(i.href)
   );
-  const [open, setOpen] = useState(isAnyActive);
+  // Start open if the user had it open, or the current route lives in this group.
+  const [open, setOpen] = useState(() => OPEN_NAV_GROUPS.has(label) || isAnyActive);
+
+  // Navigating into this group auto-expands it and remembers that.
+  useEffect(() => {
+    if (isAnyActive) {
+      OPEN_NAV_GROUPS.add(label);
+      setOpen(true);
+    }
+  }, [isAnyActive, label]);
+
+  const toggleOpen = () => {
+    setOpen((prev) => {
+      const next = !prev;
+      if (next) OPEN_NAV_GROUPS.add(label);
+      else OPEN_NAV_GROUPS.delete(label);
+      return next;
+    });
+  };
 
   // Hide the entire group if no sub-items survive the permission filter
   if (visibleItems.length === 0) return null;
@@ -145,7 +208,7 @@ function NavGroup({ label, icon: GroupIcon, items, pathname, permissions, isSupe
   return (
     <div className="pt-1">
       <button
-        onClick={() => setOpen(!open)}
+        onClick={toggleOpen}
         className={`flex items-center justify-between w-full gap-3 px-4 py-2.5 rounded-xl text-[13.5px] font-medium transition-all ${
           isAnyActive && !open
             ? "bg-blue-50 text-[#0A4FE8]"
@@ -296,10 +359,56 @@ export default function AdminSidebar({ mobileOpen = false, onMobileClose }: Admi
           );
         })}
 
+        <NavGroup
+          label="Communication"
+          icon={MessageSquare}
+          items={communicationNavItems}
+          pathname={pathname}
+          permissions={permissions}
+          isSuperAdmin={isSuperAdmin}
+          onNavigate={mobile ? handleMobileNavigate : handleDesktopNavigate}
+        />
+        <NavGroup
+          label="Web Content"
+          icon={Newspaper}
+          items={contentWebNavItems}
+          pathname={pathname}
+          permissions={permissions}
+          isSuperAdmin={isSuperAdmin}
+          onNavigate={mobile ? handleMobileNavigate : handleDesktopNavigate}
+        />
+        <NavGroup
+          label="Clients"
+          icon={Calendar}
+          items={clientEngagementNavItems}
+          pathname={pathname}
+          permissions={permissions}
+          isSuperAdmin={isSuperAdmin}
+          onNavigate={mobile ? handleMobileNavigate : handleDesktopNavigate}
+        />
+        <NavGroup
+          label="Compliance"
+          icon={Scale}
+          items={complianceNavItems}
+          pathname={pathname}
+          permissions={permissions}
+          isSuperAdmin={isSuperAdmin}
+          onNavigate={mobile ? handleMobileNavigate : handleDesktopNavigate}
+        />
+
         <div className="pt-4 pb-1 px-4">
           <p className="text-[10px] font-bold text-gray-300 uppercase tracking-[0.12em]">Operations</p>
         </div>
 
+        <NavGroup
+          label="Content Hub"
+          icon={Sparkles}
+          items={contentHubNavItems}
+          pathname={pathname}
+          permissions={permissions}
+          isSuperAdmin={isSuperAdmin}
+          onNavigate={mobile ? handleMobileNavigate : handleDesktopNavigate}
+        />
         <NavGroup
           label="Finance"
           icon={Wallet}
@@ -319,7 +428,7 @@ export default function AdminSidebar({ mobileOpen = false, onMobileClose }: Admi
           onNavigate={mobile ? handleMobileNavigate : handleDesktopNavigate}
         />
         <NavGroup
-          label="Clients"
+          label="CRM"
           icon={Building2}
           items={clientsNavItems}
           pathname={pathname}

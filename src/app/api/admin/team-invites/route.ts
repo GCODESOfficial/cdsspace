@@ -1,24 +1,17 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { NextResponse } from "next/server";
-import { cookies } from "next/headers";
 import { supabaseAdmin } from "@/lib/supabase";
+import { getAdminSession } from "@/lib/admin-session";
 import { generateInviteToken } from "@/lib/team-auth";
 
 export const runtime = "nodejs";
 
+// Canonical resolver: admin_session cookie OR sub-admin team_session.
 async function verifyAdmin() {
-  const store = await cookies();
-  const raw = store.get("admin_session")?.value;
-  if (!raw) return null;
-  try {
-    const session = JSON.parse(raw);
-    return session.role === "super_admin" || session.role === "sub_admin" ? session : null;
-  } catch {
-    return null;
-  }
+  return getAdminSession();
 }
 
-// GET — list pending invites
+// GET - list pending invites
 export async function GET() {
   const admin = await verifyAdmin();
   if (!admin || !supabaseAdmin) {
@@ -34,7 +27,7 @@ export async function GET() {
   return NextResponse.json({ ok: true, invites: data || [] });
 }
 
-// POST — create a blank self-serve invite. Optional pre-filled hints.
+// POST - create a blank self-serve invite. Optional pre-filled hints.
 export async function POST(req: Request) {
   const admin = await verifyAdmin();
   if (!admin || !supabaseAdmin) {
@@ -61,7 +54,7 @@ export async function POST(req: Request) {
   return NextResponse.json({ ok: true, invite: data });
 }
 
-// DELETE — revoke a pending invite by token
+// DELETE - revoke a pending invite by token
 export async function DELETE(req: Request) {
   const admin = await verifyAdmin();
   if (!admin || !supabaseAdmin) {

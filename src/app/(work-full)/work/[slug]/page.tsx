@@ -5,6 +5,8 @@ import { notFound } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { slugifyTitle } from "@/lib/work-slug";
+import { isPdfUrl } from "@/lib/work-asset";
+import WorkAsset from "@/components/marketing/WorkAsset";
 
 interface WorkRow {
     id: number;
@@ -54,7 +56,10 @@ async function fetchImages(workId: number): Promise<WorkImageRow[]> {
 }
 
 function pickHero(work: WorkRow | null, images: WorkImageRow[]): string | null {
-    return work?.cover_image ?? images[0]?.image_url ?? null;
+    // The hero renders through next/image, so it must be an actual image - never
+    // a PDF. Prefer the cover, else the first image asset that isn't a PDF.
+    if (work?.cover_image && !isPdfUrl(work.cover_image)) return work.cover_image;
+    return images.find((img) => !isPdfUrl(img.image_url))?.image_url ?? null;
 }
 
 export async function generateMetadata({ params }: { params: Params }): Promise<Metadata> {
@@ -62,15 +67,13 @@ export async function generateMetadata({ params }: { params: Params }): Promise<
     const work = await resolveWorkBySlug(slug);
     if (!work) {
         return {
-            title: "Project not found — CDS Space",
+            title: "Project not found - CDS Space",
             robots: { index: false, follow: false },
         };
     }
 
-    const images = await fetchImages(work.id);
-    const hero = pickHero(work, images);
     const url = `${SITE_URL}/work/${slugifyTitle(work.title)}`;
-    const title = `${work.title} — CDS Space`;
+    const title = `${work.title} - CDS Space`;
     const description =
         work.description?.slice(0, 200) ??
         `A ${work.category ?? "design"} project by CDS Space.`;
@@ -94,15 +97,13 @@ export async function generateMetadata({ params }: { params: Params }): Promise<
             url,
             siteName: "CDS Space",
             type: "article",
-            images: hero
-                ? [{ url: hero, width: 1920, height: 1080, alt: work.title }]
-                : undefined,
+            // The link-preview image comes from the colocated `opengraph-image`
+            // route (the project's uploaded cover image); Next merges it in.
         },
         twitter: {
             card: "summary_large_image",
             title,
             description,
-            images: hero ? [hero] : undefined,
             site: "@cdsspace_",
             creator: "@cdsspace_",
         },
@@ -133,7 +134,7 @@ function Meta({ label, lines }: { label: string; lines: string[] | null }) {
                     ))}
                 </ul>
             ) : (
-                <p className="text-[#9CA3AF] text-sm md:text-[15px] font-medium">—</p>
+                <p className="text-[#9CA3AF] text-sm md:text-[15px] font-medium">-</p>
             )}
         </div>
     );
@@ -218,13 +219,7 @@ export default async function WorkDetailPage({ params }: { params: Params }) {
                                         key={img.id}
                                         className="relative w-full rounded-xl md:rounded-2xl overflow-hidden bg-gray-100"
                                     >
-                                        {/* eslint-disable-next-line @next/next/no-img-element */}
-                                        <img
-                                            src={img.image_url}
-                                            alt=""
-                                            loading="lazy"
-                                            className="w-full h-auto block"
-                                        />
+                                        <WorkAsset url={img.image_url} alt={work.title} />
                                     </div>
                                 ))}
                             </div>

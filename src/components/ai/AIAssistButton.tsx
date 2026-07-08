@@ -72,7 +72,7 @@ export function AIAssistButton<I extends Record<string, unknown>>({
         type="button"
         onClick={run}
         disabled={loading}
-        title={error ?? (filled ? "Filled — click to regenerate" : "Let AI fill this for you")}
+        title={error ?? (filled ? "Filled - click to regenerate" : "Let AI fill this for you")}
         className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-[11px] font-semibold shadow-sm hover:shadow-md transition disabled:opacity-70 ${
           error
             ? "bg-rose-500 text-white"

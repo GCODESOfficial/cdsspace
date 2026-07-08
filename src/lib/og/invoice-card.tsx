@@ -6,7 +6,7 @@
  *   - "Client: <name>" subtitle
  *   - Globe footer with cdsspace.com | cdsspace.pro
  *
- * Sized for the canonical 1.91:1 Meta/WhatsApp spec — see brand-card.tsx
+ * Sized for the canonical 1.91:1 Meta/WhatsApp spec - see brand-card.tsx
  * for the reasoning. All pixel values are tuned for 1200×630 and must be
  * kept in sync with renderBrandCard.
  */
@@ -109,7 +109,7 @@ export function renderInvoiceCard(p: InvoiceCardProps): ReactElement {
                     /* eslint-disable-next-line @next/next/no-img-element */
                     <img
                         src={logoDataUri}
-                        alt="CDS Space — Branding Agency"
+                        alt="CDS Space - Branding Agency"
                         width={190}
                         height={73}
                         style={{ display: "block" }}

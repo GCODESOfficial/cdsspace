@@ -1,0 +1,24 @@
+name: cMeet auto-close
+
+# glashdb has no built-in scheduler, so this GitHub Actions workflow is the
+# external cron: every 5 minutes it pings the auto-close endpoint, which ends
+# any live cMeet that's had no participant for 30 minutes. (The app also closes
+# stale rooms lazily whenever a meeting or the meetings list is viewed - this is
+# the background safety net for rooms nobody is looking at.)
+
+on:
+  schedule:
+    # Every 5 minutes (UTC). Note: GitHub schedules are best-effort and can be
+    # delayed by a few minutes under load - fine for a 30-minute idle window.
+    - cron: "*/5 * * * *"
+  workflow_dispatch: {}
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger cMeet auto-close
+        run: |
+          curl -fsS -X GET "https://cdsspace.pro/api/cron/cmeet-autoclose" \
+            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
+            -w "\nHTTP %{http_code}\n"

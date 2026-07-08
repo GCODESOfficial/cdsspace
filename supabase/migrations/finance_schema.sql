@@ -1,5 +1,5 @@
 -- ============================================================
--- CDS Space Finance Module — full schema (all modules)
+-- CDS Space Finance Module - full schema (all modules)
 -- Run once in Supabase SQL editor.
 -- Safe to re-run: uses IF NOT EXISTS where possible.
 -- ============================================================

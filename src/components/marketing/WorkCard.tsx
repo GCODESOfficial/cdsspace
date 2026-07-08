@@ -70,7 +70,7 @@ export function WorkCard({ work, index = 0, onOpen, className }: WorkCardProps) 
                     <div className="absolute inset-0 bg-brand-stroke/30" />
                 )}
 
-                {/* Premium Hover Overlay — Desktop Only */}
+                {/* Premium Hover Overlay - Desktop Only */}
                 <div className="absolute inset-0 bg-brand-navy/60 md:bg-black/55 opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none" />
 
                 <div className="absolute inset-0 flex flex-col items-center justify-center text-center px-6 z-10 opacity-0 translate-y-4 group-hover:opacity-100 group-hover:translate-y-0 transition-all duration-500 ease-out hidden md:flex">

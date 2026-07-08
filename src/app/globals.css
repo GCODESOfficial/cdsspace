@@ -149,7 +149,7 @@ body {
 }
 
 /* ------------------------------------------------------------------
- * .legal-prose — typography for admin-editable legal pages
+ * .legal-prose - typography for admin-editable legal pages
  *
  * Rendered HTML comes from the `legal_documents` table. Keep these rules
  * self-contained (no @apply) so the CSS remains valid regardless of the
@@ -269,6 +269,33 @@ body {
   border-radius: 8px;
 }
 
+/* Blog article body - force the site's normal sans font everywhere, even when
+   content arrives wrapped in a code / <pre> block, and let it wrap naturally.
+   Rules sit after .legal-prose so they win on equal specificity. */
+.blog-content,
+.blog-content p,
+.blog-content li,
+.blog-content h1,
+.blog-content h2,
+.blog-content h3,
+.blog-content h4,
+.blog-content blockquote,
+.blog-content pre,
+.blog-content code {
+  font-family: var(--font-sans), Arial, Helvetica, sans-serif;
+}
+.blog-content pre {
+  white-space: pre-wrap;
+  word-break: break-word;
+  background: transparent;
+  padding: 0;
+  border: 0;
+}
+.blog-content pre code {
+  background: transparent;
+  padding: 0;
+}
+
 /* Chat message input: internal scroll (up to max-height) without a
    visible scrollbar. Keeps the textbox clean while still letting the
    user scroll through a long draft. */
@@ -278,4 +305,42 @@ body {
 }
 .chat-textarea::-webkit-scrollbar {
   display: none;                    /* Chrome / Safari / new Edge */
+}
+
+/* ─────────────── Branded pixel-art cursor ───────────────
+   The CDS Space 3D arrow replaces the default OS pointer across every page,
+   dashboard and admin view (all share the root layout → this stylesheet).
+   `cursor` is an inherited property, so setting it on html cascades to every
+   element that doesn't declare its own. PNG (not SVG) because Safari/WebKit
+   does not support SVG `cursor:` images. `3 3` is the hotspot at the arrow tip.
+   Source art: public/cursors/cursor.svg - regenerate via scripts/build-cursor.mjs. */
+html {
+  cursor: url('/cursors/cursor.png') 2 2, auto;
+}
+
+/* Keep the cursors that carry meaning: I-beam in text fields, hand on things
+   that are clickable, and not-allowed on disabled controls. */
+input:not([type='button']):not([type='submit']):not([type='reset']):not([type='checkbox']):not([type='radio']):not([type='range']):not([type='color']):not([type='file']),
+textarea,
+[contenteditable='true'] {
+  cursor: text;
+}
+
+a[href],
+button:not(:disabled),
+label[for],
+select,
+summary,
+[role='button'],
+[role='link'],
+[role='tab'],
+[role='menuitem'],
+.cursor-pointer {
+  cursor: url('/cursors/cursor.png') 2 2, pointer;
+}
+
+:disabled,
+[aria-disabled='true'],
+.cursor-not-allowed {
+  cursor: not-allowed;
 }

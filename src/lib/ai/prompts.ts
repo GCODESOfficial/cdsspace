@@ -25,7 +25,7 @@ export type AIKind =
   // Project / client docs
   | "project_doc_draft"
   | "protect_doc_description"
-  // Finance — invoices
+  // Finance - invoices
   | "invoice_notes"
   | "invoice_item_description"
   // Admin fills + replies
@@ -58,7 +58,7 @@ interface Recipe {
 }
 
 const BRAND_VOICE = `
-You are writing for CDS Space — a premium branding agency.
+You are writing for CDS Space - a premium branding agency.
 Voice: confident, modern, hospitable, slightly playful. Never corporate-bland.
 Never invent facts about people or projects. If context is missing, keep the
 phrasing generic instead of fabricating details. Write in American English.
@@ -71,7 +71,7 @@ export const RECIPES: Record<AIKind, Recipe> = {
 
 Write a concise open-role description (90–140 words) for the CDS Space careers page.
 Structure: an opening hook (1–2 sentences), what they'll own day-to-day (3–4 sentences),
-who they'll collaborate with. No lists. No headings. No trailing CTA — the page already has one.`,
+who they'll collaborate with. No lists. No headings. No trailing CTA - the page already has one.`,
     max_tokens: 500,
     buildUser: (i) =>
       `Role title: ${i.title}\nType: ${i.role_type || "unspecified"}\nLocation: ${i.location || "unspecified"}\nNotes: ${i.notes || "(none)"}`,
@@ -93,7 +93,7 @@ Format as plain lines starting with "• ". No intro text, no trailing paragraph
 
 Produce a short "Role-specific perks" list (3–5 bullets) that complement CDS Space's
 standard perks (mentorship, calm studio, flexible schedule, faith-sensitive workplace).
-Don't repeat those — highlight perks that are specific to this role.
+Don't repeat those - highlight perks that are specific to this role.
 Format as plain lines starting with "• ". No intro, no outro.`,
     max_tokens: 300,
     buildUser: (i) => `Role: ${i.title}\nDescription: ${i.description || "(none)"}`,
@@ -104,7 +104,7 @@ Format as plain lines starting with "• ". No intro, no outro.`,
 
 You are the CDS Space hiring lead replying to a career applicant. Tone: warm, honest,
 specific. Length: 60–110 words. Never promise a decision you can't keep. End with a
-concrete next step. Sign off simply with "— The CDS Space Team".`,
+concrete next step. Sign off simply with "- The CDS Space Team".`,
     max_tokens: 400,
     buildUser: (i) =>
       `Applicant: ${i.applicant_name}\nRole applied for: ${i.role_title}\nIntent: ${i.intent}\nNotes: ${i.notes || "(none)"}`,
@@ -115,7 +115,7 @@ concrete next step. Sign off simply with "— The CDS Space Team".`,
     system: `${BRAND_VOICE}
 
 Continue the user's document from where it stops. Match the existing tone, voice,
-and terminology exactly. Output only the new continuation — do NOT repeat any of
+and terminology exactly. Output only the new continuation - do NOT repeat any of
 the text already written. 150–350 words unless the doc is short (then match length).`,
     max_tokens: 900,
     buildUser: (i) => `Document so far:\n\n${i.body}`,
@@ -163,7 +163,7 @@ Preserve all facts. Aim for ~30% fewer words. Keep the original structure.`,
     system: `${BRAND_VOICE}
 
 Produce an outline (markdown headings + sub-bullets) for a doc on the given topic.
-Depth: 2 levels of headings. Keep it actionable — each section should have a
+Depth: 2 levels of headings. Keep it actionable - each section should have a
 one-line note about what goes inside.`,
     max_tokens: 500,
     buildUser: (i) => `Topic: ${i.topic}\nAudience: ${i.audience || "internal team"}\nNotes: ${i.notes || "(none)"}`,
@@ -183,12 +183,12 @@ Output only the rewrite.`,
     system: `${BRAND_VOICE}
 
 Draft an internal project brief. Sections (markdown headings):
-## Overview — 2–3 sentences
-## Goals — 3–5 bullets
-## Scope — 3–5 bullets of what's included
-## Out of scope — 2–3 bullets
-## Timeline — 1 short paragraph
-## Risks — 2–3 bullets
+## Overview - 2–3 sentences
+## Goals - 3–5 bullets
+## Scope - 3–5 bullets of what's included
+## Out of scope - 2–3 bullets
+## Timeline - 1 short paragraph
+## Risks - 2–3 bullets
 Keep total length under 350 words.`,
     max_tokens: 900,
     buildUser: (i) => `Project: ${i.project_name}\nClient: ${i.client_name || "(internal)"}\nNotes: ${i.notes}`,
@@ -204,19 +204,19 @@ and when they'd reach for it.`,
     buildUser: (i) => `Title: ${i.title}\nVisibility: ${i.visibility}\nNotes: ${i.notes || "(none)"}`,
   },
 
-  // ---------------- Finance — invoices ----------------
+  // ---------------- Finance - invoices ----------------
   invoice_notes: {
     system: `${BRAND_VOICE}
 
 Write the "Notes" block on a CDS Space invoice. 2–4 sentences total.
 Cover (only if relevant): bank/payment instructions placeholder, payment timing,
-thank-you line. NEVER invent specific bank account numbers — reference them
+thank-you line. NEVER invent specific bank account numbers - reference them
 generically as "the account details on file" if needed. Plain text, no markdown.`,
     max_tokens: 280,
     buildUser: (i) =>
       `Client: ${i.client_name || "(unknown)"}
 Currency: ${i.currency || "NGN"}
-Total: ${i.total ?? "—"}
+Total: ${i.total ?? "-"}
 Due date: ${i.due_date || "(unset)"}
 Scope: ${i.scope || "custom"}
 Items: ${(i.items || []).map((it: any) => `${it.name} × ${it.quantity}`).join("; ") || "(none)"}
@@ -238,7 +238,7 @@ Concrete, deliverable-focused. No fluff, no pricing language. Plain text only.`,
 
 You're an admin replying to a client message in the CDS Space inbox. Tone: warm,
 specific, helpful. Length: 50–110 words. Acknowledge what they asked, then
-either answer it or set a clear next step. Sign off "— CDS Space".`,
+either answer it or set a clear next step. Sign off "- CDS Space".`,
     max_tokens: 320,
     buildUser: (i) =>
       `Client: ${i.client_name || "(unknown)"}
@@ -251,7 +251,7 @@ Context (last few turns): ${i.history || "(none)"}`,
     system: `${BRAND_VOICE}
 
 Write a concise FAQ answer (45–90 words) for the CDS Space website.
-Plain prose — no list unless the question explicitly asks for steps.
+Plain prose - no list unless the question explicitly asks for steps.
 Direct, specific, never marketing-fluffy.`,
     max_tokens: 240,
     buildUser: (i) => `Question: ${i.question}\nNotes / draft: ${i.draft || "(none)"}`,
@@ -295,7 +295,7 @@ Write a one-line note for an internal expenditure entry (8–18 words).
 Plain language, mention what it was for and the project (if any). No fluff.`,
     max_tokens: 80,
     buildUser: (i) =>
-      `Title: ${i.title}\nCategory: ${i.category || "(none)"}\nAmount: ${i.amount || "—"} ${i.currency || ""}\nProject: ${i.project || "(none)"}`,
+      `Title: ${i.title}\nCategory: ${i.category || "(none)"}\nAmount: ${i.amount || "-"} ${i.currency || ""}\nProject: ${i.project || "(none)"}`,
   },
 
   // ---------------- Chat -----------------
@@ -362,7 +362,7 @@ First-person. Confident, not boastful. Mentions 1–2 concrete things they've sh
     system: `${BRAND_VOICE}
 
 Extract a clean, deduped list of 8–15 skills from the user's past roles and projects.
-Return JSON: {"skills":["...",...]} — noun phrases, title-case, no descriptions.`,
+Return JSON: {"skills":["...",...]} - noun phrases, title-case, no descriptions.`,
     max_tokens: 250,
     json: true,
     buildUser: (i) =>
@@ -374,7 +374,7 @@ Return JSON: {"skills":["...",...]} — noun phrases, title-case, no description
     system: `${BRAND_VOICE}
 
 Draft a reply to an inbound consultation request. Warm, specific, sets up a 20-min call.
-60–100 words. Sign off "— CDS Space". Never promise prices.`,
+60–100 words. Sign off "- CDS Space". Never promise prices.`,
     max_tokens: 300,
     buildUser: (i) =>
       `Name: ${i.name}\nBrand: ${i.brand || "(not provided)"}\nGoal: ${i.goal}\nNotes: ${i.notes || "(none)"}`,

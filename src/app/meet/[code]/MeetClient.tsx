@@ -45,7 +45,7 @@ interface Meeting {
 }
 
 /* ------------------------------------------------------------------ */
-/*  Live video tile — subscribes to a MediaStream and paints it.     */
+/*  Live video tile - subscribes to a MediaStream and paints it.     */
 /*  Keyed by stream.id so React re-mounts on stream swap.            */
 /* ------------------------------------------------------------------ */
 function VideoTile({
@@ -71,7 +71,7 @@ function VideoTile({
       const reapply = () => { if (el.srcObject !== stream) el.srcObject = stream; };
       stream.addEventListener("addtrack", reapply);
       stream.addEventListener("removetrack", reapply);
-      // Autoplay can be blocked on Safari/iOS until user interaction — retry once muted.
+      // Autoplay can be blocked on Safari/iOS until user interaction - retry once muted.
       const play = () => el.play().catch(() => { el.muted = true; el.play().catch(() => {}); });
       play();
       return () => {
@@ -118,7 +118,7 @@ export default function MeetRoomPage() {
   const [remotes, setRemotes] = useState<RemotePeer[]>([]);
   const clientRef = useRef<CMeetClient | null>(null);
 
-  // Chat (source of truth: CMeetClient.onChat — which already fires with self:true on send)
+  // Chat (source of truth: CMeetClient.onChat - which already fires with self:true on send)
   const [chat, setChat] = useState<ChatMessage[]>([]);
   const [chatInput, setChatInput] = useState("");
   const [showChat, setShowChat] = useState(false);
@@ -174,6 +174,17 @@ export default function MeetRoomPage() {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  /* -------- Presence heartbeat (keeps the room from auto-closing) -------- */
+  useEffect(() => {
+    if (!joined || !code) return;
+    const ping = () => {
+      fetch(`/api/cmeet/${code}/heartbeat`, { method: "POST", credentials: "include", keepalive: true }).catch(() => {});
+    };
+    ping();
+    const interval = window.setInterval(ping, 60_000);
+    return () => window.clearInterval(interval);
+  }, [joined, code]);
 
   /* -------- Permissions & join -------- */
   const canJoinMeeting = Boolean(name.trim()) && !joining && !mediaError;

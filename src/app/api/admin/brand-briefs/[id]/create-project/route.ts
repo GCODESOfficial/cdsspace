@@ -25,13 +25,15 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     const name = brief.brand_name?.trim() || brief.invite_label?.trim() || "New project";
     const client = brief.contact_name?.trim() || brief.brand_name?.trim() || "Client";
 
+    // NOTE: budget is deliberately NOT written into project notes — notes are
+    // visible to all assigned team members, and budget is management-only. It
+    // stays on the linked brand brief, where /api/team/work gates it by role.
     const notes = [
         brief.brand_description && `About: ${brief.brand_description}`,
         brief.target_audience && `Audience: ${brief.target_audience}`,
         Array.isArray(brief.assets_needed) && brief.assets_needed.length
             ? `Scope: ${brief.assets_needed.join(", ")}`
             : null,
-        brief.budget_range && `Budget: ${brief.budget_range}`,
         brief.timeline && `Timeline: ${brief.timeline}`,
         brief.contact_email && `Client email: ${brief.contact_email}`,
         brief.contact_phone && `Client phone: ${brief.contact_phone}`,
@@ -51,6 +53,12 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
         .select()
         .single();
     if (insertErr) return NextResponse.json({ error: insertErr.message }, { status: 500 });
+
+    // Persist the brief -> project link so the brief surfaces inside the
+    // project's workspace Files panel. Best-effort: if the project_id column
+    // hasn't been migrated yet (glashdb-brief-project-link.sql), don't fail the
+    // project creation over it.
+    await sb.from("brand_briefs").update({ project_id: project.id }).eq("id", id);
 
     return NextResponse.json({ project });
 }

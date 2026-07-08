@@ -4,21 +4,38 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import FinanceShell, { glassCard } from "@/components/finance/FinanceShell";
 import { supabase } from "@/lib/supabase";
+import { formatFinanceDate } from "@/lib/finance/types";
 import {
   ArrowDownToLine, Briefcase, Tag, FileText, Users, Receipt, Wallet, BarChart3, ArrowUpRight,
-  TrendingUp, TrendingDown, DollarSign, Activity, AlertCircle, CheckCircle2, Clock, Loader2,
+  TrendingUp, TrendingDown, DollarSign, AlertCircle, Clock, Loader2, ScrollText,
 } from "lucide-react";
 
 const SECTIONS = [
   { href: "/admin/finance/projects",      label: "Projects",      desc: "Create & manage projects and milestones",    icon: Briefcase, tint: "from-blue-500 to-indigo-500" },
   { href: "/admin/finance/price-list",    label: "Price List",    desc: "Products & services with unit prices",       icon: Tag,       tint: "from-fuchsia-500 to-pink-500" },
   { href: "/admin/finance/invoices",      label: "Invoices",      desc: "Generate, send & track invoices",             icon: FileText,  tint: "from-emerald-500 to-teal-500" },
+  { href: "/admin/finance/quotations",    label: "Quotations",    desc: "Rough estimates before invoicing",             icon: ScrollText, tint: "from-blue-500 to-cyan-500" },
   { href: "/admin/finance/subscriptions", label: "Inflow",        desc: "Record positive money received",              icon: ArrowDownToLine, tint: "from-emerald-500 to-teal-500" },
   { href: "/admin/finance/contractors",   label: "Contractors",   desc: "Team & contractor payments",                  icon: Users,     tint: "from-violet-500 to-purple-500" },
   { href: "/admin/finance/expenditures",  label: "Expenditures",  desc: "Track all outgoing spend",                    icon: Receipt,   tint: "from-rose-500 to-red-500" },
   { href: "/admin/finance/payroll",       label: "Payroll",       desc: "Employees & bank payroll exports",            icon: Wallet,    tint: "from-cyan-500 to-sky-500" },
   { href: "/admin/finance/audit",       label: "Detailed",      desc: "Full financial summary",                      icon: BarChart3, tint: "from-slate-700 to-slate-900" },
 ];
+
+interface RecentInvoice {
+  id: string;
+  client_name: string;
+  issue_date: string;
+  total: number | string;
+  status: string;
+}
+
+interface RecentExpense {
+  id: string;
+  title: string;
+  spent_on: string;
+  amount: number | string;
+}
 
 interface Stats {
   totalRevenue: number;
@@ -35,9 +52,8 @@ interface Stats {
   totalEmployees: number;
   totalInflow: number;
   outstandingPayables: number;
-  recentInvoices: any[];
-  recentExpenses: any[];
-  recentInflows: any[];
+  recentInvoices: RecentInvoice[];
+  recentExpenses: RecentExpense[];
 }
 
 const formatCurrency = (n: number) => `₦${n.toLocaleString("en", { maximumFractionDigits: 0 })}`;
@@ -102,9 +118,8 @@ export default function FinanceHome() {
           totalEmployees: employees.length,
           totalInflow,
           outstandingPayables,
-          recentInvoices: invoices.slice(0, 5),
-          recentExpenses: expenditures.slice(0, 5),
-          recentInflows: inflows.slice(0, 5),
+          recentInvoices: invoices.slice(0, 5) as RecentInvoice[],
+          recentExpenses: expenditures.slice(0, 5) as RecentExpense[],
         });
       } catch (error) {
         console.error("Failed to load finance stats:", error);
@@ -230,7 +245,7 @@ export default function FinanceHome() {
                     <div key={inv.id} className="flex items-center justify-between p-2.5 rounded-xl hover:bg-blue-50/40 transition">
                       <div className="min-w-0">
                         <p className="text-[13px] font-medium text-gray-900 truncate">{inv.client_name}</p>
-                        <p className="text-[11px] text-gray-400">{new Date(inv.issue_date).toLocaleDateString()}</p>
+                        <p className="text-[11px] text-gray-400">{formatFinanceDate(inv.issue_date)}</p>
                       </div>
                       <div className="flex items-center gap-2">
                         <span className="text-[13px] font-semibold tabular-nums text-gray-700">{formatCurrency(Number(inv.total))}</span>

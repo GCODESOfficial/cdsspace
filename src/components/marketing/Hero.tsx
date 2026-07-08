@@ -1,30 +1,122 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { motion } from "framer-motion";
+import Image from "next/image";
 import Link from "next/link";
-import { createClient } from "@/lib/supabase/client";
+
+type FullscreenRequestElement = HTMLElement & {
+    webkitRequestFullscreen?: () => Promise<void> | void;
+    msRequestFullscreen?: () => Promise<void> | void;
+};
+
+type FullscreenDocument = Document & {
+    webkitExitFullscreen?: () => Promise<void> | void;
+    msExitFullscreen?: () => Promise<void> | void;
+    webkitFullscreenElement?: Element | null;
+    msFullscreenElement?: Element | null;
+};
+
+function getFullscreenElement() {
+    const doc = document as FullscreenDocument;
+
+    return (
+        doc.fullscreenElement ??
+        doc.webkitFullscreenElement ??
+        doc.msFullscreenElement
+    );
+}
+
+function requestFullscreen(element: FullscreenRequestElement | null) {
+    if (!element) return;
+
+    const request =
+        element.requestFullscreen ??
+        element.webkitRequestFullscreen ??
+        element.msRequestFullscreen;
+
+    try {
+        const result = request?.call(element);
+        if (result && "catch" in result) {
+            result.catch(() => undefined);
+        }
+    } catch {
+        // Browsers may reject fullscreen when user activation is unavailable.
+    }
+}
 
 /**
  * Hero Section - 10/10 Fidelity Implementation
  * Designed for 1440px, scaled fluidly for smaller desktop screens.
  */
 export const Hero = () => {
-    const [isLoggedIn, setIsLoggedIn] = useState(false);
+    const [isReelOpen, setIsReelOpen] = useState(false);
+    const playerShellRef = useRef<HTMLDivElement | null>(null);
+    const mainVideoRef = useRef<HTMLVideoElement | null>(null);
 
-    // Check auth status to match My Account behavior
     useEffect(() => {
-        const supabase = createClient();
-        supabase.auth.getUser().then(({ data: { user } }) => {
-            setIsLoggedIn(!!user);
-        });
-        const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-            setIsLoggedIn(!!session?.user);
-        });
-        return () => subscription.unsubscribe();
-    }, []);
+        if (!isReelOpen) return;
 
-    const accountHref = isLoggedIn ? "/dashboard" : "/login";
+        const shell = playerShellRef.current;
+        const video = mainVideoRef.current;
+
+        if (!getFullscreenElement()) {
+            requestFullscreen(shell);
+        }
+
+        if (video) {
+            video.currentTime = 0;
+            video.play().catch(() => undefined);
+        }
+
+        const handleFullscreenChange = () => {
+            if (!getFullscreenElement()) {
+                setIsReelOpen(false);
+            }
+        };
+
+        document.addEventListener("fullscreenchange", handleFullscreenChange);
+        document.addEventListener("webkitfullscreenchange", handleFullscreenChange);
+        document.addEventListener("MSFullscreenChange", handleFullscreenChange);
+
+        return () => {
+            video?.pause();
+            document.removeEventListener("fullscreenchange", handleFullscreenChange);
+            document.removeEventListener("webkitfullscreenchange", handleFullscreenChange);
+            document.removeEventListener("MSFullscreenChange", handleFullscreenChange);
+        };
+    }, [isReelOpen]);
+
+    const closeReel = async () => {
+        const doc = document as FullscreenDocument;
+
+        if (getFullscreenElement()) {
+            const exitFullscreen =
+                doc.exitFullscreen ??
+                doc.webkitExitFullscreen ??
+                doc.msExitFullscreen;
+
+            try {
+                const exit = exitFullscreen?.call(doc);
+                if (exit && "catch" in exit) {
+                    await exit.catch(() => undefined);
+                }
+            } catch {
+                // Ignore fullscreen exit failures and return to the page shell.
+            }
+        }
+
+        mainVideoRef.current?.pause();
+        setIsReelOpen(false);
+        window.setTimeout(() => {
+            window.scrollTo({ top: 0, behavior: "smooth" });
+        }, 0);
+    };
+
+    const openReel = () => {
+        requestFullscreen(document.documentElement);
+        setIsReelOpen(true);
+    };
 
     return (
         <section className="relative w-full pt-[116px] sm:pt-[132px] md:pt-[174px] pb-[88px] sm:pb-[120px] md:pb-[174px] overflow-hidden bg-brand-bg">
@@ -85,11 +177,11 @@ export const Hero = () => {
                         data-node-id="5808:4936"
                     >
                         <Link
-                            href={accountHref}
+                            href="/consultation"
                             className="flex items-center justify-center px-8 py-[15px] rounded-[100px] text-[16px] md:text-[18px] font-medium text-brand-bg transition-opacity hover:opacity-90 tracking-[-0.18px] whitespace-nowrap w-full sm:w-auto"
                             style={{ background: 'var(--color-brand-gradient)' }}
                         >
-                            <span>Explore the Branding Space</span>
+                            <span>Schedule a Strategy Session</span>
                         </Link>
                     </div>
                 </div>
@@ -99,32 +191,28 @@ export const Hero = () => {
                     className="mt-14 sm:mt-16 md:mt-[104px] w-full max-w-[1408px] aspect-[370/290] sm:aspect-[1408/981] rounded-[16px] md:rounded-[24px] bg-[#040B37] relative overflow-hidden animate-reveal opacity-0 shadow-[0_12px_24px_rgba(4,11,55,0.1),0_32px_64px_rgba(4,11,55,0.15)] group cursor-pointer"
                     style={{ animationDelay: '0.5s' }}
                     data-node-id="5272:37295"
-                    onClick={() => {
-                        const video = document.getElementById('hero-reel') as HTMLVideoElement;
-                        if (video) {
-                            if (video.requestFullscreen) {
-                                video.requestFullscreen();
-                            } else if ((video as any).webkitRequestFullscreen) {
-                                (video as any).webkitRequestFullscreen();
-                            } else if ((video as any).msRequestFullscreen) {
-                                (video as any).msRequestFullscreen();
-                            }
-                            video.muted = false;
-                            video.currentTime = 0;
-                            video.play();
+                    onClick={openReel}
+                    role="button"
+                    tabIndex={0}
+                    onKeyDown={(event) => {
+                        if (event.key === "Enter" || event.key === " ") {
+                            event.preventDefault();
+                            openReel();
                         }
                     }}
+                    aria-label="Watch CDS Space reel"
                 >
                     {/* The video element with exactly matched rounding and behavior */}
                     <video
-                        id="hero-reel"
                         autoPlay
                         loop
                         muted
                         playsInline
+                        preload="metadata"
                         className="absolute inset-0 w-full h-full object-cover rounded-[16px] md:rounded-[24px]"
+                        aria-label="CDS Space reel preview"
                     >
-                        <source src="/home/CDS Space Branding Agency.mp4" type="video/mp4" />
+                        <source src="/videos/cds-preview.mp4" type="video/mp4" />
                     </video>
 
                     {/* Cinematic Hover Overlay */}
@@ -143,9 +231,12 @@ export const Hero = () => {
 
                             {/* CDS Branding on Video Overlay */}
                             <div className="absolute left-8 md:left-12 bottom-8 md:bottom-12 flex flex-col items-start gap-2 z-20">
-                                <img
+                                <Image
                                     src="/navbar/CDS Logo.svg"
                                     alt="CDS"
+                                    width={96}
+                                    height={36}
+                                    loading="lazy"
                                     className="w-16 md:w-24 brightness-0 invert opacity-90"
                                 />
                                 <div className="flex items-center gap-2">
@@ -159,6 +250,37 @@ export const Hero = () => {
                     </div>
                 </div>
             </div>
+
+            {isReelOpen && (
+                <div
+                    ref={playerShellRef}
+                    className="fixed inset-0 z-[300] flex flex-col bg-black text-white"
+                    role="dialog"
+                    aria-modal="true"
+                    aria-label="CDS Space main reel"
+                >
+                    <div className="absolute left-4 top-4 z-20 sm:left-6 sm:top-6">
+                        <button
+                            type="button"
+                            onClick={closeReel}
+                            className="rounded-full border border-white/20 bg-white px-5 py-3 text-[14px] font-semibold text-[#040B37] shadow-[0_16px_40px_rgba(0,0,0,0.22)] transition hover:bg-white/90 focus:outline-none focus:ring-4 focus:ring-white/30"
+                        >
+                            Back to home
+                        </button>
+                    </div>
+
+                    <video
+                        ref={mainVideoRef}
+                        src="/videos/video-main.mp4"
+                        controls
+                        autoPlay
+                        playsInline
+                        preload="metadata"
+                        className="h-full w-full bg-black object-contain"
+                        onEnded={closeReel}
+                    />
+                </div>
+            )}
         </section>
     );
 };

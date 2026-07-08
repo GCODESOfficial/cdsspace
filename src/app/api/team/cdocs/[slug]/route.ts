@@ -27,7 +27,7 @@ export async function GET(req: Request, { params }: { params: Promise<{ slug: st
     .maybeSingle();
   if (!doc) return NextResponse.json({ ok: false, error: "Not found" }, { status: 404 });
 
-  // Log the view (async — fire and forget is fine)
+  // Log the view (async - fire and forget is fine)
   db.from("team_cdocs_views")
     .insert({
       doc_id: doc.id,

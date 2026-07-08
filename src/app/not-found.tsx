@@ -193,7 +193,7 @@ export default function NotFound() {
           // Off screen
           if (newY > GAME_HEIGHT) {
             if (item.type === "logo" || item.type === "star") {
-              // Missed a good one — reset combo
+              // Missed a good one - reset combo
               if (item.type === "logo") {
                 newFloats.push({
                   id: floatIdRef.current++,
@@ -434,7 +434,7 @@ export default function NotFound() {
         >
           ← Back to CDS Space
         </Link>
-        <span className="text-white/30 text-xs hidden md:inline">A 404 by CDS Space — even our missing pages are unicorns 🦄</span>
+        <span className="text-white/30 text-xs hidden md:inline">A 404 by CDS Space - even our missing pages are unicorns 🦄</span>
       </div>
 
       <style jsx>{`

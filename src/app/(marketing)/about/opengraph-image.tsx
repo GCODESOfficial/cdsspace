@@ -3,7 +3,7 @@ import { renderBrandCard, OG_SIZE, OG_CONTENT_TYPE } from "@/lib/og/brand-card";
 import { getOgFonts } from "@/lib/og/fonts";
 
 export const runtime = "nodejs";
-export const alt = "About CDS Space — Our Team, Culture & Open Roles";
+export const alt = "About CDS Space - Our Team, Culture & Open Roles";
 export const size = OG_SIZE;
 export const contentType = OG_CONTENT_TYPE;
 
