@@ -16,6 +16,7 @@
  * Resend's HTTPS API (port 443) instead - same sendMail interface, no SMTP.
  * With no key it falls back to Gmail SMTP (local dev / SMTP-allowed hosts).
  */
+import { createHash } from "crypto";
 import nodemailer from "nodemailer";
 import { createResendHttpTransport } from "@/lib/resend-transport";
 import { createGmailApiTransport, gmailApiCredsFromEnv, verifyGmailApi } from "@/lib/gmail-api-transport";
@@ -27,6 +28,16 @@ export const EMAIL_FROM = process.env.EMAIL_FROM || "support@cdsspace.pro";
 /** Build a From header with a display name, e.g. `"CDS Space" <support@cdsspace.pro>`. */
 export function emailFrom(displayName: string): string {
   return `"${displayName}" <${EMAIL_FROM}>`;
+}
+
+/**
+ * Stable Message-ID root for a recipient + notification category. Every email
+ * that sets this as its `references`/`inReplyTo` threads into one conversation
+ * for that recipient (e.g. their rolling "Taskboard" thread).
+ */
+export function notificationThreadRoot(recipientEmail: string, category: string): string {
+  const hash = createHash("sha1").update(`${recipientEmail.toLowerCase()}|${category}`).digest("hex").slice(0, 16);
+  return `<cds-${category}-${hash}@cdsspace.pro>`;
 }
 
 /**
@@ -82,6 +93,16 @@ export interface SendEmailInput {
     contentType?: string;
     cid?: string;
   }>;
+  /**
+   * Message threading. Every email sharing the same `references`/`inReplyTo`
+   * root groups into ONE conversation in the recipient's inbox (e.g. all
+   * Taskboard notifications), while each stays a distinct, timestamped message.
+   */
+  messageId?: string;
+  references?: string | string[];
+  inReplyTo?: string;
+  /** Override the Date header - e.g. to reflect the original event time on a resend. */
+  date?: Date;
   /**
    * When set, this email is a repetitive notification that should be COMPOUNDED
    * rather than sent immediately. It is queued and the notification-digest cron
@@ -147,6 +168,10 @@ export async function sendEmail(input: SendEmailInput): Promise<void> {
       text: input.text,
       replyTo: input.replyTo,
       attachments: attachments.length ? attachments : undefined,
+      messageId: input.messageId,
+      references: input.references,
+      inReplyTo: input.inReplyTo,
+      date: input.date,
     });
   } finally {
     // Only close transports we created here; leave a shared/batch one open.

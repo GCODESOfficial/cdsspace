@@ -1,32 +1,34 @@
 /**
- * Notification digest worker.
+ * Notification thread worker.
  *
- * Point a scheduler at GET /api/cron/notification-digest every ~30 min
+ * Point a scheduler at GET /api/cron/notification-digest every ~5-15 min
  * (Authorization: Bearer CRON_SECRET). It flushes public.notification_email_queue,
- * grouping unsent items per recipient + category: a single item goes out as its
- * original email; multiple items compound into ONE branded digest email so a
- * burst of task/chat notifications no longer floods the inbox.
+ * sending each queued notification as its OWN email but threading all items of the
+ * same category to a recipient into a single inbox conversation (e.g. "Taskboard").
+ * Each message keeps its own event time, so the inbox reads like a tidy follow-up
+ * thread rather than one compressed summary.
  */
 import { NextRequest, NextResponse } from "next/server";
 import { glashQuery } from "@/lib/glashdb/postgres";
-import { sendEmail } from "@/lib/email-from";
-import { brandedEmailHtml } from "@/lib/email-template";
+import { createEmailTransport, sendEmail, notificationThreadRoot } from "@/lib/email-from";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+export const maxDuration = 300;
 
 interface QueueRow {
   id: string; recipient_email: string; category: string; subject: string;
   title: string; body: string | null; link: string | null; html: string | null;
-  text_body: string | null; from_name: string | null;
+  text_body: string | null; from_name: string | null; created_at: string;
 }
 
-const CATEGORY_LABEL: Record<string, string> = {
-  tasks: "task updates",
-  chat: "chat messages",
-  deliveries: "delivery updates",
-  content: "content updates",
-  finance: "finance updates",
+// The conversation title each category threads under.
+const CATEGORY_SUBJECT: Record<string, string> = {
+  tasks: "Taskboard",
+  chat: "Messages",
+  deliveries: "Deliveries",
+  content: "Content updates",
+  finance: "Finance",
 };
 
 function authorized(req: NextRequest) {
@@ -35,64 +37,50 @@ function authorized(req: NextRequest) {
   return (req.headers.get("authorization") || "") === `Bearer ${secret}`;
 }
 
-function escapeHtml(v: string) {
-  return v.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#039;" })[c] || c);
-}
-
 export async function GET(req: NextRequest) {
   if (!authorized(req)) return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
 
   const rows = await glashQuery<QueueRow>(
-    `select id, recipient_email, category, subject, title, body, link, html, text_body, from_name
+    `select id, recipient_email, category, subject, title, body, link, html, text_body, from_name, created_at
        from public.notification_email_queue
       where sent_at is null
       order by recipient_email, category, created_at
       limit 2000`,
   );
-  if (!rows.length) return NextResponse.json({ ok: true, groups: 0, emails: 0, items: 0 });
+  if (!rows.length) return NextResponse.json({ ok: true, emails: 0, items: 0 });
 
-  // Group by recipient + category.
-  const groups = new Map<string, QueueRow[]>();
-  for (const row of rows) {
-    const key = `${row.recipient_email}|${row.category}`;
-    (groups.get(key) || groups.set(key, []).get(key)!).push(row);
-  }
-
+  // Reuse one transport across the whole flush.
+  const transporter = createEmailTransport();
   let emails = 0;
-  for (const [, items] of groups) {
-    const first = items[0];
-    const ids = items.map((i) => i.id);
+  const threaded = new Set<string>();
+
+  for (const row of rows) {
+    const root = notificationThreadRoot(row.recipient_email, row.category);
     try {
-      if (items.length === 1) {
-        // Single item - send the original email untouched.
-        await sendEmail({ to: first.recipient_email, subject: first.subject, html: first.html || undefined, text: first.text_body || undefined, fromName: first.from_name || "CDS Space" });
-      } else {
-        // Multiple - compound into one branded digest.
-        const label = CATEGORY_LABEL[first.category] || `${first.category} updates`;
-        const listItems = items.map((i) => {
-          const title = escapeHtml(i.title || i.subject);
-          const line = i.link ? `<a href="${escapeHtml(i.link)}" style="color:#0A4FE8;text-decoration:none;font-weight:600;">${title}</a>` : `<span style="font-weight:600;color:#0D1B39;">${title}</span>`;
-          const sub = i.body ? `<div style="color:#667085;font-size:13px;margin-top:2px;">${escapeHtml(i.body)}</div>` : "";
-          return `<li style="margin:0 0 12px 0;list-style:none;padding:12px 14px;border:1px solid #eef1f7;border-radius:10px;">${line}${sub}</li>`;
-        }).join("");
-        const bodyHtml = `
-          <p style="margin:0 0 14px 0;">You have <strong>${items.length}</strong> new ${escapeHtml(label)} from the last day.</p>
-          <ul style="margin:0;padding:0;">${listItems}</ul>
-          <p style="margin:16px 0 0 0;color:#667085;font-size:12px;">These were grouped so your inbox stays tidy. Open the CDS Space dashboard to act on them.</p>`;
-        await sendEmail({
-          to: first.recipient_email,
-          subject: `${items.length} ${label} - CDS Space`,
-          html: brandedEmailHtml(bodyHtml, { eyebrow: label, preheader: `${items.length} ${label} in the last 24 hours.` }),
-          text: `You have ${items.length} new ${label}:\n\n` + items.map((i) => `- ${i.title}${i.link ? ` ${i.link}` : ""}`).join("\n"),
-          fromName: "CDS Space",
-        });
-      }
-      await glashQuery(`update public.notification_email_queue set sent_at = now() where id = any($1::uuid[])`, [ids]);
+      await sendEmail({
+        to: row.recipient_email,
+        // A consistent per-category subject makes the messages group into one
+        // conversation; the specific task/detail lives in the message body.
+        subject: CATEGORY_SUBJECT[row.category] || row.subject,
+        html: row.html || undefined,
+        text: row.text_body || undefined,
+        fromName: row.from_name || "CDS Space",
+        transporter,
+        // Thread every item of this category to the recipient into one conversation.
+        references: root,
+        inReplyTo: root,
+        messageId: `<cds-item-${row.id}@cdsspace.pro>`,
+        // Reflect the real event time so the thread reads like OPay-style receipts.
+        date: row.created_at ? new Date(row.created_at) : undefined,
+      });
+      await glashQuery(`update public.notification_email_queue set sent_at = now() where id = $1::uuid`, [row.id]);
       emails += 1;
+      threaded.add(`${row.recipient_email}|${row.category}`);
     } catch (error) {
-      console.error("[notification-digest] group send failed:", error);
+      console.error("[notification-thread] send failed:", error);
     }
   }
+  transporter.close();
 
-  return NextResponse.json({ ok: true, groups: groups.size, emails, items: rows.length });
+  return NextResponse.json({ ok: true, emails, items: rows.length, conversations: threaded.size });
 }
