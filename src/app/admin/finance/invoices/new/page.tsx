@@ -10,7 +10,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Plus, Trash2 } from "lucide-react";
 import FinanceShell, { glassCard } from "@/components/finance/FinanceShell";
 import {
-  CURRENCIES, Currency, FinancePriceItem, formatMoney,
+  CURRENCIES, CURRENCY_NAMES, Currency, FinancePriceItem, formatMoney,
   DELIVERY_SPEEDS, DeliverySpeed,
   DEFAULT_PAYMENT_TERMS, DEFAULT_REVISIONS_NOTE, DEFAULT_WORKING_HOURS,
 } from "@/lib/finance/types";
@@ -32,6 +32,7 @@ interface ClientLite {
   address: string | null;
   industry?: string | null;
   contact_person?: string | null;
+  billing_currency?: Currency | null;
 }
 
 export default function NewInvoicePage() {
@@ -125,6 +126,7 @@ export default function NewInvoicePage() {
       email: c.email ?? "",
       address: c.address ?? "",
     });
+    if (CURRENCIES.includes(c.billing_currency as Currency)) setCurrency(c.billing_currency as Currency);
     setClientQuery("");
     setClientMenuOpen(false);
   };
@@ -445,7 +447,7 @@ export default function NewInvoicePage() {
               </p>
             </div>
           </div>
-          <Button onClick={save} disabled={saving} className="h-11 px-6 rounded-xl bg-gradient-to-b from-blue-600 to-blue-700 shadow-lg shadow-blue-600/30">
+          <Button onClick={save} disabled={saving} className="h-11 px-6 rounded-xl bg-[#0A4FE8] shadow-lg shadow-blue-600/30">
             {saving ? "Creating…" : "Create Invoice"}
           </Button>
         </div>
@@ -458,7 +460,7 @@ export default function NewInvoicePage() {
             <h3 className="font-semibold text-gray-900 mb-4">Scope</h3>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
               {(["custom", "project", "milestone", "monthly"] as const).map((s) => (
-                <button key={s} onClick={() => setScope(s)} className={`py-2.5 rounded-xl text-sm font-medium capitalize transition ${scope === s ? "bg-gradient-to-b from-blue-600 to-blue-700 text-white shadow-lg shadow-blue-600/30" : "bg-white/70 text-gray-600 hover:bg-white"}`}>{s}</button>
+                <button key={s} onClick={() => setScope(s)} className={`py-2.5 rounded-xl text-sm font-medium capitalize transition ${scope === s ? "bg-[#0A4FE8] text-white shadow-lg shadow-blue-600/30" : "bg-white/70 text-gray-600 hover:bg-white"}`}>{s}</button>
               ))}
             </div>
             {scope !== "custom" && (
@@ -680,7 +682,7 @@ export default function NewInvoicePage() {
                         onClick={() => pickDeliverySpeed(s.value)}
                         className={`p-3 rounded-xl text-left transition border ${
                           active
-                            ? "bg-gradient-to-b from-blue-600 to-blue-700 text-white border-transparent shadow-lg shadow-blue-600/30"
+                            ? "bg-[#0A4FE8] text-white border-transparent shadow-lg shadow-blue-600/30"
                             : "bg-white/70 text-gray-700 border-white/80 hover:bg-white"
                         }`}
                       >
@@ -715,7 +717,7 @@ export default function NewInvoicePage() {
               <Field label="Currency">
                 <Select value={currency} onValueChange={(v) => setCurrency(v as Currency)}>
                   <SelectTrigger className="h-11 rounded-xl"><SelectValue /></SelectTrigger>
-                  <SelectContent>{CURRENCIES.map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}</SelectContent>
+                  <SelectContent>{CURRENCIES.map((c) => <SelectItem key={c} value={c}>{c} · {CURRENCY_NAMES[c]}</SelectItem>)}</SelectContent>
                 </Select>
               </Field>
               <div className="grid grid-cols-2 gap-3">

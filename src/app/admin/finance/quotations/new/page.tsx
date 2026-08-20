@@ -34,6 +34,7 @@ interface ClientLite {
   phone: string | null;
   address: string | null;
   industry?: string | null;
+  billing_currency?: Currency | null;
 }
 interface SampleRow { kind: "image" | "link"; url: string; label: string; }
 
@@ -98,6 +99,7 @@ export default function NewQuotationPage() {
 
   const applyClient = (c: ClientLite) => {
     setClient({ name: c.name, email: c.email ?? "", address: c.address ?? "" });
+    if (CURRENCIES.includes(c.billing_currency as Currency)) setCurrency(c.billing_currency as Currency);
     setClientQuery("");
     setClientMenuOpen(false);
   };
@@ -393,7 +395,7 @@ export default function NewQuotationPage() {
               </p>
             </div>
           </div>
-          <Button onClick={save} disabled={saving} className="h-11 px-6 rounded-xl bg-gradient-to-b from-blue-600 to-blue-700 shadow-lg shadow-blue-600/30">
+          <Button onClick={save} disabled={saving} className="h-11 px-6 rounded-xl bg-[#0A4FE8] shadow-lg shadow-blue-600/30">
             {saving ? "Creating..." : "Create Quotation"}
           </Button>
         </div>
@@ -405,7 +407,7 @@ export default function NewQuotationPage() {
             <h3 className="font-semibold text-gray-900 mb-4">Scope</h3>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
               {(["custom", "project", "milestone", "monthly"] as const).map((s) => (
-                <button key={s} onClick={() => setScope(s)} className={`py-2.5 rounded-xl text-sm font-medium capitalize transition ${scope === s ? "bg-gradient-to-b from-blue-600 to-blue-700 text-white shadow-lg shadow-blue-600/30" : "bg-white/70 text-gray-600 hover:bg-white"}`}>{s}</button>
+                <button key={s} onClick={() => setScope(s)} className={`py-2.5 rounded-xl text-sm font-medium capitalize transition ${scope === s ? "bg-[#0A4FE8] text-white shadow-lg shadow-blue-600/30" : "bg-white/70 text-gray-600 hover:bg-white"}`}>{s}</button>
               ))}
             </div>
             {scope !== "custom" && (

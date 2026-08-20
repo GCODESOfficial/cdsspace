@@ -15,7 +15,17 @@ export const TIMEBOOK_SCHEDULE = {
   breakStartMinutes: 13 * 60,
   breakEndMinutes: 14 * 60,
   clockOutMinutes: 18 * 60,
+  // Work is capped at the scheduled safety cutoff when a member forgets to
+  // check out, but the automatic close is not applied until late at night.
+  // This leaves the full evening available for an intentional manual checkout.
+  autoCheckoutMinutes: 18 * 60 + 15,
+  autoCheckoutFinalizeMinutes: 23 * 60 + 55,
 };
+
+// Desktop browsers and some phones often report office Wi-Fi location with a
+// few hundred meters of uncertainty. Count that uncertainty as part of the
+// geofence, but cap it so wildly inaccurate IP-based locations do not pass.
+const GEOFENCE_ACCURACY_BUFFER_METERS = 1000;
 
 // Maximum check-in/check-out cycles allowed per work day.
 export const MAX_DAILY_SESSIONS = 3;
@@ -122,22 +132,27 @@ export function locationFlags(
     clientCapturedAt?: string | null;
   },
   office: OfficeGeofence = TIMEBOOK_OFFICE,
+  options: { requireCoordinates?: boolean } = {},
 ) {
+  const requireCoordinates = options.requireCoordinates ?? true;
   const flags: string[] = [];
   const hasCoords = Number.isFinite(input.latitude) && Number.isFinite(input.longitude);
+  const accuracy = Number.isFinite(input.accuracy) ? Math.max(0, Number(input.accuracy)) : null;
+  const accuracyBuffer = Math.min(accuracy ?? 0, GEOFENCE_ACCURACY_BUFFER_METERS);
+  const effectiveRadius = office.radiusMeters + accuracyBuffer;
   const distance = hasCoords
     ? distanceMeters(Number(input.latitude), Number(input.longitude), office.latitude, office.longitude)
     : null;
-  const inside = distance !== null ? distance <= office.radiusMeters : false;
+  const inside = distance !== null ? distance <= effectiveRadius : false;
 
-  if (!hasCoords) flags.push("missing_location");
-  if (Number(input.accuracy ?? 0) > 200) flags.push("low_gps_accuracy");
+  if (!hasCoords && requireCoordinates) flags.push("missing_location");
+  if ((accuracy ?? 0) > 200) flags.push("low_gps_accuracy");
   if (input.clientCapturedAt) {
     const drift = Math.abs(Date.now() - new Date(input.clientCapturedAt).getTime());
     if (drift > 10 * 60 * 1000) flags.push("client_time_drift");
   }
 
-  return { distance, inside, flags };
+  return { distance, inside, flags, effectiveRadius };
 }
 
 export function workMinutes(clockInAt?: string | null, clockOutAt?: string | null, breakStartAt?: string | null, breakEndAt?: string | null) {
@@ -172,6 +187,10 @@ export function overtimeMinutes(clockOutAt?: string | null) {
 export function isEarlyLogout(clockOutAt?: string | null) {
   if (!clockOutAt) return false;
   return lagosMinutes(new Date(clockOutAt)) < TIMEBOOK_SCHEDULE.clockOutMinutes;
+}
+
+export function isAfterAutoCheckout(date = new Date()) {
+  return lagosMinutes(date) >= TIMEBOOK_SCHEDULE.autoCheckoutMinutes;
 }
 
 export function attendanceScores(status: AttendanceStatus, totalWorkMinutes = 0, overtime = 0) {

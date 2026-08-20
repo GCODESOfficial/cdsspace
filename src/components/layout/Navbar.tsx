@@ -2,18 +2,20 @@
 
 import React, { useState, useEffect } from "react";
 import Link from "next/link";
+import Image from "next/image";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
 import { AnimatePresence, motion } from "framer-motion";
 import { StudioDropdown, MobileStudioAccordion } from "./StudioDropdown";
 import { Menu, X, User } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
+import type { AuthChangeEvent, Session, User as AuthUser } from "@supabase/supabase-js";
 
 const navLinks = [
     { name: "Home", href: "/" },
     { name: "About", href: "/about" },
     { name: "Work", href: "/work" },
-    { name: "Blog", href: "/blog" },
+    { name: "Intelligence", href: "/intelligence" },
 ];
 
 export const Navbar = () => {
@@ -25,10 +27,10 @@ export const Navbar = () => {
     // Check auth status
     useEffect(() => {
         const supabase = createClient();
-        supabase.auth.getUser().then(({ data: { user } }) => {
+        supabase.auth.getUser().then(({ data: { user } }: { data: { user: AuthUser | null } }) => {
             setIsLoggedIn(!!user);
         });
-        const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+        const { data: { subscription } } = supabase.auth.onAuthStateChange((_event: AuthChangeEvent, session: Session | null) => {
             setIsLoggedIn(!!session?.user);
         });
         return () => subscription.unsubscribe();
@@ -49,7 +51,7 @@ export const Navbar = () => {
     }, [isMobileMenuOpen]);
 
     return (
-        <header className="fixed top-3 sm:top-4 md:top-6 left-0 right-0 z-50 flex justify-center pointer-events-none">
+        <header data-site-header className="fixed top-3 sm:top-4 md:top-6 left-0 right-0 z-50 flex justify-center pointer-events-none">
             <div className="w-full max-w-[920px] xl:max-w-[1080px] 2xl:max-w-[1140px] px-3 sm:px-4 md:px-6 pointer-events-auto relative">
                 <nav
                     className={cn(
@@ -60,10 +62,14 @@ export const Navbar = () => {
                 >
                     {/* CDS Logo - Scaled for Mobile/Desktop */}
                     <Link href="/" className="shrink-0 ml-1.5 md:ml-1 2xl:ml-2" onClick={() => setIsMobileMenuOpen(false)}>
-                        <img
+                        <Image
                             src="/navbar/CDS Logo.svg"
                             alt="CDS Logo"
-                            className="w-[56px] sm:w-[60px] md:w-[68px] 2xl:w-[81.4px] h-[22px] sm:h-[24px] md:h-[26px] 2xl:h-[32px] object-contain"
+                            width={82}
+                            height={32}
+                            priority
+                            sizes="(min-width: 1536px) 82px, (min-width: 768px) 68px, 60px"
+                            className="h-auto w-[56px] object-contain sm:w-[60px] md:w-[68px] 2xl:w-[82px]"
                         />
                     </Link>
 
@@ -75,7 +81,7 @@ export const Navbar = () => {
                                 href={link.href}
                                 className={cn(
                                     "px-3 2xl:px-4 py-[10px] 2xl:py-[13px] text-[15px] 2xl:text-[18px] font-medium transition-colors tracking-[-0.18px] whitespace-nowrap",
-                                    pathname === link.href
+                                    pathname === link.href || pathname.startsWith(`${link.href}/`)
                                         ? "text-brand-blue"
                                         : "text-brand-body hover:text-brand-blue"
                                 )}

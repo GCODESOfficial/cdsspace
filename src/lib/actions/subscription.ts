@@ -2,6 +2,7 @@
 
 import { supabaseAdmin } from "@/lib/supabase";
 import { revalidatePath } from "next/cache";
+import { verifyUser } from "@/lib/admin-auth";
 
 const supabase = supabaseAdmin!;
 
@@ -50,8 +51,14 @@ export async function validateReferralCode(code: string) {
  * Updates the user's profile with their contact and company details.
  * (Note: In a real app, this would also interface with a payment provider)
  */
-export async function recordSubscription(userId: string, data: SubscriptionData) {
+export async function recordSubscription(requestedUserId: string, data: SubscriptionData) {
     try {
+        const session = await verifyUser();
+        if (!session) return { success: false, error: "Unauthorized" };
+        if (requestedUserId && requestedUserId !== session.user.id) {
+            return { success: false, error: "This subscription does not belong to the active account." };
+        }
+        const userId = session.user.id;
         // Find the referrer if a code was provided
         let referrerId: string | undefined;
         if (data.referralCode) {
@@ -120,7 +127,7 @@ export async function recordSubscription(userId: string, data: SubscriptionData)
 
         // Revalidate relevant pages
         revalidatePath("/dashboard");
-        revalidatePath("/subscription");
+        revalidatePath("/dashboard/subscription");
 
         return { success: true };
     } catch (error) {

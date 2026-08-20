@@ -6,7 +6,7 @@ import { supabase } from "@/lib/supabase";
 import { hasPermission } from "@/lib/admin-permissions";
 import {
   ShieldCheck, Users, Briefcase, Award, ArrowUpRight, Loader2,
-  Clock, Fingerprint, Activity, Building2, CalendarCheck, ListChecks,
+  Clock, Activity, Building2, KanbanSquare,
   GraduationCap, BadgeDollarSign, BarChart3, KeyRound, CalendarClock,
   UserPlus, X, Copy, Check, Plane,
 } from "lucide-react";
@@ -38,16 +38,14 @@ type Member = { id: string; full_name: string; department?: string | null };
 // Every HRM sub-module. `perm` is checked client-side to hide cards a
 // sub-admin can't open (super admins see all); the target pages guard too.
 const MODULES = [
-  { href: "/admin/team-members", label: "Team Members", desc: "Roster, profiles & invites", icon: Users, tint: "from-blue-500 to-indigo-500", perm: "team_members" },
-  { href: "/admin/team-today", label: "Team Today", desc: "Daily attendance & accountability", icon: CalendarCheck, tint: "from-sky-500 to-blue-500", perm: "team_today" },
-  { href: "/admin/daily-tasks", label: "Daily Tasks", desc: "Assign & track daily work", icon: ListChecks, tint: "from-cyan-500 to-sky-500", perm: "team_today" },
-  { href: "/admin/timebook", label: "Timebook", desc: "Attendance, geofence & leave", icon: Clock, tint: "from-teal-500 to-emerald-500", perm: "timebook" },
-  { href: "/admin/time-machine", label: "Time Machine", desc: "Biometric / fingerprint clock", icon: Fingerprint, tint: "from-emerald-500 to-green-500", perm: "time_machine" },
-  { href: "/admin/work-tracking", label: "Work Tracking", desc: "Productivity & screenshots", icon: Activity, tint: "from-amber-500 to-orange-500", perm: "work_tracking" },
+  { href: "/admin/team-members", label: "Team Members", desc: "Roster, profiles & invites", icon: Users, tint: "bg-[#0A4FE8]", perm: "team_members" },
+  { href: "/admin/taskboard", label: "Taskboard", desc: "Shared lists, tasks, people & documents", icon: KanbanSquare, tint: "bg-[#0A4FE8]", perm: "team_today" },
+  { href: "/admin/timebook", label: "Attendance", desc: "Check-ins, schedules, leave & geofence", icon: Clock, tint: "from-teal-500 to-emerald-500", perm: "timebook" },
+  { href: "/admin/work-tracking", label: "Work Activity", desc: "Live focus, task context & evidence", icon: Activity, tint: "from-amber-500 to-orange-500", perm: "work_tracking" },
   { href: "/admin/team-reports", label: "Team Reports", desc: "Reported vs tracked (super admin)", icon: BarChart3, tint: "from-orange-500 to-red-500", superAdminOnly: true },
   { href: "/admin/team-payroll", label: "Team Payroll", desc: "Salaries & payroll runs", icon: BadgeDollarSign, tint: "from-lime-500 to-green-500", perm: "team_payroll" },
   { href: "/admin/departments", label: "Departments", desc: "Teams & department leads", icon: Building2, tint: "from-violet-500 to-purple-500", perm: "departments" },
-  { href: "/admin/sub-admins", label: "Sub-admins", desc: "Admin team & permissions", icon: ShieldCheck, tint: "from-indigo-500 to-blue-500", perm: "sub_admins" },
+  { href: "/admin/sub-admins", label: "Sub-admins", desc: "Admin team & permissions", icon: ShieldCheck, tint: "bg-[#0A4FE8]", perm: "sub_admins" },
   { href: "/admin/applications", label: "Applications", desc: "Review applicants & assign roles", icon: Users, tint: "from-fuchsia-500 to-pink-500", perm: "applicants" },
   { href: "/admin/screening", label: "Screening", desc: "Interviews & candidate screening", icon: GraduationCap, tint: "from-pink-500 to-rose-500", perm: "applicants" },
   { href: "/admin/hrm/roles", label: "Open Roles", desc: "Post & manage job openings", icon: Briefcase, tint: "from-amber-500 to-yellow-500", perm: "applicants" },
@@ -121,7 +119,7 @@ export default function HRMOverview() {
     canBypass && { key: "bypass", label: "Generate bypass code", desc: "Geofence override for check-in", icon: KeyRound, onClick: () => setModal("bypass") },
     canLeave && { key: "leave", label: "Review leave requests", desc: leaveRequests.length ? `${leaveRequests.length} pending` : "Approve or reject leave", icon: Plane, badge: leaveRequests.length, onClick: () => setModal("leave") },
     can("team_members") && { key: "add-member", label: "Add team member", desc: "Invite someone to the team", icon: UserPlus, href: "/admin/team-members" },
-    can("team_today") && { key: "assign-task", label: "Assign a task", desc: "Give a member work today", icon: ListChecks, href: "/admin/team-today" },
+    can("team_today") && { key: "assign-task", label: "Open Taskboard", desc: "Create and assign shared work", icon: KanbanSquare, href: "/admin/taskboard" },
     can("timebook") && { key: "set-office", label: "Set office geofence", desc: "Update location & radius", icon: CalendarClock, href: "/admin/timebook" },
   ].filter(Boolean) as { key: string; label: string; desc: string; icon: typeof KeyRound; badge?: number; onClick?: () => void; href?: string }[];
 
@@ -181,7 +179,7 @@ export default function HRMOverview() {
               <Link key={s.href} href={s.href} className="group">
                 <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-6 h-full hover:shadow-lg hover:-translate-y-0.5 transition-all">
                   <div className="flex items-start justify-between mb-5">
-                    <div className={`w-12 h-12 rounded-xl bg-gradient-to-br ${s.tint} grid place-items-center shadow-lg shadow-blue-600/10`}>
+                    <div className={`w-12 h-12 rounded-xl bg-[#0A4FE8] grid place-items-center shadow-lg shadow-blue-600/10`}>
                       <s.icon className="w-6 h-6 text-white" />
                     </div>
                     <ArrowUpRight className="w-5 h-5 text-gray-300 group-hover:text-[#0A4FE8] transition" />

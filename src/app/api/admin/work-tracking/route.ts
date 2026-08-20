@@ -3,10 +3,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { getAdminSession, type AdminSession } from "@/lib/admin-session";
 import { hasPermission } from "@/lib/admin-permissions";
 import { glashMaybeOne, glashOne, glashQuery } from "@/lib/glashdb/postgres";
-import { getGlashDbAdmin } from "@/lib/glashdb";
 import {
   DEFAULT_CAPTURE_INTERVAL_SECONDS,
-  WORK_TRACKING_BUCKET,
   normalizeDate,
   uniqueStrings,
   weekRange,
@@ -26,13 +24,9 @@ function canView(session: AdminSession) {
 function canManage(session: AdminSession) {
   return session.role === "super_admin"
     || hasPermission(session.permissions, "work_tracking")
-    || hasPermission(session.permissions, "work_tracking.reports");
-}
-
-function canViewScreenshots(session: AdminSession) {
-  return session.role === "super_admin"
-    || hasPermission(session.permissions, "work_tracking")
-    || hasPermission(session.permissions, "work_tracking.screenshots");
+    || hasPermission(session.permissions, "work_tracking.reports")
+    // Team Reports' Generate & Compare buttons post here too.
+    || hasPermission(session.permissions, "team_reports.generate");
 }
 
 function canManageSettings(session: AdminSession) {
@@ -77,6 +71,28 @@ async function logAccess(session: AdminSession, input: {
   ).catch(() => []);
 }
 
+function dateOffset(dateString: string, days: number) {
+  const cursor = new Date(`${dateString}T12:00:00+01:00`);
+  cursor.setUTCDate(cursor.getUTCDate() + days);
+  return cursor.toISOString().slice(0, 10);
+}
+
+function dateKey(value: unknown) {
+  if (typeof value === "string") return value.slice(0, 10);
+  if (value instanceof Date) return lagosDate(value);
+  return "";
+}
+
+function eachDate(start: string, end: string) {
+  const dates: string[] = [];
+  const cursor = new Date(`${start}T12:00:00+01:00`);
+  const stop = new Date(`${end}T12:00:00+01:00`);
+  while (cursor <= stop) {
+    dates.push(cursor.toISOString().slice(0, 10));
+    cursor.setUTCDate(cursor.getUTCDate() + 1);
+  }
+  return dates;
+}
 
 async function compareWeeklyReport(memberId: string, weekStart: string) {
   const range = weekRange(weekStart);
@@ -107,9 +123,10 @@ async function compareWeeklyReport(memberId: string, weekStart: string) {
   const matches = projects.filter((project) => selfText.includes(project.toLowerCase())).slice(0, 8);
   const additional = projects.filter((project) => !selfText.includes(project.toLowerCase())).slice(0, 8);
   const omissions = additional.length ? additional.map((item) => `${item} was detected but not clearly reported`) : [];
-  const discrepancies = weeklyReport.attendance_summary?.idle_percentage > 20
-    ? [`Idle time was ${weeklyReport.attendance_summary.idle_percentage}% and should be reviewed with submitted tasks`]
-    : [];
+  // A quiet browser tab is not evidence of idleness: the member may be
+  // researching, studying or working in another tool. Only compare explicit
+  // task/focus evidence with the member's submitted report.
+  const discrepancies: string[] = [];
   const confidence = Math.max(35, Math.min(95, matches.length * 20 + (projects.length ? 35 : 20)));
   const data = await glashOne<any>(
     `insert into public.team_work_tracking_report_comparisons
@@ -139,7 +156,7 @@ async function compareWeeklyReport(memberId: string, weekStart: string) {
       additional,
       discrepancies,
       confidence,
-      `Compared employee report with tracked work. ${matches.length} direct matches, ${additional.length} additional detected contribution areas, ${discrepancies.length} discrepancy flags.`,
+      `Compared the member's report with their confirmed work context. ${matches.length} direct matches and ${additional.length} additional recorded contribution areas.`,
     ],
   );
   return { ...data, detected_deliverables: deliverables };
@@ -153,8 +170,6 @@ export async function GET(req: NextRequest) {
   const date = normalizeDate(url.searchParams.get("date"), lagosDate());
   const memberId = url.searchParams.get("member_id");
   const range = weekRange(date);
-  const screenshotAccess = canViewScreenshots(session!);
-
   const [members, sessions, entries, dailyReports, snapshots, weeklyReports, selfReports, comparisons, accessLogs, settings] = await Promise.all([
     glashQuery("select id, full_name, email, role_title, department, is_active from public.team_members where is_active = true order by full_name asc"),
     glashQuery("select * from public.team_work_tracking_sessions where work_date = $1 order by started_at desc", [date]),
@@ -168,8 +183,7 @@ export async function GET(req: NextRequest) {
     glashQuery("select * from public.team_work_tracking_daily_reports where work_date = $1", [date]),
     glashQuery(
       `select id, session_id, team_member_id, work_date, captured_at, active_app, page_title,
-        page_url, project_hint, activity_state, idle_seconds, screenshot_storage_path,
-        expires_at, ai_status, ai_summary, ai_categories, detected_apps, detected_websites,
+        page_url, project_hint, activity_state, ai_status, ai_summary, ai_categories, detected_apps, detected_websites,
         detected_projects, detected_deliverables, productivity_score, focus_score, confidence, metadata
        from public.team_work_tracking_snapshots
        where work_date = $1
@@ -185,26 +199,11 @@ export async function GET(req: NextRequest) {
     glashMaybeOne("select * from public.team_work_tracking_settings where id = 1 limit 1"),
   ]);
 
-  // Sign screenshot URLs (10-min TTL) for admins with screenshot permission.
-  const storage = screenshotAccess ? (getGlashDbAdmin() as any).storage.from(WORK_TRACKING_BUCKET) : null;
-  const snapshotRows = await Promise.all((snapshots || []).map(async (snapshot: any) => {
-    let screenshotUrl: string | null = null;
-    if (storage && snapshot.screenshot_storage_path) {
-      try {
-        const { data } = await storage.createSignedUrl(snapshot.screenshot_storage_path, 60 * 10);
-        screenshotUrl = data?.signedUrl || null;
-      } catch {
-        screenshotUrl = null;
-      }
-    }
-    return { ...snapshot, screenshot_url: screenshotUrl };
-  }));
-
   await logAccess(session!, {
     action: memberId ? "view_member_work_tracking" : "view_work_tracking_overview",
     reportType: memberId ? "member_timeline" : "overview",
     teamMemberId: memberId,
-    metadata: { date, week_start: range.week_start, screenshot_access: screenshotAccess },
+    metadata: { date, week_start: range.week_start, tracking_mode: "activity_heartbeat" },
   });
 
   const reports = dailyReports || [];
@@ -218,6 +217,57 @@ export async function GET(req: NextRequest) {
     underutilized: (weeklyReports || []).filter((report: any) => report.underutilization_risk === "high").length,
   };
 
+  let trailing7Days: any[] = [];
+  if (memberId) {
+    const trailingStart = dateOffset(date, -6);
+    const [trailingEntries, trailingReports, trailingSessions] = await Promise.all([
+      glashQuery<any>(
+        `select id, team_member_id, work_date, attendance_status, current_status,
+                clock_in_at, clock_out_at, total_work_minutes, overtime_minutes, scores
+           from public.team_time_entries
+          where team_member_id = $1
+            and work_date >= $2
+            and work_date <= $3
+          order by work_date asc`,
+        [memberId, trailingStart, date],
+      ),
+      glashQuery<any>(
+        `select *
+           from public.team_work_tracking_daily_reports
+          where team_member_id = $1
+            and work_date >= $2
+            and work_date <= $3
+          order by work_date asc`,
+        [memberId, trailingStart, date],
+      ),
+      glashQuery<any>(
+        `select work_date,
+                count(*)::int as session_count,
+                coalesce(sum(
+                  coalesce(nullif(metadata->>'checkpoint_count', '')::int, screenshot_count, 0)
+                ),0)::int as evidence_count,
+                coalesce(sum(active_seconds),0)::int as active_seconds,
+                max(last_capture_at) as last_capture_at
+           from public.team_work_tracking_sessions
+          where team_member_id = $1
+            and work_date >= $2
+            and work_date <= $3
+          group by work_date
+          order by work_date asc`,
+        [memberId, trailingStart, date],
+      ),
+    ]);
+    const entryByDate = new Map((trailingEntries || []).map((entry: any) => [dateKey(entry.work_date), entry]));
+    const reportByDate = new Map((trailingReports || []).map((report: any) => [dateKey(report.work_date), report]));
+    const sessionByDate = new Map((trailingSessions || []).map((session: any) => [dateKey(session.work_date), session]));
+    trailing7Days = eachDate(trailingStart, date).map((day) => ({
+      date: day,
+      entry: entryByDate.get(day) || null,
+      report: reportByDate.get(day) || null,
+      session: sessionByDate.get(day) || null,
+    }));
+  }
+
   return NextResponse.json({
     ok: true,
     date,
@@ -227,13 +277,13 @@ export async function GET(req: NextRequest) {
     sessions,
     entries,
     daily_reports: reports,
-    snapshots: snapshotRows,
+    snapshots,
     weekly_reports: weeklyReports,
     self_reports: selfReports,
     comparisons,
     access_logs: accessLogs,
     stats,
-    screenshot_access: screenshotAccess,
+    trailing_7_days: trailing7Days,
     actor: session?.name,
   });
 }
@@ -260,6 +310,34 @@ export async function POST(req: NextRequest) {
         metadata: { date },
       });
       return NextResponse.json({ ok: true, report });
+    }
+
+    if (action === "generate_all_daily_reports") {
+      const date = normalizeDate(body.date, lagosDate());
+      // Optional scoping: a specific set of member ids (e.g. the department
+      // filter on the dashboard). Otherwise run every active team member.
+      const requestedIds = Array.isArray(body.member_ids)
+        ? (body.member_ids as unknown[]).map(String).filter(Boolean)
+        : null;
+      const members = await glashQuery<{ id: string }>(
+        requestedIds && requestedIds.length
+          ? "select id from public.team_members where is_active = true and id = any($1::uuid[])"
+          : "select id from public.team_members where is_active = true",
+        requestedIds && requestedIds.length ? [requestedIds] : [],
+      );
+      // Generate every member's daily report at once, resilient to individual
+      // failures so one bad member doesn't sink the whole batch.
+      const results = await Promise.allSettled(
+        members.map((m) => generateDailyReport(m.id, date)),
+      );
+      const generated = results.filter((r) => r.status === "fulfilled").length;
+      const failed = results.length - generated;
+      await logAccess(session!, {
+        action: "generate_all_daily_reports",
+        reportType: "daily_report",
+        metadata: { date, generated, failed, total: results.length },
+      });
+      return NextResponse.json({ ok: true, generated, failed, total: results.length });
     }
 
     if (action === "generate_weekly_report") {

@@ -5,6 +5,7 @@ import { getTeamSession } from "@/lib/team-auth";
 import { lagosDate } from "@/lib/timebook";
 import { roleTemplateFor } from "@/lib/team-tasks/role-templates";
 import { resolveChecklistFor } from "@/lib/team-tasks/templates-db";
+import { autoCheckoutOpenTimeEntries } from "@/lib/timebook-auto-checkout";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -26,6 +27,10 @@ export async function GET() {
     const memberId = session.id;
     const workDate = lagosDate();
 
+    await autoCheckoutOpenTimeEntries({ workDate, source: "team_my_day_get" }).catch((error) => {
+        console.error("[timebook] auto checkout failed:", error);
+    });
+
     const tasks = await safe(
         () =>
             glashQuery<any>(
@@ -41,7 +46,7 @@ export async function GET() {
         [],
     );
 
-    // Merge task attachments in a resilient way — if the attachment columns
+    // Merge task attachments in a resilient way - if the attachment columns
     // aren't migrated yet, this fails silently and tasks still render.
     const taskIds = (tasks ?? []).map((t: any) => t.id).filter(Boolean);
     if (taskIds.length) {

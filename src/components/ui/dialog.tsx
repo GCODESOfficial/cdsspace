@@ -38,7 +38,7 @@ function DialogOverlay({
     <DialogPrimitive.Overlay
       data-slot="dialog-overlay"
       className={cn(
-        "data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 fixed inset-0 z-50 bg-black/50",
+        "data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 fixed inset-0 z-50 bg-[#040B37]/55 backdrop-blur-[4px]",
         className
       )}
       {...props}
@@ -57,21 +57,21 @@ function DialogContent({
       <DialogPrimitive.Content
         data-slot="dialog-content"
         className={cn(
-          "scrollbar-hide overflow-hidden max-h-[calc(100dvh-1rem)] bg-background data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 fixed top-[50%] left-[50%] z-50 grid w-full max-w-[calc(100vw-1rem)] translate-x-[-50%] translate-y-[-50%] gap-4 rounded-2xl p-4 shadow-lg duration-200 sm:max-h-[90vh] sm:max-w-lg sm:rounded-lg sm:p-6",
+          "workspace-dialog-position scrollbar-hide max-h-[calc(100dvh-1rem)] overflow-hidden border border-white/80 bg-white data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 fixed z-50 grid w-full max-w-[calc(100vw-1rem)] gap-3 rounded-[24px] p-4 shadow-[0_28px_90px_rgba(4,11,55,0.24)] duration-200 sm:max-h-[90vh] sm:max-w-lg sm:p-6",
           className
         )}
         {...props}
       >
-        <div className="relative w-full h-full">
+        <div className="relative h-9 w-full shrink-0">
         {/* Close button - fixed at top right inside the modal */}
-        <DialogPrimitive.Close className="w-9 h-9 text-white flex justify-center items-center bg-gradient-to-r cursor-pointer rounded-xl from-[#08129C] to-[#072056] border border-white ring-offset-background focus:ring-ring data-[state=open]:bg-accent data-[state=open]:text-muted-foreground absolute top-0 right-0 z-50 hover:scale-105 disabled:pointer-events-none sm:-top-4 sm:-right-4 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4">
+        <DialogPrimitive.Close className="absolute right-0 top-0 z-50 flex h-9 w-9 items-center justify-center rounded-xl border border-slate-200 bg-slate-50 text-slate-500 shadow-sm transition hover:border-blue-200 hover:bg-blue-50 hover:text-brand-blue focus:outline-none focus:ring-4 focus:ring-blue-100 disabled:pointer-events-none [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4">
           <XIcon />
           <span className="sr-only">Close</span>
         </DialogPrimitive.Close>
         </div>
 
         {/* Scrolling content area */}
-        <div className="overflow-y-auto scrollbar-hide max-h-[calc(100dvh-7rem)] pr-1 sm:max-h-[calc(90vh-3rem)]">
+        <div data-slot="dialog-scroll-area" className="min-h-0 flex-1 overflow-y-auto overscroll-contain scrollbar-hide max-h-[calc(100dvh-7rem)] pr-1 sm:max-h-[calc(90vh-3rem)]">
           {children}
         </div>
       </DialogPrimitive.Content>
@@ -110,7 +110,7 @@ function DialogTitle({
   return (
     <DialogPrimitive.Title
       data-slot="dialog-title"
-      className={cn("text-xl leading-none font-bold", className)}
+      className={cn("text-xl leading-tight font-bold tracking-[-0.02em] text-brand-navy", className)}
       {...props}
     />
   )

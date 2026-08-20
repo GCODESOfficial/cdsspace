@@ -2,10 +2,25 @@
 
 import { useEffect, useState } from "react";
 import NextLink from "next/link";
-import { Eye, EyeOff, Loader2, ShieldCheck, Users, Download, Monitor, Smartphone, CheckCircle2 } from "lucide-react";
-import { detectPlatform, detectOs, type Platform } from "@/lib/desktop-app";
+import { Eye, EyeOff, Loader2, ShieldCheck, Users } from "lucide-react";
 
 type Tab = "admin" | "team";
+
+function captureOptionalLoginLocation(): Promise<Record<string, unknown> | null> {
+  if (typeof navigator === "undefined" || !navigator.geolocation) return Promise.resolve(null);
+  return new Promise((resolve) => {
+    navigator.geolocation.getCurrentPosition(
+      (position) => resolve({
+        latitude: position.coords.latitude,
+        longitude: position.coords.longitude,
+        accuracy: position.coords.accuracy,
+        captured_at: new Date(position.timestamp).toISOString(),
+      }),
+      () => resolve(null),
+      { enableHighAccuracy: false, timeout: 2500, maximumAge: 60_000 },
+    );
+  });
+}
 
 export function StaffSignInForm({ initialTab = "admin" }: { initialTab?: Tab }) {
   const [tab, setTab] = useState<Tab>(initialTab);
@@ -33,14 +48,6 @@ export function StaffSignInForm({ initialTab = "admin" }: { initialTab?: Tab }) 
   const [inviteMessage, setInviteMessage] = useState<string | null>(null);
   const [inviteProcessed, setInviteProcessed] = useState(false);
 
-  // Platform detection for the team-portal download prompt. Runs client-side
-  // only (defaults to desktop-browser during SSR so nothing flashes wrong).
-  const [platform, setPlatform] = useState<Platform>("desktop-browser");
-  const [os, setOs] = useState<"mac" | "windows" | "other">("other");
-  useEffect(() => {
-    setPlatform(detectPlatform());
-    setOs(detectOs());
-  }, []);
 
   // Pre-fill from a just-redeemed team invite that walked the user through
   // /team/invite/[token]. The setup form stashes { username, password } in
@@ -131,10 +138,17 @@ export function StaffSignInForm({ initialTab = "admin" }: { initialTab?: Tab }) 
         const json = await res.json().catch(() => ({}));
         setError(json.error || "Invalid email or password");
       } else {
+        const location = await captureOptionalLoginLocation();
+        const clientDevice = {
+          platform: navigator.platform || null,
+          timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || null,
+          language: navigator.language || null,
+          screen: `${window.screen.width}x${window.screen.height}`,
+        };
         const res = await fetch("/api/team/login", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ identifier, password }),
+          body: JSON.stringify({ identifier, password, location, client_device: clientDevice }),
           credentials: "include",
         });
         const json = await res.json();
@@ -205,64 +219,15 @@ export function StaffSignInForm({ initialTab = "admin" }: { initialTab?: Tab }) 
         </button>
       </div>
 
-      {/* Team: platform-aware access prompt */}
-      {!isAdmin && platform === "desktop-browser" && (
-        <div className="rounded-2xl border border-brand-blue/20 bg-brand-blue/[0.04] p-4">
-          <div className="flex items-start gap-3">
-            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-brand-blue/10">
-              <Monitor className="h-5 w-5 text-brand-blue" />
-            </div>
-            <div className="min-w-0">
-              <p className="text-[14px] font-bold text-brand-navy">Get the CDS Space app</p>
-              <p className="mt-0.5 text-[12.5px] leading-relaxed text-brand-body/70">
-                For full work sessions (automatic background reporting across all your screens),
-                download the desktop app and sign in there. You can also just continue in this
-                browser below — sign-in works either way.
-              </p>
-            </div>
-          </div>
-          <div className="mt-3 flex flex-col gap-2 sm:flex-row">
-            <NextLink
-              href="/download"
-              className={`inline-flex flex-1 items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-[13px] font-semibold transition ${os === "mac" ? "bg-brand-blue text-white hover:bg-brand-blue/90" : "bg-white text-brand-navy border border-brand-stroke hover:border-brand-blue/40"}`}
-            >
-              <Download className="h-4 w-4" /> Download for macOS
-            </NextLink>
-            <NextLink
-              href="/download"
-              className={`inline-flex flex-1 items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-[13px] font-semibold transition ${os === "windows" ? "bg-brand-blue text-white hover:bg-brand-blue/90" : "bg-white text-brand-navy border border-brand-stroke hover:border-brand-blue/40"}`}
-            >
-              <Download className="h-4 w-4" /> Download for Windows
-            </NextLink>
-          </div>
-          <p className="mt-2 text-center text-[11.5px] text-brand-body/50">
-            Continuing in the browser signs you in with activity-only tracking.
-          </p>
-        </div>
-      )}
-
-      {/* Team: running inside the desktop app */}
-      {!isAdmin && platform === "desktop-app" && (
-        <div className="flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-[12.5px] font-medium text-emerald-700">
-          <CheckCircle2 className="h-4 w-4 shrink-0" /> CDS Space desktop app detected — you&apos;re all set to sign in.
-        </div>
-      )}
-
-      {/* Team: mobile / tablet — web portal is allowed here */}
-      {!isAdmin && platform === "mobile" && (
-        <div className="flex items-start gap-2 rounded-xl border border-brand-blue/20 bg-brand-blue/[0.04] px-4 py-3 text-[12.5px] leading-relaxed text-brand-body/75">
-          <Smartphone className="mt-0.5 h-4 w-4 shrink-0 text-brand-blue" />
-          <span>On mobile you can sign in and use the web portal directly. The desktop app is only needed on computers.</span>
-        </div>
-      )}
-
-      {/* Team policy notice: VPN + monitoring disclosure (all platforms) */}
+      {/* Team policy notice: VPN + monitoring disclosure */}
       {!isAdmin && (
         <div className="px-4 py-3 rounded-xl text-[12.5px] leading-relaxed border bg-amber-50 border-amber-200 text-amber-800">
           <p className="font-semibold">Before you sign in</p>
           <ul className="mt-1 list-disc pl-4 space-y-0.5">
-            <li><b>Do not use a VPN</b> when logging in or checking in — it interferes with attendance and location verification.</li>
-            <li>Work sessions are monitored during work hours (activity and periodic screen captures) to keep reporting, compliance and productive use of work time fair for everyone.</li>
+            <li><b>Do not use a VPN</b> when logging in or checking in - it interferes with attendance and location verification.</li>
+            <li>Only one team device can be active at a time. Signing in elsewhere closes the previous session.</li>
+            <li>Login time, device, browser, operating system, IP address and available location are recorded for security.</li>
+            <li>Work sessions are monitored during work hours (activity and periodic screen viewing) to keep reporting, compliance and productive use of work time fair for everyone. Screen images are analysed in real time and are <b>not stored</b>.</li>
           </ul>
         </div>
       )}
@@ -351,7 +316,7 @@ export function StaffSignInForm({ initialTab = "admin" }: { initialTab?: Tab }) 
           disabled={isLoading}
           className="w-full h-[44px] lg:h-[48px] 2xl:h-[56px] rounded-xl p-[2px] bg-brand-bg border border-[#648EFC] shadow-[0_4px_8px_rgba(0,0,0,0.04)] group overflow-hidden disabled:opacity-70 disabled:cursor-not-allowed"
         >
-          <div className="w-full h-full rounded-xl flex items-center justify-center transition-opacity group-hover:opacity-90 bg-linear-to-r from-[#0035C1] to-[#0575FF]">
+          <div className="w-full h-full rounded-xl flex items-center justify-center transition-opacity group-hover:opacity-90 bg-[#0A4FE8]">
             {isLoading ? (
               <Loader2 className="w-4 h-4 lg:w-5 lg:h-5 2xl:w-6 2xl:h-6 animate-spin text-white" />
             ) : (

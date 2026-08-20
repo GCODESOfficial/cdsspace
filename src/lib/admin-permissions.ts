@@ -62,11 +62,11 @@ export const PERMISSION_GROUPS: PermissionGroup[] = [
   // ─────────────── Client-facing comms ───────────────
   {
     key: "messages",
-    label: "Client Conversation",
+    label: "Chat/Meet",
     route: "/admin/messages",
     permissions: [
-      { key: "messages.view", label: "View Client Conversation", description: "Read client conversations" },
-      { key: "messages.send", label: "Send Client Conversation", description: "Reply to clients" },
+      { key: "messages.view", label: "View Chat/Meet", description: "Read client conversations and meeting invitations" },
+      { key: "messages.send", label: "Send Chat/Meet Messages", description: "Reply to clients and initiate meetings" },
       { key: "messages.delete", label: "Delete Messages", description: "Remove messages or threads" },
     ],
   },
@@ -146,6 +146,18 @@ export const PERMISSION_GROUPS: PermissionGroup[] = [
     ],
   },
   {
+    key: "deliveries",
+    label: "Client Deliveries",
+    route: "/admin/clients/deliveries",
+    permissions: [
+      { key: "deliveries.view", label: "View Client Deliveries", description: "See finished-work handovers and their client recipients" },
+      { key: "deliveries.create", label: "Prepare Client Deliveries", description: "Create drafts and upload finished brand identity or design files" },
+      { key: "deliveries.send", label: "Approve & Send Client Deliveries", description: "Approve prepared finished work and release it to client accounts" },
+      { key: "deliveries.assign", label: "Legacy Delivery Assignment", description: "Compatibility permission for earlier delivery records" },
+      { key: "deliveries.approve", label: "Legacy Delivery Approval", description: "Compatibility permission for earlier delivery records" },
+    ],
+  },
+  {
     key: "pricing",
     label: "Pricing",
     route: "/admin/pricing",
@@ -178,6 +190,30 @@ export const PERMISSION_GROUPS: PermissionGroup[] = [
       { key: "clients.edit", label: "Edit Clients", description: "Update client contact & brand details" },
       { key: "clients.delete", label: "Delete Clients", description: "Remove clients from the directory" },
       { key: "clients.export", label: "Export", description: "Download client lists" },
+      { key: "clients.banners.view", label: "View Banner Commerce", description: "See banner sizes, materials, design fees, and client edit requests" },
+      { key: "clients.banners.edit", label: "Manage Banner Commerce", description: "Set banner production and design prices used for client invoices" },
+      { key: "clients.merch.view", label: "View Merch Commerce", description: "See the merch catalogue, product visuals, variants, pricing, and orders" },
+      { key: "clients.merch.edit", label: "Manage Merch Commerce", description: "Manage merch products, presentation visuals, variants, production prices, and design fees" },
+      { key: "clients.sales_settings.view", label: "View Sales Settings", description: "See shared offers, countries, pickup locations, and delivery rules" },
+      { key: "clients.sales_settings.edit", label: "Manage Sales Settings", description: "Manage shared offers and fulfilment rules used across client orders" },
+      { key: "clients.growth.view", label: "View Growth Engine", description: "See company research, campaigns, prospects, and draft outreach" },
+      { key: "clients.growth.create", label: "Build Growth Campaigns", description: "Research public sources and create campaigns, prospects, contacts, emails, hooks, and proposals" },
+      { key: "clients.growth.approve", label: "Approve Outreach", description: "Approve an email immediately before delivery" },
+      { key: "clients.growth.send", label: "Send Outreach", description: "Deliver an approved email through the CDS Space email account" },
+      { key: "clients.mailings.view", label: "View Client Mailings", description: "View Sales Hub mailing drafts and delivery history" },
+      { key: "clients.mailings.create", label: "Create Client Mailings", description: "Select recipients, write, rewrite, and attach campaign imagery" },
+      { key: "clients.mailings.send", label: "Send Client Mailings", description: "Deliver approved branded emails to selected or all clients" },
+    ],
+  },
+  {
+    key: "deals",
+    label: "Deals",
+    route: "/admin/deals",
+    permissions: [
+      { key: "deals.view", label: "View Deals", description: "See the Deals overview and activity totals" },
+      { key: "deals.proposals", label: "Manage Proposals", description: "Generate, edit, download, and send source-backed proposals" },
+      { key: "deals.audits", label: "Manage Brand Audits", description: "Generate and review evidence-led public brand audits" },
+      { key: "deals.prospects", label: "Manage Prospect Checklist", description: "Create, update, and follow up prospect records" },
     ],
   },
   {
@@ -337,17 +373,17 @@ export const PERMISSION_GROUPS: PermissionGroup[] = [
   },
   {
     key: "team_today",
-    label: "Team Today",
-    route: "/admin/team-today",
+    label: "Taskboard",
+    route: "/admin/taskboard",
     permissions: [
-      { key: "team_today.view", label: "View Team Today", description: "See daily accountability: attendance, tasks, reports and blockers" },
-      { key: "team_today.assign", label: "Assign Tasks", description: "Assign daily tasks to team members" },
-      { key: "team_today.resolve_blockers", label: "Resolve Blockers", description: "Mark escalated blockers as resolved" },
+      { key: "team_today.view", label: "View Taskboards", description: "See shared lists, tasks, members and attached documents" },
+      { key: "team_today.assign", label: "Manage Tasks", description: "Create, assign, edit and move Taskboard work" },
+      { key: "team_today.resolve_blockers", label: "Manage Board Members", description: "Add and remove members from shared boards" },
     ],
   },
   {
     key: "timebook",
-    label: "Team Timebook",
+    label: "Attendance",
     route: "/admin/timebook",
     permissions: [
       { key: "timebook.view", label: "View Timebook", description: "See attendance, time logs, and compliance reports" },
@@ -361,38 +397,36 @@ export const PERMISSION_GROUPS: PermissionGroup[] = [
   },
   {
     key: "blog",
-    label: "Blog Manager",
-    route: "/admin/blog",
+    label: "Intelligence Manager",
+    route: "/admin/intelligence",
     permissions: [
-      { key: "blog.view", label: "View Posts", description: "See the blog post list" },
+      { key: "blog.view", label: "View Articles", description: "See the Intelligence article list" },
       { key: "blog.create", label: "Create & Edit", description: "Write, edit, and schedule articles" },
       { key: "blog.publish", label: "Publish", description: "Publish or unpublish articles" },
-      { key: "blog.authors", label: "Manage Authors", description: "Create and edit blog authors" },
+      { key: "blog.authors", label: "Manage Authors", description: "Create and edit Intelligence authors" },
+      { key: "blog.settings", label: "Manage Settings", description: "Configure Intelligence publishing and engagement defaults" },
       { key: "blog.delete", label: "Delete Posts", description: "Permanently remove articles" },
     ],
   },
   {
-    key: "time_machine",
-    label: "Time Machine (Biometric)",
-    route: "/admin/time-machine",
+    key: "work_tracking",
+    label: "Work Activity",
+    route: "/admin/work-tracking",
     permissions: [
-      { key: "time_machine.view", label: "View Station", description: "Open the biometric portal and attendance booklet" },
-      { key: "time_machine.enroll", label: "Enroll Fingerprints", description: "Capture and register team-member fingerprints" },
-      { key: "time_machine.operate", label: "Run Check-in/out", description: "Operate the scanner to record check-in and check-out" },
-      { key: "time_machine.correct", label: "Correct Records", description: "Manually fix biometric attendance entries" },
-      { key: "time_machine.export", label: "Export Booklet", description: "Download attendance and performance reports" },
+      { key: "work_tracking.view", label: "View Activity", description: "See attendance-linked focus, task context, timelines and scorecards" },
+      { key: "work_tracking.screenshots", label: "View Detailed Evidence", description: "Open the detailed member-confirmed activity timeline" },
+      { key: "work_tracking.reports", label: "Generate Reports", description: "Generate daily summaries, weekly rollups, and report comparisons" },
+      { key: "work_tracking.settings", label: "Manage Settings", description: "Manage heartbeat intervals, retention and access policy" },
+      { key: "work_tracking.retention", label: "Manage Retention", description: "Clean up expired legacy evidence while preserving reports" },
     ],
   },
   {
-    key: "work_tracking",
-    label: "Work Tracking",
-    route: "/admin/work-tracking",
+    key: "team_reports",
+    label: "Team Reports",
+    route: "/admin/team-reports",
     permissions: [
-      { key: "work_tracking.view", label: "View Tracking", description: "See productivity dashboards, summaries, and scorecards" },
-      { key: "work_tracking.screenshots", label: "View Screenshots", description: "Open retained screenshot timeline images before retention expiry" },
-      { key: "work_tracking.reports", label: "Generate Reports", description: "Generate daily reports, weekly rollups, and employee-report comparisons" },
-      { key: "work_tracking.settings", label: "Manage Settings", description: "Update capture interval, idle threshold, retention, and access policy" },
-      { key: "work_tracking.retention", label: "Run Retention", description: "Delete expired raw screenshots while preserving summaries and metadata" },
+      { key: "team_reports.view", label: "View Team Reports", description: "See each member's submitted reports next to the automated tracking report, side by side" },
+      { key: "team_reports.generate", label: "Generate & Compare", description: "Run daily reports, weekly rollups, and manual-vs-tracked comparisons from this view" },
     ],
   },
   {
@@ -442,6 +476,7 @@ export const PERMISSION_GROUPS: PermissionGroup[] = [
     permissions: [
       { key: "content_hub.view", label: "View Content Hub", description: "Open the content hub and dashboard" },
       { key: "content_hub.create", label: "Create Content", description: "Use the content creation wizard" },
+      { key: "content_hub.visual_library", label: "Visual Library", description: "Upload, choose and manage content photos/videos" },
       { key: "content_hub.ai", label: "AI Tools", description: "Generate and enhance content with AI" },
       { key: "content_hub.calendar", label: "Content Calendar", description: "View and manage the posting calendar" },
       { key: "content_hub.approve", label: "Approve", description: "Approve content in the approval queue" },
@@ -449,6 +484,17 @@ export const PERMISSION_GROUPS: PermissionGroup[] = [
       { key: "content_hub.publish", label: "Publish / Mark Posted", description: "Copy, download assets, and mark content published" },
       { key: "content_hub.studio", label: "BSD Studio", description: "Repurpose BSD videos into clips and posts" },
       { key: "content_hub.settings", label: "Settings", description: "Manage branding presets and reminder defaults" },
+    ],
+  },
+
+  // ─────────────── CREATE ───────────────
+  {
+    key: "create",
+    label: "CREATE",
+    route: "/admin/create",
+    permissions: [
+      { key: "create.view", label: "View CREATE Management", description: "Open the CREATE platform admin and analytics" },
+      { key: "create.manage_tools", label: "Manage Tools", description: "Add, edit, enable, or disable CREATE tools" },
     ],
   },
 
@@ -478,6 +524,8 @@ export const ALL_PERMISSIONS = PERMISSION_GROUPS.flatMap((g) => g.permissions);
 export function hasPermission(permissions: string[], key: string): boolean {
   if (permissions.includes("all")) return true;
   if (permissions.includes(key)) return true;
+  if (key === "clients.sales_settings.view" && permissions.includes("clients.banners.view")) return true;
+  if (key === "clients.sales_settings.edit" && permissions.includes("clients.banners.edit")) return true;
   if (key.startsWith("finance_") && permissions.includes("finance.manage")) return true;
   const owningGroup = PERMISSION_GROUPS.find((g) => g.permissions.some((p) => p.key === key));
   if (owningGroup && permissions.includes(owningGroup.key)) return true;
@@ -504,6 +552,7 @@ export function getPermissionForRoute(pathname: string): string | null {
 
   if (pathname.startsWith("/admin/content-hub/create")) return "content_hub.create";
   if (pathname.startsWith("/admin/content-hub/calendar")) return "content_hub.calendar";
+  if (pathname.startsWith("/admin/content-hub/visual-library")) return "content_hub.visual_library";
   if (pathname.startsWith("/admin/content-hub/approvals")) return "content_hub.approve";
   if (pathname.startsWith("/admin/content-hub/studio")) return "content_hub.studio";
   if (pathname.startsWith("/admin/content-hub/ai")) return "content_hub.ai";
@@ -521,10 +570,24 @@ export function getPermissionForRoute(pathname: string): string | null {
   if (pathname.startsWith("/admin/faqs")) return "faqs";
   if (pathname.startsWith("/admin/legal")) return "legal";
   if (pathname.startsWith("/admin/brand-briefs")) return "brand_briefs";
-  if (pathname.startsWith("/admin/blog")) return "blog";
+  if (pathname.startsWith("/admin/intelligence/create")) return "blog.create";
+  if (pathname.startsWith("/admin/intelligence/authors")) return "blog.authors";
+  if (pathname.startsWith("/admin/intelligence/settings")) return "blog.settings";
+  if (pathname.startsWith("/admin/intelligence") || pathname.startsWith("/admin/blog")) return "blog";
   if (pathname.startsWith("/admin/pricing")) return "pricing";
 
   if (pathname.startsWith("/admin/orders")) return "orders";
+  if (pathname.startsWith("/admin/deals/growth")) return "clients.growth.view";
+  if (pathname.startsWith("/admin/deals/proposals")) return "deals.proposals";
+  if (pathname.startsWith("/admin/deals/brand-audits")) return "deals.audits";
+  if (pathname.startsWith("/admin/deals/prospects")) return "deals.prospects";
+  if (pathname.startsWith("/admin/deals")) return "deals";
+  if (pathname.startsWith("/admin/vendors")) return "clients";
+  if (pathname.startsWith("/admin/clients/deliveries")) return "deliveries";
+  if (pathname.startsWith("/admin/clients/mailings")) return "clients.mailings.view";
+  if (pathname.startsWith("/admin/clients/sales-settings")) return "clients.sales_settings.view";
+  if (pathname.startsWith("/admin/clients/banners")) return "clients.banners.view";
+  if (pathname.startsWith("/admin/clients/merch")) return "clients.merch.view";
   if (pathname.startsWith("/admin/clients")) return "clients";
   if (pathname.startsWith("/admin/testimonials")) return "testimonials";
 
@@ -545,12 +608,13 @@ export function getPermissionForRoute(pathname: string): string | null {
   if (pathname.startsWith("/admin/hrm/certifications")) return "applicants";
   if (pathname.startsWith("/admin/hrm")) return "applicants";
 
+  if (pathname.startsWith("/admin/taskboard")) return "team_today";
   if (pathname.startsWith("/admin/team-today")) return "team_today";
   if (pathname.startsWith("/admin/team-members")) return "team_members";
   if (pathname.startsWith("/admin/timebook")) return "timebook";
-  if (pathname.startsWith("/admin/time-machine")) return "time_machine";
+  if (pathname.startsWith("/admin/time-machine")) return "timebook";
   if (pathname.startsWith("/admin/work-tracking")) return "work_tracking";
-  if (pathname.startsWith("/admin/team-reports")) return "all"; // super admin only
+  if (pathname.startsWith("/admin/team-reports")) return "team_reports";
   if (pathname.startsWith("/admin/team-payroll")) return "team_payroll";
   if (pathname.startsWith("/admin/departments")) return "departments";
   if (pathname.startsWith("/admin/sub-admins")) return "sub_admins";

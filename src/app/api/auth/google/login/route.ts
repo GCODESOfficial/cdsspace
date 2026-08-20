@@ -9,11 +9,11 @@ import { createClient } from "@/lib/glashdb/server";
  * on THIS origin) and redirect the browser to GlashDB's Google authorize URL.
  * Google returns to GlashDB, which redirects back to `<origin>/auth/callback`,
  * where `exchangeCodeForSession` completes the login. Everything runs against
- * api.glashdb.com — no Supabase, no Vercel.
+ * api.glashdb.com - no Supabase, no Vercel.
  *
  * CRITICAL: GlashDB matches `redirect_to` against the project's allowed Redirect
  * URLs by EXACT string, INCLUDING scheme and query string. So:
- *   - we send a bare `<origin>/auth/callback` (no ?next=…) — a query string would
+ *   - we send a bare `<origin>/auth/callback` (no ?next=…) - a query string would
  *     break the match and yield "redirectTo is not allowed for this project";
  *   - we force https for real domains (http only for localhost), because the
  *     allow-list entry is https and http≠https;
@@ -23,7 +23,10 @@ import { createClient } from "@/lib/glashdb/server";
  * the GlashDB Redirect URLs list.
  */
 function getOrigin(req: NextRequest) {
-  const host = req.headers.get("x-forwarded-host") || req.nextUrl.host;
+  if (process.env.NODE_ENV === "production" && process.env.NEXT_PUBLIC_SITE_URL) {
+    return new URL(process.env.NEXT_PUBLIC_SITE_URL).origin;
+  }
+  const host = (req.headers.get("x-forwarded-host") || req.nextUrl.host).split(",")[0].trim();
   const isLocal = /^(localhost|127\.0\.0\.1)(:\d+)?$/.test(host);
   const proto = isLocal ? "http" : "https";
   return `${proto}://${host}`;

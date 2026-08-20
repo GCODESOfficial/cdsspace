@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { requireFinanceAdmin } from "@/lib/finance/api-auth";
+import { requireFinanceAdminAsync } from "@/lib/finance/api-auth";
 import { getSupabaseAdmin } from "@/lib/supabase";
 
 /**
@@ -8,7 +8,7 @@ import { getSupabaseAdmin } from "@/lib/supabase";
  * carry the brief's core context) so the admin can pick up from there.
  */
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-    const denied = requireFinanceAdmin(req);
+    const denied = await requireFinanceAdminAsync(req, "brand_briefs");
     if (denied) return denied;
 
     const { id } = await params;
@@ -25,7 +25,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     const name = brief.brand_name?.trim() || brief.invite_label?.trim() || "New project";
     const client = brief.contact_name?.trim() || brief.brand_name?.trim() || "Client";
 
-    // NOTE: budget is deliberately NOT written into project notes — notes are
+    // NOTE: budget is deliberately NOT written into project notes - notes are
     // visible to all assigned team members, and budget is management-only. It
     // stays on the linked brand brief, where /api/team/work gates it by role.
     const notes = [

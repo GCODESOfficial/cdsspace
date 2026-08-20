@@ -1,17 +1,20 @@
 import { NextResponse } from "next/server";
-import { verifyAdmin, verifyUser } from "@/lib/admin-auth";
+import { verifyUser } from "@/lib/admin-auth";
+import { getClientChatAdminActor } from "@/lib/client-chat-admin";
 import { supabaseAdmin } from "@/lib/supabase";
 import { getActiveWhatsAppIntegration, phoneFromWaRoomId } from "@/lib/whatsapp/config";
 import { sendCloudApiMessage } from "@/lib/whatsapp/cloud";
 import { isQrConnected, sendQrMessage } from "@/lib/whatsapp/qr-runtime";
 import { externalIdFromRoomId, getMetaIntegration } from "@/lib/meta/config";
 import { graphPost } from "@/lib/meta/graph";
+import { isLegacyClientUuid } from "@/lib/client-routes";
+import { ADMIN_FEATURE_PERMISSION_KEYS, notifyAdminFeatureEvent } from "@/lib/admin-feature-notifications";
 
 export const dynamic = "force-dynamic";
 
 export async function GET(request: Request) {
   try {
-    const admin = await verifyAdmin();
+    const admin = await getClientChatAdminActor("messages.view");
     const userSession = await verifyUser();
 
     if (!admin && !userSession) {
@@ -57,7 +60,7 @@ export async function GET(request: Request) {
 
 export async function POST(request: Request) {
   try {
-    const admin = await verifyAdmin();
+    const admin = await getClientChatAdminActor("messages.send");
     const userSession = await verifyUser();
 
     if (!admin && !userSession) {
@@ -69,13 +72,26 @@ export async function POST(request: Request) {
 
     const body = await request.json();
     const { roomId, message, fileUrl } = body;
+    const replyToMessageId = typeof body.replyToMessageId === "string" && body.replyToMessageId
+      ? body.replyToMessageId
+      : null;
 
     if (!roomId || !message) {
       return NextResponse.json({ error: "roomId and message are required" }, { status: 400 });
     }
 
-    const isAdmin = !!admin;
-    const senderId = isAdmin ? admin.id : userSession!.user.id;
+    // A browser can legitimately hold both an admin portal cookie and a client
+    // dashboard session. Client surfaces opt into the client identity explicitly;
+    // the room ownership check below prevents that hint from widening access.
+    const clientActorRequested = body.actor === "client";
+    if (clientActorRequested && !userSession) {
+      return NextResponse.json({ error: "Client session required" }, { status: 401 });
+    }
+
+    const isAdmin = !!admin && !clientActorRequested;
+    const senderId = isAdmin
+      ? (isLegacyClientUuid(admin.id) ? admin.id : null)
+      : userSession!.user.id;
     const senderRole = isAdmin ? "admin" : "client";
 
     // External channel rooms can only be replied to by admin.
@@ -93,6 +109,17 @@ export async function POST(request: Request) {
       }
     }
 
+    if (replyToMessageId) {
+      const { data: replyTarget } = await supabaseAdmin
+        .from("chat_messages")
+        .select("id, room_id")
+        .eq("id", replyToMessageId)
+        .maybeSingle();
+      if (!replyTarget || replyTarget.room_id !== roomId) {
+        return NextResponse.json({ error: "The message being replied to is not in this conversation." }, { status: 400 });
+      }
+    }
+
     const outboundSource = isWaRoom
       ? await resolveWaSource()
       : metaRoom
@@ -107,6 +134,7 @@ export async function POST(request: Request) {
         sender_role: senderRole,
         message,
         file_url: fileUrl || null,
+        reply_to_message_id: replyToMessageId,
         source: outboundSource,
       })
       .select()
@@ -194,30 +222,48 @@ export async function POST(request: Request) {
       }
     } else if (isAdmin) {
       // Internal: notify client
-      const clientUserId = roomId.replace("client_", "");
-      await supabaseAdmin.from("notifications").insert({
-        user_id: clientUserId,
-        type: "new_message",
-        title: "New message from admin",
-        message: message.length > 100 ? message.substring(0, 100) + "..." : message,
-        link: "/chat",
-      });
+      const clientUserId = roomId.slice("client_".length);
+      if (isLegacyClientUuid(clientUserId)) {
+        const { error: notificationError } = await supabaseAdmin.from("notifications").insert({
+          user_id: clientUserId,
+          type: "new_message",
+          title: "New message from admin",
+          message: message.length > 100 ? message.substring(0, 100) + "..." : message,
+          link: "/dashboard/messages",
+        });
+        if (notificationError) {
+          console.error("Client chat notification failed:", notificationError.message);
+        }
+      }
     } else {
       // Internal: notify admin
+      const adminEmail = process.env.NEXT_PUBLIC_ADMIN_EMAIL?.trim().toLowerCase() || "ceo@cdsspace.pro";
       const { data: adminProfile } = await supabaseAdmin
         .from("profiles")
         .select("id")
-        .eq("email", "ceo@cdsspace.pro")
-        .single();
-      if (adminProfile) {
-        await supabaseAdmin.from("notifications").insert({
+        .eq("email", adminEmail)
+        .maybeSingle();
+      if (adminProfile?.id && isLegacyClientUuid(adminProfile.id)) {
+        const { error: notificationError } = await supabaseAdmin.from("notifications").insert({
           user_id: adminProfile.id,
           type: "new_message",
           title: "New message from client",
           message: message.length > 100 ? message.substring(0, 100) + "..." : message,
           link: `/chat?room=${roomId}`,
         });
+        if (notificationError) {
+          console.error("Admin chat notification failed:", notificationError.message);
+        }
       }
+      const senderName = String(userSession?.user.user_metadata?.full_name || userSession?.user.email || "A client");
+      await notifyAdminFeatureEvent({
+        permissionKeys: ADMIN_FEATURE_PERMISSION_KEYS.messages,
+        title: `New client message from ${senderName}`,
+        body: message.length > 180 ? `${message.slice(0, 180)}…` : message,
+        link: `/admin/messages?room=${encodeURIComponent(roomId)}`,
+        eyebrow: "Sales Hub · Chat/Meet",
+        details: { Client: senderName, Channel: outboundSource === "web" ? "Client dashboard" : outboundSource },
+      });
     }
 
     return NextResponse.json({ message: chatMessage });

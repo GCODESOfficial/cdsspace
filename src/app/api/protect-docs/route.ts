@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase";
 import { getToolActor } from "@/lib/team-tools-auth";
 import { canActorReadDoc, hashDocPassword } from "@/lib/protect-docs";
+import { assertCleanBuffer, UploadSecurityError } from "@/lib/upload-security";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -59,6 +60,12 @@ export async function POST(req: Request) {
   if (fileBuffer && fileName) {
     const bucket = "team-documents";
     const path = `${Date.now()}-${(fileName || "file").replace(/[^a-zA-Z0-9._-]+/g, "_")}`;
+    try {
+      assertCleanBuffer(Buffer.from(fileBuffer));
+    } catch (e) {
+      if (e instanceof UploadSecurityError) return NextResponse.json({ ok: false, error: e.message }, { status: e.status });
+      throw e;
+    }
     const { error: upErr } = await (db as any).storage.from(bucket).upload(path, new Uint8Array(fileBuffer), {
       contentType: fileMime || "application/octet-stream",
       upsert: false,

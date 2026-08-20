@@ -3,6 +3,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { financeDb, requireFinanceAdminAsync } from "@/lib/finance/api-auth";
 import { logActivity } from "@/lib/activity-log";
 import { recordResourceVersion } from "@/lib/admin-versioning";
+import { resolveClientBillingCurrency } from "@/lib/client-billing-server";
+import { CURRENCIES } from "@/lib/finance/types";
 
 async function getQuotationSnapshot(sb: any, id: string) {
   const { data: quotation, error } = await sb
@@ -91,6 +93,17 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   const sb = financeDb();
   const before = await getQuotationSnapshot(sb, id);
   if (!before.quotation) return NextResponse.json({ error: "Quotation not found" }, { status: 404 });
+
+  if ("currency" in body || "client_email" in body) {
+    const requestedCurrency = CURRENCIES.includes(String(body.currency || before.quotation.currency).toUpperCase() as (typeof CURRENCIES)[number])
+      ? String(body.currency || before.quotation.currency).toUpperCase()
+      : String(before.quotation.currency || "NGN");
+    patch.currency = await resolveClientBillingCurrency(
+      sb,
+      body.client_email ?? before.quotation.client_email,
+      requestedCurrency,
+    );
+  }
 
   if (body.items && Array.isArray(body.items)) {
     const subtotal = body.items.reduce((s: number, it: { quantity: number; unit_price: number }) => s + Number(it.quantity) * Number(it.unit_price), 0);

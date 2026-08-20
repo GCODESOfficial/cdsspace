@@ -18,6 +18,9 @@ import {
     X,
     Check,
     ExternalLink,
+    UserPlus,
+    Search,
+    Loader2,
 } from "lucide-react";
 import { glassCard } from "@/components/finance/FinanceShell";
 import { Button } from "@/components/ui/button";
@@ -48,6 +51,9 @@ interface Assignment {
     team_member_id: string | null;
     department: string | null;
     role: string | null;
+    is_project_leader: boolean;
+    can_edit_project: boolean;
+    can_manage_tasks: boolean;
     created_at: string;
     team_members: Member | null;
 }
@@ -61,6 +67,7 @@ interface ProjectDocument {
     file_url: string | null;
     added_by: string | null;
     created_at: string;
+    visibility: "internal" | "client";
     cdoc?: { id: string; title: string; updated_at: string } | null;
     protected_doc?: { id: string; title: string; file_url: string } | null;
 }
@@ -86,6 +93,13 @@ interface ProjectMeeting {
     created_at: string;
 }
 
+interface ProjectClient {
+    id: string;
+    name: string;
+    email: string;
+    avatar_url: string | null;
+}
+
 type DocumentOptionPayload = {
     data?: { docs?: CDoc[] } | CDoc[];
     docs?: CDoc[];
@@ -107,10 +121,13 @@ export function ProjectCollaborationPanel({ projectId }: { projectId: string }) 
     const [protectedDocs, setProtectedDocs] = useState<ProtectedDoc[]>([]);
     const [meetings, setMeetings] = useState<ProjectMeeting[]>([]);
     const [chatThreadId, setChatThreadId] = useState<string | null>(null);
+    const [projectClient, setProjectClient] = useState<ProjectClient | null>(null);
+    const [projectClients, setProjectClients] = useState<ProjectClient[]>([]);
 
     const [showAssign, setShowAssign] = useState(false);
     const [showDoc, setShowDoc] = useState(false);
     const [showMeeting, setShowMeeting] = useState(false);
+    const [showClientManager, setShowClientManager] = useState(false);
 
     const loadAll = async () => {
         await Promise.all([loadAssignments(), loadDocuments(), loadMeetings(), loadChat()]);
@@ -142,6 +159,8 @@ export function ProjectCollaborationPanel({ projectId }: { projectId: string }) 
         if (r.ok) {
             const d = await r.json();
             setChatThreadId(d.thread?.id ?? null);
+            setProjectClient(d.client ?? null);
+            setProjectClients(d.clients ?? []);
         }
     };
 
@@ -200,6 +219,18 @@ export function ProjectCollaborationPanel({ projectId }: { projectId: string }) 
         await fetch(`/api/admin/finance/projects/${projectId}/assignments/${a.id}`, { method: "DELETE" });
         loadAssignments();
     };
+    const promoteAssignment = async (a: Assignment) => {
+        if (!a.team_member_id || a.is_project_leader) return;
+        if (!(await appConfirm("Assign this member as a project leader? They will be able to edit the project and manage tasks."))) return;
+        const response = await fetch(`/api/admin/finance/projects/${projectId}/assignments`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ assignment_id: a.id }),
+        });
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok) return appAlert(payload.error || "Could not assign the project leader.");
+        loadAssignments();
+    };
     const removeDocument = async (d: ProjectDocument) => {
         if (!(await appConfirm("Detach this document from the project?"))) return;
         await fetch(`/api/admin/finance/projects/${projectId}/documents/${d.id}`, { method: "DELETE" });
@@ -212,6 +243,10 @@ export function ProjectCollaborationPanel({ projectId }: { projectId: string }) 
     };
 
     const startInstantChat = async () => {
+        if (chatThreadId) {
+            window.open(`/admin/chat?thread=${chatThreadId}`, "_blank", "noopener,noreferrer");
+            return;
+        }
         const r = await fetch(`/api/admin/finance/projects/${projectId}/chat`, { method: "POST" });
         const d = await r.json();
         if (!r.ok) return appAlert(d.error || "Couldn't start chat.");
@@ -286,7 +321,21 @@ export function ProjectCollaborationPanel({ projectId }: { projectId: string }) 
                                             : "Everyone in this department"}
                                         {a.role ? ` · ${a.role}` : ""}
                                     </div>
+                                    {a.is_project_leader && (
+                                        <span className="mt-1 inline-flex rounded-full border border-blue-100 bg-blue-50 px-2 py-0.5 text-[10px] font-semibold text-[#0A4FE8]">
+                                            Project leader
+                                        </span>
+                                    )}
                                 </div>
+                                {a.team_member_id && !a.is_project_leader && (
+                                    <button
+                                        onClick={() => promoteAssignment(a)}
+                                        className="p-2 rounded-lg text-gray-400 hover:text-[#0A4FE8] hover:bg-blue-50 transition"
+                                        title="Make project leader"
+                                    >
+                                        <Shield className="w-4 h-4" />
+                                    </button>
+                                )}
                                 <button
                                     onClick={() => removeAssignment(a)}
                                     className="p-2 rounded-lg text-gray-400 hover:text-red-600 hover:bg-red-50 transition"
@@ -344,6 +393,9 @@ export function ProjectCollaborationPanel({ projectId }: { projectId: string }) 
                                             {" · "}
                                             {new Date(d.created_at).toLocaleDateString()}
                                         </div>
+                                        <div className={`mt-1 text-[10px] font-semibold ${d.visibility === "client" ? "text-emerald-600" : "text-gray-400"}`}>
+                                            {d.visibility === "client" ? "Shared with client" : "Internal only"}
+                                        </div>
                                     </div>
                                     <a
                                         href={href}
@@ -380,6 +432,16 @@ export function ProjectCollaborationPanel({ projectId }: { projectId: string }) 
                         </p>
                     </div>
                     <div className="flex items-center gap-2">
+                        {(projectClient || projectClients.length > 0) && (
+                            <Button
+                                variant="outline"
+                                onClick={() => setShowClientManager(true)}
+                                className="rounded-xl border-emerald-200 text-emerald-700 hover:bg-emerald-50"
+                            >
+                                <UserPlus className="w-4 h-4 mr-1.5" />
+                                Manage clients{projectClients.length ? ` (${projectClients.length})` : ""}
+                            </Button>
+                        )}
                         <Button variant="outline" onClick={startInstantChat} className="rounded-xl">
                             <MessageSquare className="w-4 h-4 mr-1.5" />
                             {chatThreadId ? "Open Project Chat" : "Start Chat"}
@@ -396,8 +458,15 @@ export function ProjectCollaborationPanel({ projectId }: { projectId: string }) 
                             <Check className="w-4 h-4" />
                         </div>
                         <div className="text-[12.5px] text-emerald-800 flex-1">
-                            A project chat thread is live. Everyone assigned sees it under <strong>Team Chat</strong> in their portal.
+                            A project chat thread is live. Everyone assigned sees it under <strong>Team Chat</strong>
+                            {projectClients.length ? `, and ${projectClients.length} client${projectClients.length === 1 ? "" : "s"} can follow it from Chat/Meet.` : "."}
                         </div>
+                    </div>
+                )}
+
+                {!projectClient && (
+                    <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50/70 px-4 py-3 text-[12px] text-amber-800">
+                        Link this project to a registered client account before adding the client to its group chat.
                     </div>
                 )}
 
@@ -470,6 +539,17 @@ export function ProjectCollaborationPanel({ projectId }: { projectId: string }) 
                     }}
                 />
             )}
+            {showClientManager && (
+                <ProjectClientManagerModal
+                    projectId={projectId}
+                    selectedClients={projectClients}
+                    onClose={() => setShowClientManager(false)}
+                    onDone={() => {
+                        setShowClientManager(false);
+                        void loadChat();
+                    }}
+                />
+            )}
             {showDoc && (
                 <DocumentModal
                     projectId={projectId}
@@ -497,6 +577,100 @@ export function ProjectCollaborationPanel({ projectId }: { projectId: string }) 
 }
 
 /* ------------ sub-components ------------ */
+
+interface DirectoryClient {
+    platform_user_id: string;
+    name: string;
+    brand_name: string | null;
+    email: string | null;
+}
+
+function ProjectClientManagerModal({
+    projectId,
+    selectedClients,
+    onClose,
+    onDone,
+}: {
+    projectId: string;
+    selectedClients: ProjectClient[];
+    onClose: () => void;
+    onDone: () => void;
+}) {
+    const [clients, setClients] = useState<DirectoryClient[]>([]);
+    const [selected, setSelected] = useState(() => new Set(selectedClients.map((client) => client.id)));
+    const [query, setQuery] = useState("");
+    const [loading, setLoading] = useState(true);
+    const [saving, setSaving] = useState(false);
+
+    useEffect(() => {
+        fetch("/api/admin/clients/directory", { cache: "no-store" })
+            .then(async (response) => {
+                const payload = await response.json();
+                if (!response.ok) throw new Error(payload.error || "Could not load clients");
+                const unique = new Map<string, DirectoryClient>();
+                for (const client of payload.clients || []) {
+                    if (!client.has_platform_account || !client.platform_user_id) continue;
+                    unique.set(client.platform_user_id, {
+                        platform_user_id: client.platform_user_id,
+                        name: client.name || client.brand_name || client.email || "Client",
+                        brand_name: client.brand_name || null,
+                        email: client.email || null,
+                    });
+                }
+                setClients(Array.from(unique.values()).sort((a, b) => a.name.localeCompare(b.name)));
+            })
+            .catch((error) => void appAlert(error instanceof Error ? error.message : "Could not load clients"))
+            .finally(() => setLoading(false));
+    }, []);
+
+    const needle = query.trim().toLowerCase();
+    const filtered = clients.filter((client) => !needle || [client.name, client.brand_name, client.email]
+        .some((value) => value?.toLowerCase().includes(needle)));
+
+    const save = async () => {
+        setSaving(true);
+        try {
+            const response = await fetch(`/api/admin/finance/projects/${projectId}/chat`, {
+                method: "PATCH",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ clientIds: Array.from(selected) }),
+            });
+            const payload = await response.json();
+            if (!response.ok) throw new Error(payload.error || "Could not update project clients");
+            onDone();
+            await appAlert(`${selected.size} client${selected.size === 1 ? "" : "s"} can now access this project chat.`);
+        } catch (error) {
+            await appAlert(error instanceof Error ? error.message : "Could not update project clients");
+        } finally {
+            setSaving(false);
+        }
+    };
+
+    return (
+        <ModalShell title="Project chat clients" onClose={onClose}>
+            <p className="mb-4 text-[12px] leading-5 text-gray-500">Add one or more registered clients. Every selected client can follow and reply in this project group.</p>
+            <label className="relative block">
+                <Search className="absolute start-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
+                <Input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search by name or email" className="h-11 rounded-xl ps-10" />
+            </label>
+            <div className="mt-3 max-h-72 overflow-y-auto rounded-xl border border-gray-100 p-2">
+                {loading ? <div className="grid h-32 place-items-center"><Loader2 className="h-5 w-5 animate-spin text-[#0A4FE8]" /></div> : filtered.length === 0 ? <p className="py-10 text-center text-[12px] text-gray-400">No clients match your search.</p> : filtered.map((client) => (
+                    <label key={client.platform_user_id} className="mb-1 flex cursor-pointer items-center gap-3 rounded-xl px-3 py-2.5 hover:bg-blue-50/60">
+                        <input type="checkbox" checked={selected.has(client.platform_user_id)} onChange={() => setSelected((current) => {
+                            const next = new Set(current);
+                            if (next.has(client.platform_user_id)) next.delete(client.platform_user_id);
+                            else next.add(client.platform_user_id);
+                            return next;
+                        })} className="h-4 w-4 accent-[#0A4FE8]" />
+                        <div className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-blue-50 text-[10px] font-bold text-[#0A4FE8]">{client.name.charAt(0).toUpperCase()}</div>
+                        <div className="min-w-0 flex-1"><p className="truncate text-[12px] font-semibold text-[#0D1B39]">{client.name}</p><p className="truncate text-[10px] text-gray-400">{client.email || client.brand_name || "CDS Space account"}</p></div>
+                    </label>
+                ))}
+            </div>
+            <div className="mt-5 flex justify-end gap-2"><Button variant="outline" onClick={onClose} disabled={saving}>Cancel</Button><Button onClick={save} disabled={saving} className="bg-[#0A4FE8] hover:bg-[#083EC0]">{saving ? <Loader2 className="me-2 h-4 w-4 animate-spin" /> : null}Save clients</Button></div>
+        </ModalShell>
+    );
+}
 
 function ModalShell({
     title,
@@ -545,6 +719,7 @@ function AssignModal({
     const [memberId, setMemberId] = useState("");
     const [department, setDepartment] = useState("");
     const [role, setRole] = useState("");
+    const [isProjectLeader, setIsProjectLeader] = useState(false);
     const [saving, setSaving] = useState(false);
 
     const submit = async () => {
@@ -559,6 +734,7 @@ function AssignModal({
                     team_member_id: mode === "member" ? memberId : null,
                     department: mode === "department" ? department : null,
                     role: role || null,
+                    is_project_leader: mode === "member" && isProjectLeader,
                 }),
             });
             const d = await r.json();
@@ -594,7 +770,7 @@ function AssignModal({
 
             {mode === "member" ? (
                 <div className="space-y-3">
-                    <div>
+            <div>
                         <Label className="text-[11px] uppercase tracking-wider text-gray-500 font-bold">Team member</Label>
                         <Select value={memberId} onValueChange={setMemberId}>
                             <SelectTrigger className="h-11 rounded-xl mt-1.5">
@@ -646,6 +822,21 @@ function AssignModal({
                 />
             </div>
 
+            {mode === "member" && (
+                <label className="mt-4 flex cursor-pointer items-start gap-3 rounded-xl border border-blue-100 bg-blue-50/60 p-3">
+                    <input
+                        type="checkbox"
+                        checked={isProjectLeader}
+                        onChange={(event) => setIsProjectLeader(event.target.checked)}
+                        className="mt-0.5 h-4 w-4 rounded border-blue-200 text-[#0A4FE8]"
+                    />
+                    <span>
+                        <span className="block text-[12.5px] font-semibold text-[#0D1B39]">Assign as project leader</span>
+                        <span className="mt-0.5 block text-[11px] leading-5 text-gray-500">Project leaders can edit project details, add tasks and manage milestones.</span>
+                    </span>
+                </label>
+            )}
+
             <div className="flex justify-end gap-2 mt-5">
                 <Button variant="outline" onClick={onClose} disabled={saving}>Cancel</Button>
                 <Button onClick={submit} disabled={saving} className="bg-[#0A4FE8] hover:bg-[#083EC0]">
@@ -674,10 +865,11 @@ function DocumentModal({
     const [protectedId, setProtectedId] = useState("");
     const [title, setTitle] = useState("");
     const [fileUrl, setFileUrl] = useState("");
+    const [visibility, setVisibility] = useState<"internal" | "client">("internal");
     const [saving, setSaving] = useState(false);
 
     const submit = async () => {
-        const payload: Record<string, unknown> = { kind, title: title.trim() };
+        const payload: Record<string, unknown> = { kind, title: title.trim(), visibility };
         if (kind === "cdoc") {
             if (!cdocId) return appAlert("Pick a cDoc.");
             payload.cdoc_id = cdocId;
@@ -786,6 +978,17 @@ function DocumentModal({
                     onChange={(e) => setTitle(e.target.value)}
                     className="h-11 rounded-xl mt-1.5"
                 />
+            </div>
+
+            <div className="mt-3">
+                <Label className="text-[11px] uppercase tracking-wider text-gray-500 font-bold">Client visibility</Label>
+                <Select value={visibility} onValueChange={(value) => setVisibility(value as "internal" | "client")}>
+                    <SelectTrigger className="h-11 rounded-xl mt-1.5"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                        <SelectItem value="internal">Internal only</SelectItem>
+                        <SelectItem value="client">Share in client dashboard</SelectItem>
+                    </SelectContent>
+                </Select>
             </div>
 
             <div className="flex justify-end gap-2 mt-5">

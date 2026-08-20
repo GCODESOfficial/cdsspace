@@ -1,0 +1,23 @@
+name: Content auto-publish
+
+# glashdb has no built-in scheduler, so this GitHub Actions workflow is the
+# external cron: every 5 minutes it pings the auto-publish endpoint, which posts
+# any due scheduled content to its connected channels (LinkedIn today) and fires
+# per-item "Auto-schedule" entries whose time has arrived.
+
+on:
+  schedule:
+    # Every 5 minutes (UTC). GitHub schedules are best-effort and can be delayed
+    # a few minutes under load - fine for content scheduling.
+    - cron: "*/5 * * * *"
+  workflow_dispatch: {}
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger content auto-publish
+        run: |
+          curl -fsS -X GET "https://cdsspace.pro/api/cron/content-autopublish" \
+            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
+            -w "\nHTTP %{http_code}\n"

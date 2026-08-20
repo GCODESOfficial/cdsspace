@@ -30,6 +30,7 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
+import { activityMetadataSummary } from "@/lib/activity-metadata";
 
 type ReportStats = {
   totalTrackedEvents: number;
@@ -413,7 +414,7 @@ export default function AuditReportPage() {
     const q = query.trim().toLowerCase();
     if (!q) return report.recentActivities;
     return report.recentActivities.filter((item) =>
-      [item.actor_name, item.action, item.resource_type, item.resource_label, item.page]
+      [item.actor_name, item.action, item.resource_type, item.resource_label, item.page, activityMetadataSummary(item.metadata)]
         .filter(Boolean)
         .some((value) => String(value).toLowerCase().includes(q)),
     );
@@ -742,6 +743,7 @@ export default function AuditReportPage() {
                   ) : (
                     filteredActivities.slice(0, 40).map((item) => {
                       const { noun, verb } = prettyAction(item.action);
+                      const metadataSummary = activityMetadataSummary(item.metadata);
                       return (
                         <div key={`${item.id}-${item.created_at}`} className="flex gap-3 border-b border-slate-50 px-5 py-3 last:border-0">
                           <div className={`mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-2xl ${
@@ -764,6 +766,7 @@ export default function AuditReportPage() {
                             <p className="mt-0.5 text-xs text-slate-400">
                               {formatDateTime(item.created_at)} · {item.page}
                             </p>
+                            {metadataSummary && <p className="mt-1 break-words text-[11px] leading-4 text-slate-500">{metadataSummary}</p>}
                           </div>
                           <ChevronRight className="mt-2 h-4 w-4 shrink-0 text-slate-300" />
                         </div>

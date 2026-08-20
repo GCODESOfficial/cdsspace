@@ -93,7 +93,7 @@ export async function PATCH(req: NextRequest) {
   try {
     settings = await runUpdate(entries);
   } catch (err: any) {
-    // Most likely the AI-defaults columns don't exist yet — retry without them so
+    // Most likely the AI-defaults columns don't exist yet - retry without them so
     // branding/reminder settings still save.
     const hasNew = entries.some((e) => newColumns.has(e.col));
     if (hasNew && /column|does not exist|default_hashtags|best_examples/i.test(String(err?.message))) {

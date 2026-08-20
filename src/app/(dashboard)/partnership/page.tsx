@@ -1,10 +1,10 @@
-import { PartnershipView } from "@/components/dashboard/PartnershipView";
+import { redirect } from "next/navigation";
 
 export const metadata = {
-    title: "Best Partner | CDS Space",
-    description: "Become a CDS Best Partner - earn 5% on every referral, withdraw anytime.",
+    title: "Brand Marketers | CDS Space",
+    description: "The CDS Space Brand Marketer programme now has a dedicated portal.",
 };
 
 export default function PartnershipPage() {
-    return <PartnershipView />;
+    redirect("/marketer");
 }

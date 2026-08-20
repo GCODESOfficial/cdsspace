@@ -37,7 +37,7 @@ export async function getTimebookOffice(): Promise<TimebookOffice> {
       };
     }
   } catch {
-    // Table not migrated yet — use the default.
+    // Table not migrated yet - use the default.
   }
   return { ...TIMEBOOK_OFFICE };
 }

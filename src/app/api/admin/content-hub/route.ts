@@ -9,6 +9,8 @@ import { REMINDER_OFFSETS } from "@/lib/content-hub/shared";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 function str(v: unknown) {
   return typeof v === "string" ? v.trim() : "";
 }
@@ -161,6 +163,7 @@ export async function POST(req: NextRequest) {
 
   // Media attachments.
   const media = Array.isArray(body.media) ? body.media : [];
+  const sourceVisualAssetId = str(body.source_visual_asset_id);
   for (let i = 0; i < media.length; i++) {
     const m = media[i];
     if (!str(m?.url)) continue;
@@ -179,6 +182,19 @@ export async function POST(req: NextRequest) {
         i,
         m.meta && typeof m.meta === "object" ? m.meta : {},
       ],
+    );
+  }
+
+  if (UUID.test(sourceVisualAssetId)) {
+    await glashQuery(
+      `update public.content_visual_assets
+       set status = 'used',
+           used_at = now(),
+           archived_at = null,
+           used_in_content_id = $1,
+           updated_at = now()
+       where id = $2`,
+      [item.id, sourceVisualAssetId],
     );
   }
 

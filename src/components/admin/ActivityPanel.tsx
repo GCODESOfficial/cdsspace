@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { Loader2, Clock, ShieldCheck } from "lucide-react";
+import { activityDetailRows } from "@/lib/activity-metadata";
 
 interface ActivityRow {
     id: string;
@@ -18,6 +19,7 @@ interface ActivityRow {
 }
 
 const VERB_LABELS: Record<string, string> = {
+    access: "accessed",
     create: "created",
     update: "updated",
     delete: "deleted",
@@ -34,6 +36,16 @@ const VERB_LABELS: Record<string, string> = {
     restore_version: "restored version for",
     surcharge: "added surcharge to",
     archive: "archived",
+    submit: "submitted",
+    approve: "approved",
+    approve_publish: "approved and published",
+    request_revision: "requested revisions for",
+    files_uploaded: "uploaded files to",
+    draft_saved: "saved a draft for",
+    draft_deleted: "deleted a draft for",
+    sent_to_client: "sent to the client",
+    await_client_account: "secured pending a client account",
+    login: "logged in to",
 };
 
 function prettyAction(action: string): { verb: string; noun: string } {
@@ -98,7 +110,7 @@ export default function ActivityPanel({
 
     return (
         <section
-            className={`mt-10 border border-gray-100 rounded-2xl bg-white ${compact ? "" : "shadow-xs"}`}
+            className={`${compact ? "mt-0" : "mt-10"} border border-gray-100 rounded-2xl bg-white ${compact ? "" : "shadow-xs"}`}
         >
             <header
                 className="flex items-center justify-between px-5 py-3.5 border-b border-gray-50 cursor-pointer select-none"
@@ -132,6 +144,7 @@ export default function ActivityPanel({
                         <ul className="divide-y divide-gray-50">
                             {items.map((a) => {
                                 const { verb, noun } = prettyAction(a.action);
+                                const details = activityDetailRows(a.metadata);
                                 return (
                                     <li key={a.id} className="px-5 py-3 flex items-start gap-3 text-[12.5px]">
                                         <div
@@ -165,6 +178,16 @@ export default function ActivityPanel({
                                                 {timeAgo(a.created_at)} ·{" "}
                                                 {new Date(a.created_at).toLocaleString()}
                                             </p>
+                                            {details.length > 0 && (
+                                                <dl className="mt-2 grid gap-1 rounded-lg border border-gray-100 bg-gray-50/70 px-3 py-2 sm:grid-cols-2">
+                                                    {details.map((detail) => (
+                                                        <div key={`${detail.label}-${detail.value}`} className="min-w-0 text-[10.5px] leading-4">
+                                                            <dt className="inline font-semibold text-gray-500">{detail.label}: </dt>
+                                                            <dd className="inline break-words text-gray-600">{detail.value}</dd>
+                                                        </div>
+                                                    ))}
+                                                </dl>
+                                            )}
                                         </div>
                                     </li>
                                 );

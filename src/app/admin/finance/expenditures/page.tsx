@@ -15,6 +15,8 @@ import ActivityPanel from "@/components/admin/ActivityPanel";
 import ModalHeader from "@/components/finance/ModalHeader";
 import { SuggestionInput } from "@/components/finance/SuggestionInput";
 import { CURRENCIES, Currency, FinanceExpenditure, formatMoney } from "@/lib/finance/types";
+import { convertFinanceAmount } from "@/lib/finance/currency-display";
+import { useFinanceDisplayCurrency } from "@/components/finance/FinanceCurrencySelector";
 import { appAlert, appConfirm } from "@/lib/app-notify";
 
 type Cycle = "daily" | "weekly" | "monthly" | "quarterly" | "yearly" | "custom";
@@ -31,6 +33,7 @@ const EMPTY: {
 };
 
 export default function ExpendituresPage() {
+  const { currency: displayCurrency, rates } = useFinanceDisplayCurrency();
   const [list, setList] = useState<FinanceExpenditure[]>([]);
   const [loading, setLoading] = useState(true);
   const [open, setOpen] = useState(false);
@@ -93,8 +96,8 @@ export default function ExpendituresPage() {
     await fetch(`/api/admin/finance/expenditures/${id}`, { method: "DELETE" }); load();
   };
 
-  const total = list.reduce((s, e) => s + Number(e.amount), 0);
-  const recurring = list.filter((e) => e.recurring).reduce((s, e) => s + Number(e.amount), 0);
+  const total = list.reduce((s, e) => s + convertFinanceAmount(e.amount, e.currency, displayCurrency, rates), 0);
+  const recurring = list.filter((e) => e.recurring).reduce((s, e) => s + convertFinanceAmount(e.amount, e.currency, displayCurrency, rates), 0);
   const oneOff = total - recurring;
 
   return (
@@ -113,7 +116,7 @@ export default function ExpendituresPage() {
           }}
         >
           <DialogTrigger asChild>
-            <Button onClick={openNew} className="h-11 px-5 rounded-xl bg-gradient-to-b from-blue-600 to-blue-700 shadow-lg shadow-blue-600/30">
+            <Button onClick={openNew} className="h-11 px-5 rounded-xl bg-[#0A4FE8] shadow-lg shadow-blue-600/30">
               <Plus className="w-4 h-4 mr-1.5" /> New Expenditure
             </Button>
           </DialogTrigger>
@@ -190,16 +193,16 @@ export default function ExpendituresPage() {
             </div>
             <DialogFooter className="mt-5">
               <Button variant="outline" className="h-11 px-5 rounded-xl" onClick={() => setOpen(false)}>Cancel</Button>
-              <Button onClick={save} className="h-11 px-5 rounded-xl bg-gradient-to-b from-blue-600 to-blue-700 shadow-lg shadow-blue-600/30">Save</Button>
+              <Button onClick={save} className="h-11 px-5 rounded-xl bg-[#0A4FE8] shadow-lg shadow-blue-600/30">Save</Button>
             </DialogFooter>
           </DialogContent>
         </Dialog>
       }
     >
       <div className="grid grid-cols-1 md:grid-cols-3 gap-5 mb-8">
-        <StatCard icon={Receipt} label="Total Spend" value={formatMoney(total)} accent="from-rose-500 to-red-500" />
-        <StatCard icon={Repeat} label="Recurring" value={formatMoney(recurring)} accent="from-amber-500 to-orange-500" />
-        <StatCard icon={Zap} label="One-Off" value={formatMoney(oneOff)} accent="from-blue-500 to-indigo-500" />
+        <StatCard icon={Receipt} label="Total Spend" value={formatMoney(total, displayCurrency)} accent="from-rose-500 to-red-500" />
+        <StatCard icon={Repeat} label="Recurring" value={formatMoney(recurring, displayCurrency)} accent="from-amber-500 to-orange-500" />
+        <StatCard icon={Zap} label="One-Off" value={formatMoney(oneOff, displayCurrency)} accent="bg-[#0A4FE8]" />
       </div>
 
       {loading ? (
@@ -230,7 +233,10 @@ export default function ExpendituresPage() {
                   <td className="px-5 py-4 font-medium text-gray-900">{e.title}</td>
                   <td className="px-5 py-4 text-gray-500">{e.category ?? "-"}</td>
                   <td className="px-5 py-4 text-gray-500">{new Date(e.spent_on).toLocaleDateString()}</td>
-                  <td className="px-5 py-4 font-semibold">{formatMoney(e.amount, e.currency)}</td>
+                  <td className="px-5 py-4 font-semibold">
+                    <div>{formatMoney(convertFinanceAmount(e.amount, e.currency, displayCurrency, rates), displayCurrency)}</div>
+                    {e.currency !== displayCurrency && <div className="mt-0.5 text-[11px] font-normal text-gray-400">Original: {formatMoney(e.amount, e.currency)}</div>}
+                  </td>
                   <td className="px-5 py-4">
                     {e.recurring ? <span className="text-[10px] uppercase tracking-wider font-semibold px-2.5 py-1 rounded-full bg-amber-50 text-amber-700">{e.recurrence_cycle}</span> : <span className="text-xs text-gray-400">one-off</span>}
                   </td>

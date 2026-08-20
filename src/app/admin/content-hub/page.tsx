@@ -1,13 +1,14 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
-import { PenLine, Clapperboard, Sparkles, ClipboardCheck, CalendarClock, FileEdit, CheckCircle2, Send, Archive } from "lucide-react";
+import { PenLine, Clapperboard, Printer, Bot, ClipboardCheck, CalendarClock, CalendarDays, FileEdit, CheckCircle2, Send, Archive, Images, Loader2 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import ContentHubShell from "@/components/content-hub/ContentHubShell";
 import ActivityPanel from "@/components/admin/ActivityPanel";
 import { StatusBadge } from "@/components/content-hub/parts";
 import { platformLabel, type ContentStatus } from "@/lib/content-hub/shared";
+import { appAlert } from "@/lib/app-notify";
 
 interface Upcoming { id: string; title: string; scheduled_at: string; scheduled_platform: string | null; status: ContentStatus; assigned_publisher_name: string | null; platforms: string[] }
 
@@ -15,22 +16,82 @@ export default function ContentHubDashboard() {
   const [counts, setCounts] = useState<Record<string, number>>({});
   const [upcoming, setUpcoming] = useState<Upcoming[]>([]);
   const [loading, setLoading] = useState(true);
+  const [printing, setPrinting] = useState<"day" | "week" | null>(null);
 
-  useEffect(() => {
+  const loadMeta = useCallback(() => {
+    setLoading(true);
     fetch("/api/admin/content-hub/meta", { cache: "no-store" })
       .then((r) => r.json())
       .then((d) => { if (d.ok) { setCounts(d.stats?.counts || {}); setUpcoming(d.stats?.upcoming || []); } })
       .finally(() => setLoading(false));
   }, []);
 
+  useEffect(() => { loadMeta(); }, [loadMeta]);
+
+  async function runWotdPrint(days = 1) {
+    const mode = days === 1 ? "day" : "week";
+    setPrinting(mode);
+    try {
+      const res = await fetch("/api/admin/content-hub/wotd-print", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ days }),
+      });
+      const json = await res.json().catch(() => ({ ok: false, error: "WOTD print failed." }));
+      if (!res.ok || !json.ok) {
+        const partial = days > 1 && json.completed_count
+          ? ` ${json.completed_count} of ${days} days were completed before the error.`
+          : "";
+        throw new Error(`${json.error || "WOTD print failed."}${partial}`);
+      }
+      await appAlert({
+        title: days === 1 ? "WOTD print" : "7-day WOTD schedule",
+        message: days === 1
+          ? json.created
+            ? `${json.word?.word || "Branding word"} was saved to Visual Library and scheduled.`
+            : `${json.word?.word || "Branding word"} is already scheduled for ${json.date_key}.`
+          : `${json.created_count} new WOTD ${json.created_count === 1 ? "post was" : "posts were"} scheduled from ${json.start_date_key} to ${json.end_date_key}.${json.existing_count ? ` ${json.existing_count} already existed.` : ""}`,
+        kind: "success",
+      });
+      loadMeta();
+    } catch (error) {
+      await appAlert({
+        title: days === 1 ? "WOTD print" : "7-day WOTD schedule",
+        message: error instanceof Error ? error.message : "WOTD print failed.",
+        kind: "error",
+      });
+    } finally {
+      setPrinting(null);
+    }
+  }
+
   return (
     <ContentHubShell
       title="Content Hub"
       subtitle="Plan, create, approve, schedule and package content - then hand it to the Social Media Manager to post."
       action={
-        <Link href="/admin/content-hub/create" className="inline-flex items-center gap-2 rounded-xl bg-[#0A4FE8] px-4 py-2.5 text-[13px] font-bold text-white shadow-sm transition hover:bg-[#083EC0]">
-          <PenLine className="h-4 w-4" /> Create Content
-        </Link>
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={() => runWotdPrint(1)}
+            disabled={printing !== null}
+            className="inline-flex items-center gap-2 rounded-xl border border-blue-200 bg-white px-4 py-2.5 text-[13px] font-bold text-[#0A4FE8] shadow-sm transition hover:bg-blue-50 disabled:opacity-60"
+          >
+            {printing === "day" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Printer className="h-4 w-4" />} WOTD print
+          </button>
+          <button
+            type="button"
+            onClick={() => runWotdPrint(7)}
+            disabled={printing !== null}
+            className="inline-flex items-center gap-2 rounded-xl border border-blue-200 bg-blue-50 px-4 py-2.5 text-[13px] font-bold text-[#0A4FE8] shadow-sm transition hover:bg-blue-100 disabled:opacity-60"
+          >
+            {printing === "week" ? <Loader2 className="h-4 w-4 animate-spin" /> : <CalendarDays className="h-4 w-4" />}
+            {printing === "week" ? "Scheduling 7 days..." : "Generate 7-day WOTD"}
+          </button>
+          <Link href="/admin/content-hub/create" className="inline-flex items-center gap-2 rounded-xl bg-[#0A4FE8] px-4 py-2.5 text-[13px] font-bold text-white shadow-sm transition hover:bg-[#083EC0]">
+            <PenLine className="h-4 w-4" /> Create Content
+          </Link>
+        </div>
       }
     >
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
@@ -81,8 +142,9 @@ export default function ContentHubDashboard() {
           <h2 className="mb-3 text-[15px] font-bold text-[#0D1B39]">Jump to</h2>
           <div className="space-y-2">
             <QuickLink href="/admin/content-hub/create" icon={PenLine} label="Create Content" desc="Guided 7-step wizard" />
+            <QuickLink href="/admin/content-hub/visual-library" icon={Images} label="Visual Library" desc="Upload photos & videos" />
             <QuickLink href="/admin/content-hub/studio" icon={Clapperboard} label="BSD Studio" desc="Repurpose videos into clips & posts" />
-            <QuickLink href="/admin/content-hub/ai" icon={Sparkles} label="AI Assistant" desc="Brainstorm and draft fast" />
+            <QuickLink href="/admin/content-hub/ai" icon={Bot} label="AI Assistant" desc="Brainstorm and draft fast" />
             <QuickLink href="/admin/content-hub/approvals" icon={ClipboardCheck} label="Approval Queue" desc="Review pending content" />
           </div>
         </section>

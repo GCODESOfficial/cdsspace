@@ -83,7 +83,7 @@ export function AIToolbar({
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
-        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-gradient-to-r from-[#0A4FE8] to-[#7B3AED] text-white text-[12px] font-semibold shadow-sm hover:shadow-md transition"
+        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-[#0A4FE8] text-white text-[12px] font-semibold shadow-sm hover:shadow-md transition"
       >
         <PenLine className="w-3.5 h-3.5" />
         AI
@@ -94,7 +94,7 @@ export function AIToolbar({
         <>
           <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
           <div className="absolute right-0 mt-2 w-72 bg-white rounded-2xl shadow-xl border border-gray-100 z-50 overflow-hidden">
-            <div className="px-3 py-2 bg-gradient-to-r from-[#0A4FE8]/5 to-[#7B3AED]/5 border-b border-gray-100">
+            <div className="px-3 py-2 bg-blue-50 border-b border-gray-100">
               <p className="text-[11px] uppercase tracking-wider font-bold text-[#0A4FE8]">
                 AI writing assist
               </p>

@@ -15,7 +15,8 @@ import {
   generateSessionToken,
   teamSessionExpiresAt,
 } from "@/lib/team-auth";
-import { glashMaybeOne, glashOne, glashQuery } from "@/lib/glashdb/postgres";
+import { glashMaybeOne, glashOne, glashPool, glashQuery } from "@/lib/glashdb/postgres";
+import { insertActivityLog } from "@/lib/activity-log";
 
 export interface TeamLocationInput {
   latitude?: number | null;
@@ -24,12 +25,33 @@ export interface TeamLocationInput {
   clientCapturedAt?: string | null;
 }
 
+export interface TeamLoginClientDevice {
+  platform?: string | null;
+  timezone?: string | null;
+  language?: string | null;
+  screen?: string | null;
+}
+
+export interface TeamSessionContext {
+  source?: string;
+  location?: TeamLocationInput;
+  clientDevice?: TeamLoginClientDevice;
+}
+
 export function locationFromPayload(value: unknown): TeamLocationInput {
   const loc = (value && typeof value === "object" ? value : {}) as Record<string, unknown>;
+  const finite = (candidate: unknown) => {
+    if (candidate == null) return null;
+    const parsed = Number(candidate);
+    return Number.isFinite(parsed) ? parsed : null;
+  };
+  const latitude = finite(loc.latitude);
+  const longitude = finite(loc.longitude);
+  const accuracy = finite(loc.accuracy);
   return {
-    latitude: loc.latitude == null ? null : Number(loc.latitude),
-    longitude: loc.longitude == null ? null : Number(loc.longitude),
-    accuracy: loc.accuracy == null ? null : Number(loc.accuracy),
+    latitude: latitude != null && latitude >= -90 && latitude <= 90 ? latitude : null,
+    longitude: longitude != null && longitude >= -180 && longitude <= 180 ? longitude : null,
+    accuracy: accuracy != null && accuracy >= 0 ? accuracy : null,
     clientCapturedAt: typeof loc.captured_at === "string" ? loc.captured_at : null,
   };
 }
@@ -103,49 +125,148 @@ function clientIp(req: NextRequest) {
     || null;
 }
 
-export async function createTeamSession(memberId: string, req?: { headers: Headers }) {
+function decodedHeader(headers: Headers, name: string) {
+  const value = headers.get(name)?.trim();
+  if (!value) return null;
+  try { return decodeURIComponent(value); } catch { return value; }
+}
+
+function browserFromUserAgent(userAgent: string) {
+  if (/Edg\//i.test(userAgent)) return "Microsoft Edge";
+  if (/OPR\//i.test(userAgent)) return "Opera";
+  if (/Chrome\//i.test(userAgent) || /CriOS\//i.test(userAgent)) return "Google Chrome";
+  if (/Firefox\//i.test(userAgent) || /FxiOS\//i.test(userAgent)) return "Mozilla Firefox";
+  if (/Safari\//i.test(userAgent)) return "Safari";
+  return userAgent ? "Other browser" : "Unknown browser";
+}
+
+function osFromUserAgent(userAgent: string) {
+  if (/Windows NT 10/i.test(userAgent)) return "Windows 10/11";
+  if (/Windows/i.test(userAgent)) return "Windows";
+  if (/iPhone|iPad|iPod/i.test(userAgent)) return "iOS/iPadOS";
+  if (/Android/i.test(userAgent)) return "Android";
+  if (/CrOS/i.test(userAgent)) return "ChromeOS";
+  if (/Mac OS X|Macintosh/i.test(userAgent)) return "macOS";
+  if (/Linux/i.test(userAgent)) return "Linux";
+  return "Unknown operating system";
+}
+
+function headerLocation(headers: Headers) {
+  const city = decodedHeader(headers, "x-vercel-ip-city") || decodedHeader(headers, "cf-ipcity");
+  const region = decodedHeader(headers, "x-vercel-ip-country-region") || decodedHeader(headers, "cf-region");
+  const country = decodedHeader(headers, "x-vercel-ip-country") || decodedHeader(headers, "cf-ipcountry");
+  return { city, region, country };
+}
+
+export async function createTeamSession(memberId: string, req?: { headers: Headers }, context: TeamSessionContext = {}) {
   const sessionToken = generateSessionToken();
   const expiresAt = teamSessionExpiresAt();
   const userAgent = req?.headers.get("user-agent") || "";
   const deviceType = deviceTypeFromUserAgent(userAgent);
-
-  await glashQuery(
-    `update public.team_device_sessions
-     set revoked_at = now(), revoke_reason = 'replaced_by_new_login'
-     where team_member_id = $1
-       and device_type = $2
-       and revoked_at is null`,
-    [memberId, deviceType],
-  ).catch(() => []);
-
-  await glashQuery(
-    `insert into public.team_device_sessions
-      (team_member_id, session_token, device_type, user_agent, ip_address, expires_at, metadata)
-     values ($1,$2,$3,$4,$5,$6,$7::jsonb)`,
-    [
-      memberId,
-      sessionToken,
-      deviceType,
-      userAgent || null,
-      req ? clientIpFromHeaders(req.headers) : null,
-      expiresAt,
-      JSON.stringify({ policy: "one_desktop_one_mobile" }),
-    ],
-  );
-
-  const member = await glashOne<{
+  const browserName = browserFromUserAgent(userAgent);
+  const osName = osFromUserAgent(userAgent);
+  const platform = context.clientDevice?.platform?.trim() || null;
+  const deviceName = platform ? `${platform} · ${browserName}` : `${osName} · ${browserName}`;
+  const ipAddress = req ? clientIpFromHeaders(req.headers) : null;
+  const inferredLocation = req ? headerLocation(req.headers) : { city: null, region: null, country: null };
+  const latitude = context.location?.latitude ?? null;
+  const longitude = context.location?.longitude ?? null;
+  const location = [inferredLocation.city, inferredLocation.region, inferredLocation.country].filter(Boolean).join(", ")
+    || (latitude != null && longitude != null ? `${Number(latitude).toFixed(5)}, ${Number(longitude).toFixed(5)}` : "Location unavailable");
+  const source = context.source || "team_session";
+  const metadata = {
+    policy: "one_active_device",
+    platform,
+    language: context.clientDevice?.language || null,
+    screen: context.clientDevice?.screen || null,
+    location_accuracy: context.location?.accuracy ?? null,
+    client_captured_at: context.location?.clientCapturedAt ?? null,
+  };
+  const client = await glashPool.connect();
+  let replacedSessionCount = 0;
+  let sessionId = "";
+  let member: {
     id: string;
     full_name: string;
     username: string;
     is_sub_admin: boolean;
-  }>(
-    `update public.team_members
-     set session_token = $1, session_expires_at = $2
-     where id = $3
-     returning id, full_name, username, is_sub_admin`,
-    [sessionToken, expiresAt, memberId],
-  );
-  return { sessionToken, expiresAt, member, deviceType };
+  };
+  try {
+    await client.query("begin");
+    await client.query("select id from public.team_members where id = $1 for update", [memberId]);
+    const revoked = await client.query(
+      `update public.team_device_sessions
+          set revoked_at = now(), revoke_reason = 'replaced_by_new_login'
+        where team_member_id = $1 and revoked_at is null
+        returning id`,
+      [memberId],
+    );
+    replacedSessionCount = revoked.rowCount || 0;
+    const inserted = await client.query<{ id: string }>(
+      `insert into public.team_device_sessions
+        (team_member_id, session_token, device_type, user_agent, ip_address, expires_at,
+         browser_name, os_name, device_name, city, region, country, country_code,
+         latitude, longitude, timezone, login_source, metadata)
+       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18::jsonb)
+       returning id`,
+      [
+        memberId, sessionToken, deviceType, userAgent || null, ipAddress, expiresAt,
+        browserName, osName, deviceName, inferredLocation.city, inferredLocation.region,
+        inferredLocation.country, inferredLocation.country, latitude, longitude,
+        context.clientDevice?.timezone || null, source, JSON.stringify(metadata),
+      ],
+    );
+    sessionId = inserted.rows[0].id;
+    const updated = await client.query<{
+      id: string; full_name: string; username: string; is_sub_admin: boolean;
+    }>(
+      `update public.team_members
+          set session_token = $1, session_expires_at = $2
+        where id = $3
+        returning id, full_name, username, is_sub_admin`,
+      [sessionToken, expiresAt, memberId],
+    );
+    if (!updated.rows[0]) throw new Error("Team member was not found.");
+    member = updated.rows[0];
+    await client.query("commit");
+  } catch (error) {
+    await client.query("rollback").catch(() => undefined);
+    throw error;
+  } finally {
+    client.release();
+  }
+
+  await insertActivityLog({
+    actor_kind: "team",
+    actor_id: member.id,
+    actor_name: member.full_name || member.username,
+    actor_is_admin: false,
+    action: "team.login",
+    page: "team/login",
+    resource_type: "team_session",
+    resource_id: sessionId,
+    resource_label: deviceName,
+    metadata: {
+      source,
+      device_type: deviceType,
+      device_name: deviceName,
+      browser_name: browserName,
+      os_name: osName,
+      user_agent: userAgent || null,
+      ip_address: ipAddress,
+      location,
+      city: inferredLocation.city,
+      region: inferredLocation.region,
+      country: inferredLocation.country,
+      latitude,
+      longitude,
+      timezone: context.clientDevice?.timezone || null,
+      login_at: new Date().toISOString(),
+      replaced_session_count: replacedSessionCount,
+    },
+  }).catch((error) => console.error("[audit] team login log failed:", error));
+
+  return { sessionToken, expiresAt, member, deviceType, sessionId, replacedSessionCount };
 }
 
 export async function recordLoginAttendance(input: {

@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Sparkles, Loader2, Copy, Check, Plus, Hash } from "lucide-react";
+import { Bot, Loader2, Copy, Check, Plus, Hash } from "lucide-react";
 import { appAlert } from "@/lib/app-notify";
 import ContentHubShell from "@/components/content-hub/ContentHubShell";
 import { TONES, PLATFORMS, ENHANCE_ACTIONS } from "@/lib/content-hub/shared";
@@ -60,7 +60,7 @@ export default function AiAssistantPage() {
               </select>
             </div>
             <button onClick={generate} disabled={busy === "generate"} className="inline-flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-[#0A4FE8] text-[13.5px] font-bold text-white hover:bg-[#083EC0] disabled:opacity-60">
-              {busy === "generate" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />} Generate
+              {busy === "generate" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Bot className="h-4 w-4" />} Generate
             </button>
           </div>
         </section>

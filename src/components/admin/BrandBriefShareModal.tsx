@@ -7,13 +7,9 @@ import {
     Copy,
     X,
     Link2,
-    Share2,
-    Facebook,
-    Linkedin,
-    MessageCircle,
-    Mail,
     FileText,
 } from "lucide-react";
+import { UniversalShareButton } from "@/components/share/UniversalShareButton";
 
 export interface BrandBriefSharePayload {
     id: string;
@@ -118,53 +114,13 @@ export function BrandBriefShareModal({
                     </div>
                 </div>
 
-                {/* Share buttons */}
                 <div className="px-6 pb-6">
-                    <p className="text-[11px] font-bold uppercase tracking-wider text-gray-400 mb-2.5">
-                        Share via
-                    </p>
-                    <div className="grid grid-cols-5 gap-2">
-                        <ShareBtn
-                            label="WhatsApp"
-                            color="bg-[#25D366] hover:bg-[#20bf5a] text-white"
-                            icon={MessageCircle}
-                            href={`https://wa.me/?text=${encodeURIComponent(shareText)}`}
-                        />
-                        <ShareBtn
-                            label="LinkedIn"
-                            color="bg-[#0A66C2] hover:bg-[#084d93] text-white"
-                            icon={Linkedin}
-                            href={`https://www.linkedin.com/sharing/share-offsite/?url=${encodeURIComponent(briefUrl)}`}
-                        />
-                        <ShareBtn
-                            label="Facebook"
-                            color="bg-[#1877F2] hover:bg-[#145ec1] text-white"
-                            icon={Facebook}
-                            href={`https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(briefUrl)}`}
-                        />
-                        <ShareBtn
-                            label="Email"
-                            color="bg-gray-900 hover:bg-black text-white"
-                            icon={Mail}
-                            href={`mailto:?subject=${encodeURIComponent(
-                                `Brand brief - ${label}`,
-                            )}&body=${encodeURIComponent(shareText)}`}
-                        />
-                        <ShareBtn
-                            label="More"
-                            color="bg-gray-100 hover:bg-gray-200 text-[#0D1B39]"
-                            icon={Share2}
-                            onClick={() => {
-                                if (typeof navigator !== "undefined" && typeof navigator.share === "function") {
-                                    navigator
-                                        .share({ title: `CDS Space - ${label}`, text: shareText, url: briefUrl })
-                                        .catch(() => {});
-                                } else {
-                                    copy(shareText);
-                                }
-                            }}
-                        />
-                    </div>
+                    <UniversalShareButton
+                        title={`Brand brief: ${label}`}
+                        text={shareText}
+                        url={briefUrl}
+                        className="w-full border-transparent bg-[#0A4FE8] py-3.5 text-sm text-white shadow-lg shadow-blue-600/20 hover:bg-blue-700"
+                    />
                 </div>
 
                 {payload.invite_note && (
@@ -183,36 +139,7 @@ export function BrandBriefShareModal({
                     you'll see their answers in the Brand Briefs list the moment they're done.
                 </div>
             </div>
-        </div>
-    );
-}
 
-function ShareBtn({
-    label,
-    color,
-    icon: Icon,
-    href,
-    onClick,
-}: {
-    label: string;
-    color: string;
-    icon: React.ElementType;
-    href?: string;
-    onClick?: () => void;
-}) {
-    const cls = `flex flex-col items-center justify-center gap-1 py-3 rounded-xl text-[11px] font-semibold transition ${color}`;
-    if (href) {
-        return (
-            <a href={href} target="_blank" rel="noopener noreferrer" className={cls}>
-                <Icon className="w-4 h-4" />
-                {label}
-            </a>
-        );
-    }
-    return (
-        <button type="button" onClick={onClick} className={cls}>
-            <Icon className="w-4 h-4" />
-            {label}
-        </button>
+        </div>
     );
 }

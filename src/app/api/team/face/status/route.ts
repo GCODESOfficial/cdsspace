@@ -60,7 +60,7 @@ export async function GET(req: NextRequest) {
     });
   }
 
-  const { member: sessionMember, sessionToken, deviceType } = await createTeamSession(challenge.team_member_id, req);
+  const { member: sessionMember, sessionToken, deviceType } = await createTeamSession(challenge.team_member_id, req, { source: "face_phone_handoff" });
   await recordLoginAttendance({
     req,
     memberId: challenge.team_member_id,

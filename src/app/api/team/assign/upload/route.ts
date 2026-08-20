@@ -4,6 +4,7 @@ import { getGlashDbAdmin } from "@/lib/glashdb";
 import { getTeamSession } from "@/lib/team-auth";
 import { glashMaybeOne } from "@/lib/glashdb/postgres";
 import { validateChatUpload } from "@/lib/chat-upload-limits";
+import { assertCleanBuffer } from "@/lib/upload-security";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -38,6 +39,7 @@ export async function POST(req: Request) {
     const ext = (file.name.split(".").pop() || "bin").toLowerCase();
     const path = `task-attachments/${Math.random().toString(36).slice(2)}-${Date.now()}.${ext}`;
     const buffer = Buffer.from(await file.arrayBuffer());
+    assertCleanBuffer(buffer);
     const { error } = await db.storage
       .from("media")
       .upload(path, buffer, { contentType: file.type || "application/octet-stream", upsert: true });

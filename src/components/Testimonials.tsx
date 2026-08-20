@@ -72,7 +72,7 @@ export default function Testimonials() {
           {testimonials.map((t) => (
             <div
               key={t.id}
-              className="bg-muted p-6 rounded-2xl shadow text-left bg-gradient-to-b from-[#FFFFFF] to-[#DFEAF8]"
+              className="rounded-2xl bg-[#DFEAF8] p-6 text-left shadow"
             >
               {t.picture_url ? (
                 <Image
@@ -109,7 +109,7 @@ export default function Testimonials() {
                   key={t.id}
                   className="basis-full md:basis-1/2 lg:basis-1/3 p-4"
                 >
-                  <div className="bg-muted p-6 py-10 rounded-2xl h-[23rem] bg-gradient-to-b from-[#FFFFFF] to-[#DFEAF8] shadow text-left">
+                  <div className="h-[23rem] rounded-2xl bg-[#DFEAF8] p-6 py-10 text-left shadow">
                     {t.picture_url ? (
                       <Image
                         src={t.picture_url}

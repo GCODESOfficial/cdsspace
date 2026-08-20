@@ -5,7 +5,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
-import { Calendar, Mail, Phone, Building2, DollarSign, MessageSquare, Paperclip, Trash2, Search, Video, Copy, Check, ExternalLink, Loader2, CalendarClock } from "lucide-react";
+import { Calendar, Mail, Phone, Building2, DollarSign, MessageSquare, Paperclip, Trash2, Search, Video, Copy, Check, ExternalLink, Loader2, CalendarClock, MapPin, MessageCircle, Send, Clock } from "lucide-react";
 import { appConfirm } from "@/lib/app-notify";
 import { toast } from "sonner";
 
@@ -25,6 +25,12 @@ interface Consultation {
   scheduled_at: string | null;
   meeting_type?: MeetingType | null;
   meeting_link?: string | null;
+  whatsapp?: string | null;
+  location?: string | null;
+  topics?: string[] | null;
+  preferred_days?: string[] | null;
+  preferred_times?: string[] | null;
+  email_sent_at?: string | null;
   created_at: string;
 }
 
@@ -63,6 +69,12 @@ export default function ConsultationsPage() {
   const [genning, setGenning] = useState(false);
   const [copied, setCopied] = useState(false);
 
+  // Email composer (review before send)
+  const [emailOpen, setEmailOpen] = useState(false);
+  const [emailSubject, setEmailSubject] = useState("");
+  const [emailBody, setEmailBody] = useState("");
+  const [sendingEmail, setSendingEmail] = useState(false);
+
   useEffect(() => {
     if (active) {
       setMeet({
@@ -71,8 +83,34 @@ export default function ConsultationsPage() {
         meeting_link: active.meeting_link || "",
       });
       setCopied(false);
+      setEmailOpen(false);
     }
   }, [active]);
+
+  const openComposer = () => {
+    if (!active) return;
+    setEmailSubject("Your CDS Space consultation");
+    setEmailBody(defaultEmailBody(active));
+    setEmailOpen(true);
+  };
+
+  const sendEmail = async () => {
+    if (!active) return;
+    if (!emailSubject.trim() || !emailBody.trim()) { toast.error("Add a subject and a message."); return; }
+    setSendingEmail(true);
+    const r = await fetch(`/api/admin/consultations/${active.id}/send-email`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ subject: emailSubject, body: emailBody }),
+    });
+    const d = await r.json().catch(() => ({}));
+    setSendingEmail(false);
+    if (!r.ok) { toast.error(d.error || "Could not send the email."); return; }
+    if (d.consultation) setActive(d.consultation);
+    setEmailOpen(false);
+    load();
+    toast.success(`Email sent to ${active.email}`);
+  };
 
   const load = async () => {
     setLoading(true);
@@ -164,7 +202,7 @@ export default function ConsultationsPage() {
   };
 
   return (
-    <div className="p-8 min-h-screen bg-gradient-to-br from-blue-50 via-white to-blue-50">
+    <div className="p-8 min-h-screen bg-[#F5F8FF]">
       <div className="max-w-[1500px] mx-auto">
         <div className="mb-8">
           <h1 className="text-[34px] leading-tight font-bold text-gray-900 tracking-tight">Consultation Requests</h1>
@@ -177,7 +215,7 @@ export default function ConsultationsPage() {
             <button
               key={s}
               onClick={() => setFilter(s)}
-              className={`px-4 py-2 rounded-xl text-sm font-medium capitalize whitespace-nowrap transition ${filter === s ? "bg-gradient-to-b from-blue-600 to-blue-700 text-white shadow-lg shadow-blue-600/30" : "text-gray-600 hover:bg-white/70"}`}
+              className={`px-4 py-2 rounded-xl text-sm font-medium capitalize whitespace-nowrap transition ${filter === s ? "bg-[#0A4FE8] text-white shadow-lg shadow-blue-600/30" : "text-gray-600 hover:bg-white/70"}`}
             >
               {s} <span className="ml-1 text-[11px] opacity-70">({counts[s]})</span>
             </button>
@@ -254,10 +292,38 @@ export default function ConsultationsPage() {
               <div className="px-7 pb-7 space-y-5">
                 <div className="grid grid-cols-2 gap-3">
                   <Info icon={Mail} label="Email">{active.email}</Info>
+                  {active.whatsapp && <Info icon={MessageCircle} label="WhatsApp">{active.whatsapp}</Info>}
+                  {active.location && <Info icon={MapPin} label="Location">{active.location}</Info>}
                   {active.company && <Info icon={Building2} label="Company">{active.company}</Info>}
                   {active.budget_range && <Info icon={DollarSign} label="Budget">{active.budget_range}</Info>}
                   {active.how_heard && <Info icon={Phone} label="Heard via">{active.how_heard}</Info>}
                 </div>
+
+                {active.topics && active.topics.length > 0 && (
+                  <div>
+                    <div className="flex items-center gap-2 text-[10px] uppercase tracking-wider text-gray-500 font-semibold mb-2">
+                      <MessageSquare className="w-3.5 h-3.5" /> Topics
+                    </div>
+                    <div className="flex flex-wrap gap-1.5">
+                      {active.topics.map((t) => (
+                        <span key={t} className="rounded-full bg-blue-50 text-blue-700 ring-1 ring-blue-100 px-2.5 py-1 text-[11px] font-semibold">{t}</span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {((active.preferred_days && active.preferred_days.length > 0) || (active.preferred_times && active.preferred_times.length > 0)) && (
+                  <div className="rounded-xl bg-gray-50 border border-gray-100 p-4">
+                    <div className="flex items-center gap-2 text-[10px] uppercase tracking-wider text-gray-500 font-semibold mb-2">
+                      <Clock className="w-3.5 h-3.5" /> Preferred meeting window
+                    </div>
+                    <div className="flex flex-wrap gap-1.5">
+                      {[...(active.preferred_days || []), ...(active.preferred_times || [])].map((w) => (
+                        <span key={w} className="rounded-full bg-white text-gray-700 ring-1 ring-gray-200 px-2.5 py-1 text-[11px] font-medium">{w}</span>
+                      ))}
+                    </div>
+                  </div>
+                )}
 
                 {active.message && (
                   <div className="rounded-xl bg-blue-50 border border-blue-100 p-4">
@@ -394,13 +460,58 @@ export default function ConsultationsPage() {
                   </div>
                 </div>
 
+                {/* Email: review before send */}
+                {emailOpen && (
+                  <div className="rounded-xl border border-blue-100 bg-blue-50/50 p-4 space-y-3">
+                    <div className="flex items-center gap-2 text-[10px] uppercase tracking-wider text-blue-700 font-semibold">
+                      <Mail className="w-3.5 h-3.5" /> Review email to {active.email}
+                    </div>
+                    <div>
+                      <label className="text-[11px] uppercase tracking-wide text-gray-500">Subject</label>
+                      <input
+                        value={emailSubject}
+                        onChange={(e) => setEmailSubject(e.target.value)}
+                        className="mt-1.5 h-11 w-full rounded-xl border border-gray-200 bg-white px-3 text-sm outline-none focus:border-blue-400"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[11px] uppercase tracking-wide text-gray-500">Message</label>
+                      <Textarea
+                        value={emailBody}
+                        onChange={(e) => setEmailBody(e.target.value)}
+                        className="rounded-xl mt-1.5 min-h-[160px] bg-white"
+                      />
+                    </div>
+                    <div className="flex items-center justify-end gap-2">
+                      <Button variant="outline" className="rounded-xl" onClick={() => setEmailOpen(false)}>Cancel</Button>
+                      <button
+                        type="button"
+                        onClick={sendEmail}
+                        disabled={sendingEmail}
+                        className="inline-flex items-center gap-2 h-11 px-5 rounded-xl bg-[#0A4FE8] text-white font-medium shadow-lg shadow-blue-600/30 disabled:opacity-60"
+                      >
+                        {sendingEmail ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />} Send email
+                      </button>
+                    </div>
+                  </div>
+                )}
+
                 <div className="flex items-center justify-between pt-2">
                   <Button variant="outline" className="rounded-xl text-red-600 border-red-200 hover:bg-red-50" onClick={() => remove(active.id)}>
                     <Trash2 className="w-4 h-4 mr-1.5" /> Delete
                   </Button>
-                  <a href={buildReplyMailto(active)} className="inline-flex items-center gap-2 h-11 px-5 rounded-xl bg-gradient-to-b from-blue-600 to-blue-700 text-white font-medium shadow-lg shadow-blue-600/30 hover:from-blue-600 hover:to-blue-800 transition">
-                    <Mail className="w-4 h-4" /> Reply by Email
-                  </a>
+                  <div className="flex items-center gap-2">
+                    {active.email_sent_at && (
+                      <span className="text-[11px] text-emerald-600 font-medium">Sent {new Date(active.email_sent_at).toLocaleDateString()}</span>
+                    )}
+                    <button
+                      type="button"
+                      onClick={openComposer}
+                      className="inline-flex items-center gap-2 h-11 px-5 rounded-xl bg-[#0A4FE8] text-white font-medium shadow-lg shadow-blue-600/30 hover:bg-[#083FC2] transition"
+                    >
+                      <Mail className="w-4 h-4" /> {active.email_sent_at ? "Send another email" : "Compose email"}
+                    </button>
+                  </div>
                 </div>
               </div>
             </>
@@ -411,17 +522,16 @@ export default function ConsultationsPage() {
   );
 }
 
-function buildReplyMailto(c: Consultation) {
-  const subject = "Your CDS Space consultation";
-  const lines = [`Hi ${c.full_name.split(" ")[0]},`, ""];
+function defaultEmailBody(c: Consultation) {
+  const lines = [`Hi ${c.full_name.split(" ")[0]},`, "", "Thank you for reaching out to CDS Space."];
   if (c.scheduled_at) {
-    lines.push(`Your consultation is scheduled for ${new Date(c.scheduled_at).toLocaleString()}.`);
+    lines.push("", `Your consultation is scheduled for ${new Date(c.scheduled_at).toLocaleString()}.`);
   }
   if (c.meeting_link) {
     lines.push(`Join here: ${fullMeetingUrl(c.meeting_link)}`);
   }
-  lines.push("", "Best regards,", "CDS Space");
-  return `mailto:${c.email}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(lines.join("\n"))}`;
+  lines.push("", "Looking forward to speaking with you.", "", "Warm regards,", "CDS Space");
+  return lines.join("\n");
 }
 
 function Info({ icon: Icon, label, children }: { icon: React.ComponentType<{ className?: string }>; label: string; children: React.ReactNode }) {

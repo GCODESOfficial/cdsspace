@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import {
@@ -16,6 +16,7 @@ import {
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { RichTextEditor } from "@/components/admin/RichTextEditor";
+import { sanitizeCDocHtml } from "@/lib/cdocs-html";
 
 interface DocRow {
     slug: string;
@@ -47,11 +48,12 @@ export default function LegalEditorPage() {
     const [downloading, setDownloading] = useState(false);
     const [uploading, setUploading] = useState(false);
     const [mode, setMode] = useState<ViewMode>("visual");
+    const safePreview = useMemo(() => sanitizeCDocHtml(content), [content]);
 
     const fileInputRef = useRef<HTMLInputElement | null>(null);
 
     useEffect(() => {
-        if (slug !== "privacy" && slug !== "terms") {
+        if (slug !== "privacy" && slug !== "terms" && slug !== "brand-marketer-agreement") {
             router.replace("/admin/legal");
             return;
         }
@@ -156,8 +158,8 @@ export default function LegalEditorPage() {
     }
 
     const isSeed = doc?.version === 0;
-    const publicHref = `/${slug}`;
-    const label = slug === "privacy" ? "Privacy Policy" : "Terms of Service";
+    const publicHref = slug === "brand-marketer-agreement" ? "/legal/brand-marketer-agreement" : `/${slug}`;
+    const label = slug === "privacy" ? "Privacy Policy" : slug === "terms" ? "Terms of Service" : "Brand Marketer Agreement";
 
     return (
         <div className="p-8 max-w-[1400px]">
@@ -322,7 +324,7 @@ export default function LegalEditorPage() {
                         {subtitle && <p className="text-gray-600">{subtitle}</p>}
                         <p className="text-sm text-gray-400 mt-3">Effective date: {effectiveDate}</p>
                     </div>
-                    <div className="legal-prose" dangerouslySetInnerHTML={{ __html: content }} />
+                    <div className="legal-prose" dangerouslySetInnerHTML={{ __html: safePreview }} />
                 </div>
             )}
         </div>

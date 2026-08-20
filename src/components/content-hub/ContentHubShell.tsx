@@ -6,12 +6,15 @@ import {
   LayoutDashboard,
   Calendar,
   Boxes,
+  Images,
   PenLine,
   Clapperboard,
-  Sparkles,
+  Bot,
   ClipboardCheck,
   Archive,
+  Send,
   Settings as SettingsIcon,
+  LayoutGrid,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 
@@ -19,10 +22,12 @@ const TABS: { label: string; href: string; icon: LucideIcon; exact?: boolean }[]
   { label: "Dashboard", href: "/admin/content-hub", icon: LayoutDashboard, exact: true },
   { label: "Calendar", href: "/admin/content-hub/calendar", icon: Calendar },
   { label: "Library", href: "/admin/content-hub/library", icon: Boxes },
+  { label: "Visual Library", href: "/admin/content-hub/visual-library", icon: Images },
   { label: "Create", href: "/admin/content-hub/create", icon: PenLine },
   { label: "BSD Studio", href: "/admin/content-hub/studio", icon: Clapperboard },
-  { label: "AI Assistant", href: "/admin/content-hub/ai", icon: Sparkles },
+  { label: "AI Assistant", href: "/admin/content-hub/ai", icon: Bot },
   { label: "Approvals", href: "/admin/content-hub/approvals", icon: ClipboardCheck },
+  { label: "Auto-post", href: "/admin/content-hub/auto-post", icon: Send },
   { label: "Archived", href: "/admin/content-hub/archived", icon: Archive },
   { label: "Settings", href: "/admin/content-hub/settings", icon: SettingsIcon },
 ];
@@ -50,7 +55,7 @@ export default function ContentHubShell({
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div className="min-w-0">
             <div className="inline-flex items-center gap-2 rounded-full bg-blue-50 px-3 py-1 text-[11px] font-bold uppercase tracking-[0.14em] text-[#0A4FE8] ring-1 ring-blue-100">
-              <Sparkles className="h-3.5 w-3.5" />
+              <LayoutGrid className="h-3.5 w-3.5" />
               Content Hub
             </div>
             <h1 className="mt-3 text-[24px] font-bold tracking-tight text-[#0D1B39] sm:text-[28px]">{title}</h1>

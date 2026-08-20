@@ -36,6 +36,7 @@ type ProjectRow = {
   updated_at: string;
   project_manager_name: string | null;
   department_lead_name: string | null;
+  can_edit_project?: boolean;
 };
 
 type AssignmentRow = {
@@ -44,6 +45,9 @@ type AssignmentRow = {
   team_member_id: string | null;
   department: string | null;
   role: string | null;
+  is_project_leader: boolean;
+  can_edit_project: boolean;
+  can_manage_tasks: boolean;
   created_at: string;
   member_name: string | null;
   member_email: string | null;
@@ -320,8 +324,7 @@ async function visibleProjects(session: TeamSession) {
        left join public.team_members pm on pm.id = p.project_manager_id
        left join public.team_members dl on dl.id = p.department_lead_id
       where (
-        $2::boolean = true
-        or p.project_manager_id = $1::uuid
+        p.project_manager_id = $1::uuid
         or p.department_lead_id = $1::uuid
         or exists (
           select 1
@@ -332,7 +335,7 @@ async function visibleProjects(session: TeamSession) {
                or (
                  pa.department is not null
                  and (
-                   lower(pa.department) = lower(coalesce($3::text, ''))
+                   lower(pa.department) = lower(coalesce($2::text, ''))
                    or exists (
                      select 1 from public.team_member_departments tmd
                        join public.departments d on d.id = tmd.department_id
@@ -345,7 +348,7 @@ async function visibleProjects(session: TeamSession) {
       )
         and p.status <> 'archived'
       order by coalesce(p.client_delivery_date, p.duration_end, p.updated_at::date, p.created_at::date) asc`,
-    [session.id, canViewAllProjects(session), session.department ?? ""],
+    [session.id, session.department ?? ""],
   );
 }
 
@@ -353,10 +356,9 @@ async function projectIsVisible(session: TeamSession, projectId: string) {
   const project = await glashMaybeOne<{ id: string }>(
     `select p.id
        from public.finance_projects p
-      where p.id = $4::uuid
+      where p.id = $3::uuid
         and (
-          $2::boolean = true
-          or p.project_manager_id = $1::uuid
+          p.project_manager_id = $1::uuid
           or p.department_lead_id = $1::uuid
           or exists (
             select 1 from public.project_assignments pa
@@ -364,7 +366,7 @@ async function projectIsVisible(session: TeamSession, projectId: string) {
                and (
                  pa.team_member_id = $1::uuid
                  or (pa.department is not null and (
-                       lower(pa.department) = lower(coalesce($3::text, ''))
+                       lower(pa.department) = lower(coalesce($2::text, ''))
                        or exists (
                          select 1 from public.team_member_departments tmd
                            join public.departments d on d.id = tmd.department_id
@@ -375,9 +377,32 @@ async function projectIsVisible(session: TeamSession, projectId: string) {
           )
         )
       limit 1`,
-    [session.id, canViewAllProjects(session), session.department ?? "", projectId],
+    [session.id, session.department ?? "", projectId],
   );
   return Boolean(project);
+}
+
+async function canLeadProject(session: TeamSession, projectId: string) {
+  const row = await glashMaybeOne<{ id: string }>(
+    `select p.id
+       from public.finance_projects p
+      where p.id = $2::uuid
+        and (
+          p.project_manager_id = $1::uuid
+          or p.department_lead_id = $1::uuid
+          or exists (
+            select 1 from public.project_assignments pa
+             where pa.project_id = p.id
+               and pa.team_member_id = $1::uuid
+               and pa.is_project_leader = true
+               and pa.can_edit_project = true
+               and pa.can_manage_tasks = true
+          )
+        )
+      limit 1`,
+    [session.id, projectId],
+  );
+  return Boolean(row);
 }
 
 async function addActivity(input: {
@@ -621,6 +646,13 @@ export async function GET() {
     task_count: tasks.filter((task) => task.project_id === project.id).length,
     milestone_count: milestones.filter((milestone) => milestone.project_id === project.id).length,
     team_count: assignments.filter((assignment) => assignment.project_id === project.id).length,
+    can_edit_project: project.project_manager_id === session.id
+      || project.department_lead_id === session.id
+      || assignments.some((assignment) => assignment.project_id === project.id
+        && assignment.team_member_id === session.id
+        && assignment.is_project_leader
+        && assignment.can_edit_project
+        && assignment.can_manage_tasks),
   }));
   const calendarEvents = derivedProjectEvents(projects, tasks, milestones, storedEvents);
 
@@ -647,7 +679,7 @@ export async function GET() {
     activity,
     calendar_events: calendarEvents,
     chat_threads: chatThreads,
-    team_members: canCreate || canManage ? teamMembers : [],
+    team_members: canCreate || canManage || enrichedProjects.some((project) => project.can_edit_project) ? teamMembers : [],
     departments,
     capabilities: { can_create_project: canCreate, can_manage_projects: canManage, can_view_budget: canViewBudget },
     stats,
@@ -669,7 +701,7 @@ export async function POST(req: NextRequest) {
   } catch (error) {
     // Surface a clear JSON error instead of an HTML 500 (which the client
     // reports as "The project workspace API returned an invalid response.").
-    // Usually a schema mismatch — e.g. inserting a status the DB check
+    // Usually a schema mismatch - e.g. inserting a status the DB check
     // constraint doesn't yet permit.
     return NextResponse.json(
       { ok: false, error: error instanceof Error ? error.message : "Project workspace action failed." },
@@ -731,19 +763,23 @@ async function handleWorkAction(req: NextRequest): Promise<NextResponse> {
       ],
     );
 
-    const assignmentRows: Array<[string, string]> = [];
-    if (projectManagerId) assignmentRows.push([projectManagerId, "Project Manager"]);
-    if (departmentLeadId && departmentLeadId !== projectManagerId) assignmentRows.push([departmentLeadId, "Department Lead"]);
+    const assignmentRows = new Map<string, string>();
+    assignmentRows.set(session.id, "Project Leader");
+    if (projectManagerId) assignmentRows.set(projectManagerId, "Project Manager");
+    if (departmentLeadId) assignmentRows.set(departmentLeadId, "Department Lead");
     for (const [memberId, role] of assignmentRows) {
       await glashQuery(
-        `insert into public.project_assignments (project_id, team_member_id, role)
-         select $1, $2, $3
-         where not exists (
-           select 1 from public.project_assignments
-            where project_id = $1 and team_member_id = $2
-         )`,
+        `insert into public.project_assignments
+           (project_id, team_member_id, role, is_project_leader, can_edit_project, can_manage_tasks)
+         values ($1, $2, $3, true, true, true)
+         on conflict (project_id, team_member_id) where team_member_id is not null
+         do update set
+           role = excluded.role,
+           is_project_leader = true,
+           can_edit_project = true,
+           can_manage_tasks = true`,
         [project.id, memberId, role],
-      ).catch(() => []);
+      );
     }
 
     const seedMilestones = body.seed_milestones !== false;
@@ -774,8 +810,8 @@ async function handleWorkAction(req: NextRequest): Promise<NextResponse> {
       body: project.client ? `Client: ${project.client}` : null,
       metadata: { category, priority, status },
     });
-    if (assignmentRows.length) {
-      await notifyMembers(project.id, assignmentRows.map(([id]) => id), `New project assigned: ${project.name}`, "Open the project workspace for tasks and milestones.", "project_assigned");
+    if (assignmentRows.size) {
+      await notifyMembers(project.id, Array.from(assignmentRows.keys()), `New project assigned: ${project.name}`, "Open the project workspace for tasks and milestones.", "project_assigned");
     }
 
     return NextResponse.json({ ok: true, project });
@@ -791,8 +827,8 @@ async function handleWorkAction(req: NextRequest): Promise<NextResponse> {
   }
 
   if (action === "update_project") {
-    if (!canEditProjects(session)) {
-      return NextResponse.json({ ok: false, error: "You do not have permission to update projects." }, { status: 403 });
+    if (!(await canLeadProject(session, projectId))) {
+      return NextResponse.json({ ok: false, error: "Only an assigned project leader can update this project." }, { status: 403 });
     }
     const status = body.status == null ? undefined : normalizeStatus(body.status, PROJECT_STATUSES, "active");
     const priority = body.priority == null ? undefined : normalizePriority(body.priority);
@@ -836,17 +872,21 @@ async function handleWorkAction(req: NextRequest): Promise<NextResponse> {
   }
 
   if (action === "assign_project") {
-    if (!canEditProjects(session)) {
-      return NextResponse.json({ ok: false, error: "You do not have permission to assign project members." }, { status: 403 });
+    if (!(await canLeadProject(session, projectId))) {
+      return NextResponse.json({ ok: false, error: "Only an assigned project leader can manage project members." }, { status: 403 });
     }
     const memberId = cleanUuid(body.team_member_id);
     const department = nullableText(body.department);
     const role = nullableText(body.role) || "Contributor";
+    const isProjectLeader = body.is_project_leader === true;
     if (!memberId && !department) {
       return NextResponse.json({ ok: false, error: "Choose a member or department." }, { status: 400 });
     }
     if (memberId && department) {
       return NextResponse.json({ ok: false, error: "Choose either member or department, not both." }, { status: 400 });
+    }
+    if (isProjectLeader && !memberId) {
+      return NextResponse.json({ ok: false, error: "Project leaders must be assigned to an individual team member." }, { status: 400 });
     }
     const duplicate = memberId
       ? await glashMaybeOne<{ id: string }>("select id from public.project_assignments where project_id = $1 and team_member_id = $2 limit 1", [projectId, memberId])
@@ -854,11 +894,12 @@ async function handleWorkAction(req: NextRequest): Promise<NextResponse> {
     if (duplicate) return NextResponse.json({ ok: false, error: "That assignment already exists." }, { status: 409 });
 
     const assignment = await glashOne<AssignmentRow>(
-      `insert into public.project_assignments (project_id, team_member_id, department, role)
-       values ($1,$2,$3,$4)
+      `insert into public.project_assignments
+         (project_id, team_member_id, department, role, is_project_leader, can_edit_project, can_manage_tasks)
+       values ($1,$2,$3,$4,$5,$5,$5)
        returning *, null::text as member_name, null::text as member_email, null::text as member_role_title,
                  null::text as member_department, null::text as member_avatar_url`,
-      [projectId, memberId, department, role],
+      [projectId, memberId, department, role, isProjectLeader],
     );
     const recipients = memberId ? [memberId] : await projectRecipients(projectId);
     await notifyMembers(projectId, recipients, "Project assignment updated", role ? `Role: ${role}` : "Open the project workspace.", "project_assigned");
@@ -873,6 +914,9 @@ async function handleWorkAction(req: NextRequest): Promise<NextResponse> {
   }
 
   if (action === "create_task") {
+    if (!(await canLeadProject(session, projectId))) {
+      return NextResponse.json({ ok: false, error: "Only an assigned project leader can add tasks to this project." }, { status: 403 });
+    }
     const title = cleanText(body.title);
     if (!title) return NextResponse.json({ ok: false, error: "Task title is required." }, { status: 400 });
     const status = normalizeStatus(body.status, TASK_STATUSES, "not_started");
@@ -900,16 +944,14 @@ async function handleWorkAction(req: NextRequest): Promise<NextResponse> {
         session.is_sub_admin,
       ],
     );
-    if (task.assignee_id) {
-      await notifyMembers(projectId, [task.assignee_id], `Task assigned: ${task.title}`, task.due_date ? `Due ${task.due_date}` : "Open the project workspace.", "task_assigned");
-    }
     await addActivity({ projectId, session, action: "task.create", title: `Created task: ${task.title}`, metadata: { task_id: task.id } });
     return NextResponse.json({ ok: true, task });
   }
 
   if (action === "create_milestone") {
-    // Any team member or lead with visibility on the project (guarded above by
-    // projectIsVisible) can add a milestone with a start + due date.
+    if (!(await canLeadProject(session, projectId))) {
+      return NextResponse.json({ ok: false, error: "Only an assigned project leader can add milestones." }, { status: 403 });
+    }
     const description = cleanText(body.description) || cleanText(body.title);
     if (!description) {
       return NextResponse.json({ ok: false, error: "Milestone title is required." }, { status: 400 });
@@ -933,6 +975,78 @@ async function handleWorkAction(req: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ ok: true, milestone });
   }
 
+  if (action === "update_milestone") {
+    if (!(await canLeadProject(session, projectId))) {
+      return NextResponse.json({ ok: false, error: "Only an assigned project leader can update milestones." }, { status: 403 });
+    }
+    const milestoneId = cleanUuid(body.milestone_id);
+    if (!milestoneId) return NextResponse.json({ ok: false, error: "milestone_id is required." }, { status: 400 });
+
+    const MILESTONE_STATUSES = new Set(["pending", "in_progress", "completed", "paid"]);
+    // "Mark done" is a one-tap convenience: completed + 100% + approved.
+    const markDone = body.mark_done === true;
+    const status = markDone
+      ? "completed"
+      : (body.status == null ? null : (MILESTONE_STATUSES.has(String(body.status)) ? String(body.status) : null));
+    const progress = markDone
+      ? 100
+      : (body.progress == null ? null : Math.max(0, Math.min(100, Math.round(Number(body.progress)))));
+    const approvalStatus = markDone ? "approved" : (body.approval_status == null ? null : String(body.approval_status));
+    const startDate = body.duration_start === undefined ? undefined : cleanDate(body.duration_start);
+    const dueDate = body.due_date === undefined ? undefined : cleanDate(body.due_date);
+
+    const milestone = await glashMaybeOne<MilestoneRow>(
+      `update public.finance_milestones
+          set description = coalesce(nullif($3, ''), description),
+              assigned_to = case when $4::text is null then assigned_to else nullif($4, '') end,
+              status = coalesce($5, status),
+              progress = coalesce($6, progress),
+              approval_status = coalesce($7, approval_status),
+              duration_start = case when $8::text is null then duration_start else $8::date end,
+              due_date = case when $9::text is null then due_date else $9::date end
+        where id = $1 and project_id = $2
+        returning id, project_id, description, assigned_to, duration_start, duration_end, status,
+                  position, milestone_key, due_date, approval_status, progress`,
+      [
+        milestoneId,
+        projectId,
+        cleanText(body.description),
+        body.assigned_to === undefined ? null : (nullableText(body.assigned_to) ?? ""),
+        status,
+        progress,
+        approvalStatus,
+        startDate === undefined ? null : startDate,
+        dueDate === undefined ? null : dueDate,
+      ],
+    );
+    if (!milestone) return NextResponse.json({ ok: false, error: "Milestone not found." }, { status: 404 });
+    await addActivity({
+      projectId,
+      session,
+      action: markDone ? "milestone.complete" : "milestone.update",
+      title: markDone ? `Completed milestone: ${milestone.description}` : `Updated milestone: ${milestone.description}`,
+      metadata: { milestone_id: milestone.id, status: milestone.status },
+    });
+    return NextResponse.json({ ok: true, milestone });
+  }
+
+  if (action === "delete_milestone") {
+    if (!(await canLeadProject(session, projectId))) {
+      return NextResponse.json({ ok: false, error: "Only an assigned project leader can delete milestones." }, { status: 403 });
+    }
+    const milestoneId = cleanUuid(body.milestone_id);
+    if (!milestoneId) return NextResponse.json({ ok: false, error: "milestone_id is required." }, { status: 400 });
+    const removed = await glashMaybeOne<{ id: string; description: string }>(
+      `delete from public.finance_milestones where id = $1 and project_id = $2 returning id, description`,
+      [milestoneId, projectId],
+    );
+    if (!removed) return NextResponse.json({ ok: false, error: "Milestone not found." }, { status: 404 });
+    // Detach any tasks that pointed at this milestone so they aren't orphaned.
+    await glashQuery(`update public.project_tasks set milestone_id = null where milestone_id = $1`, [milestoneId]).catch(() => []);
+    await addActivity({ projectId, session, action: "milestone.delete", title: `Deleted milestone: ${removed.description}`, metadata: { milestone_id: milestoneId } });
+    return NextResponse.json({ ok: true, deleted: milestoneId });
+  }
+
   if (action === "update_task") {
     const taskId = cleanUuid(body.task_id);
     if (!taskId) return NextResponse.json({ ok: false, error: "task_id is required." }, { status: 400 });
@@ -946,7 +1060,8 @@ async function handleWorkAction(req: NextRequest): Promise<NextResponse> {
       [taskId, projectId],
     );
     if (!task) return NextResponse.json({ ok: false, error: "Task not found." }, { status: 404 });
-    const canEditTask = canEditProjects(session) || task.assignee_id === session.id || task.reviewer_id === session.id;
+    const isProjectLeader = await canLeadProject(session, projectId);
+    const canEditTask = isProjectLeader || task.assignee_id === session.id || task.reviewer_id === session.id;
     if (!canEditTask) return NextResponse.json({ ok: false, error: "You cannot update this task." }, { status: 403 });
 
     const nextStatus = body.status == null ? task.status : normalizeStatus(body.status, TASK_STATUSES, task.status);
@@ -968,15 +1083,15 @@ async function handleWorkAction(req: NextRequest): Promise<NextResponse> {
       [
         taskId,
         projectId,
-        cleanText(body.title),
-        nullableText(body.description),
-        cleanUuid(body.assignee_id),
-        cleanUuid(body.reviewer_id),
-        nullableText(body.department),
-        body.priority == null ? null : normalizeStatus(body.priority, TASK_PRIORITIES, task.priority),
+        isProjectLeader ? cleanText(body.title) : "",
+        isProjectLeader ? nullableText(body.description) : null,
+        isProjectLeader ? cleanUuid(body.assignee_id) : null,
+        isProjectLeader ? cleanUuid(body.reviewer_id) : null,
+        isProjectLeader ? nullableText(body.department) : null,
+        isProjectLeader && body.priority != null ? normalizeStatus(body.priority, TASK_PRIORITIES, task.priority) : null,
         nextStatus,
         body.progress == null ? null : Number(body.progress),
-        cleanDate(body.due_date),
+        isProjectLeader ? cleanDate(body.due_date) : null,
       ],
     );
     await addActivity({ projectId, session, action: "task.update", title: `Updated task: ${nextTask.title}`, body: nextStatus });

@@ -2,7 +2,8 @@
 
 import jsPDF from "jspdf";
 import { installBrandFont } from "./pdf/pdf-fonts";
-import type { FinanceInvoice, FinanceInvoiceItem } from "./finance/types";
+import { localizePdfLabels } from "./pdf/pdf-i18n";
+import type { FinanceBankAccount, FinanceInvoice, FinanceInvoiceItem, FinanceReceipt } from "./finance/types";
 import {
     CDS_BANK_ACCOUNTS,
     DEFAULT_PAYMENT_TERMS,
@@ -12,7 +13,7 @@ import {
     formatFinanceDate,
 } from "./finance/types";
 
-const CURRENCY_SYMBOLS: Record<string, string> = { NGN: "N", USD: "$", RWF: "FRw " };
+const CURRENCY_SYMBOLS: Record<string, string> = { NGN: "N", USD: "$", GBP: "GBP ", EUR: "EUR ", RWF: "FRw ", CNY: "CNY ", AED: "AED " };
 
 function fmtMoney(n: number | string | null | undefined, currency: string) {
     const v = Number(n || 0);
@@ -109,15 +110,36 @@ async function loadImageAsDataUri(
  *     delivery / working hours
  *   - "Truly Best attracts Best - CDS Space" footer
  */
-export async function exportInvoiceToPdf(invoice: FinanceInvoice, items: FinanceInvoiceItem[]) {
+type InvoicePdfOptions = {
+    bankAccounts?: FinanceBankAccount[];
+    receipt?: FinanceReceipt;
+};
+
+export async function exportInvoiceToPdf(invoice: FinanceInvoice, items: FinanceInvoiceItem[], options: InvoicePdfOptions = {}) {
+    const receipt = options.receipt;
+    const isReceipt = Boolean(receipt);
+    const paymentAccounts: FinanceBankAccount[] = options.bankAccounts ?? (invoice.currency === "NGN" ? CDS_BANK_ACCOUNTS.map((account) => ({
+        currency: "NGN" as const,
+        bank_name: account.bank,
+        account_name: account.account_name,
+        account_number: account.account_number,
+        logo_url: account.logo,
+    })) : []);
     const [logoImg, sealImg, ...bankImgs] = await Promise.all([
         loadImageAsDataUri("/navbar/CDS Logo.svg", 256),
         loadImageAsDataUri("/CDS_Seal.png"),
-        ...CDS_BANK_ACCOUNTS.map((account) => loadImageAsDataUri(account.logo)),
+        ...paymentAccounts.map((account) => account.logo_url ? loadImageAsDataUri(account.logo_url) : Promise.resolve(null)),
     ]);
 
     const doc = new jsPDF({ unit: "pt", format: "a4" });
     installBrandFont(doc);
+    // Translate the fixed invoice labels into the visitor's active language
+    // (brand name, amounts, dates and item text stay as-is).
+    await localizePdfLabels(doc as unknown as { text: (...args: unknown[]) => unknown }, [
+        "Branding & Digital Agency", isReceipt ? "RECEIPT" : "INVOICE", isReceipt ? "RECEIVED FROM" : "BILLED TO", isReceipt ? "PAID / ISSUED" : "ISSUED / DUE",
+        "ITEM", "QTY", "UNIT PRICE", "AMOUNT", "NOTES", "Payment Details",
+        "Subtotal", "Discount", "Total",
+    ]);
     const pageWidth = doc.internal.pageSize.getWidth();
     const pageHeight = doc.internal.pageSize.getHeight();
     const margin = 48;
@@ -152,15 +174,15 @@ export async function exportInvoiceToPdf(invoice: FinanceInvoice, items: Finance
     doc.setFont("NeueCampton", "normal");
     doc.setFontSize(9);
     doc.setTextColor(156, 163, 175);
-    doc.text("INVOICE", pageWidth - margin, headerTop + 10, { align: "right" });
+    doc.text(isReceipt ? "RECEIPT" : "INVOICE", pageWidth - margin, headerTop + 10, { align: "right" });
 
     doc.setFont("NeueCampton", "bold");
     doc.setFontSize(20);
     doc.setTextColor(13, 27, 57);
-    doc.text(invoice.invoice_number, pageWidth - margin, headerTop + 32, { align: "right" });
+    doc.text(receipt?.receipt_number || invoice.invoice_number, pageWidth - margin, headerTop + 32, { align: "right" });
 
     // Status pill
-    const statusLabel = (invoice.status || "draft").toUpperCase();
+    const statusLabel = isReceipt ? "PAID" : (invoice.status || "draft").toUpperCase();
     const statusColors: Record<string, { bg: [number, number, number]; fg: [number, number, number] }> = {
         PAID: { bg: [209, 250, 229], fg: [6, 95, 70] },
         SENT: { bg: [219, 234, 254], fg: [29, 78, 216] },
@@ -192,8 +214,8 @@ export async function exportInvoiceToPdf(invoice: FinanceInvoice, items: Finance
     doc.setFont("NeueCampton", "bold");
     doc.setFontSize(9);
     doc.setTextColor(156, 163, 175);
-    doc.text("BILLED TO", margin, y);
-    doc.text("ISSUED / DUE", pageWidth - margin, y, { align: "right" });
+    doc.text(isReceipt ? "RECEIVED FROM" : "BILLED TO", margin, y);
+    doc.text(isReceipt ? "PAID / ISSUED" : "ISSUED / DUE", pageWidth - margin, y, { align: "right" });
 
     doc.setFont("NeueCampton", "bold");
     doc.setFontSize(12);
@@ -203,7 +225,7 @@ export async function exportInvoiceToPdf(invoice: FinanceInvoice, items: Finance
     doc.setFont("NeueCampton", "normal");
     doc.setFontSize(10);
     doc.setTextColor(75, 85, 99);
-    doc.text(fmtDate(invoice.issue_date), pageWidth - margin, y + 18, { align: "right" });
+    doc.text(fmtDate(isReceipt ? receipt?.paid_at : invoice.issue_date), pageWidth - margin, y + 18, { align: "right" });
 
     let billY = y + 34;
     doc.setFont("NeueCampton", "normal");
@@ -219,7 +241,10 @@ export async function exportInvoiceToPdf(invoice: FinanceInvoice, items: Finance
         billY += addrLines.length * 13;
     }
 
-    if (invoice.due_date) {
+    if (isReceipt) {
+        doc.setTextColor(107, 114, 128);
+        doc.text(`Invoice issued ${fmtDate(invoice.issue_date)}`, pageWidth - margin, y + 34, { align: "right" });
+    } else if (invoice.due_date) {
         doc.setTextColor(107, 114, 128);
         doc.text(`Due ${fmtDate(invoice.due_date)}`, pageWidth - margin, y + 34, { align: "right" });
     }
@@ -340,7 +365,7 @@ export async function exportInvoiceToPdf(invoice: FinanceInvoice, items: Finance
     y = Math.max(y + sealSize, totalsY) + 24;
 
     // Notes
-    if (invoice.notes) {
+    if (!isReceipt && invoice.notes) {
         const noteLines = doc.splitTextToSize(invoice.notes, innerWidth - 24);
         const noteH = 34 + noteLines.length * 12;
         ensureSpace(noteH + 16);
@@ -357,18 +382,19 @@ export async function exportInvoiceToPdf(invoice: FinanceInvoice, items: Finance
         y += noteH + 20;
     }
 
-    // Payment Details panel - navy card, bank accounts, terms
+    // Payment panel - bank instructions for invoices, confirmed transaction for receipts.
     const panelStart = y;
-    ensureSpace(240);
+    ensureSpace(isReceipt ? 190 : 240);
     const bankRowH = 78;
     const termsH = 86;
-    const panelH = 56 + bankRowH + termsH;
+    const accountRows = Math.max(1, Math.ceil(paymentAccounts.length / 2));
+    const panelH = isReceipt ? 176 : 56 + accountRows * bankRowH + termsH;
     doc.setFillColor(6, 16, 58);
     doc.roundedRect(margin, y, innerWidth, panelH, 14, 14, "F");
 
     // Header pill
     doc.setFillColor(10, 79, 232);
-    const pdPillText = "Payment Details";
+    const pdPillText = isReceipt ? "Payment confirmation" : "Payment Details";
     doc.setFont("NeueCampton", "bold");
     doc.setFontSize(10);
     const pdPillTextW = doc.getTextWidth(pdPillText);
@@ -377,12 +403,33 @@ export async function exportInvoiceToPdf(invoice: FinanceInvoice, items: Finance
     doc.setTextColor(255, 255, 255);
     doc.text(pdPillText, margin + 20 + pdPillW / 2, y + 32, { align: "center" });
 
-    // Bank accounts (2-column grid)
     const bankTop = y + 52;
     const bankColW = innerWidth / 2 - 24;
-    CDS_BANK_ACCOUNTS.forEach((b, idx) => {
-        const colX = margin + 20 + idx * (bankColW + 24);
-        const rowY = bankTop;
+    if (isReceipt && receipt) {
+        const method = receipt.payment_method === "bank_transfer" ? "Bank transfer" : receipt.payment_method === "paystack" ? "Paystack" : receipt.payment_method || "Confirmed payment";
+        const confirmationRows = [
+            ["Amount received", fmtMoney(receipt.amount, receipt.currency)],
+            ["Invoice paid", invoice.invoice_number],
+            ["Payment method", method],
+            ["Reference", receipt.payment_reference || "Confirmed by CDS Space Finance"],
+            ["Confirmed at", formatFinanceDate(receipt.paid_at, { weekday: "short", year: "numeric", month: "long", day: "numeric", hour: "2-digit", minute: "2-digit", second: "2-digit", timeZoneName: "short" })],
+        ];
+        confirmationRows.forEach(([label, value], index) => {
+            const rowY = bankTop + (index < 4 ? Math.floor(index / 2) * 44 : 88);
+            const colX = index < 4 ? margin + 20 + (index % 2) * (bankColW + 24) : margin + 20;
+            doc.setFont("NeueCampton", "normal");
+            doc.setFontSize(8.5);
+            doc.setTextColor(165, 180, 211);
+            doc.text(label, colX, rowY + 9);
+            doc.setFont("NeueCampton", "bold");
+            doc.setFontSize(index === 0 ? 15 : 10);
+            doc.setTextColor(255, 255, 255);
+            const maxWidth = index < 4 ? bankColW : innerWidth - 40;
+            doc.text(doc.splitTextToSize(String(value), maxWidth), colX, rowY + 25);
+        });
+    } else if (paymentAccounts.length) paymentAccounts.forEach((b, idx) => {
+        const colX = margin + 20 + (idx % 2) * (bankColW + 24);
+        const rowY = bankTop + Math.floor(idx / 2) * bankRowH;
 
         // Logo tile (white rounded square)
         doc.setFillColor(255, 255, 255);
@@ -401,7 +448,7 @@ export async function exportInvoiceToPdf(invoice: FinanceInvoice, items: Finance
             doc.setTextColor(255, 255, 255);
             doc.setFont("NeueCampton", "bold");
             doc.setFontSize(24);
-            doc.text(b.initial, colX + 23, rowY + 32, { align: "center" });
+            doc.text(b.bank_name.slice(0, 1).toUpperCase(), colX + 23, rowY + 32, { align: "center" });
         }
 
         // Bank text
@@ -409,12 +456,12 @@ export async function exportInvoiceToPdf(invoice: FinanceInvoice, items: Finance
         doc.setFont("NeueCampton", "normal");
         doc.setFontSize(9);
         doc.setTextColor(200, 210, 230);
-        doc.text(b.bank, textX, rowY + 12);
+        doc.text(`${b.bank_name} · ${b.currency}`, textX, rowY + 12);
 
         doc.setFont("NeueCampton", "bold");
         doc.setFontSize(16);
         doc.setTextColor(255, 255, 255);
-        doc.text(b.account_number, textX, rowY + 32);
+        doc.text(b.account_number || (b.iban ? `IBAN ${b.iban}` : "Account details on request"), textX, rowY + 32, { maxWidth: bankColW - 62 });
 
         doc.setFont("NeueCampton", "normal");
         doc.setFontSize(8.5);
@@ -423,8 +470,17 @@ export async function exportInvoiceToPdf(invoice: FinanceInvoice, items: Finance
         doc.text(nameLines, textX, rowY + 46);
     });
 
+    if (!isReceipt && !paymentAccounts.length) {
+        doc.setFont("NeueCampton", "normal");
+        doc.setFontSize(10);
+        doc.setTextColor(210, 220, 240);
+        const message = `No corporate bank account is listed for ${currency}. Use the secure Paystack option on the invoice payment screen.`;
+        doc.text(doc.splitTextToSize(message, innerWidth - 40), margin + 20, bankTop + 18);
+    }
+
     // Divider + Terms block - faint line inside the navy panel
-    const termsY = bankTop + bankRowH - 10;
+    const termsY = bankTop + accountRows * bankRowH - 10;
+    if (!isReceipt) {
     doc.setDrawColor(40, 55, 110);
     doc.setLineWidth(0.5);
     doc.line(margin + 20, termsY, pageWidth - margin - 20, termsY);
@@ -451,6 +507,7 @@ export async function exportInvoiceToPdf(invoice: FinanceInvoice, items: Finance
     drawTermsLine("No. of Revisions:", revisions);
     drawTermsLine("Delivery:", `${speed}  ·  Period: ${period}`);
     drawTermsLine("Working Hours:", hours);
+    }
 
     y = panelStart + panelH + 20;
 
@@ -472,5 +529,5 @@ export async function exportInvoiceToPdf(invoice: FinanceInvoice, items: Finance
         doc.text("cdsspace.com  |  cdsspace.pro", margin, pageHeight - 24);
     }
 
-    doc.save(`Invoice-${invoice.invoice_number}.pdf`);
+    doc.save(isReceipt ? `Receipt-${receipt?.receipt_number || invoice.invoice_number}.pdf` : `Invoice-${invoice.invoice_number}.pdf`);
 }

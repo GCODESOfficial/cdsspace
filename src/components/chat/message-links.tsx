@@ -2,10 +2,12 @@
 
 import { useEffect, useState } from "react";
 
-/** Crude URL matcher - covers http/https + bare www. domains. */
-const URL_REGEX = /\b((?:https?:\/\/|www\.)[^\s<]+[^\s<.,;:!?()])/gi;
+/** Covers public URLs plus the relative cMeet links stored in chat messages. */
+const URL_REGEX = /((?:https?:\/\/|www\.)[^\s<]+[^\s<.,;:!?()]|\/meet\/[a-z0-9-]+(?:\?[^\s<]*)?)/gi;
+const MARKDOWN_OR_URL_REGEX = /(\*\*([^*\n]+)\*\*|\[([^\]\n]+)\]\((https?:\/\/[^)\s]+)\)|((?:https?:\/\/|www\.)[^\s<]+[^\s<.,;:!?()]|\/meet\/[a-z0-9-]+(?:\?[^\s<]*)?))/gi;
 
 function normalizeHref(raw: string): string {
+    if (raw.startsWith("/")) return raw;
     if (/^https?:\/\//i.test(raw)) return raw;
     return `https://${raw}`;
 }
@@ -16,35 +18,66 @@ function normalizeHref(raw: string): string {
  * whitespace-pre-wrap on the outer span. Safe to use on user input -
  * React escapes text nodes, we only pull URLs from a tight regex.
  */
-export function Linkified({ text, className }: { text: string; className?: string }) {
+export function isMeetingLink(url: string): boolean {
+    try {
+        return /^\/meet\/[a-z0-9-]+\/?$/i.test(new URL(url, "https://cdsspace.pro").pathname);
+    } catch {
+        return false;
+    }
+}
+
+export function Linkified({
+    text,
+    className,
+    onMeetingLink,
+}: {
+    text: string;
+    className?: string;
+    onMeetingLink?: (url: string) => void;
+}) {
     if (!text) return null;
-    const parts: Array<string | { url: string; display: string }> = [];
+    const parts: Array<
+        string |
+        { kind: "link"; url: string; display: string } |
+        { kind: "bold"; display: string }
+    > = [];
     let last = 0;
-    for (const m of text.matchAll(URL_REGEX)) {
+    for (const m of text.matchAll(MARKDOWN_OR_URL_REGEX)) {
         if (m.index === undefined) continue;
         if (m.index > last) parts.push(text.slice(last, m.index));
-        parts.push({ url: normalizeHref(m[1]), display: m[1] });
-        last = m.index + m[1].length;
+        if (m[2]) {
+            parts.push({ kind: "bold", display: m[2] });
+        } else if (m[3] && m[4]) {
+            parts.push({ kind: "link", url: normalizeHref(m[4]), display: m[3] });
+        } else if (m[5]) {
+            parts.push({ kind: "link", url: normalizeHref(m[5]), display: m[5] });
+        }
+        last = m.index + m[0].length;
     }
     if (last < text.length) parts.push(text.slice(last));
 
     return (
         <span className={className}>
-            {parts.map((p, i) =>
-                typeof p === "string" ? (
-                    <span key={i}>{p}</span>
-                ) : (
+            {parts.map((part, index) => {
+                if (typeof part === "string") return <span key={index}>{part}</span>;
+                if (part.kind === "bold") return <strong key={index} className="font-bold">{part.display}</strong>;
+                return (
                     <a
-                        key={i}
-                        href={p.url}
-                        target="_blank"
+                        key={index}
+                        href={part.url}
+                        target={onMeetingLink && isMeetingLink(part.url) ? undefined : "_blank"}
                         rel="noopener noreferrer"
+                        onClick={(event) => {
+                            if (!onMeetingLink || !isMeetingLink(part.url)) return;
+                            event.preventDefault();
+                            onMeetingLink(part.url);
+                        }}
                         className="underline underline-offset-2 break-words hover:opacity-80"
                     >
-                        {p.display}
+                        {part.display}
                     </a>
-                ),
-            )}
+                );
+            })}
         </span>
     );
 }

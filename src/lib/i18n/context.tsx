@@ -2,7 +2,7 @@
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 
-export type Locale = "en" | "fr" | "es" | "pt" | "ar" | "de" | "yo" | "ig" | "ha";
+export type Locale = "en" | "fr" | "es" | "pt" | "ar" | "de" | "zh" | "ru" | "nl";
 
 export const LOCALES: { code: Locale; label: string; nativeLabel: string; rtl?: boolean }[] = [
   { code: "en", label: "English", nativeLabel: "English" },
@@ -11,9 +11,9 @@ export const LOCALES: { code: Locale; label: string; nativeLabel: string; rtl?: 
   { code: "pt", label: "Portuguese", nativeLabel: "Português" },
   { code: "de", label: "German", nativeLabel: "Deutsch" },
   { code: "ar", label: "Arabic", nativeLabel: "العربية", rtl: true },
-  { code: "yo", label: "Yoruba", nativeLabel: "Yorùbá" },
-  { code: "ig", label: "Igbo", nativeLabel: "Igbo" },
-  { code: "ha", label: "Hausa", nativeLabel: "Hausa" },
+  { code: "zh", label: "Chinese", nativeLabel: "中文" },
+  { code: "ru", label: "Russian", nativeLabel: "Русский" },
+  { code: "nl", label: "Dutch", nativeLabel: "Nederlands" },
 ];
 
 const dictionaries: Record<Locale, Record<string, string>> = {
@@ -75,7 +75,7 @@ const dictionaries: Record<Locale, Record<string, string>> = {
     "common.loading": "Chargement…",
     "common.search": "Rechercher",
   },
-  es: {}, pt: {}, ar: {}, de: {}, yo: {}, ig: {}, ha: {},
+  es: {}, pt: {}, ar: {}, de: {}, zh: {}, ru: {}, nl: {},
 };
 
 interface I18nContextValue {
@@ -100,19 +100,43 @@ export function I18nProvider({
 
   useEffect(() => {
     if (typeof window === "undefined") return;
-    const stored = window.localStorage.getItem(STORAGE_KEY) as Locale | null;
+    const stored = (window.localStorage.getItem("cds.lang") || window.localStorage.getItem(STORAGE_KEY)) as Locale | null;
     if (stored && LOCALES.some((l) => l.code === stored)) {
       setLocaleState(stored);
     }
   }, []);
 
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const onGlobalLanguage = (event: Event) => {
+      const next = (event as CustomEvent).detail as Locale;
+      if (!LOCALES.some((item) => item.code === next)) return;
+      window.localStorage.setItem(STORAGE_KEY, next);
+      setLocaleState(next);
+    };
+    window.addEventListener("cds-set-lang", onGlobalLanguage);
+    window.addEventListener("cds-lang-detected", onGlobalLanguage);
+    return () => {
+      window.removeEventListener("cds-set-lang", onGlobalLanguage);
+      window.removeEventListener("cds-lang-detected", onGlobalLanguage);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (typeof document === "undefined") return;
+    const meta = LOCALES.find((item) => item.code === locale);
+    const direction = meta?.rtl ? "rtl" : "ltr";
+    document.documentElement.lang = locale;
+    document.documentElement.dir = direction;
+    document.documentElement.dataset.writingDirection = direction;
+  }, [locale]);
+
   const setLocale = useCallback((l: Locale) => {
     setLocaleState(l);
     if (typeof window !== "undefined") {
       window.localStorage.setItem(STORAGE_KEY, l);
-      const meta = LOCALES.find((x) => x.code === l);
-      document.documentElement.dir = meta?.rtl ? "rtl" : "ltr";
-      document.documentElement.lang = l;
+      window.localStorage.setItem("cds.lang", l);
+      window.dispatchEvent(new CustomEvent("cds-set-lang", { detail: l }));
     }
   }, []);
 

@@ -28,7 +28,7 @@ const testimonials = [
   {
     logo: "/images/teeskitchen.svg",
     name: "Mi Amor",
-    text: "I must say that I am very honored by how you effortlessly designed my food brand name and logo for me...Keep up the good work! I’m so satisfied with everything you have done for my project!✨🍱💚",
+    text: "I must say that I am very honored by how you effortlessly designed my food brand name and logo for me...Keep up the good work! I’m so satisfied with everything you have done for my project! 🍱💚",
   },
   {
     logo: "/images/lifepith.svg",
@@ -101,7 +101,7 @@ export default function Testimonials() {
             <CarouselContent className="transition-transform duration-[900ms] ease-[cubic-bezier(0.33,1,0.68,1)]">
               {testimonials.map((t, i) => (
                 <CarouselItem key={i} className="basis-full p-2">
-                  <div className="bg-muted p-6 rounded-2xl shadow bg-gradient-to-b from-[#FFFFFF] to-[#DFEAF8]">
+                  <div className="rounded-2xl bg-[#DFEAF8] p-6 shadow">
                     {t.logo && (
                       <Image
                         src={t.logo}
@@ -143,7 +143,7 @@ export default function Testimonials() {
                   key={i}
                   className="basis-full md:basis-1/2 lg:basis-1/3 p-4"
                 >
-                  <div className="bg-muted p-6 py-10 rounded-2xl h-[23rem] bg-gradient-to-b from-[#FFFFFF] to-[#DFEAF8] shadow text-left">
+                  <div className="h-[23rem] rounded-2xl bg-[#DFEAF8] p-6 py-10 text-left shadow">
                     {t.logo && (
                       <Image
                         src={t.logo}

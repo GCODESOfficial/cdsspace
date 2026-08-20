@@ -6,6 +6,7 @@ import { hasPermission } from "@/lib/admin-permissions";
 import { logActivity } from "@/lib/activity-log";
 import { glashMaybeOne, glashOne, glashQuery } from "@/lib/glashdb/postgres";
 import { getTimebookOffice, saveTimebookOffice } from "@/lib/timebook-office";
+import { autoCheckoutOpenTimeEntries } from "@/lib/timebook-auto-checkout";
 import { sendEmail } from "@/lib/email-from";
 import { brandedEmailHtml } from "@/lib/email-template";
 import {
@@ -38,7 +39,7 @@ function dateKey(value: unknown, fallback = lagosDate()) {
   if (typeof value === "string") return value.slice(0, 10);
   // The pg driver returns `date` columns as a JS Date at Lagos midnight (e.g.
   // work_date 2026-07-08 arrives as 2026-07-07T23:00:00Z). Reading it back with
-  // toISOString() would slice off the UTC day and land one day early — so a
+  // toISOString() would slice off the UTC day and land one day early - so a
   // member who checked in *today* would key to yesterday and show up ABSENT.
   // Format the instant in Lagos time to recover the real calendar work_date.
   if (value instanceof Date) return lagosDate(value);
@@ -84,6 +85,12 @@ export async function GET(req: NextRequest) {
   const date = normalizeDate(url.searchParams.get("date"));
   const from = normalizeDate(url.searchParams.get("from"), date);
   const to = normalizeDate(url.searchParams.get("to"), from);
+
+  if (date === lagosDate()) {
+    await autoCheckoutOpenTimeEntries({ workDate: date, source: "admin_timebook_get" }).catch((error) => {
+      console.error("[timebook] auto checkout failed:", error);
+    });
+  }
 
   const [members, profiles, entries, leaveRequests, bypassCodes] = await Promise.all([
     glashQuery("select id, full_name, email, role_title, department, is_active from public.team_members where is_active = true order by full_name asc"),
@@ -342,7 +349,7 @@ export async function POST(req: NextRequest) {
       )));
     }
 
-    // Notify the team member — in-app + email — with the full decision details.
+    // Notify the team member - in-app + email - with the full decision details.
     const approved = status === "approved";
     const workingDays = eachDate(dateKey(leave.start_date), dateKey(leave.end_date)).filter((d) => isWorkDay(d)).length;
     const reviewNote = (body.review_note || "").toString().trim();
@@ -382,7 +389,7 @@ export async function POST(req: NextRequest) {
             ${row("Type", formatWorkMode(leave.leave_type))}
             ${row("Dates", `${fmtDate(leave.start_date)} &ndash; ${fmtDate(leave.end_date)}`)}
             ${row("Working days", String(workingDays))}
-            ${row("Reason", leave.reason ? String(leave.reason) : "&mdash;")}
+            ${row("Reason", leave.reason ? String(leave.reason) : "Not provided")}
             ${row("Status", approved ? "Approved" : "Declined")}
             ${reviewNote ? row("Note from reviewer", reviewNote) : ""}
           </table>

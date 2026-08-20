@@ -12,9 +12,12 @@ import ModalHeader from "@/components/finance/ModalHeader";
 import BankPicker from "@/components/finance/BankPicker";
 import { findBankByCode } from "@/lib/finance/banks";
 import { FinanceEmployee, FinancePayrollRun, formatMoney } from "@/lib/finance/types";
+import { convertFinanceAmount } from "@/lib/finance/currency-display";
+import { useFinanceDisplayCurrency } from "@/components/finance/FinanceCurrencySelector";
 import { appAlert, appConfirm, appPrompt } from "@/lib/app-notify";
 
 export default function PayrollPage() {
+  const { currency: displayCurrency, rates } = useFinanceDisplayCurrency();
   const [tab, setTab] = useState<"runs" | "employees">("runs");
   const [employees, setEmployees] = useState<FinanceEmployee[]>([]);
   const [runs, setRuns] = useState<FinancePayrollRun[]>([]);
@@ -55,27 +58,27 @@ export default function PayrollPage() {
         tab === "runs" ? (
           <Dialog open={runOpen} onOpenChange={setRunOpen}>
             <DialogTrigger asChild>
-              <Button className="h-11 px-5 rounded-xl bg-gradient-to-b from-blue-600 to-blue-700 shadow-lg shadow-blue-600/30"><Plus className="w-4 h-4 mr-1.5" /> New Run</Button>
+              <Button className="h-11 px-5 rounded-xl bg-[#0A4FE8] shadow-lg shadow-blue-600/30"><Plus className="w-4 h-4 mr-1.5" /> New Run</Button>
             </DialogTrigger>
             <DialogContent className="bg-white max-w-md rounded-2xl border-0 shadow-2xl p-7">
-              <ModalHeader icon={CalendarRange} title="New Payroll Run" subtitle="Create a payroll batch for a period" accent="from-cyan-500 to-sky-500" />
+              <ModalHeader icon={CalendarRange} title="New Payroll Run" subtitle="Create a payroll batch for a period" accent="bg-[#0A4FE8]" />
               <div className="space-y-4 mt-2">
                 <Field label="Title"><Input className="h-11 rounded-xl" value={runForm.title} onChange={(e) => setRunForm({ ...runForm, title: e.target.value })} placeholder="e.g. October 2026 Salary" /></Field>
                 <Field label="Period"><Input type="month" className="h-11 rounded-xl" value={runForm.period} onChange={(e) => setRunForm({ ...runForm, period: e.target.value })} /></Field>
               </div>
               <DialogFooter className="mt-5">
                 <Button variant="outline" className="rounded-xl" onClick={() => setRunOpen(false)}>Cancel</Button>
-                <Button onClick={saveRun} className="rounded-xl bg-gradient-to-b from-blue-600 to-blue-700">Create</Button>
+                <Button onClick={saveRun} className="rounded-xl bg-[#0A4FE8]">Create</Button>
               </DialogFooter>
             </DialogContent>
           </Dialog>
         ) : (
           <Dialog open={empOpen} onOpenChange={setEmpOpen}>
             <DialogTrigger asChild>
-              <Button className="h-11 px-5 rounded-xl bg-gradient-to-b from-blue-600 to-blue-700 shadow-lg shadow-blue-600/30"><Plus className="w-4 h-4 mr-1.5" /> New Employee</Button>
+              <Button className="h-11 px-5 rounded-xl bg-[#0A4FE8] shadow-lg shadow-blue-600/30"><Plus className="w-4 h-4 mr-1.5" /> New Employee</Button>
             </DialogTrigger>
             <DialogContent className="bg-white max-w-xl rounded-2xl border-0 shadow-2xl p-7">
-              <ModalHeader icon={UserPlus} title="New Employee" subtitle="Add a salaried staff member" accent="from-cyan-500 to-sky-500" />
+              <ModalHeader icon={UserPlus} title="New Employee" subtitle="Add a salaried staff member" accent="bg-[#0A4FE8]" />
               <div className="grid grid-cols-2 gap-4 mt-2">
                 <Field label="Full Name"><Input className="h-11 rounded-xl" value={empForm.name} onChange={(e) => setEmpForm({ ...empForm, name: e.target.value })} /></Field>
                 <Field label="Role"><Input className="h-11 rounded-xl" value={empForm.role} onChange={(e) => setEmpForm({ ...empForm, role: e.target.value })} /></Field>
@@ -90,7 +93,7 @@ export default function PayrollPage() {
               </div>
               <DialogFooter className="mt-5">
                 <Button variant="outline" className="rounded-xl" onClick={() => setEmpOpen(false)}>Cancel</Button>
-                <Button onClick={saveEmp} className="rounded-xl bg-gradient-to-b from-blue-600 to-blue-700">Save</Button>
+                <Button onClick={saveEmp} className="rounded-xl bg-[#0A4FE8]">Save</Button>
               </DialogFooter>
             </DialogContent>
           </Dialog>
@@ -98,8 +101,8 @@ export default function PayrollPage() {
       }
     >
       <div className={`${glassCard} p-1.5 inline-flex rounded-2xl mb-6`}>
-        <button onClick={() => setTab("runs")} className={`px-5 py-2 rounded-xl text-sm font-medium ${tab === "runs" ? "bg-gradient-to-b from-blue-600 to-blue-700 text-white shadow-lg shadow-blue-600/30" : "text-gray-600"}`}>Payroll Runs</button>
-        <button onClick={() => setTab("employees")} className={`px-5 py-2 rounded-xl text-sm font-medium ${tab === "employees" ? "bg-gradient-to-b from-blue-600 to-blue-700 text-white shadow-lg shadow-blue-600/30" : "text-gray-600"}`}>Employees</button>
+        <button onClick={() => setTab("runs")} className={`px-5 py-2 rounded-xl text-sm font-medium ${tab === "runs" ? "bg-[#0A4FE8] text-white shadow-lg shadow-blue-600/30" : "text-gray-600"}`}>Payroll Runs</button>
+        <button onClick={() => setTab("employees")} className={`px-5 py-2 rounded-xl text-sm font-medium ${tab === "employees" ? "bg-[#0A4FE8] text-white shadow-lg shadow-blue-600/30" : "text-gray-600"}`}>Employees</button>
       </div>
 
       {tab === "runs" ? (
@@ -120,7 +123,8 @@ export default function PayrollPage() {
                     </div>
                     <span className={`text-[10px] uppercase tracking-wider font-semibold px-2.5 py-1 rounded-full ${r.status === "paid" ? "bg-emerald-50 text-emerald-700" : r.status === "processed" ? "bg-blue-50 text-blue-700" : "bg-gray-100 text-gray-600"}`}>{r.status}</span>
                   </div>
-                  <div className="text-2xl font-bold text-gray-900">{formatMoney(r.total, r.currency)}</div>
+                  <div className="text-2xl font-bold text-gray-900">{formatMoney(convertFinanceAmount(r.total, r.currency, displayCurrency, rates), displayCurrency)}</div>
+                  {r.currency !== displayCurrency && <div className="mt-0.5 text-[11px] text-gray-400">Original: {formatMoney(r.total, r.currency)}</div>}
                 </div>
               </Link>
             ))}
@@ -152,7 +156,12 @@ export default function PayrollPage() {
                     <td className="px-5 py-4 text-gray-500">{e.role ?? "-"}</td>
                     <td className="px-5 py-4 text-gray-500">{e.bank_code ? findBankByCode(e.bank_code)?.name : "-"}</td>
                     <td className="px-5 py-4 text-gray-500 font-mono">{e.account_number ?? "-"}</td>
-                    <td className="px-5 py-4 font-semibold">{e.base_salary ? formatMoney(e.base_salary, e.currency) : "-"}</td>
+                    <td className="px-5 py-4 font-semibold">
+                      {e.base_salary ? <>
+                        <div>{formatMoney(convertFinanceAmount(e.base_salary, e.currency, displayCurrency, rates), displayCurrency)}</div>
+                        {e.currency !== displayCurrency && <div className="mt-0.5 text-[11px] font-normal text-gray-400">Original: {formatMoney(e.base_salary, e.currency)}</div>}
+                      </> : "-"}
+                    </td>
                     <td className="px-5 py-4 text-right">
                       <button onClick={() => removeEmp(e.id)} className="w-8 h-8 rounded-lg hover:bg-red-50 grid place-items-center text-gray-400 hover:text-red-600"><Trash2 className="w-4 h-4" /></button>
                     </td>

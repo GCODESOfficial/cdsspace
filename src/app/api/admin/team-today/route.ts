@@ -4,6 +4,7 @@ import { getAdminSessionAsync } from "@/app/api/admin-check/route";
 import { hasPermission } from "@/lib/admin-permissions";
 import { glashMaybeOne, glashQuery } from "@/lib/glashdb/postgres";
 import { lagosDate } from "@/lib/timebook";
+import { autoCheckoutOpenTimeEntries } from "@/lib/timebook-auto-checkout";
 import { assignDirectTask } from "@/lib/team-tasks/server";
 import { checklistTemplateFor } from "@/lib/team-tasks/role-templates";
 
@@ -26,6 +27,10 @@ export async function GET(req: NextRequest) {
     const workDate = lagosDate();
 
     try {
+        await autoCheckoutOpenTimeEntries({ workDate, source: "admin_team_today_get" }).catch((error) => {
+            console.error("[timebook] auto checkout failed:", error);
+        });
+
         const members = await glashQuery<any>(
             `select id, full_name, role_title, department, avatar_url, coalesce(is_team_lead,false) as is_team_lead
                from public.team_members where is_active order by department nulls last, full_name`,
@@ -39,7 +44,7 @@ export async function GET(req: NextRequest) {
         const attByMember = new Map(attendance.map((a) => [a.team_member_id, a]));
 
         const taskStats = await glashQuery<any>(
-            // completed_at is timestamptz — cast in Lagos time so "done today"
+            // completed_at is timestamptz - cast in Lagos time so "done today"
             // matches the Lagos work_date instead of the UTC session date.
             `select assignee_id,
                     count(*) filter (where status not in ('completed','approved')) as open,

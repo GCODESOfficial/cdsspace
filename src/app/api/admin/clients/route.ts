@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { verifyAdmin } from "@/lib/admin-auth";
 import { supabaseAdmin } from "@/lib/supabase";
+import { sanitizeOrFilterTerm } from "@/lib/search-filter";
 
 export const dynamic = "force-dynamic";
 
@@ -17,11 +18,14 @@ export async function GET(request: Request) {
     // Fetch all profiles
     let profilesQuery = supabaseAdmin
       .from("profiles")
-      .select("*");
+      .select("*")
+      .neq("email_verified_at", null)
+      .eq("account_status", "active");
 
-    if (search) {
+    const safeSearch = sanitizeOrFilterTerm(search);
+    if (safeSearch) {
       profilesQuery = profilesQuery.or(
-        `full_name.ilike.%${search}%,email.ilike.%${search}%`
+        `full_name.ilike.%${safeSearch}%,email.ilike.%${safeSearch}%`
       );
     }
 
@@ -36,7 +40,7 @@ export async function GET(request: Request) {
     }
 
     // Get all profile IDs for batch queries
-    const profileIds = profiles.map((p) => p.id);
+    const profileIds = profiles.map((p: { id: string }) => p.id);
 
     // Fetch subscription counts per user
     const { data: subscriptions, error: subError } = await supabaseAdmin
@@ -85,7 +89,7 @@ export async function GET(request: Request) {
     }
 
     // Merge counts into profiles
-    const clients = profiles.map((profile) => ({
+    const clients = profiles.map((profile: { id: string; [key: string]: unknown }) => ({
       ...profile,
       subscription_count: subCounts.get(profile.id) ?? 0,
       design_request_count: designCounts.get(profile.id) ?? 0,

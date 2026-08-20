@@ -97,7 +97,7 @@ export async function POST(req: Request) {
 
   await db.from("departments").update({ thread_id: thread.id }).eq("id", dep.id);
 
-  // Optionally seed members now — via the junction (additive), plus set their
+  // Optionally seed members now - via the junction (additive), plus set their
   // primary department if unset, and add them to the new chat channel.
   if (Array.isArray(member_ids) && member_ids.length) {
     const ids = member_ids.map(String);

@@ -147,7 +147,9 @@ export class GlashQueryBuilder<T = any> implements PromiseLike<GlashQueryResult<
   }
 }
 
-export function createGlashQueryClient(executePayload: GlashQueryExecutor, extras: Record<string, any> = {}) {
+export function createGlashQueryClient<
+  TExtras extends Record<string, any> = Record<string, never>,
+>(executePayload: GlashQueryExecutor, extras: TExtras = {} as TExtras) {
   return {
     ...extras,
     from(table: string) {

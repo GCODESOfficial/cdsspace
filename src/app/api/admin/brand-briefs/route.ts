@@ -1,19 +1,24 @@
 import { NextRequest, NextResponse } from "next/server";
-import { requireFinanceAdmin } from "@/lib/finance/api-auth";
+import { requireFinanceAdminAsync } from "@/lib/finance/api-auth";
 import { getSupabaseAdmin } from "@/lib/supabase";
 import { randomToken } from "@/lib/finance/types";
 
+export const dynamic = "force-dynamic";
+
 /** List all brand briefs (admin). */
 export async function GET(req: NextRequest) {
-    const denied = requireFinanceAdmin(req);
+    const denied = await requireFinanceAdminAsync(req, "brand_briefs");
     if (denied) return denied;
     const sb = getSupabaseAdmin() as any;
     const { data, error } = await sb
         .from("brand_briefs")
         .select("*")
-        .order("created_at", { ascending: false });
+        .order("updated_at", { ascending: false });
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-    return NextResponse.json({ briefs: data ?? [] });
+    return NextResponse.json(
+        { briefs: data ?? [] },
+        { headers: { "Cache-Control": "private, no-store, max-age=0" } },
+    );
 }
 
 /**
@@ -22,7 +27,7 @@ export async function GET(req: NextRequest) {
  * the share modal immediately.
  */
 export async function POST(req: NextRequest) {
-    const denied = requireFinanceAdmin(req);
+    const denied = await requireFinanceAdminAsync(req, "brand_briefs");
     if (denied) return denied;
 
     const body = await req.json().catch(() => ({}));

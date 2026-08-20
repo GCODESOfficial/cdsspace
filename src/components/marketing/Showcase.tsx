@@ -1,5 +1,5 @@
 import { SectionHeader } from "@/components/shared/SectionHeader";
-import { Button } from "@/components/ui/Button";
+import { Button } from "@/components/ui/button";
 
 const projects = [
     {

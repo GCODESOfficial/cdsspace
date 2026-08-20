@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAdminSession } from "@/lib/admin-session";
 import { getSupabaseAdmin } from "@/lib/supabase";
+import { assertCleanBuffer, UploadSecurityError } from "@/lib/upload-security";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -39,6 +40,12 @@ export async function POST(req: NextRequest) {
   const ext = (file.name.split(".").pop() || "bin").toLowerCase().replace(/[^a-z0-9]/g, "") || "bin";
   const path = `${folder || "uploads"}/${crypto.randomUUID()}.${ext}`;
   const buffer = Buffer.from(await file.arrayBuffer());
+  try {
+    assertCleanBuffer(buffer);
+  } catch (e) {
+    if (e instanceof UploadSecurityError) return NextResponse.json({ ok: false, error: e.message }, { status: e.status });
+    throw e;
+  }
 
   const { error } = await storage.storage
     .from("media")

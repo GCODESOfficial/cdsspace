@@ -1,0 +1,10 @@
+#!/bin/sh
+# Blocks commits that contain the em-dash (U+2014) or its entity/escape forms,
+# which the deploy build's content-style check rejects (`npm run build:next`).
+# Bypass in an emergency with `git commit --no-verify`.
+node scripts/check-content-style.mjs || {
+  echo ""
+  echo "Commit blocked: forbidden punctuation found (see above)."
+  echo "Replace the em-dash with a comma, colon, parentheses, hyphen, or full stop."
+  exit 1
+}

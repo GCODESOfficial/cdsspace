@@ -7,8 +7,13 @@
  * Uses table + inline styles for broad email-client compatibility, and an
  * absolute HTTPS logo URL (email clients can't load relative or local images).
  */
+import { EMAIL_LOGO_CID } from "@/lib/email-logo";
+
 const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL?.replace(/\/$/, "") || "https://cdsspace.pro";
-const LOGO_URL = `${SITE_URL}/favicon.png`;
+// The logo travels with the message as an inline CID attachment (see
+// email-logo.ts + sendEmail), so it renders even when no hosted image is
+// reachable. sendEmail attaches the bytes whenever this cid appears in the html.
+const LOGO_SRC = `cid:${EMAIL_LOGO_CID}`;
 const BRAND = "#0A4FE8";
 const NAVY = "#0D1B39";
 
@@ -40,7 +45,7 @@ export function brandedEmailHtml(bodyHtml: string, opts: BrandedEmailOptions = {
         <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:560px;background:#ffffff;border:1px solid #e6eaf2;border-radius:16px;overflow:hidden;">
           <tr>
             <td align="center" style="padding:28px 24px 8px 24px;">
-              <img src="${LOGO_URL}" width="56" height="56" alt="CDS Space" style="display:block;border-radius:14px;" />
+              <img src="${LOGO_SRC}" width="56" height="56" alt="CDS Space" style="display:block;width:56px;height:56px;border-radius:14px;" />
               <div style="margin-top:12px;font-family:Arial,Helvetica,sans-serif;font-size:18px;font-weight:800;color:${NAVY};">CDS Space</div>
               ${eyebrow}
             </td>

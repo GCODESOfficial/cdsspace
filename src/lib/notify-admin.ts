@@ -8,7 +8,7 @@ import { supabaseAdmin } from "@/lib/supabase";
  * 20260708_hrm_interactive.sql): order_update, new_message, status_change,
  * new_order, team_checkin, team_checkout, team_alert, work_tracking.
  *
- * Never throws — a failed notification must not break the calling flow.
+ * Never throws - a failed notification must not break the calling flow.
  */
 const SUPER_ADMIN_EMAIL = "ceo@cdsspace.pro";
 

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase";
 import { getTeamSessionFromToken } from "@/lib/team-auth";
+import { verifyAdminCookie } from "@/lib/admin-session-cookie";
 
 export interface AdminSession {
   role: "super_admin" | "sub_admin";
@@ -20,23 +21,9 @@ export interface AdminSession {
  * members with sub-admin access) requires the async variant below.
  */
 export function getAdminSession(req: NextRequest): AdminSession | null {
-  const cookie = req.cookies.get("admin_session");
-  if (cookie?.value) {
-    try {
-      const session = JSON.parse(cookie.value) as AdminSession;
-      if (session.role && session.email) return { ...session, source: "admin_cookie" };
-    } catch {
-      // fall through to legacy-string branch
-    }
-    if (cookie.value === "authenticated") {
-      return {
-        role: "super_admin",
-        email: "ceo@cdsspace.pro",
-        name: "Admin",
-        permissions: ["all"],
-        source: "admin_cookie",
-      };
-    }
+  const session = verifyAdminCookie<AdminSession>(req.cookies.get("admin_session")?.value);
+  if (session && session.role && session.email) {
+    return { ...session, source: "admin_cookie" };
   }
   return null;
 }

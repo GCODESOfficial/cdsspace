@@ -1,46 +1,103 @@
-import React, { useRef, useState } from "react";
+import React from "react";
 import { motion } from "framer-motion";
 import { AssetHub, AssetFile } from "../../shared/AssetHub";
 import { cn } from "@/lib/utils";
 import { BannerFormData } from "./types";
-import { AlertCircle, CheckCircle2, Edit3, UploadCloud } from "lucide-react";
-import { storageService } from "@/lib/supabase/storage";
-import { createClient } from "@/lib/supabase/client";
+import { AlertCircle, CheckCircle2, Edit3, Minus, Plus, UploadCloud } from "lucide-react";
+import { formatMoney, type Currency } from "@/lib/finance/types";
+import { bannerPrice, type BannerDesignService } from "@/lib/banner-commerce";
+import { appAlert } from "@/lib/app-notify";
 
 interface Step2Props {
     formData: BannerFormData;
     updateFormData: (updates: Partial<BannerFormData> | ((prev: BannerFormData) => BannerFormData)) => void;
     onNext: () => void;
     onPrev: () => void;
+    currency: Currency;
+    designService: BannerDesignService | null;
 }
 
-const BANNER_ACCEPTED_TYPES = ".svg,.png,.jpg,.jpeg,.pdf,.zip,.ai,.psd";
-const BANNER_MIME_DESCRIPTION = "SVG, PNG, JPG, PDF, ZIP, AI, PSD (max. 10MB)";
+const BANNER_ACCEPTED_TYPES = ".png,.jpg,.jpeg,.pdf,.ai,.fig,.svg";
+const BANNER_MIME_DESCRIPTION = "PNG, JPG, PDF, AI, FIG, SVG (max. 20MB)";
+const BANNER_MAX_FILE_SIZE_MB = 20;
+const BANNER_ALLOWED_EXTENSIONS = new Set(["png", "jpg", "jpeg", "pdf", "ai", "fig", "svg"]);
 
-export const Step2_VisualExecution = ({ formData, updateFormData, onNext, onPrev }: Step2Props) => {
-    const supabase = createClient();
+export const Step2_VisualExecution = ({ formData, updateFormData, onNext, onPrev, currency, designService }: Step2Props) => {
+    const quantity = Math.max(1, Math.min(1000, Number(formData.quantity) || 1));
+    const completedArtworkCount = formData.readyFiles.filter((file) => (file as AssetFile).status === "success" && Boolean((file as AssetFile).storagePath)).length;
+
+    const syncReadyFiles = (files: AssetFile[]) => {
+        const urls = files.map((file) => file.storagePath).filter((path): path is string => Boolean(path));
+        updateFormData({
+            readyFiles: files,
+            readyFileUrls: urls,
+            readyFile: files[0] || null,
+            readyFileUrl: urls[0] || null,
+        });
+    };
+
+    const changeQuantity = (nextQuantity: number) => {
+        const normalized = Math.max(1, Math.min(1000, nextQuantity || 1));
+        const keepCount = Math.min(normalized, formData.readyFiles.length);
+        updateFormData({
+            quantity: normalized,
+            readyFiles: formData.readyFiles.slice(0, keepCount),
+            readyFileUrls: formData.readyFileUrls.slice(0, keepCount),
+            readyFile: formData.readyFiles[0] || null,
+            readyFileUrl: formData.readyFileUrls[0] || null,
+        });
+    };
 
     const handleUpload = async (file: File, index: number, isReadyFile: boolean) => {
         try {
-            const { data: { user } } = await supabase.auth.getUser();
-            if (!user) throw new Error("Unauthorized");
-
-            const path = storageService.generatePath(user.id, file.name);
-            const bucket = "banners"; // Using existing bucket for simplicity
-
-            await storageService.uploadFile(file, bucket, path);
+            const extension = file.name.split(".").pop()?.toLowerCase() || "";
+            if (!BANNER_ALLOWED_EXTENSIONS.has(extension)) {
+                throw new Error("Use a PNG, JPG, PDF, AI, FIG, or SVG file.");
+            }
+            if (file.size > BANNER_MAX_FILE_SIZE_MB * 1024 * 1024) {
+                throw new Error(`Files must not exceed ${BANNER_MAX_FILE_SIZE_MB}MB.`);
+            }
+            const uploadForm = new FormData();
+            uploadForm.set("file", file);
+            uploadForm.set("category", isReadyFile ? "artwork" : "reference");
+            if (isReadyFile) {
+                const standardDimensions = formData.size.split("x").map((value) => Number(value));
+                const targetWidth = formData.isCustom ? Number(formData.customWidth) : standardDimensions[0];
+                const targetHeight = formData.isCustom ? Number(formData.customHeight) : standardDimensions[1];
+                if (targetWidth > 0 && targetHeight > 0) {
+                    uploadForm.set("targetWidth", String(targetWidth));
+                    uploadForm.set("targetHeight", String(targetHeight));
+                }
+            }
+            const response = await fetch("/api/banners/upload", { method: "POST", body: uploadForm });
+            const payload = await response.json().catch(() => ({}));
+            if (!response.ok) throw new Error(payload.error || "The print file could not be uploaded.");
+            const path = String(payload.storagePath || "");
+            if (!path) throw new Error("The uploaded file did not return a storage path.");
 
             // For now we store the path, but in a real app we might want the signed URL or public URL
             if (isReadyFile) {
                 updateFormData(prev => {
-                    const readyFile = prev.readyFile as AssetFile;
-                    if (readyFile) {
-                        readyFile.status = 'success';
+                    const readyFiles = [...prev.readyFiles] as AssetFile[];
+                    if (readyFiles[index]) {
+                        readyFiles[index] = Object.assign(readyFiles[index], {
+                            status: "success" as const,
+                            progress: 100,
+                            storagePath: path,
+                            // Keep the instant blob preview. Replacing it here
+                            // caused a visible broken image whenever a storage
+                            // URL had not propagated yet. Restored drafts use
+                            // the authenticated preview route from the server.
+                            preview: readyFiles[index].preview || payload.previewUrl,
+                        });
                     }
+                    const readyFileUrls = readyFiles.map((item) => item.storagePath).filter((item): item is string => Boolean(item));
                     return {
                         ...prev,
-                        readyFileUrl: path,
-                        readyFile: readyFile
+                        readyFiles,
+                        readyFileUrls,
+                        readyFile: readyFiles[0] || null,
+                        readyFileUrl: readyFileUrls[0] || null,
                     };
                 });
             } else {
@@ -62,13 +119,14 @@ export const Step2_VisualExecution = ({ formData, updateFormData, onNext, onPrev
             }
         } catch (error) {
             console.error("Upload failed:", error);
+            void appAlert(error instanceof Error ? error.message : "The artwork could not be uploaded.");
             if (isReadyFile) {
                 updateFormData(prev => {
-                    const readyFile = prev.readyFile as AssetFile;
-                    if (readyFile) {
-                        readyFile.status = 'error';
+                    const readyFiles = [...prev.readyFiles] as AssetFile[];
+                    if (readyFiles[index]) {
+                        readyFiles[index] = Object.assign(readyFiles[index], { status: "error" as const });
                     }
-                    return { ...prev, readyFile };
+                    return { ...prev, readyFiles, readyFile: readyFiles[0] || null };
                 });
             } else {
                 updateFormData(prev => {
@@ -120,7 +178,7 @@ export const Step2_VisualExecution = ({ formData, updateFormData, onNext, onPrev
                         )}
                     >
                         <Edit3 className="w-4 h-4 xl:w-4.5 xl:h-4.5 2xl:w-5 2xl:h-5" />
-                        <span className="truncate">Create New Design</span>
+                        <span className="truncate">Create New Design{formData.isCustom ? " · added to quote" : designService ? ` · ${formatMoney(bannerPrice(designService.prices, currency), currency)}` : ""}</span>
                     </button>
                 </div>
             </div>
@@ -128,16 +186,29 @@ export const Step2_VisualExecution = ({ formData, updateFormData, onNext, onPrev
             {/* Sub-Views based on executionMode */}
             {formData.executionMode === "Upload" ? (
                 <div className="space-y-6 xl:space-y-8 2xl:space-y-10 animate-in fade-in slide-in-from-bottom-2 duration-500">
+                    <div className="rounded-[18px] border border-blue-100 bg-blue-50/70 p-4 sm:flex sm:items-center sm:justify-between sm:gap-5">
+                        <div>
+                            <h3 className="text-[13px] font-bold text-[#0D1B39]">How many printed banners do you need?</h3>
+                            <p className="mt-1 text-[11px] leading-5 text-slate-500">Upload one finished design for every banner. Quantity {quantity} requires {quantity} design{quantity === 1 ? "" : "s"}.</p>
+                        </div>
+                        <div className="mt-3 flex h-11 min-w-[168px] items-center rounded-2xl border border-blue-100 bg-white p-1 sm:mt-0">
+                            <button type="button" onClick={() => changeQuantity(quantity - 1)} disabled={formData.isSubmitting || quantity <= 1} className="grid h-9 w-9 place-items-center rounded-xl text-slate-500 hover:bg-slate-50 disabled:opacity-30" aria-label="Decrease banner quantity"><Minus className="h-4 w-4" /></button>
+                            <input type="number" min="1" max="1000" value={quantity} onChange={(event) => changeQuantity(Number(event.target.value))} className="min-w-0 flex-1 bg-transparent text-center text-[14px] font-bold text-[#0D1B39] outline-none" aria-label="Banner quantity" />
+                            <button type="button" onClick={() => changeQuantity(quantity + 1)} disabled={formData.isSubmitting || quantity >= 1000} className="grid h-9 w-9 place-items-center rounded-xl text-[#0A4FE8] hover:bg-blue-50 disabled:opacity-30" aria-label="Increase banner quantity"><Plus className="h-4 w-4" /></button>
+                        </div>
+                    </div>
                     {/* Upload Zone */}
                     <div className="space-y-3 xl:space-y-4 2xl:space-y-6">
+                        <div className="flex items-center justify-between text-[11px] font-semibold"><span className="text-slate-500">Print-ready designs</span><span className={completedArtworkCount === quantity ? "text-emerald-600" : "text-[#0A4FE8]"}>{completedArtworkCount} of {quantity} uploaded</span></div>
                         <AssetHub
-                            files={formData.readyFile ? [formData.readyFile as AssetFile] : []}
-                            onUpdateFiles={(files) => updateFormData({ readyFile: files[0] || null })}
+                            files={formData.readyFiles as AssetFile[]}
+                            onUpdateFiles={syncReadyFiles}
                             onFileAdded={(file, idx) => handleUpload(file, idx, true)}
                             acceptedTypes={BANNER_ACCEPTED_TYPES}
                             description={BANNER_MIME_DESCRIPTION}
-                            maxFiles={1}
-                            title="Drop your print-ready file here"
+                            maxSizeMB={BANNER_MAX_FILE_SIZE_MB}
+                            maxFiles={quantity}
+                            title={`Drop ${quantity === 1 ? "your print-ready design" : `up to ${quantity} print-ready designs`} here`}
                             icon="folder"
                             className="h-[140px] 2xl:h-[180px]"
                         />
@@ -148,10 +219,10 @@ export const Step2_VisualExecution = ({ formData, updateFormData, onNext, onPrev
                         <h4 className="text-brand-navy text-[13px] xl:text-[14px] 2xl:text-[16px] font-bold">Print Requirements:</h4>
                         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-1 gap-2 xl:gap-3 2xl:gap-4">
                             {[
-                                { label: "CMYK color mode", status: "ok" },
+                                { label: "RGB color mode", status: "ok" },
                                 { label: "300 DPI minimum resolution", status: "ok" },
                                 { label: "3mm bleed on all sides", status: "ok" },
-                                { label: "Accepted formats: PDF, AI, PSD, JPG/PNG", status: "warn" }
+                                { label: "Accepted formats: PNG, JPG, PDF, AI, FIG, SVG", status: "warn" }
                             ].map((req, i) => (
                                 <div key={i} className="flex items-center gap-2 xl:gap-2.5 2xl:gap-3">
                                     {req.status === "ok" ? (
@@ -174,8 +245,30 @@ export const Step2_VisualExecution = ({ formData, updateFormData, onNext, onPrev
                             disabled={formData.isSubmitting}
                             value={formData.designBrief}
                             onChange={(e) => updateFormData({ designBrief: e.target.value })}
-                            placeholder="Goals, audience, timeline, and references help us a lot."
+                            placeholder="Describe the goal, audience, tone, visual direction and where the banner will be used."
                             className="w-full h-24 xl:h-32 2xl:h-40 p-4 xl:p-5 2xl:p-6 rounded-[14px] 2xl:rounded-[24px] bg-brand-bg border border-transparent outline-none text-brand-navy text-[13px] xl:text-[14px] 2xl:text-[15px] font-medium placeholder:text-brand-mute focus:ring-2 focus:ring-brand-blue/20 transition-all resize-none disabled:opacity-50"
+                        />
+                    </div>
+
+                    <div className="space-y-3 xl:space-y-4">
+                        <h3 className="text-brand-navy text-[15px] xl:text-[16px] 2xl:text-[20px] font-bold">Exact content to include</h3>
+                        <textarea
+                            disabled={formData.isSubmitting}
+                            value={formData.designContent}
+                            onChange={(e) => updateFormData({ designContent: e.target.value })}
+                            placeholder="Paste the headline, body copy, dates, venue, phone numbers, website, call-to-action and any mandatory wording."
+                            className="w-full h-28 xl:h-32 p-4 xl:p-5 rounded-[14px] bg-brand-bg border border-transparent outline-none text-brand-navy text-[13px] xl:text-[14px] font-medium placeholder:text-brand-mute focus:ring-2 focus:ring-brand-blue/20 transition-all resize-none disabled:opacity-50"
+                        />
+                    </div>
+
+                    <div className="space-y-3 xl:space-y-4">
+                        <h3 className="text-brand-navy text-[15px] xl:text-[16px] 2xl:text-[20px] font-bold">Reference notes or links</h3>
+                        <textarea
+                            disabled={formData.isSubmitting}
+                            value={formData.referenceNotes}
+                            onChange={(e) => updateFormData({ referenceNotes: e.target.value })}
+                            placeholder="Add links to inspiration, brand guidelines or explain what to follow and what to avoid."
+                            className="w-full h-24 p-4 xl:p-5 rounded-[14px] bg-brand-bg border border-transparent outline-none text-brand-navy text-[13px] xl:text-[14px] font-medium placeholder:text-brand-mute focus:ring-2 focus:ring-brand-blue/20 transition-all resize-none disabled:opacity-50"
                         />
                     </div>
 
@@ -192,6 +285,7 @@ export const Step2_VisualExecution = ({ formData, updateFormData, onNext, onPrev
                             onFileAdded={(file, idx) => handleUpload(file, idx, false)}
                             acceptedTypes={BANNER_ACCEPTED_TYPES}
                             description={BANNER_MIME_DESCRIPTION}
+                            maxSizeMB={BANNER_MAX_FILE_SIZE_MB}
                             maxFiles={5}
                             title="Drop brand assets here"
                             icon="upload"
@@ -211,7 +305,7 @@ export const Step2_VisualExecution = ({ formData, updateFormData, onNext, onPrev
                 </button>
                 <button
                     onClick={onNext}
-                    disabled={formData.isSubmitting || (formData.executionMode === "Upload" && !formData.readyFile)}
+                    disabled={formData.isSubmitting || (formData.executionMode === "Upload" ? completedArtworkCount !== quantity : (!formData.designBrief.trim() || !formData.designContent.trim() || (!formData.isCustom && (!designService || bannerPrice(designService.prices, currency) <= 0))))}
                     className="flex-[2] h-[48px] xl:h-[52px] 2xl:h-[72px] bg-brand-blue rounded-full text-white font-bold text-[15px] xl:text-[16px] 2xl:text-[20px] hover:bg-brand-blue/90 transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-lg shadow-brand-blue/20"
                 >
                     Next Step

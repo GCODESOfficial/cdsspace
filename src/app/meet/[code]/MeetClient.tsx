@@ -6,18 +6,19 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import {
   Mic, MicOff, Video, VideoOff, PhoneOff, ScreenShare, ScreenShareOff,
-  MessageCircle, Send, Smile, X as XIcon, Loader2, Share2, Copy, Check,
-  Facebook, Linkedin, AtSign, Search, CircleStop, AlertTriangle, Users,
+  MessageCircle, Send, Smile, X as XIcon, Loader2, Check,
+  AtSign, Search, CircleStop, AlertTriangle, Users, Circle,
 } from "lucide-react";
 import { CMeetClient, type RemotePeer, type ChatMessage } from "@/lib/cmeet-rtc";
 import { appAlert } from "@/lib/app-notify";
+import { UniversalShareButton } from "@/components/share/UniversalShareButton";
 
 /* ------------------------------------------------------------------ */
 /*  Emoji hinting                                                     */
 /* ------------------------------------------------------------------ */
 const EMOJI_HINTS: Record<string, string[]> = {
   thanks: ["🙏", "💚", "🙌"],
-  great: ["🔥", "🚀", "✨"],
+  great: ["🔥", "🚀", "👏"],
   ship: ["🚢", "🚀"],
   lol: ["😂", "🤣"],
   love: ["❤️", "😍"],
@@ -113,6 +114,18 @@ export default function MeetRoomPage() {
   const [camOn, setCamOn] = useState(true);
   const [sharing, setSharing] = useState(false);
   const cameraTrackRef = useRef<MediaStreamTrack | null>(null); // kept so we can restore after screen-share
+  const sharingTrackRef = useRef<MediaStreamTrack | null>(null);
+  const localStreamRef = useRef<MediaStream | null>(null);
+
+  // Local recording. The recording never leaves the browser; stopping it
+  // immediately downloads the WebM/MP4 file to this device.
+  const [recording, setRecording] = useState(false);
+  const recorderRef = useRef<MediaRecorder | null>(null);
+  const recordingChunksRef = useRef<BlobPart[]>([]);
+  const recordingAudioContextRef = useRef<AudioContext | null>(null);
+  const recordingAudioTrackRef = useRef<MediaStreamTrack | null>(null);
+  const recordingStopResolverRef = useRef<(() => void) | null>(null);
+  const embeddedRef = useRef(false);
 
   // Peers
   const [remotes, setRemotes] = useState<RemotePeer[]>([]);
@@ -127,7 +140,6 @@ export default function MeetRoomPage() {
   const chatScrollRef = useRef<HTMLDivElement>(null);
 
   // Side panels
-  const [showShare, setShowShare] = useState(false);
   const [showTag, setShowTag] = useState(false);
   const [showEndConfirm, setShowEndConfirm] = useState(false);
   const [endingStream, setEndingStream] = useState(false);
@@ -135,6 +147,7 @@ export default function MeetRoomPage() {
   /* -------- Load meeting + session -------- */
   useEffect(() => {
     if (!code) return;
+    embeddedRef.current = new URLSearchParams(window.location.search).get("embed") === "1";
     (async () => {
       const r = await fetch(`/api/cmeet/${code}`, { cache: "no-store" });
       const j = await r.json();
@@ -150,6 +163,20 @@ export default function MeetRoomPage() {
       } catch { /* guest */ }
     })();
   }, [code]);
+
+  useEffect(() => {
+    localStreamRef.current = localStream;
+  }, [localStream]);
+
+  useEffect(() => {
+    const closeFromParent = (event: MessageEvent) => {
+      if (event.origin !== window.location.origin || event.data?.type !== "cmeet:request-close") return;
+      void hangUp();
+    };
+    window.addEventListener("message", closeFromParent);
+    return () => window.removeEventListener("message", closeFromParent);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   /* -------- Autoscroll chat -------- */
   useEffect(() => {
@@ -170,7 +197,10 @@ export default function MeetRoomPage() {
   useEffect(() => {
     return () => {
       try { clientRef.current?.leave(); } catch {}
-      localStream?.getTracks().forEach((t) => t.stop());
+      if (recorderRef.current?.state === "recording") recorderRef.current.stop();
+      localStreamRef.current?.getTracks().forEach((t) => t.stop());
+      sharingTrackRef.current?.stop();
+      cameraTrackRef.current?.stop();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -240,62 +270,164 @@ export default function MeetRoomPage() {
   }
 
   function toggleCam() {
-    if (!localStream) return;
+    if (!localStreamRef.current) return;
     const next = !camOn;
-    localStream.getVideoTracks().forEach((t) => (t.enabled = next));
+    const camera = cameraTrackRef.current;
+    if (camera) camera.enabled = next;
+    else localStreamRef.current.getVideoTracks().forEach((t) => (t.enabled = next));
     setCamOn(next);
+  }
+
+  async function stopScreenShare() {
+    const client = clientRef.current;
+    const currentStream = localStreamRef.current;
+    const sharedTrack = sharingTrackRef.current;
+    if (!client || !currentStream || !sharedTrack) return;
+    sharingTrackRef.current = null;
+    sharedTrack.onended = null;
+    try {
+      let cameraTrack = cameraTrackRef.current;
+      if (!cameraTrack || cameraTrack.readyState !== "live") {
+        const fresh = await navigator.mediaDevices.getUserMedia({ video: true });
+        cameraTrack = fresh.getVideoTracks()[0];
+        cameraTrackRef.current = cameraTrack;
+      }
+      cameraTrack.enabled = camOn;
+      await client.replaceVideoTrack(cameraTrack, { sharing: false });
+      sharedTrack.stop();
+      const nextStream = new MediaStream([...currentStream.getAudioTracks(), cameraTrack]);
+      localStreamRef.current = nextStream;
+      setLocalStream(nextStream);
+      setSharing(false);
+    } catch (error) {
+      sharingTrackRef.current = sharedTrack;
+      console.error("Stop share failed", error);
+    }
   }
 
   async function toggleShare() {
     const client = clientRef.current;
-    if (!client || !localStream) return;
-
-    if (sharing) {
-      // Stop screen share, restore camera track
-      try {
-        let camTrack = cameraTrackRef.current;
-        if (!camTrack || camTrack.readyState !== "live") {
-          const fresh = await navigator.mediaDevices.getUserMedia({ video: true });
-          camTrack = fresh.getVideoTracks()[0];
-          cameraTrackRef.current = camTrack;
-        }
-        await client.replaceVideoTrack(camTrack, { sharing: false });
-
-        // Update the local MediaStream so our preview swaps back
-        const current = localStream.getVideoTracks()[0];
-        if (current) {
-          try { current.stop(); } catch {}
-          localStream.removeTrack(current);
-        }
-        localStream.addTrack(camTrack);
-        // Force a new reference so VideoTile useEffect re-binds
-        setLocalStream(new MediaStream(localStream.getTracks()));
-        setSharing(false);
-      } catch (e) {
-        console.error("Stop share failed", e);
-      }
+    const currentStream = localStreamRef.current;
+    if (!client || !currentStream) return;
+    if (sharingTrackRef.current) {
+      await stopScreenShare();
       return;
     }
 
     try {
       const disp = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: false });
       const shareTrack: MediaStreamTrack = disp.getVideoTracks()[0];
-      shareTrack.onended = () => { toggleShare(); };
+      shareTrack.contentHint = "detail";
+      const cameraTrack = currentStream.getVideoTracks()[0];
+      if (cameraTrack && cameraTrack !== sharingTrackRef.current) cameraTrackRef.current = cameraTrack;
+      sharingTrackRef.current = shareTrack;
+      shareTrack.onended = () => { void stopScreenShare(); };
 
       await client.replaceVideoTrack(shareTrack, { sharing: true });
-
-      // Replace the video track in our local preview stream
-      const prev = localStream.getVideoTracks()[0];
-      if (prev) {
-        localStream.removeTrack(prev);
-        // Keep the camera track alive so we can swap back
-        cameraTrackRef.current = prev;
-      }
-      localStream.addTrack(shareTrack);
-      setLocalStream(new MediaStream(localStream.getTracks()));
+      const nextStream = new MediaStream([...currentStream.getAudioTracks(), shareTrack]);
+      localStreamRef.current = nextStream;
+      setLocalStream(nextStream);
       setSharing(true);
     } catch (e) {
+      const failedTrack = sharingTrackRef.current;
+      if (failedTrack) {
+        failedTrack.onended = null;
+        failedTrack.stop();
+      }
+      sharingTrackRef.current = null;
       console.warn("Screen share cancelled", e);
+    }
+  }
+
+  function stopRecording(): Promise<void> {
+    const recorder = recorderRef.current;
+    if (!recorder || recorder.state === "inactive") return Promise.resolve();
+    return new Promise((resolve) => {
+      recordingStopResolverRef.current = resolve;
+      try {
+        recorder.stop();
+      } catch {
+        recordingStopResolverRef.current = null;
+        resolve();
+      }
+    });
+  }
+
+  async function startRecording() {
+    if (recorderRef.current?.state === "recording") return;
+    if (typeof MediaRecorder === "undefined") {
+      await appAlert("Call recording is not supported by this browser.");
+      return;
+    }
+    const streams = [localStreamRef.current, ...remotes.map((peer) => peer.stream)].filter(Boolean) as MediaStream[];
+    const output = new MediaStream();
+    const featured = remoteSharing?.stream || (sharingTrackRef.current ? localStreamRef.current : remotes[0]?.stream) || localStreamRef.current;
+    const videoTrack = featured?.getVideoTracks()[0];
+    if (videoTrack) output.addTrack(videoTrack);
+
+    const audioContext = new AudioContext();
+    const destination = audioContext.createMediaStreamDestination();
+    for (const stream of streams) {
+      const audioTracks = stream.getAudioTracks().filter((track) => track.readyState === "live");
+      if (!audioTracks.length) continue;
+      const source = audioContext.createMediaStreamSource(new MediaStream(audioTracks));
+      source.connect(destination);
+    }
+    const mixedAudio = destination.stream.getAudioTracks()[0];
+    if (mixedAudio) {
+      output.addTrack(mixedAudio);
+      recordingAudioTrackRef.current = mixedAudio;
+    }
+    await audioContext.resume().catch(() => undefined);
+    recordingAudioContextRef.current = audioContext;
+
+    const mimeType = (videoTrack ? [
+      "video/webm;codecs=vp9,opus",
+      "video/webm;codecs=vp8,opus",
+      "video/webm",
+      "video/mp4",
+    ] : [
+      "audio/webm;codecs=opus",
+      "audio/webm",
+      "audio/mp4",
+    ]).find((type) => MediaRecorder.isTypeSupported(type));
+    try {
+      const recorder = new MediaRecorder(output, mimeType ? { mimeType, videoBitsPerSecond: 2_000_000 } : undefined);
+      recordingChunksRef.current = [];
+      recorder.ondataavailable = (event) => { if (event.data.size) recordingChunksRef.current.push(event.data); };
+      recorder.onstop = () => {
+        const type = recorder.mimeType || mimeType || "video/webm";
+        const blob = new Blob(recordingChunksRef.current, { type });
+        if (blob.size) {
+          const objectUrl = URL.createObjectURL(blob);
+          const anchor = document.createElement("a");
+          const safeTitle = (meeting?.title || "cmeet-call").replace(/[^a-z0-9]+/gi, "-").replace(/^-|-$/g, "").toLowerCase();
+          anchor.href = objectUrl;
+          const extension = type.includes("mp4") ? (videoTrack ? "mp4" : "m4a") : "webm";
+          anchor.download = `${safeTitle || "cmeet-call"}-${new Date().toISOString().replace(/[:.]/g, "-")}.${extension}`;
+          document.body.appendChild(anchor);
+          anchor.click();
+          anchor.remove();
+          window.setTimeout(() => URL.revokeObjectURL(objectUrl), 30_000);
+        }
+        recordingChunksRef.current = [];
+        recordingAudioTrackRef.current?.stop();
+        recordingAudioTrackRef.current = null;
+        void recordingAudioContextRef.current?.close();
+        recordingAudioContextRef.current = null;
+        recorderRef.current = null;
+        setRecording(false);
+        recordingStopResolverRef.current?.();
+        recordingStopResolverRef.current = null;
+      };
+      recorderRef.current = recorder;
+      recorder.start(1_000);
+      setRecording(true);
+    } catch (error) {
+      recordingAudioTrackRef.current?.stop();
+      void audioContext.close();
+      recordingAudioContextRef.current = null;
+      await appAlert(error instanceof Error ? error.message : "The recording could not start.");
     }
   }
 
@@ -306,14 +438,19 @@ export default function MeetRoomPage() {
     setChatInput("");
   }
 
-  function hangUp(opts?: { notice?: string }) {
+  async function hangUp(opts?: { notice?: string }) {
+    await stopRecording();
     try { clientRef.current?.leave(); } catch {}
-    localStream?.getTracks().forEach((t) => t.stop());
+    localStreamRef.current?.getTracks().forEach((t) => t.stop());
     if (cameraTrackRef.current) { try { cameraTrackRef.current.stop(); } catch {} }
     clientRef.current = null;
     setJoined(false);
     if (opts?.notice) appAlert(opts.notice);
-    router.push("/team/cmeet");
+    if (embeddedRef.current && window.parent !== window) {
+      window.parent.postMessage({ type: "cmeet:close" }, window.location.origin);
+    } else {
+      router.push("/team/cmeet");
+    }
   }
 
   async function endStreamForEveryone() {
@@ -322,7 +459,7 @@ export default function MeetRoomPage() {
     try {
       await fetch(`/api/cmeet/${code}`, { method: "DELETE" });
       try { clientRef.current?.sendChat("__host_ended_stream__"); } catch {}
-      hangUp();
+      await hangUp();
     } finally {
       setEndingStream(false);
     }
@@ -531,8 +668,20 @@ export default function MeetRoomPage() {
           <ControlButton onClick={toggleShare} active={sharing} icon={sharing ? <ScreenShareOff className="w-4 h-4" /> : <ScreenShare className="w-4 h-4" />} title={sharing ? "Stop sharing" : "Share your screen"} />
         )}
         <ControlButton onClick={() => setShowChat(!showChat)} active={showChat} icon={<MessageCircle className="w-4 h-4" />} title="Chat" />
+        <ControlButton
+          onClick={() => { if (recording) void stopRecording(); else void startRecording(); }}
+          active={recording}
+          icon={recording ? <CircleStop className="w-4 h-4" /> : <Circle className="w-4 h-4" />}
+          title={recording ? "Stop and save recording" : "Record this call to your device"}
+        />
         <ControlButton onClick={() => setShowTag(true)} active={showTag} icon={<AtSign className="w-4 h-4" />} title="Tag teammates" />
-        <ControlButton onClick={() => setShowShare(true)} active={false} icon={<Share2 className="w-4 h-4" />} title="Share live" />
+        <UniversalShareButton
+          title={meeting.title}
+          text={`Join the live meeting "${meeting.title}" on CDS Space cMeet.`}
+          url={`/meet/${code}`}
+          label=""
+          className="h-9 min-h-9 w-9 rounded-full border-white/10 bg-white/5 p-0 text-white shadow-none hover:border-white/20 hover:bg-white/10"
+        />
         {canEndStream && (
           <button
             onClick={() => setShowEndConfirm(true)}
@@ -542,12 +691,11 @@ export default function MeetRoomPage() {
             <CircleStop className="w-4 h-4" /> End stream
           </button>
         )}
-        <button onClick={() => hangUp()} className="ml-2 inline-flex items-center gap-1.5 px-4 py-2 rounded-full bg-rose-600 text-white text-[12.5px] font-semibold">
+        <button onClick={() => void hangUp()} className="ml-2 inline-flex items-center gap-1.5 px-4 py-2 rounded-full bg-rose-600 text-white text-[12.5px] font-semibold">
           <PhoneOff className="w-4 h-4" /> Leave
         </button>
       </footer>
 
-      {showShare && <ShareLiveModal title={meeting.title} code={code!} onClose={() => setShowShare(false)} />}
       {showTag && <TagMembersModal code={code!} onClose={() => setShowTag(false)} />}
       {showEndConfirm && (
         <EndStreamConfirm
@@ -755,63 +903,6 @@ function TagMembersModal({ code, onClose }: { code: string; onClose: () => void 
           <button onClick={send} disabled={picked.size === 0 || sending} className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-[#0A4FE8] text-white text-[12.5px] font-semibold hover:bg-[#083EC0] transition disabled:opacity-50">
             {sending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}
             Notify
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-/* ------------------------------------------------------------------ */
-/*  Share live modal                                                  */
-/* ------------------------------------------------------------------ */
-function ShareLiveModal({ title, code, onClose }: { title: string; code: string; onClose: () => void }) {
-  const [copied, setCopied] = useState(false);
-  const url = typeof window !== "undefined" ? `${window.location.origin}/meet/${code}` : `/meet/${code}`;
-  const text = `Join the live meeting "${title}" on CDS Space cMeet: ${url}`;
-
-  async function copy() {
-    await navigator.clipboard.writeText(url);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 1500);
-  }
-  function open(href: string) { window.open(href, "_blank", "noopener,noreferrer,width=640,height=640"); }
-  async function nativeShare() {
-    if (navigator.share) {
-      try { await navigator.share({ title, text, url }); } catch {}
-    } else {
-      copy();
-    }
-  }
-
-  return (
-    <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4" onClick={onClose}>
-      <div className="bg-white text-[#0D1B39] rounded-2xl shadow-2xl w-full max-w-sm" onClick={(e) => e.stopPropagation()}>
-        <div className="px-5 py-4 border-b border-gray-100 flex items-center justify-between">
-          <div>
-            <h3 className="text-[14px] font-semibold">Share live meeting</h3>
-            <p className="text-[11px] text-gray-400 mt-0.5">Anyone with this link can join.</p>
-          </div>
-          <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-gray-50"><XIcon className="w-4 h-4 text-gray-400" /></button>
-        </div>
-        <div className="p-5 space-y-4">
-          <div className="rounded-xl border border-gray-100 bg-gray-50 px-3 py-2 flex items-center gap-2">
-            <Share2 className="w-3.5 h-3.5 text-[#0A4FE8] shrink-0" />
-            <input readOnly value={url} onClick={(e) => (e.target as HTMLInputElement).select()} className="flex-1 bg-transparent font-mono text-[11px] outline-none truncate" />
-            <button onClick={copy} className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-[#0A4FE8] text-white text-[11px] font-medium">
-              {copied ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />} {copied ? "Copied" : "Copy"}
-            </button>
-          </div>
-          <div className="grid grid-cols-2 gap-2">
-            <button onClick={() => open(`https://wa.me/?text=${encodeURIComponent(text)}`)} className="inline-flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-xl border border-[#25D366]/40 bg-white text-[#128C7E] text-[12px] font-medium hover:bg-[#25D366]/10"><MessageCircle className="w-3.5 h-3.5" /> WhatsApp</button>
-            <button onClick={() => open(`https://t.me/share/url?url=${encodeURIComponent(url)}&text=${encodeURIComponent(text)}`)} className="inline-flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-xl border border-[#229ED9]/40 bg-white text-[#229ED9] text-[12px] font-medium hover:bg-[#229ED9]/10"><Send className="w-3.5 h-3.5" /> Telegram</button>
-            <button onClick={() => open(`https://twitter.com/intent/tweet?text=${encodeURIComponent(text)}`)} className="inline-flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-xl border border-gray-200 bg-white text-[#0D1B39] text-[12px] font-medium hover:bg-gray-50">X / Twitter</button>
-            <button onClick={() => open(`https://www.linkedin.com/sharing/share-offsite/?url=${encodeURIComponent(url)}`)} className="inline-flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-xl border border-[#0A66C2]/40 bg-white text-[#0A66C2] text-[12px] font-medium hover:bg-[#0A66C2]/10"><Linkedin className="w-3.5 h-3.5" /> LinkedIn</button>
-            <button onClick={() => open(`https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(url)}`)} className="inline-flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-xl border border-[#1877F2]/40 bg-white text-[#1877F2] text-[12px] font-medium hover:bg-[#1877F2]/10"><Facebook className="w-3.5 h-3.5" /> Facebook</button>
-            <button onClick={() => open(`mailto:?subject=${encodeURIComponent("Join me on cMeet")}&body=${encodeURIComponent(text)}`)} className="inline-flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-xl border border-gray-200 bg-white text-gray-600 text-[12px] font-medium hover:bg-gray-50">Email</button>
-          </div>
-          <button onClick={nativeShare} className="w-full inline-flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-xl bg-[#0A4FE8] text-white text-[12.5px] font-semibold">
-            <Share2 className="w-3.5 h-3.5" /> More (native share)
           </button>
         </div>
       </div>

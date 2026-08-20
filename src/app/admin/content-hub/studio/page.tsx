@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Upload, Loader2, Sparkles, Clapperboard, Plus, Scissors } from "lucide-react";
+import { Upload, Loader2, PackagePlus, Clapperboard, Plus, Scissors } from "lucide-react";
 import { appAlert } from "@/lib/app-notify";
 import ContentHubShell from "@/components/content-hub/ContentHubShell";
 import { CLIP_COUNTS, CLIP_TYPES, type MediaKind } from "@/lib/content-hub/shared";
@@ -99,7 +99,7 @@ export default function BsdStudioPage() {
 
           <textarea value={note} onChange={(e) => setNote(e.target.value)} rows={3} placeholder="What did this BSD cover? (topic, key points, speaker)..." className="mt-3 w-full resize-y rounded-xl border border-gray-200 bg-gray-50 px-3 py-2.5 text-[13px] text-[#0D1B39] outline-none focus:border-blue-300 focus:bg-white focus:ring-2 focus:ring-blue-100" />
           <button onClick={generatePackage} disabled={busy === "package"} className="mt-3 inline-flex h-11 items-center gap-2 rounded-xl bg-[#0A4FE8] px-5 text-[13.5px] font-bold text-white hover:bg-[#083EC0] disabled:opacity-60">
-            {busy === "package" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />} Generate package
+            {busy === "package" ? <Loader2 className="h-4 w-4 animate-spin" /> : <PackagePlus className="h-4 w-4" />} Generate package
           </button>
 
           {pkg && (
@@ -186,7 +186,7 @@ function PackageBlock({ label, text, onSave }: { label: string; text: string; on
         <span className="text-[12px] font-bold text-[#0D1B39]">{label}</span>
         <button onClick={onSave} className="inline-flex items-center gap-1 text-[11.5px] font-semibold text-[#0A4FE8] hover:underline"><Plus className="h-3.5 w-3.5" /> Save to library</button>
       </div>
-      <pre className="max-h-40 overflow-y-auto whitespace-pre-wrap text-[12px] leading-5 text-[#0D1B39]">{text}</pre>
+      <div className="max-h-40 overflow-y-auto whitespace-pre-wrap break-words text-[13px] leading-6 text-[#0D1B39]">{text}</div>
     </div>
   );
 }

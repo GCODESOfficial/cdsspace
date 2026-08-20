@@ -125,7 +125,7 @@ export async function POST(req: Request) {
   // target === "client"
   // Only admin can forward INTO a client room
   if (viewer.kind !== "admin") {
-    return NextResponse.json({ ok: false, error: "Only admin can forward to client chat" }, { status: 403 });
+    return NextResponse.json({ ok: false, error: "Only admin can forward to Chat/Meet" }, { status: 403 });
   }
   // target_id must look like a client room id "client_{uuid}"
   if (!/^client_/.test(String(target_id))) {
@@ -148,5 +148,15 @@ export async function POST(req: Request) {
     .select("id")
     .single();
   if (insErr) return NextResponse.json({ ok: false, error: insErr.message }, { status: 500 });
+  const clientUserId = String(target_id).slice("client_".length);
+  if (/^[0-9a-f-]{36}$/i.test(clientUserId)) {
+    await db.from("notifications").insert({
+      user_id: clientUserId,
+      type: "new_message",
+      title: "New message from CDS Space",
+      message: originalBody.length > 100 ? `${originalBody.slice(0, 100)}...` : originalBody || "Attachment",
+      link: "/dashboard/messages",
+    });
+  }
   return NextResponse.json({ ok: true, message_id: inserted.id });
 }

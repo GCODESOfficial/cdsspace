@@ -1,28 +1,63 @@
 'use client';
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { Footer } from "@/components/layout/Footer";
 import InvoiceDocument from "@/components/finance/InvoiceDocument";
+import InvoicePaymentPanel from "@/components/finance/InvoicePaymentPanel";
+import { UniversalShareButton } from "@/components/share/UniversalShareButton";
 import { Button } from "@/components/ui/button";
-import { Download, Share2 } from "lucide-react";
-import type { FinanceInvoice, FinanceInvoiceItem } from "@/lib/finance/types";
+import { Check, Download, Loader2, TicketCheck } from "lucide-react";
+import type { FinanceBankAccount, FinanceInvoice, FinanceInvoiceItem, FinanceReceipt, InvoicePaymentSubmission } from "@/lib/finance/types";
 import { buildInvoiceShareMessage } from "@/lib/finance/share";
-import { appToast } from "@/lib/app-notify";
 
 export default function PublicInvoiceClient({ token }: { token: string }) {
   const sp = useSearchParams();
   const [invoice, setInvoice] = useState<FinanceInvoice | null>(null);
   const [items, setItems] = useState<FinanceInvoiceItem[]>([]);
+  const [paymentSubmission, setPaymentSubmission] = useState<InvoicePaymentSubmission | null>(null);
+  const [receipt, setReceipt] = useState<FinanceReceipt | null>(null);
+  const [bankAccounts, setBankAccounts] = useState<FinanceBankAccount[]>([]);
+  const [paystackAvailable, setPaystackAvailable] = useState(false);
   const [notFound, setNotFound] = useState(false);
   const [isDownloading, setIsDownloading] = useState(false);
+  const [marketerCode, setMarketerCode] = useState("");
+  const [marketerSaving, setMarketerSaving] = useState(false);
+  const [marketerMessage, setMarketerMessage] = useState("");
+  const [marketerError, setMarketerError] = useState("");
+
+  const refreshInvoice = useCallback(async (initial = false) => {
+    try {
+      const response = await fetch(`/api/finance/invoice/${token}`, { cache: "no-store" });
+      if (!response.ok) throw new Error("Invoice not found");
+      const data = await response.json();
+      setInvoice(data.invoice);
+      setItems(data.items ?? []);
+      setPaymentSubmission(data.paymentSubmission ?? null);
+      setReceipt(data.receipt ?? null);
+      setBankAccounts(data.bankAccounts ?? []);
+      setPaystackAvailable(data.paymentOptions?.paystack === true);
+      setMarketerCode((current) => current || data.invoice?.marketer_code || "");
+      setNotFound(false);
+    } catch {
+      if (initial) setNotFound(true);
+    }
+  }, [token]);
 
   useEffect(() => {
-    fetch(`/api/finance/invoice/${token}`)
-      .then((r) => r.ok ? r.json() : Promise.reject())
-      .then((d) => { setInvoice(d.invoice); setItems(d.items ?? []); })
-      .catch(() => setNotFound(true));
-  }, [token]);
+    void refreshInvoice(true);
+    const interval = window.setInterval(() => void refreshInvoice(false), 10_000);
+    const refreshVisible = () => {
+      if (document.visibilityState === "visible") void refreshInvoice(false);
+    };
+    document.addEventListener("visibilitychange", refreshVisible);
+    window.addEventListener("focus", refreshVisible);
+    return () => {
+      window.clearInterval(interval);
+      document.removeEventListener("visibilitychange", refreshVisible);
+      window.removeEventListener("focus", refreshVisible);
+    };
+  }, [refreshInvoice]);
 
   useEffect(() => {
     if (invoice && sp.get("print") === "1") {
@@ -37,13 +72,25 @@ export default function PublicInvoiceClient({ token }: { token: string }) {
       // Direct jsPDF render - no html2canvas, no CORS image loads, no hangs.
       // Loaded on demand so jsPDF stays out of the initial page bundle.
       const { exportInvoiceToPdf } = await import("@/lib/invoice-pdf");
-      exportInvoiceToPdf(invoice, items);
+      exportInvoiceToPdf(invoice, items, { bankAccounts });
     } catch (error) {
       console.error("Failed to generate PDF:", error);
       window.print();
     } finally {
       setIsDownloading(false);
     }
+  };
+
+  const saveMarketerCode = async () => {
+    if (!invoice || !marketerCode.trim()) return;
+    setMarketerSaving(true); setMarketerError(""); setMarketerMessage("");
+    const response = await fetch(`/api/finance/invoice/${token}/marketer-code`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ code: marketerCode }) });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok) { setMarketerError(result.error || "Could not apply the code."); setMarketerSaving(false); return; }
+    setMarketerCode(result.marketer.code);
+    setInvoice({ ...invoice, marketer_code: result.marketer.code, marketer_attributed_at: result.attribution.marketer_attributed_at });
+    setMarketerMessage(`${result.marketer.name} will receive a commission when this invoice is recorded as paid.`);
+    setMarketerSaving(false);
   };
 
   if (notFound) {
@@ -86,30 +133,18 @@ export default function PublicInvoiceClient({ token }: { token: string }) {
           }
         }
       `}</style>
-      <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-blue-50 py-10 px-4 print:bg-white print:py-0 print:px-0">
+      <div className="min-h-screen bg-[#F5F8FF] py-10 px-4 print:bg-white print:py-0 print:px-0">
         <div className="max-w-[820px] mx-auto mb-6 flex justify-end gap-2 no-print">
-          <Button 
-            variant="outline"
-            onClick={() => {
-              const shareText = buildInvoiceShareMessage(invoice?.invoice_number, window.location.href);
-              if (navigator.share) {
-                navigator.share({
-                  title: `Invoice ${invoice?.invoice_number || ""}`,
-                  text: shareText,
-                }).catch(() => {});
-              } else {
-                navigator.clipboard.writeText(shareText);
-                appToast({ message: "Invoice link copied to clipboard", kind: "success" });
-              }
-            }}
+          <UniversalShareButton
+            title={`Invoice ${invoice?.invoice_number || ""}`.trim()}
+            text={buildInvoiceShareMessage(invoice?.invoice_number, "").trim()}
+            url={`/invoice/${token}`}
             className="h-11 px-5 rounded-xl border-blue-200 text-blue-700 hover:bg-blue-50"
-          >
-            <Share2 className="w-4 h-4 mr-1.5" /> Share
-          </Button>
+          />
           <Button 
             onClick={handleDownload} 
             disabled={isDownloading}
-            className="h-11 px-5 rounded-xl bg-gradient-to-b from-blue-600 to-blue-700 shadow-lg shadow-blue-600/30 disabled:opacity-70"
+            className="h-11 px-5 rounded-xl bg-[#0A4FE8] shadow-lg shadow-blue-600/30 disabled:opacity-70"
           >
             {isDownloading ? (
               <span className="flex items-center gap-2">
@@ -123,8 +158,34 @@ export default function PublicInvoiceClient({ token }: { token: string }) {
             )}
           </Button>
         </div>
+        {invoice && (
+          <InvoicePaymentPanel
+            token={token}
+            invoice={invoice}
+            submission={paymentSubmission}
+            receipt={receipt}
+            bankAccounts={bankAccounts}
+            paystackAvailable={paystackAvailable}
+            onSubmitted={setPaymentSubmission}
+          />
+        )}
+        {invoice && invoice.status !== "paid" && invoice.status !== "cancelled" && paymentSubmission?.status !== "pending" && paymentSubmission?.status !== "confirmed" && (
+          <section className="no-print mx-auto mb-6 max-w-[820px] rounded-[16px] border border-blue-100 bg-white p-5 shadow-[0_12px_34px_rgba(15,40,90,0.07)]">
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-end">
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-2 text-[#0D1B39]"><TicketCheck className="size-5 text-blue-600" /><h2 className="text-[14px] font-semibold">Were you referred by a CDS Space Brand Marketer?</h2></div>
+                <p className="mt-1.5 text-[11px] leading-5 text-gray-500">Enter their code before payment. Once this invoice is paid, a commission is credited to that marketer.</p>
+                <input value={marketerCode} onChange={(event) => { setMarketerCode(event.target.value.toUpperCase().replace(/[^A-Z0-9]/g, "")); setMarketerError(""); setMarketerMessage(""); }} placeholder="e.g. CHRIS" className="mt-3 h-11 w-full rounded-[12px] border border-gray-200 px-4 font-mono text-[13px] font-bold tracking-[.08em] outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-100" />
+              </div>
+              <button onClick={saveMarketerCode} disabled={marketerSaving || !marketerCode} className="flex h-11 shrink-0 items-center justify-center gap-2 rounded-[12px] bg-blue-600 px-5 text-[12px] font-semibold text-white disabled:opacity-50">{marketerSaving ? <Loader2 className="size-4 animate-spin" /> : <Check className="size-4" />}{invoice.marketer_code ? "Update code" : "Apply code"}</button>
+            </div>
+            {marketerMessage && <p className="mt-3 rounded-[10px] bg-emerald-50 px-3 py-2 text-[11px] font-medium text-emerald-700">{marketerMessage}</p>}
+            {marketerError && <p className="mt-3 rounded-[10px] bg-red-50 px-3 py-2 text-[11px] font-medium text-red-600">{marketerError}</p>}
+            {invoice.marketer_code && !marketerMessage && <p className="mt-3 rounded-[10px] bg-blue-50 px-3 py-2 text-[11px] font-medium text-blue-700">Marketer code <span className="font-mono font-bold">{invoice.marketer_code}</span> is attached to this invoice.</p>}
+          </section>
+        )}
         <div id="invoice-capture" className="print-container mx-auto">
-          {invoice && <InvoiceDocument invoice={invoice} items={items} />}
+          {invoice && <InvoiceDocument invoice={invoice} items={items} bankAccounts={bankAccounts} />}
         </div>
       </div>
       <div className="no-print"><Footer /></div>

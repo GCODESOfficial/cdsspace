@@ -19,6 +19,8 @@
 import nodemailer from "nodemailer";
 import { createResendHttpTransport } from "@/lib/resend-transport";
 import { createGmailApiTransport, gmailApiCredsFromEnv, verifyGmailApi } from "@/lib/gmail-api-transport";
+import { EMAIL_LOGO_CID, emailLogoAttachment } from "@/lib/email-logo";
+import { glashQuery } from "@/lib/glashdb/postgres";
 
 export const EMAIL_FROM = process.env.EMAIL_FROM || "support@cdsspace.pro";
 
@@ -73,6 +75,20 @@ export interface SendEmailInput {
   replyTo?: string;
   /** Reuse an open transport across a batch instead of opening one per email. */
   transporter?: ReturnType<typeof createEmailTransport>;
+  /** Optional inline or downloadable attachments supplied by the caller. */
+  attachments?: Array<{
+    filename: string;
+    content: Buffer | string;
+    contentType?: string;
+    cid?: string;
+  }>;
+  /**
+   * When set, this email is a repetitive notification that should be COMPOUNDED
+   * rather than sent immediately. It is queued and the notification-digest cron
+   * groups all items of the same category per recipient into one email. Set
+   * EMAIL_DIGEST=off to disable and send everything immediately.
+   */
+  digestCategory?: string;
 }
 
 /** Active transport, in priority order: Gmail HTTPS API → Resend HTTPS → Gmail SMTP. */
@@ -88,8 +104,40 @@ export const EMAIL_MODE: "gmail_api" | "resend" | "smtp" = gmailApiCredsFromEnv(
  * Gmail SMTP otherwise. Either way the From address is EMAIL_FROM.
  */
 export async function sendEmail(input: SendEmailInput): Promise<void> {
+  // Compoundable notifications are queued; the digest cron sends a grouped email.
+  if (input.digestCategory && process.env.EMAIL_DIGEST !== "off") {
+    try {
+      await glashQuery(
+        `insert into public.notification_email_queue
+           (recipient_email, category, subject, title, body, link, html, text_body, from_name)
+         values ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+        [
+          input.to,
+          input.digestCategory,
+          input.subject,
+          input.subject,
+          input.text?.split("\n")[1] || null,
+          (input.text?.match(/https?:\/\/\S+/) || [])[0] || null,
+          input.html || null,
+          input.text || null,
+          input.fromName || "CDS Space",
+        ],
+      );
+      return;
+    } catch (error) {
+      // If queueing fails, fall through and send immediately - never lose a notice.
+      console.error("[email-digest] queue failed, sending immediately:", error);
+    }
+  }
+
   const from = emailFrom(input.fromName || "CDS Space");
   const transporter = input.transporter ?? createEmailTransport();
+  // Attach the branded logo inline only when the html references its cid (i.e.
+  // it went through brandedEmailHtml), so plain emails stay lightweight.
+  const attachments = [
+    ...(input.html?.includes(`cid:${EMAIL_LOGO_CID}`) ? [emailLogoAttachment()] : []),
+    ...(input.attachments || []),
+  ];
   try {
     await transporter.sendMail({
       from,
@@ -98,6 +146,7 @@ export async function sendEmail(input: SendEmailInput): Promise<void> {
       html: input.html,
       text: input.text,
       replyTo: input.replyTo,
+      attachments: attachments.length ? attachments : undefined,
     });
   } finally {
     // Only close transports we created here; leave a shared/batch one open.

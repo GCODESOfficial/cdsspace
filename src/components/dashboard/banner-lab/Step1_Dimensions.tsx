@@ -1,138 +1,125 @@
 "use client";
 
-import React from "react";
 import { motion } from "framer-motion";
+import { Check, Maximize2, Ruler, ShieldAlert } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { formatMoney, type Currency } from "@/lib/finance/types";
+import { BANNER_DIMENSION_UNITS, bannerDescriptionWithoutDimensions, bannerMaterialPrice, bannerSizeInchesLabel, bannerSizeLabel, customBannerSizeLabel, type BannerMaterial, type BannerProduct } from "@/lib/banner-commerce";
 import { BannerFormData } from "./types";
 
 interface Step1Props {
-    formData: BannerFormData;
-    updateFormData: (updates: Partial<BannerFormData>) => void;
-    onNext: () => void;
+  formData: BannerFormData;
+  products: BannerProduct[];
+  currency: Currency;
+  updateFormData: (updates: Partial<BannerFormData>) => void;
+  onNext: () => void;
 }
 
-export const Step1_Dimensions = ({ formData, updateFormData, onNext }: Step1Props) => {
-    const sizeOptions = [
-        { id: "80x200", label: "80cm x 200cm", sub: "Compact - Perfect for tight spaces" },
-        { id: "85x200", label: "85cm x 200cm", sub: "Standard - Most popular size" },
-        { id: "100x200", label: "100cm x 200cm", sub: "Wide - Maximum visibility" },
-        { id: "120x200", label: "120cm x 200cm", sub: "Premium - Trade show ready" },
-    ] as const;
+export const Step1_Dimensions = ({ formData, products, currency, updateFormData, onNext }: Step1Props) => {
+  const selected = products.find((product) => product.id === formData.productId);
+  const customWidth = Math.max(0, Number(formData.customWidth) || 0);
+  const customHeight = Math.max(0, Number(formData.customHeight) || 0);
+  const ready = formData.isCustom
+    ? customWidth > 0 && customHeight > 0
+    : Boolean(selected && bannerMaterialPrice(selected, formData.quality, currency) > 0);
+  const materials: Array<{ value: BannerMaterial; title: string; note: string }> = [
+    { value: "Standard", title: "Standard material", note: "Reliable everyday production material" },
+    { value: "Premium", title: "Premium material", note: "Higher-grade material and finishing" },
+  ];
 
-    const environmentOptions = [
-        { id: "Indoor", label: "Indoor", sub: "Events, offices, showrooms" },
-        { id: "Outdoor", label: "Outdoor", sub: "Weather-resistant material" },
-    ] as const;
+  return (
+    <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -12 }} className="space-y-7">
+      <div>
+        <div className="flex items-center gap-2 text-[#0A4FE8]"><Ruler className="h-4 w-4" /><p className="text-[12px] font-semibold">Product and dimensions</p></div>
+        <h2 className="mt-2 text-[22px] font-bold tracking-tight text-[#0D1B39]">Choose the right banner</h2>
+        <p className="mt-1 text-[12px] leading-5 text-slate-500">Every production price is controlled by Sales Hub and displayed in your account currency.</p>
+      </div>
 
-    return (
-        <motion.div
-            initial={{ opacity: 0, y: 10 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -10 }}
-            className="space-y-6 xl:space-y-8 2xl:space-y-12"
+      <div className="grid gap-3">
+        {products.map((product) => {
+          const standardPrice = bannerMaterialPrice(product, "Standard", currency);
+          const premiumPrice = bannerMaterialPrice(product, "Premium", currency);
+          const availablePrices = [standardPrice, premiumPrice].filter((price) => price > 0);
+          const price = availablePrices.length ? Math.min(...availablePrices) : 0;
+          const priced = availablePrices.length > 0;
+          const active = product.id === formData.productId;
+          const description = bannerDescriptionWithoutDimensions(product);
+          return (
+            <button
+              type="button"
+              key={product.id}
+              disabled={!priced}
+              onClick={() => {
+                const currentMaterialPrice = bannerMaterialPrice(product, formData.quality, currency);
+                const quality: BannerMaterial = currentMaterialPrice > 0 ? formData.quality : standardPrice > 0 ? "Standard" : "Premium";
+                updateFormData({
+                  productId: product.id,
+                  isCustom: false,
+                  size: `${Number(product.width_cm)}x${Number(product.height_cm)}`,
+                  quality,
+                  environment: product.environment as BannerFormData["environment"],
+                });
+              }}
+              className={cn(
+                "group flex w-full items-center gap-4 rounded-[18px] border-2 p-4 text-left transition sm:p-5",
+                active ? "border-[#0A4FE8] bg-blue-50/70 shadow-sm" : "border-slate-200 bg-white hover:border-blue-200 hover:bg-blue-50/30",
+                !priced && "cursor-not-allowed opacity-55",
+              )}
+            >
+              <span className={cn("grid h-9 w-9 shrink-0 place-items-center rounded-full border-2", active ? "border-[#0A4FE8] bg-[#0A4FE8] text-white" : "border-slate-200 text-transparent")}><Check className="h-4 w-4" /></span>
+              <span className="min-w-0 flex-1"><span className="block text-[14px] font-bold text-[#0D1B39]">{product.name}</span><span className="mt-1 block text-[11px] text-slate-500">{bannerSizeLabel(product)} · {bannerSizeInchesLabel(product)}{description ? ` · ${description}` : ""}</span></span>
+              <span className="shrink-0 text-right"><span className="block text-[14px] font-bold text-[#0A4FE8]">{priced ? formatMoney(price, currency) : "Not priced"}</span><span className="text-[10px] text-slate-400">{priced ? "Starting from" : "Per banner"}</span></span>
+            </button>
+          );
+        })}
+
+        <button
+          type="button"
+          onClick={() => updateFormData({ productId: "", isCustom: true, size: customWidth && customHeight ? customBannerSizeLabel(customWidth, customHeight, formData.dimensionUnit) : "" })}
+          className={cn("group flex w-full items-center gap-4 rounded-[18px] border-2 p-4 text-left transition sm:p-5", formData.isCustom ? "border-[#0A4FE8] bg-blue-50/70 shadow-sm" : "border-slate-200 bg-white hover:border-blue-200 hover:bg-blue-50/30")}
         >
-            {/* Frame & Dimensions */}
-            <div className="space-y-3 xl:space-y-4 2xl:space-y-6">
-                <h3 className="text-brand-navy text-[15px] xl:text-[16px] 2xl:text-[20px] font-bold tracking-tight">Frame & Dimensions</h3>
-                <div className="flex gap-3 xl:gap-4 2xl:gap-6">
-                    {(["Standard", "Premium"] as const).map((q) => (
-                        <button
-                            key={q}
-                            onClick={() => updateFormData({ quality: q })}
-                            className={cn(
-                                "flex-1 h-[48px] xl:h-[52px] 2xl:h-[64px] rounded-[10px] 2xl:rounded-[16px] border transition-all flex flex-col items-center justify-center gap-0 2xl:gap-1",
-                                formData.quality === q
-                                    ? "bg-[#F0F5FF] border-brand-blue text-brand-blue"
-                                    : "bg-white border-brand-stroke text-brand-body hover:border-brand-blue/30"
-                            )}
-                        >
-                            <span className="text-[13px] xl:text-[14px] 2xl:text-[16px] font-bold tracking-tight">{q}</span>
-                            <span className={cn(
-                                "text-[8px] xl:text-[9px] 2xl:text-[10px] font-medium tracking-tight opacity-70",
-                                formData.quality === q ? "text-brand-blue" : "text-brand-mute"
-                            )}>
-                                {q === "Standard" ? "Basic flex material" : "Premium printing material"}
-                            </span>
-                        </button>
-                    ))}
-                </div>
-            </div>
+          <span className={cn("grid h-9 w-9 shrink-0 place-items-center rounded-full border-2", formData.isCustom ? "border-[#0A4FE8] bg-[#0A4FE8] text-white" : "border-slate-200 text-slate-400")}><Maximize2 className="h-4 w-4" /></span>
+          <span className="min-w-0 flex-1"><span className="block text-[14px] font-bold text-[#0D1B39]">Custom banner</span><span className="mt-1 block text-[11px] text-slate-500">Choose your unit and exact width and height. CDS Space will prepare a quotation after reviewing the specification.</span></span>
+          <span className="shrink-0 text-right"><span className="block text-[13px] font-bold text-[#0A4FE8]">Request quote</span><span className="text-[10px] text-slate-400">No upfront price</span></span>
+        </button>
+      </div>
 
-            {/* Banner Size */}
-            <div className="space-y-3 xl:space-y-4 2xl:space-y-6">
-                <h3 className="text-brand-navy text-[15px] xl:text-[16px] 2xl:text-[20px] font-bold tracking-tight">Banner Size</h3>
-                <div className="grid grid-cols-1 gap-2 xl:gap-3 2xl:gap-4">
-                    {sizeOptions.map((opt) => (
-                        <button
-                            key={opt.id}
-                            onClick={() => updateFormData({ size: opt.id })}
-                            className={cn(
-                                "w-full px-4 py-3 xl:px-5 xl:py-4 2xl:px-7 2xl:py-6 rounded-[10px] 2xl:rounded-[16px] border-2 transition-all flex items-center gap-4 xl:gap-5 2xl:gap-7 text-left group",
-                                formData.size === opt.id
-                                    ? "bg-[#F0F5FF]/50 border-brand-blue shadow-sm"
-                                    : "bg-white border-brand-stroke hover:border-brand-blue/20"
-                            )}
-                        >
-                            <div className={cn(
-                                "size-5 xl:size-6 2xl:size-7 rounded-full border-2 flex items-center justify-center transition-all",
-                                formData.size === opt.id ? "border-brand-blue bg-white" : "border-brand-stroke group-hover:border-brand-blue/30"
-                            )}>
-                                {formData.size === opt.id && <div className="size-2.5 xl:size-3 2xl:size-3.5 rounded-full bg-brand-blue" />}
-                            </div>
-                            <div className="flex flex-col">
-                                <span className={cn(
-                                    "text-[13px] xl:text-[14px] 2xl:text-[17px] font-bold tracking-tight leading-none",
-                                    formData.size === opt.id ? "text-brand-navy" : "text-brand-body"
-                                )}>{opt.label}</span>
-                                <span className="text-brand-mute text-[10px] xl:text-[11px] 2xl:text-[13px] font-medium mt-0.5">{opt.sub}</span>
-                            </div>
-                        </button>
-                    ))}
-                </div>
-            </div>
+      {formData.isCustom && <div className="space-y-4 rounded-[20px] border border-blue-100 bg-blue-50/30 p-4 sm:p-5">
+        <div><h3 className="text-[13px] font-bold text-[#0D1B39]">Custom dimensions</h3><p className="mt-1 text-[11px] leading-5 text-slate-500">Enter the finished banner size. The production team will verify material usage, finishing and delivery before pricing it.</p></div>
+        <div className="grid gap-3 sm:grid-cols-[1fr_1fr_1.2fr]">
+          <label className="space-y-2"><span className="text-[11px] font-bold text-[#0D1B39]">Width</span><input type="number" min="0.01" step="0.01" value={formData.customWidth} onChange={(event) => updateFormData({ customWidth: event.target.value, size: customBannerSizeLabel(Number(event.target.value) || 0, customHeight, formData.dimensionUnit) })} placeholder="e.g. 3" className="h-12 w-full rounded-2xl border border-slate-200 bg-white px-4 text-[13px] outline-none focus:border-blue-400 focus:ring-4 focus:ring-blue-100" /></label>
+          <label className="space-y-2"><span className="text-[11px] font-bold text-[#0D1B39]">Height</span><input type="number" min="0.01" step="0.01" value={formData.customHeight} onChange={(event) => updateFormData({ customHeight: event.target.value, size: customBannerSizeLabel(customWidth, Number(event.target.value) || 0, formData.dimensionUnit) })} placeholder="e.g. 2" className="h-12 w-full rounded-2xl border border-slate-200 bg-white px-4 text-[13px] outline-none focus:border-blue-400 focus:ring-4 focus:ring-blue-100" /></label>
+          <label className="space-y-2"><span className="text-[11px] font-bold text-[#0D1B39]">Dimension unit</span><select value={formData.dimensionUnit} onChange={(event) => { const dimensionUnit = event.target.value as BannerFormData["dimensionUnit"]; updateFormData({ dimensionUnit, size: customBannerSizeLabel(customWidth, customHeight, dimensionUnit) }); }} className="h-12 w-full rounded-2xl border border-slate-200 bg-white px-4 text-[13px] outline-none focus:border-blue-400 focus:ring-4 focus:ring-blue-100">{BANNER_DIMENSION_UNITS.map((unit) => <option key={unit.value} value={unit.value}>{unit.label} ({unit.symbol})</option>)}</select></label>
+        </div>
+        <label className="block space-y-2"><span className="text-[11px] font-bold text-[#0D1B39]">Usage environment</span><select value={formData.environment} onChange={(event) => updateFormData({ environment: event.target.value as BannerFormData["environment"] })} className="h-12 w-full rounded-2xl border border-slate-200 bg-white px-4 text-[13px] outline-none focus:border-blue-400 focus:ring-4 focus:ring-blue-100"><option>Indoor</option><option>Outdoor</option></select></label>
+      </div>}
 
-            {/* Usage Environment */}
-            <div className="space-y-3 xl:space-y-4 2xl:space-y-6">
-                <h3 className="text-brand-navy text-[15px] xl:text-[16px] 2xl:text-[20px] font-bold tracking-tight">Usage Environment</h3>
-                <div className="grid grid-cols-1 gap-2 xl:gap-3 2xl:gap-4">
-                    {environmentOptions.map((opt) => (
-                        <button
-                            key={opt.id}
-                            onClick={() => updateFormData({ environment: opt.id })}
-                            className={cn(
-                                "w-full px-4 py-3 xl:px-5 xl:py-4 2xl:px-7 2xl:py-6 rounded-[10px] 2xl:rounded-[16px] border-2 transition-all flex items-center gap-4 xl:gap-5 2xl:gap-7 text-left group",
-                                formData.environment === opt.id
-                                    ? "bg-[#F0F5FF]/50 border-brand-blue shadow-sm"
-                                    : "bg-white border-brand-stroke hover:border-brand-blue/20"
-                            )}
-                        >
-                            <div className={cn(
-                                "size-5 xl:size-6 2xl:size-7 rounded-full border-2 flex items-center justify-center transition-all",
-                                formData.environment === opt.id ? "border-brand-blue bg-white" : "border-brand-stroke group-hover:border-brand-blue/30"
-                            )}>
-                                {formData.environment === opt.id && <div className="size-2.5 xl:size-3 2xl:size-3.5 rounded-full bg-brand-blue" />}
-                            </div>
-                            <div className="flex flex-col">
-                                <span className={cn(
-                                    "text-[13px] xl:text-[14px] 2xl:text-[17px] font-bold tracking-tight leading-none",
-                                    formData.environment === opt.id ? "text-brand-navy" : "text-brand-body"
-                                )}>{opt.label}</span>
-                                <span className="text-brand-mute text-[10px] xl:text-[11px] 2xl:text-[13px] font-medium mt-0.5">{opt.sub}</span>
-                            </div>
-                        </button>
-                    ))}
-                </div>
-            </div>
+      {(selected || formData.isCustom) && <div className="space-y-3">
+        <div><h3 className="text-[13px] font-bold text-[#0D1B39]">Choose your material</h3><p className="mt-1 text-[11px] text-slate-500">{formData.isCustom ? "Your selected material will be reviewed and included in the quotation." : "Both material options are priced independently for the selected banner size."}</p></div>
+        <div className="grid gap-3 sm:grid-cols-2">
+          {materials.map((material) => {
+            const price = selected ? bannerMaterialPrice(selected, material.value, currency) : 0;
+            const priced = formData.isCustom || price > 0;
+            const active = formData.quality === material.value;
+            return <button
+              key={material.value}
+              type="button"
+              disabled={!priced}
+              onClick={() => updateFormData({ quality: material.value })}
+              className={cn("rounded-[18px] border-2 p-4 text-left transition", active ? "border-[#0A4FE8] bg-blue-50" : "border-slate-200 bg-white hover:border-blue-200", !priced && "cursor-not-allowed opacity-50")}
+            >
+              <span className="flex items-start justify-between gap-3"><span><span className="block text-[13px] font-bold text-[#0D1B39]">{material.title}</span><span className="mt-1 block text-[10px] leading-4 text-slate-500">{material.note}</span></span><span className={cn("mt-0.5 grid h-5 w-5 shrink-0 place-items-center rounded-full border", active ? "border-[#0A4FE8] bg-[#0A4FE8] text-white" : "border-slate-300 text-transparent")}><Check className="h-3 w-3" /></span></span>
+              <span className="mt-4 block text-[14px] font-bold text-[#0A4FE8]">{formData.isCustom ? "Priced after review" : priced ? formatMoney(price, currency) : "Not priced"}</span>
+            </button>;
+          })}
+        </div>
+      </div>}
 
-            {/* Next Action */}
-            <div className="pt-4 xl:pt-6 2xl:pt-12">
-                <button
-                    onClick={onNext}
-                    className="w-full h-[48px] xl:h-[52px] 2xl:h-[72px] bg-brand-blue rounded-full text-white font-bold text-[15px] xl:text-[16px] 2xl:text-[20px] hover:bg-brand-blue/90 transition-all active:scale-[0.98] shadow-lg shadow-brand-blue/20"
-                >
-                    Next
-                </button>
-            </div>
-        </motion.div>
-    );
+      {!formData.isCustom && !products.some((product) => bannerMaterialPrice(product, "Standard", currency) > 0 || bannerMaterialPrice(product, "Premium", currency) > 0) && (
+        <div className="flex gap-3 rounded-[16px] border border-amber-200 bg-amber-50 p-4 text-amber-800"><ShieldAlert className="mt-0.5 h-4 w-4 shrink-0" /><p className="text-[11px] leading-5">Banner pricing for {currency} is still being configured. Your account has not been charged and an order cannot be submitted until an admin approves a price.</p></div>
+      )}
+
+      <button type="button" onClick={onNext} disabled={!ready} className="h-12 w-full rounded-2xl bg-[#0A4FE8] text-[14px] font-bold text-white shadow-lg shadow-blue-600/20 transition hover:bg-[#083FC0] disabled:cursor-not-allowed disabled:opacity-40">Continue to artwork</button>
+    </motion.div>
+  );
 };

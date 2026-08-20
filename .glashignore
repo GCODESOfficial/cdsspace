@@ -9,3 +9,29 @@ out
 *.log
 *.tsbuildinfo
 .DS_Store
+
+# Non-runtime content excluded to shrink the deploy upload (was 54MB / 1810
+# files and hit the 180s upload timeout). LEADING SLASH is required: a bare
+# name like `supabase` matches src/lib/supabase too and breaks the build with
+# module-not-found. These are anchored to the repo root only.
+/artifacts
+/docs
+/glashdb
+/zkteco-bridge
+/whatsapp-bridge
+/supabase
+/skills
+/create.md
+/supabase-*.sql
+/glashdb-*.sql
+
+# Large design source files not referenced by the app (kept in git for
+# designers, not needed at runtime).
+/public/merch/source
+/public/DUNS footer.svg
+
+# home/source is 10MB of design source; keep only the 3 files the site serves.
+/public/home/source/*
+!/public/home/source/07fbbce755ed61ba1adec6b971cbda1650a2fb94.png
+!/public/home/source/0b29fab281d7cfe7e98502c49ddc2794b06f2c3c.png
+!/public/home/source/54b250b0180289389a7faef542be363a9bb13baa.png

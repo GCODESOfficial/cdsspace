@@ -129,11 +129,14 @@ export async function PATCH(req: Request) {
     return NextResponse.json({ ok: false, error: "Invalid" }, { status: 400 });
   }
   const db = supabaseAdmin as any;
-  await db
+  // Team members may only archive requests they created; admins act on any.
+  let q = db
     .from("team_signature_requests")
     .update({ archived_at: action === "archive" ? new Date().toISOString() : null })
     .in("id", ids);
-  return NextResponse.json({ ok: true });
+  if (actor.kind !== "admin") q = q.eq("requested_by", actor.id);
+  const { data } = await q.select("id");
+  return NextResponse.json({ ok: true, count: (data || []).length });
 }
 
 // DELETE - soft/hard delete (but never for signed requests)
@@ -147,6 +150,13 @@ export async function DELETE(req: Request) {
   const { data: signed } = await db.from("team_signature_requests").select("id").in("id", ids).eq("status", "signed");
   const blocked = new Set((signed || []).map((r: any) => r.id));
   const targets = ids.filter((i) => !blocked.has(i));
-  if (targets.length) await db.from("team_signature_requests").delete().in("id", targets);
-  return NextResponse.json({ ok: true, skipped_signed: Array.from(blocked) });
+  let deleted: any[] = [];
+  if (targets.length) {
+    // Team members may only delete requests they created; admins delete any.
+    let q = db.from("team_signature_requests").delete().in("id", targets);
+    if (actor.kind !== "admin") q = q.eq("requested_by", actor.id);
+    const { data } = await q.select("id");
+    deleted = data || [];
+  }
+  return NextResponse.json({ ok: true, deleted: deleted.length, skipped_signed: Array.from(blocked) });
 }

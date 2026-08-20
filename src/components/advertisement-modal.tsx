@@ -256,7 +256,7 @@ export function AdvertisementModal({
 								<Button
 									type="submit"
 									disabled={isLoading || ads.length >= 10}
-									className="bg-gradient-to-r from-[#08129C] to-[#072056] text-white hover:scale-105 cursor-pointer"
+									className="bg-[#0A4FE8] text-white hover:scale-105 cursor-pointer"
 								>
 									{isLoading ? "Adding..." : "Add Advertisement"}
 								</Button>
@@ -301,7 +301,7 @@ export function AdvertisementModal({
 														size="sm"
 														onClick={() => handleSaveEdit(ad.imageUrl)}
 														disabled={isLoading}
-														className="bg-gradient-to-r from-[#08129C] to-[#072056] text-white"
+														className="bg-[#0A4FE8] text-white"
 													>
 														<Save className="h-4 w-4 mr-1" /> {isLoading ? "Saving..." : "Save"}
 													</Button>

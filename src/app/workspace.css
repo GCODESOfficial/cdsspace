@@ -1,0 +1,248 @@
+/*
+ * CDS Space workspace design system.
+ *
+ * The admin dashboard is the visual reference for every signed-in surface:
+ * Neue Campton typography, pale blue canvas, navy hierarchy, bright blue
+ * actions, soft white cards, quiet borders and compact controls.
+ */
+
+[data-app-shell] {
+  --workspace-canvas: #f0f5ff;
+  --workspace-card: #ffffff;
+  --workspace-navy: #0d1b39;
+  --workspace-body: #647089;
+  --workspace-muted: #96a0b5;
+  --workspace-blue: #0a4fe8;
+  --workspace-blue-dark: #083ec0;
+  --workspace-border: #e4eaf5;
+  --workspace-radius-xs: var(--radius-step-1);
+  --workspace-radius-sm: var(--radius-step-2);
+  --workspace-control-radius: var(--radius-step-3);
+  --workspace-radius: var(--radius-step-4);
+  --workspace-shadow: 0 10px 30px rgb(13 27 57 / 5.5%);
+  --workspace-shadow-raised: 0 18px 50px rgb(13 27 57 / 12%);
+  background: var(--workspace-canvas);
+  color: var(--workspace-navy);
+}
+
+[data-app-shell] [data-app-content] {
+  width: 100%;
+  min-width: 0;
+  background: var(--workspace-canvas);
+}
+
+[data-app-shell] [data-app-content] > * {
+  width: 100%;
+  max-width: 1680px;
+  margin-inline: auto;
+}
+
+[data-app-shell] [data-app-content] :where(h1, h2, h3, h4) {
+  letter-spacing: -0.018em;
+}
+
+[data-app-shell] [data-app-content] h1 {
+  font-weight: 700;
+  line-height: 1.08;
+}
+
+[data-app-shell] [data-app-content] :where(p, label, td, li) {
+  text-wrap: pretty;
+}
+
+[data-app-shell] [data-app-content] :where(
+  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]):not([type="file"]),
+  select,
+  textarea
+) {
+  min-height: 2.625rem;
+  max-width: 100%;
+  border-color: var(--workspace-border);
+  border-radius: var(--workspace-control-radius);
+  background-color: #fff;
+  color: var(--workspace-navy);
+  box-shadow: 0 1px 2px rgb(13 27 57 / 3%);
+}
+
+[data-app-shell] [data-app-content] :where(
+  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]):not([type="file"]),
+  select,
+  textarea
+):focus {
+  border-color: rgb(10 79 232 / 42%);
+  outline: none;
+  box-shadow: 0 0 0 4px rgb(219 234 254 / 80%);
+}
+
+[data-app-shell] [data-app-content] :where(button, a[role="button"]) {
+  flex-shrink: 0;
+  border-radius: var(--workspace-control-radius);
+  font-weight: 600;
+  transition:
+    color 160ms ease,
+    background-color 160ms ease,
+    border-color 160ms ease,
+    box-shadow 160ms ease,
+    transform 160ms ease;
+}
+
+[data-app-shell] [data-app-content] :where(button, a[role="button"]):active {
+  transform: scale(0.985);
+}
+
+[data-app-shell] [data-app-content] :where(button, a)[class*="bg-[#0A4FE8]"],
+[data-app-shell] [data-app-content] :where(button, a).bg-brand-blue {
+  box-shadow: 0 8px 20px rgb(10 79 232 / 18%);
+}
+
+[data-app-shell] [data-app-content] :where(div, section, article, form)[class*="bg-white"][class*="rounded"] {
+  border-color: var(--workspace-border);
+  box-shadow: var(--workspace-shadow);
+}
+
+[data-app-shell] [data-app-content] :where(table) {
+  color: var(--workspace-navy);
+}
+
+[data-app-shell] [data-app-content] :where(thead) {
+  color: var(--workspace-muted);
+}
+
+[data-app-shell] [data-app-content] :where(th) {
+  height: 3rem;
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.055em;
+  text-transform: uppercase;
+}
+
+[data-app-shell] [data-app-content] :where(td) {
+  border-color: #edf1f7;
+  font-size: 0.8125rem;
+}
+
+[data-app-shell] [data-app-content] :where(tbody tr) {
+  transition: background-color 150ms ease;
+}
+
+[data-app-shell] [data-app-content] :where(tbody tr:hover) {
+  background: #f8faff;
+}
+
+[data-app-shell] [data-app-content] :where(.overflow-x-auto, [class*="overflow-x-auto"]) {
+  overscroll-behavior-inline: contain;
+  scrollbar-width: thin;
+  scrollbar-color: #cdd7ea transparent;
+}
+
+[data-app-shell] [data-app-content] :where(.shadow-sm) {
+  --tw-shadow-color: rgb(13 27 57 / 6%);
+}
+
+[data-slot="dropdown-menu-content"],
+[data-slot="dropdown-menu-sub-content"] {
+  border-color: #e4eaf5;
+  border-radius: 0.875rem;
+  background: #fff;
+  padding: 0.375rem;
+  box-shadow: 0 18px 50px rgb(13 27 57 / 16%);
+}
+
+[data-slot="dropdown-menu-item"],
+[data-slot="dropdown-menu-checkbox-item"],
+[data-slot="dropdown-menu-radio-item"] {
+  min-height: 2.25rem;
+  border-radius: 0.625rem;
+  font-size: 0.8125rem;
+}
+
+[data-slot="dialog-title"],
+[data-slot="alert-dialog-title"] {
+  color: #0d1b39;
+}
+
+:where(.fixed.inset-0)[class*="bg-black"],
+:where(.fixed.inset-0)[class*="bg-[#040B37]"] {
+  backdrop-filter: blur(4px);
+}
+
+:where(.fixed.inset-0) > :where(div, form)[class*="bg-white"][class*="max-w"] {
+  border: 1px solid rgb(255 255 255 / 80%);
+  border-radius: 1.5rem;
+  box-shadow: 0 28px 90px rgb(4 11 55 / 24%);
+}
+
+.workspace-dialog-position {
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+}
+
+@media (min-width: 1024px) {
+  [data-app-shell="admin"] [data-app-content] {
+    min-height: 100dvh;
+  }
+}
+
+@media (max-width: 767px) {
+  [data-app-shell] {
+    --workspace-radius: 1rem;
+    --workspace-control-radius: 0.75rem;
+  }
+
+  [data-app-shell] [data-app-content] > * {
+    max-width: 100%;
+  }
+
+  [data-app-shell] [data-app-content] h1 {
+    font-size: clamp(1.5rem, 7vw, 1.875rem);
+    line-height: 1.12;
+  }
+
+  [data-app-shell] [data-app-content] h2 {
+    line-height: 1.18;
+  }
+
+  [data-app-shell] [data-app-content] :where(div, section, article, form)[class*="bg-white"][class*="rounded"] {
+    border-radius: var(--workspace-radius);
+  }
+
+  [data-app-shell] [data-app-content] :where(.gap-8, .gap-7, .gap-6) {
+    gap: 1rem;
+  }
+
+  [data-app-shell] [data-app-content] :where(.mb-8, .mb-7, .mb-6) {
+    margin-bottom: 1.25rem;
+  }
+
+  [data-app-shell] [data-app-content] :where(.p-8, .p-7, .p-6) {
+    padding: 1rem;
+  }
+
+  [data-app-shell] [data-app-content] :where(.px-8, .px-7, .px-6) {
+    padding-inline: 1rem;
+  }
+
+  [data-app-shell] [data-app-content] :where(.py-8, .py-7, .py-6) {
+    padding-block: 1rem;
+  }
+
+  [data-app-shell] [data-app-content] :where(table) {
+    min-width: 42rem;
+  }
+
+  [data-slot="dialog-content"],
+  [data-slot="alert-dialog-content"] {
+    box-shadow: 0 -18px 60px rgb(4 11 55 / 18%);
+  }
+}
+
+@media (max-width: 380px) {
+  [data-app-shell] [data-app-content] :where(.p-5, .p-4) {
+    padding: 0.875rem;
+  }
+
+  [data-app-shell] [data-app-content] :where(.px-5, .px-4) {
+    padding-inline: 0.875rem;
+  }
+}

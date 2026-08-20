@@ -85,12 +85,12 @@ const RequestCard = ({ title, description, id, display_id, user, date, status, o
 
             <div className="flex items-center gap-[12px] 2xl:gap-[16px] mt-1 2xl:mt-2">
                 {status === "COMPLETED" ? (
-                    <button className="bg-linear-to-r from-[#0035C1] to-[#0575FF] px-[16px] py-[8px] 2xl:px-[20px] 2xl:py-[10px] rounded-full flex items-center gap-[8px] text-white text-[12px] 2xl:text-[14px] font-bold cursor-pointer hover:brightness-110 transition-all shadow-sm">
+                    <button className="bg-[#0A4FE8] px-[16px] py-[8px] 2xl:px-[20px] 2xl:py-[10px] rounded-full flex items-center gap-[8px] text-white text-[12px] 2xl:text-[14px] font-bold cursor-pointer hover:brightness-110 transition-all shadow-sm">
                         <DownloadCloud className="w-[16px] h-[16px] 2xl:w-[18px] 2xl:h-[18px]" />
                         Download Files
                     </button>
                 ) : (status === "IN_REVIEW" || status === "PENDING") ? (
-                    <button className="bg-linear-to-r from-[#0035C1] to-[#0575FF] px-[16px] py-[8px] 2xl:px-[20px] 2xl:py-[10px] rounded-full flex items-center gap-[8px] text-white text-[12px] 2xl:text-[14px] font-bold cursor-pointer hover:brightness-110 transition-all shadow-sm">
+                    <button className="bg-[#0A4FE8] px-[16px] py-[8px] 2xl:px-[20px] 2xl:py-[10px] rounded-full flex items-center gap-[8px] text-white text-[12px] 2xl:text-[14px] font-bold cursor-pointer hover:brightness-110 transition-all shadow-sm">
                         <MessageSquare className="w-[16px] h-[16px] 2xl:w-[18px] 2xl:h-[18px]" />
                         Give Feedback
                     </button>
@@ -119,6 +119,7 @@ interface ActiveSubscriptionViewProps {
     plan?: string;
     industry?: string;
     designCount?: number;
+    designLimit?: number;
     companyName?: string;
     onUpdateDesignCount?: (count: number) => void;
     onUpgrade?: () => void;
@@ -231,6 +232,7 @@ export const ActiveSubscriptionView = ({
     plan = "Scaleup",
     industry = "Web3",
     designCount: initialDesignCount = 4,
+    designLimit,
     companyName = "CDS Space",
     onUpdateDesignCount,
     onUpgrade,
@@ -377,7 +379,9 @@ export const ActiveSubscriptionView = ({
 
     const currentPlanKey = plan.toLowerCase() as keyof typeof planLimits;
     const currentPlan = planLimits[currentPlanKey] || planLimits.scaleup;
-    const currentLimit = currentPlan.limit;
+    const currentLimit = Number.isInteger(designLimit) && Number(designLimit) > 0
+        ? Number(designLimit)
+        : currentPlan.limit;
     const progressPercentage = Math.min((designCount / currentLimit) * 100, 100);
     const isQuotaFull = designCount >= currentLimit;
 
@@ -408,7 +412,7 @@ export const ActiveSubscriptionView = ({
                                 "px-[16px] xl:px-[20px] 2xl:px-[24px] py-[8px] xl:py-[10px] 2xl:py-[12px] rounded-full flex items-center justify-center gap-[6px] 2xl:gap-[8px] text-white text-[14px] xl:text-[16px] 2xl:text-[18px] font-medium shadow-md transition-all whitespace-nowrap",
                                 isQuotaFull 
                                     ? "bg-brand-mute cursor-not-allowed opacity-70" 
-                                    : "bg-linear-to-r from-[#0035C1] to-[#0575FF] hover:scale-[1.02] active:scale-[0.98] cursor-pointer"
+                                    : "bg-[#0A4FE8] hover:scale-[1.02] active:scale-[0.98] cursor-pointer"
                             )}
                         >
                             <Plus className="w-[16px] h-[16px] xl:w-[20px] xl:h-[20px] 2xl:w-[24px] 2xl:h-[24px]" />

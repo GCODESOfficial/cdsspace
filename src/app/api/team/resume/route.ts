@@ -12,13 +12,15 @@ export async function GET() {
     return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
   }
   const db = supabaseAdmin as any;
-  const { data } = await db.from("team_resumes").select("*").eq("team_member_id", actor.id).maybeSingle();
+  const { data, error } = await db.from("team_resumes").select("*").eq("team_member_id", actor.id).maybeSingle();
+  if (error) return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
   if (!data) {
-    const { data: created } = await db
+    const { data: created, error: createError } = await db
       .from("team_resumes")
       .insert({ team_member_id: actor.id, is_public: false })
       .select("*")
       .single();
+    if (createError) return NextResponse.json({ ok: false, error: createError.message }, { status: 500 });
     return NextResponse.json({ ok: true, resume: created });
   }
   return NextResponse.json({ ok: true, resume: data });
@@ -34,7 +36,7 @@ export async function PUT(req: Request) {
   const allowed = ["headline", "about", "avatar_url", "location", "website", "email_public", "socials", "skills", "past_roles", "projects", "education", "certifications", "is_public"];
   for (const k of allowed) if (k in body) patch[k] = body[k];
   const db = supabaseAdmin as any;
-  const { data, error } = await db.from("team_resumes").update(patch).eq("team_member_id", actor.id).select("*").single();
+  const { data, error } = await db.from("team_resumes").upsert({ team_member_id: actor.id, ...patch }, { onConflict: "team_member_id" }).select("*").single();
   if (error) return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
   
   // Also sync avatar_url to the main team_members table if it changed

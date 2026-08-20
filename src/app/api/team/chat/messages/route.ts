@@ -6,6 +6,7 @@ import {
   getTeamChatDb,
   getViewerPayload,
   hydrateTeamMessages,
+  isAttachmentRestrictedThread,
   TEAM_CHAT_MESSAGE_COLUMNS,
 } from "@/lib/team-chat-server";
 import { canShareProtectedChatResource } from "@/lib/chat-resource-permissions";
@@ -103,7 +104,7 @@ export async function GET(req: Request) {
 
   // Live presence signals for typing indicators and read ticks. Derived from the
   // participant rows the client already writes (last_typing_at via the typing
-  // route, last_read_at via the read route) — no schema change needed. Skipped on
+  // route, last_read_at via the read route) - no schema change needed. Skipped on
   // history pagination (`before`) where it isn't relevant.
   let typing: { id: string; name: string }[] = [];
   let readWatermark: string | null = null;
@@ -174,6 +175,17 @@ export async function POST(req: Request) {
   const protectedShare = await canShareProtectedChatResource(viewer, threadId, metadata);
   if (!protectedShare.ok) {
     return NextResponse.json({ ok: false, error: protectedShare.error }, { status: 403 });
+  }
+
+  // Files/media may only be shared in group spaces (department & project group
+  // chats). Block attachments in 1-on-1 direct member chats. Admin DMs
+  // (includes_admin) and all group/department/broadcast threads are allowed.
+  const carriesAttachment = !!attachmentUrl || (typeof messageType === "string" && ["file", "image", "video", "audio"].includes(messageType));
+  if (carriesAttachment && (await isAttachmentRestrictedThread(threadId))) {
+    return NextResponse.json(
+      { ok: false, error: "Sharing files, images and videos isn't allowed in direct chats - use your department or project group chat." },
+      { status: 403 },
+    );
   }
 
   // Announcement channels are post-restricted: only management (admins +
@@ -248,12 +260,18 @@ export async function POST(req: Request) {
       : (viewer.session.full_name || "A teammate");
   const senderId = viewer.kind === "team" ? viewer.session.id : null;
 
+  // "@everyone" turns the normal per-message notification into an explicit
+  // mention so every participant sees they were tagged.
+  const mentionsEveryone = !!body && /(^|[\s(])@everyone\b/i.test(body);
+
   const notifRows = (parts || [])
     .filter((p: any) => p.team_member_id !== senderId)
     .map((p: any) => ({
       recipient_id: p.team_member_id,
-      kind: "chat_message",
-      title: `${senderName} · ${threadLabel}`,
+      kind: mentionsEveryone ? "chat_mention" : "chat_message",
+      title: mentionsEveryone
+        ? `${senderName} mentioned everyone · ${threadLabel}`
+        : `${senderName} · ${threadLabel}`,
       body: stickerKey ? "Sticker" : body?.slice(0, 120) || "Attachment",
       link: `/team/chat?thread=${threadId}`,
       thread_id: threadId,

@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { Loader2, Save, Plus, X, Hash } from "lucide-react";
 import { appAlert } from "@/lib/app-notify";
 import ContentHubShell from "@/components/content-hub/ContentHubShell";
+import SocialChannels from "@/components/content-hub/SocialChannels";
 import { AssetUrlField } from "@/components/admin/AssetUrlField";
 import { REMINDER_OFFSETS, REMINDER_CHANNELS } from "@/lib/content-hub/shared";
 
@@ -204,6 +205,8 @@ export default function ContentSettingsPage() {
           <p className="mt-2 text-[11px] text-gray-400">Remember to press Save. Up to 50 examples are kept; the AI uses your most recent ones.</p>
         </div>
       </section>
+
+      <SocialChannels />
     </ContentHubShell>
   );
 }

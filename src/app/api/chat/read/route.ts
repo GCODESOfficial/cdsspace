@@ -1,12 +1,13 @@
 import { NextResponse } from "next/server";
-import { verifyAdmin, verifyUser } from "@/lib/admin-auth";
+import { verifyUser } from "@/lib/admin-auth";
+import { getClientChatAdminActor } from "@/lib/client-chat-admin";
 import { supabaseAdmin } from "@/lib/supabase";
 
 export const dynamic = "force-dynamic";
 
 export async function POST(request: Request) {
   try {
-    const admin = await verifyAdmin();
+    const admin = await getClientChatAdminActor("messages.view");
     const userSession = await verifyUser();
 
     if (!admin && !userSession) {
@@ -23,7 +24,12 @@ export async function POST(request: Request) {
       );
     }
 
-    const isAdmin = !!admin;
+    const clientActorRequested = body.actor === "client";
+    if (clientActorRequested && !userSession) {
+      return NextResponse.json({ error: "Client session required" }, { status: 401 });
+    }
+
+    const isAdmin = !!admin && !clientActorRequested;
 
     // If client, only allow marking messages in their own room
     if (!isAdmin) {

@@ -281,7 +281,7 @@ export async function POST(req: Request, ctx: { params: Promise<{ token: string 
       .eq("token", token);
   }
 
-  const { sessionToken } = await createTeamSession(memberId, req);
+  const { sessionToken } = await createTeamSession(memberId, req, { source: "team_invite" });
 
   const response = NextResponse.json({
     ok: true,

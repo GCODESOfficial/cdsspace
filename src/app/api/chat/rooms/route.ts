@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
-import { verifyAdmin, verifyUser } from "@/lib/admin-auth";
+import { verifyUser } from "@/lib/admin-auth";
+import { getClientChatAdminActor } from "@/lib/client-chat-admin";
 import { supabaseAdmin } from "@/lib/supabase";
 
 export const dynamic = "force-dynamic";
@@ -15,9 +16,24 @@ type RoomRow = {
   meta?: { platform: "facebook" | "instagram"; external_user_id: string; display_name: string | null; username: string | null; linked_client_id: string | null } | null;
 };
 
+type ClientProfileLite = NonNullable<RoomRow["client"]>;
+type WhatsAppContactLite = {
+  phone: string;
+  display_name: string | null;
+  wa_name: string | null;
+  client_id: string | null;
+};
+type MetaContactLite = {
+  platform: "facebook" | "instagram";
+  external_user_id: string;
+  display_name: string | null;
+  username: string | null;
+  client_id: string | null;
+};
+
 export async function GET() {
   try {
-    const admin = await verifyAdmin();
+    const admin = await getClientChatAdminActor("messages.view");
     const userSession = await verifyUser();
 
     if (!admin && !userSession) {
@@ -91,15 +107,18 @@ export async function GET() {
             }),
       ]);
 
-      const profileMap = new Map((profiles || []).map((p) => [p.id, p]));
-      const contactMap = new Map((waContacts || []).map((c) => [c.phone, c]));
+      const profileRows = (profiles || []) as ClientProfileLite[];
+      const whatsAppRows = (waContacts || []) as WhatsAppContactLite[];
+      const metaRows = (metaContacts || []) as MetaContactLite[];
+      const profileMap = new Map<string, ClientProfileLite>(profileRows.map((profile) => [profile.id, profile]));
+      const contactMap = new Map<string, WhatsAppContactLite>(whatsAppRows.map((contact) => [contact.phone, contact]));
       const metaContactMap = new Map(
-        (metaContacts || []).map((c) => [`${c.platform}_${c.external_user_id}`, c] as const),
+        metaRows.map((contact) => [`${contact.platform}_${contact.external_user_id}`, contact] as const),
       );
 
       const linkedClientIds = [
-        ...Array.from(contactMap.values()).map((c) => c.client_id),
-        ...Array.from(metaContactMap.values()).map((c) => c.client_id),
+        ...Array.from(contactMap.values()).map((contact) => contact.client_id),
+        ...Array.from(metaContactMap.values()).map((contact) => contact.client_id),
       ].filter((x): x is string => !!x && !profileMap.has(x));
 
       if (linkedClientIds.length) {
@@ -107,7 +126,7 @@ export async function GET() {
           .from("profiles")
           .select("id, email, full_name, avatar_url")
           .in("id", linkedClientIds);
-        (extraProfiles || []).forEach((p) => profileMap.set(p.id, p));
+        ((extraProfiles || []) as ClientProfileLite[]).forEach((profile) => profileMap.set(profile.id, profile));
       }
 
       const hydrated = rooms.map<RoomRow>((room) => {

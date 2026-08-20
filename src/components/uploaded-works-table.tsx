@@ -107,19 +107,19 @@ export function UploadedWorksTable({
 	);
 
 	return (
-		<div className="p-6">
+		<div className="p-4 sm:p-6">
 			{/* Header */}
-			<div className="flex items-center justify-between mb-5">
+			<div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
 				<h2 className="text-[16px] font-semibold text-[#0D1B39]">Uploaded Works</h2>
-				<div className="flex items-center gap-2.5">
+				<div className="grid min-w-0 grid-cols-[minmax(0,1fr)_86px_40px_40px] items-center gap-2 sm:flex sm:gap-2.5">
 					{/* Search */}
-					<div className="relative">
+					<div className="relative min-w-0">
 						<Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
 						<input
 							placeholder="Search..."
 							value={localSearchQuery}
 							onChange={handleLocalSearchChange}
-							className="pl-8 pr-3 py-2 w-44 rounded-lg bg-gray-50 border border-gray-200 text-xs text-gray-700 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-300 transition"
+							className="w-full rounded-lg border border-gray-200 bg-gray-50 py-2 pl-8 pr-2 text-xs text-gray-700 placeholder:text-gray-400 transition focus:border-blue-300 focus:outline-none focus:ring-2 focus:ring-blue-100 sm:w-44 sm:pr-3"
 						/>
 					</div>
 
@@ -136,16 +136,19 @@ export function UploadedWorksTable({
 
 					<button
 						onClick={() => setSortOrder(sortOrder === "asc" ? "desc" : "asc")}
-						className="p-2 rounded-lg bg-gray-50 border border-gray-200 text-gray-500 hover:bg-gray-100 hover:text-gray-700 transition"
+						className="flex h-10 w-10 items-center justify-center rounded-lg border border-gray-200 bg-gray-50 text-gray-500 transition hover:bg-gray-100 hover:text-gray-700"
+						aria-label={sortOrder === "asc" ? "Sort descending" : "Sort ascending"}
 					>
 						<ArrowUpDown className="w-3.5 h-3.5" />
 					</button>
 
 					{/* Add */}
-					<Link href="/admin/upload-works">
-						<button className="w-8 h-8 rounded-lg bg-[#0A4FE8] text-white flex items-center justify-center hover:bg-[#083EC0] transition text-lg font-light">
-							+
-						</button>
+					<Link
+						href="/admin/upload-works"
+						className="flex h-10 w-10 items-center justify-center rounded-lg bg-[#0A4FE8] text-lg font-light text-white shadow-[0_8px_20px_rgba(10,79,232,0.18)] transition hover:bg-[#083EC0]"
+						aria-label="Upload a work"
+					>
+						+
 					</Link>
 				</div>
 			</div>
@@ -228,15 +231,16 @@ export function UploadedWorksTable({
 
 			{/* Pagination */}
 			{totalPages > 1 && (
-				<div className="flex items-center justify-between mt-4 pt-4 border-t border-gray-50">
+				<div className="mt-4 flex flex-col gap-3 border-t border-gray-50 pt-4 min-[420px]:flex-row min-[420px]:items-center min-[420px]:justify-between">
 					<p className="text-[11px] text-gray-400">
 						{paginatedWorks.length} of {filteredWorks.length} entries
 					</p>
-					<div className="flex items-center gap-1">
+					<div className="flex max-w-full items-center justify-center gap-1">
 						<button
 							disabled={currentPage === 1}
 							onClick={() => setCurrentPage(currentPage - 1)}
-							className="w-7 h-7 rounded-lg flex items-center justify-center text-gray-400 hover:bg-gray-100 disabled:opacity-30 transition"
+							className="flex h-8 w-8 items-center justify-center rounded-lg text-gray-400 transition hover:bg-gray-100 disabled:opacity-30"
+							aria-label="Previous page"
 						>
 							<ChevronLeft className="w-4 h-4" />
 						</button>
@@ -244,7 +248,9 @@ export function UploadedWorksTable({
 							<button
 								key={i}
 								onClick={() => setCurrentPage(i + 1)}
-								className={`w-7 h-7 rounded-lg text-xs font-medium transition ${
+								aria-label={`Page ${i + 1}`}
+								aria-current={currentPage === i + 1 ? "page" : undefined}
+								className={`h-8 w-8 rounded-lg text-xs font-medium transition ${
 									currentPage === i + 1
 										? "bg-[#0A4FE8] text-white shadow-sm"
 										: "text-gray-500 hover:bg-gray-100"
@@ -256,7 +262,8 @@ export function UploadedWorksTable({
 						<button
 							disabled={currentPage === totalPages}
 							onClick={() => setCurrentPage(currentPage + 1)}
-							className="w-7 h-7 rounded-lg flex items-center justify-center text-gray-400 hover:bg-gray-100 disabled:opacity-30 transition"
+							className="flex h-8 w-8 items-center justify-center rounded-lg text-gray-400 transition hover:bg-gray-100 disabled:opacity-30"
+							aria-label="Next page"
 						>
 							<ChevronRight className="w-4 h-4" />
 						</button>

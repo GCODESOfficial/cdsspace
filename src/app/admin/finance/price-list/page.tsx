@@ -33,7 +33,7 @@ export default function PriceListPage() {
     const r = await fetch("/api/admin/finance/price-list");
     const d = await r.json();
     const all: FinancePriceItem[] = d.items ?? [];
-    // Auto-delete items with no price (0 / null) — they clutter the catalog and
+    // Auto-delete items with no price (0 / null) - they clutter the catalog and
     // aren't usable on invoices. Fire the deletes, then show only priced items.
     const zeroPriced = all.filter((i) => Number(i.unit_price) <= 0);
     if (zeroPriced.length) {
@@ -122,7 +122,7 @@ export default function PriceListPage() {
           </Button>
           <Dialog open={open} onOpenChange={setOpen}>
             <DialogTrigger asChild>
-              <Button onClick={openNew} className="h-11 px-5 rounded-xl bg-gradient-to-b from-blue-600 to-blue-700 shadow-lg shadow-blue-600/30">
+              <Button onClick={openNew} className="h-11 px-5 rounded-xl bg-[#0A4FE8] shadow-lg shadow-blue-600/30">
                 <Plus className="w-4 h-4 mr-1.5" /> New Item
               </Button>
             </DialogTrigger>
@@ -168,7 +168,7 @@ export default function PriceListPage() {
               </div>
               <DialogFooter className="mt-5">
                 <Button variant="outline" className="h-11 px-5 rounded-xl" onClick={() => setOpen(false)}>Cancel</Button>
-                <Button onClick={save} className="h-11 px-5 rounded-xl bg-gradient-to-b from-blue-600 to-blue-700 shadow-lg shadow-blue-600/30">Save</Button>
+                <Button onClick={save} className="h-11 px-5 rounded-xl bg-[#0A4FE8] shadow-lg shadow-blue-600/30">Save</Button>
               </DialogFooter>
             </DialogContent>
           </Dialog>
@@ -222,7 +222,7 @@ export default function PriceListPage() {
                       <div className="font-semibold text-gray-900">{it.name}</div>
                       {it.description && <div className="text-xs text-gray-500 truncate max-w-md">{it.description}</div>}
                     </td>
-                    <td className="px-4 py-3 text-gray-600">{it.category || "—"}</td>
+                    <td className="px-4 py-3 text-gray-600">{it.category || "-"}</td>
                     <td className="px-4 py-3 text-right font-bold text-blue-700 whitespace-nowrap">{formatMoney(it.unit_price, it.currency)}</td>
                     <td className="px-4 py-3">
                       <div className="flex justify-end gap-1">

@@ -6,6 +6,8 @@ import { supabase } from "@/lib/supabase";
 import {
   Building2, ShoppingBag, Quote, ArrowUpRight, Loader2,
   Users, TrendingUp, MessageSquare,
+  PackageCheck,
+  Mail,
 } from "lucide-react";
 
 interface Stats {
@@ -16,7 +18,9 @@ interface Stats {
 }
 
 const SECTIONS = [
-  { href: "/admin/clients/list", label: "Client / Brand List", desc: "Manage all clients & brands", icon: Building2, tint: "from-blue-500 to-indigo-500" },
+  { href: "/admin/clients/deliveries", label: "Client Deliveries", desc: "Send finished project files directly to clients", icon: PackageCheck, tint: "bg-[#0A4FE8]" },
+  { href: "/admin/clients/list", label: "Unified Client List", desc: "Manage manual customers and platform accounts", icon: Building2, tint: "bg-[#0A4FE8]" },
+  { href: "/admin/clients/mailings", label: "Client mailings", desc: "Write and send branded email campaigns", icon: Mail, tint: "bg-[#0A4FE8]" },
   { href: "/admin/orders", label: "Client Orders", desc: "Track design, banner, merch & recurring orders", icon: ShoppingBag, tint: "from-emerald-500 to-teal-500" },
   { href: "/admin/testimonials", label: "Testimonials", desc: "Manage client testimonials & photos", icon: Quote, tint: "from-amber-500 to-orange-500" },
 ];
@@ -29,21 +33,21 @@ export default function ClientsOverview() {
   useEffect(() => {
     async function loadStats() {
       try {
-        const [clientsRes, ordersRes, testimonialsRes, recentRes] = await Promise.all([
-          supabase.from("clients").select("id, status"),
+        const [directoryRes, ordersRes, testimonialsRes] = await Promise.all([
+          fetch("/api/admin/clients/directory", { cache: "no-store" }),
           supabase.from("design_requests").select("id"),
           supabase.from("testimonials").select("id"),
-          supabase.from("clients").select("id, name, brand_name, industry, created_at").order("created_at", { ascending: false }).limit(5),
         ]);
 
-        const clients = clientsRes.data || [];
+        const directory = await directoryRes.json().catch(() => ({}));
+        const clients = directoryRes.ok ? directory.clients || [] : [];
         setStats({
           totalClients: clients.length,
-          activeClients: clients.filter(c => c.status === "active").length,
+          activeClients: clients.filter((c: { status?: string }) => c.status === "active").length,
           totalOrders: ordersRes.data?.length || 0,
           totalTestimonials: testimonialsRes.data?.length || 0,
         });
-        setRecentClients(recentRes.data || []);
+        setRecentClients([...clients].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()).slice(0, 5));
       } catch (e) {
         console.error(e);
       } finally {
@@ -57,8 +61,8 @@ export default function ClientsOverview() {
     <div className="p-8 max-w-[1200px]">
       <div className="mb-8">
         <p className="text-[#0A4FE8] text-sm font-semibold">Management</p>
-        <h1 className="text-[28px] font-bold text-[#0D1B39] tracking-tight">Clients</h1>
-        <p className="text-gray-400 text-[13px] mt-1">All client relationships in one place - brands, orders, and testimonials.</p>
+        <h1 className="text-[28px] font-bold text-[#0D1B39] tracking-tight">Sales Hub</h1>
+        <p className="text-gray-400 text-[13px] mt-1">Client relationships, finished-work delivery, orders, and testimonials in one place.</p>
       </div>
 
       {/* Stats */}
@@ -75,12 +79,12 @@ export default function ClientsOverview() {
 
       {/* Section Cards */}
       <h2 className="text-sm font-semibold text-gray-400 uppercase tracking-wider mb-4">Quick Access</h2>
-      <div className="grid grid-cols-3 gap-5 mb-8">
+      <div className="grid gap-5 mb-8 md:grid-cols-2 xl:grid-cols-4">
         {SECTIONS.map((s) => (
           <Link key={s.href} href={s.href} className="group">
             <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-6 h-full hover:shadow-lg hover:-translate-y-0.5 transition-all">
               <div className="flex items-start justify-between mb-5">
-                <div className={`w-12 h-12 rounded-xl bg-gradient-to-br ${s.tint} grid place-items-center shadow-lg shadow-blue-600/10`}>
+                <div className={`w-12 h-12 rounded-xl bg-[#0A4FE8] grid place-items-center shadow-lg shadow-blue-600/10`}>
                   <s.icon className="w-6 h-6 text-white" />
                 </div>
                 <ArrowUpRight className="w-5 h-5 text-gray-300 group-hover:text-[#0A4FE8] transition" />
@@ -107,7 +111,11 @@ export default function ClientsOverview() {
                 </div>
                 <div className="flex-1 min-w-0">
                   <p className="text-[13px] font-medium text-[#0D1B39] truncate">{c.brand_name || c.name}</p>
-                  {c.industry && <p className="text-[11px] text-gray-400">{c.industry}</p>}
+                  {(c.industries?.length || c.industry) && (
+                    <p className="truncate text-[11px] text-gray-400">
+                      {(c.industries?.length ? c.industries : [c.industry]).filter(Boolean).join(" · ")}
+                    </p>
+                  )}
                 </div>
                 <span className="text-[11px] text-gray-300">{new Date(c.created_at).toLocaleDateString()}</span>
               </Link>

@@ -1,0 +1,24 @@
+# Recommended Mockup Layer Stack
+
+Top
+
+- OUTPUT_GRADE
+- FINAL_GRAIN
+- FINAL_SHARPEN
+- ENVIRONMENT_REFLECTIONS
+- SPECULAR_HIGHLIGHTS
+- SURFACE_TEXTURE_HIGH
+- FINISH_SPOT_UV
+- FINISH_FOIL
+- FINISH_EMBOSS
+- ARTWORK_EXACT
+- SURFACE_LIGHT_LOW
+- SURFACE_DISPLACEMENT
+- OCCLUSION_MASKS
+- BASE_PRODUCT
+- CLEANUP
+- BACKGROUND
+
+Bottom
+
+Keep artwork and finish masks linked to the same approved source whenever possible.

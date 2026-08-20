@@ -2,6 +2,7 @@
 
 import jsPDF from "jspdf";
 import { installBrandFont } from "./pdf/pdf-fonts";
+import { localizePdfLabels } from "./pdf/pdf-i18n";
 import type { FinanceQuotation, FinanceQuotationItem, FinanceQuotationSample } from "./finance/types";
 import {
     DEFAULT_QUOTATION_ESTIMATE_NOTE,
@@ -10,7 +11,7 @@ import {
     formatFinanceDate,
 } from "./finance/types";
 
-const CURRENCY_SYMBOLS: Record<string, string> = { NGN: "N", USD: "$", RWF: "FRw " };
+const CURRENCY_SYMBOLS: Record<string, string> = { NGN: "N", USD: "$", GBP: "GBP ", EUR: "EUR ", RWF: "FRw ", CNY: "CNY ", AED: "AED " };
 
 function fmtMoney(n: number | string | null | undefined, currency: string) {
     const v = Number(n || 0);
@@ -109,6 +110,11 @@ export async function exportQuotationToPdf(
 
     const doc = new jsPDF({ unit: "pt", format: "a4" });
     installBrandFont(doc);
+    await localizePdfLabels(doc as unknown as { text: (...args: unknown[]) => unknown }, [
+        "Branding & Digital Agency", "QUOTATION", "ESTIMATE", "Estimate Details",
+        "ISSUED / VALIDITY", "PREPARED FOR", "PROJECT / COMPANY", "ITEM", "QTY",
+        "UNIT PRICE", "NOTES", "Sample References",
+    ]);
     const pageWidth = doc.internal.pageSize.getWidth();
     const pageHeight = doc.internal.pageSize.getHeight();
     const margin = 48;

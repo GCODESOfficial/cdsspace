@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { financeDb, requireFinanceAdminAsync } from "@/lib/finance/api-auth";
 import { ensureProjectChannel } from "@/lib/team-chat-channels";
+import { resolveClientBillingCurrency } from "@/lib/client-billing-server";
+import { CURRENCIES } from "@/lib/finance/types";
 
 export async function GET(req: NextRequest) {
   const denied = await requireFinanceAdminAsync(req);
@@ -28,12 +30,13 @@ export async function POST(req: NextRequest) {
   const body = await req.json().catch(() => ({}));
   const name = String(body?.name ?? "").trim();
   const client = String(body?.client ?? "").trim();
-  const currency = String(body?.currency ?? "").trim();
+  const requestedCurrency = String(body?.currency ?? "").trim().toUpperCase();
+  const clientEmail = String(body?.client_email ?? "").trim().toLowerCase();
   const { duration_start, duration_end, notes } = body ?? {};
-  if (!name || !client || !currency) {
+  if (!name || !client || !requestedCurrency) {
     return NextResponse.json({ error: "Project name, client and currency are required." }, { status: 400 });
   }
-  if (!["NGN", "RWF", "USD"].includes(currency)) {
+  if (!CURRENCIES.includes(requestedCurrency as (typeof CURRENCIES)[number])) {
     return NextResponse.json({ error: "invalid currency" }, { status: 400 });
   }
   const isDate = (v: unknown) => typeof v === "string" && /^\d{4}-\d{2}-\d{2}$/.test(v);
@@ -43,9 +46,10 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Project end date cannot be before the start date." }, { status: 400 });
   }
   const sb = financeDb();
+  const currency = await resolveClientBillingCurrency(sb, clientEmail, requestedCurrency);
   const { data, error } = await sb
     .from("finance_projects")
-    .insert({ name, client, currency, duration_start: start, duration_end: end, notes: (typeof notes === "string" && notes.trim()) || null })
+    .insert({ name, client, client_email: clientEmail || null, currency, duration_start: start, duration_end: end, notes: (typeof notes === "string" && notes.trim()) || null })
     .select()
     .single();
   if (error) {

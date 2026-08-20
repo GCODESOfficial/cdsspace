@@ -9,6 +9,7 @@
  */
 
 const OPENAI_URL = "https://api.openai.com/v1/chat/completions";
+const OPENAI_IMAGE_URL = "https://api.openai.com/v1/images/generations";
 
 export interface ChatMessage {
   role: "system" | "user" | "assistant";
@@ -25,6 +26,7 @@ export interface ChatOptions {
 }
 
 const DEFAULT_MODEL = process.env.OPENAI_DEFAULT_MODEL || "gpt-4o-mini";
+const DEFAULT_IMAGE_MODEL = process.env.OPENAI_IMAGE_MODEL || "gpt-image-2";
 
 export class OpenAIRequestError extends Error {
   status: number;
@@ -120,6 +122,66 @@ export async function chatComplete(
     prompt_tokens: json.usage?.prompt_tokens ?? 0,
     completion_tokens: json.usage?.completion_tokens ?? 0,
     model: json.model ?? opts.model ?? DEFAULT_MODEL,
+  };
+}
+
+export interface ImageGenerationOptions {
+  model?: string;
+  size?: string;
+  quality?: "low" | "medium" | "high" | "auto";
+  output_format?: "png" | "jpeg" | "webp";
+  output_compression?: number;
+  background?: "opaque" | "transparent" | "auto";
+  user?: string;
+}
+
+/** Generate one image through the Image API and return its durable byte payload. */
+export async function generateImage(
+  prompt: string,
+  opts: ImageGenerationOptions = {},
+): Promise<{
+  bytes: Uint8Array;
+  mime_type: string;
+  model: string;
+  request_id: string | null;
+  usage: unknown;
+}> {
+  const model = opts.model || DEFAULT_IMAGE_MODEL;
+  const outputFormat = opts.output_format || "jpeg";
+  const res = await fetch(OPENAI_IMAGE_URL, {
+    method: "POST",
+    headers: authHeaders(),
+    body: JSON.stringify({
+      model,
+      prompt,
+      n: 1,
+      size: opts.size || "1536x1024",
+      quality: opts.quality || "medium",
+      output_format: outputFormat,
+      output_compression: outputFormat === "png"
+        ? undefined
+        : Math.max(0, Math.min(100, Math.round(opts.output_compression ?? 88))),
+      background: opts.background || "opaque",
+      user: opts.user,
+    }),
+  });
+
+  if (!res.ok) {
+    throw await openAIErrorFromResponse(res);
+  }
+
+  const json = await res.json();
+  const encoded = json.data?.[0]?.b64_json;
+  if (typeof encoded !== "string" || !encoded) {
+    throw new OpenAIRequestError(502, "OpenAI returned an empty image.");
+  }
+
+  return {
+    bytes: Uint8Array.from(Buffer.from(encoded, "base64")),
+    mime_type: `image/${outputFormat}`,
+    model,
+    request_id: res.headers.get("x-request-id"),
+    usage: json.usage || null,
   };
 }
 

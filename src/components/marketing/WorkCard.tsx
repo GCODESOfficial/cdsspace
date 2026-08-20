@@ -6,7 +6,7 @@ import { ArrowUpRight } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 interface Work {
-    id: number;
+    id: string;
     title: string;
     category: string | null;
     cover_image: string | null;
@@ -16,7 +16,7 @@ interface Work {
 interface WorkCardProps {
     work: Work;
     index?: number;
-    onOpen: (id: number) => void;
+    onOpen: (id: string) => void;
     className?: string;
 }
 
@@ -37,6 +37,7 @@ export function WorkCard({ work, index = 0, onOpen, className }: WorkCardProps) 
                 type="button"
                 onClick={() => onOpen(work.id)}
                 aria-label={`Open ${work.title}`}
+                data-cds-work-preview
                 className="relative block w-full h-full text-left rounded-[24px] md:rounded-[32px] 2xl:rounded-[40px] overflow-hidden group border border-brand-stroke/40 bg-brand-stroke/20 cursor-pointer shadow-sm hover:shadow-xl transition-shadow duration-500"
             >
                 {/* Mobile-only pill with category (Always visible on mobile) */}
@@ -63,6 +64,7 @@ export function WorkCard({ work, index = 0, onOpen, className }: WorkCardProps) 
                         alt={work.title}
                         fill
                         quality={90}
+                        draggable={false}
                         sizes="(min-width: 1024px) 480px, (min-width: 768px) 50vw, 100vw"
                         className="object-cover transform transition-transform duration-1000 ease-out group-hover:scale-110"
                     />

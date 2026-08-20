@@ -16,7 +16,10 @@ async function executeBrowserQuery(payload: GlashQueryPayload): Promise<GlashQue
     });
     const json = await res.json().catch(() => null);
     if (!res.ok || !json) {
-      return { data: null, error: { message: json?.error || `Glash query failed with ${res.status}` } };
+      return {
+        data: null,
+        error: { message: json?.error?.message || json?.error || `Glash query failed with ${res.status}` },
+      };
     }
     return json;
   } catch (error) {
@@ -27,6 +30,8 @@ async function executeBrowserQuery(payload: GlashQueryPayload): Promise<GlashQue
   }
 }
 
-export function createGlashBrowserQueryClient(extras: Record<string, any> = {}) {
+export function createGlashBrowserQueryClient<
+  TExtras extends Record<string, any> = Record<string, never>,
+>(extras: TExtras = {} as TExtras) {
   return createGlashQueryClient(executeBrowserQuery, extras);
 }

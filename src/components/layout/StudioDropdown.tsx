@@ -38,10 +38,10 @@ const productCards = [
         accountHref: "/dashboard/merch",
     },
     {
-        title: "Partnership",
-        description: "Refer clients and earn",
+        title: "Brand Marketers",
+        description: "Refer brands and earn 5%",
         image: "/home/source/0b29fab281d7cfe7e98502c49ddc2794b06f2c3c.png",
-        accountHref: "/partnership",
+        href: "/marketer",
     },
 ];
 

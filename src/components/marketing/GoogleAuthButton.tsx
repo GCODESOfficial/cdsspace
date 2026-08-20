@@ -11,7 +11,8 @@ import { Loader2 } from "lucide-react";
  */
 export function GoogleAuthButton({ label, next = "/dashboard" }: { label: string; next?: string }) {
     const [loading, setLoading] = useState(false);
-    const href = `/api/auth/google/login?next=${encodeURIComponent(next)}`;
+    const canonicalOrigin = (process.env.NEXT_PUBLIC_SITE_URL || "").replace(/\/$/, "");
+    const href = `${canonicalOrigin}/api/auth/google/login?next=${encodeURIComponent(next)}`;
 
     return (
         <a

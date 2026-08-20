@@ -4,7 +4,7 @@
 -- photo/file (stored in the media bucket) OR a pasted link to an image/file
 -- online. Stored inline on project_tasks so direct tasks (no project) work.
 --
--- Migrations here are MANUAL (no runner) — apply this SQL by hand against
+-- Migrations here are MANUAL (no runner) - apply this SQL by hand against
 -- GlashDB. Idempotent (IF NOT EXISTS).
 -- ---------------------------------------------------------------------------
 

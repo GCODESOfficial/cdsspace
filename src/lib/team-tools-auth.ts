@@ -5,6 +5,7 @@
 
 import { cookies } from "next/headers";
 import { getTeamSession } from "@/lib/team-auth";
+import { verifyAdminCookie } from "@/lib/admin-session-cookie";
 
 export type ToolActor =
   | { kind: "admin"; id: null; name: string; email: string; is_admin: true }
@@ -21,16 +22,11 @@ export type ToolActor =
 
 export async function getToolActor(): Promise<ToolActor | null> {
   const store = await cookies();
-  const rawAdmin = store.get("admin_session")?.value;
-  if (rawAdmin) {
-    try {
-      const s = JSON.parse(rawAdmin);
-      if (s.role === "super_admin" || s.role === "sub_admin") {
-        return { kind: "admin", id: null, name: s.name || "Admin", email: s.email, is_admin: true };
-      }
-    } catch {
-      /* fallthrough */
-    }
+  const s = verifyAdminCookie<{ role: "super_admin" | "sub_admin"; email: string; name?: string }>(
+    store.get("admin_session")?.value,
+  );
+  if (s && (s.role === "super_admin" || s.role === "sub_admin")) {
+    return { kind: "admin", id: null, name: s.name || "Admin", email: s.email, is_admin: true };
   }
   const team = await getTeamSession();
   if (team) {

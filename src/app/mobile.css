@@ -1,0 +1,298 @@
+/*
+ * CDS Space phone experience.
+ *
+ * This stylesheet is intentionally plain CSS and loads after globals.css.
+ * It provides the shared mobile contract for public, client, admin, team,
+ * authentication, notification, document, and modal surfaces.
+ */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  inline-size: 100%;
+  max-inline-size: 100%;
+  min-inline-size: 0;
+  overflow-x: clip;
+}
+
+body {
+  min-block-size: 100dvh;
+  text-align: start;
+}
+
+/*
+ * Translation changes the document direction at runtime. Logical alignment
+ * keeps headings, controls and card copy attached to the selected language's
+ * reading edge without flattening intentionally centred empty states.
+ */
+:where(input, textarea, select, [contenteditable="true"]) {
+  direction: inherit;
+  text-align: start;
+}
+
+html[dir="rtl"] [data-app-shell] .text-left {
+  text-align: right !important;
+}
+
+html[dir="rtl"] [data-app-shell] .text-right {
+  text-align: left !important;
+}
+
+[data-directional-copy] {
+  text-align: start;
+}
+
+/*
+ * Conversation-list previews must stay compact on every viewport. Keep this
+ * outside the phone media query so team, admin and client chat sidebars share
+ * the same one-line contract on desktop and mobile. The explicit rules also
+ * prevent the mobile button wrapping rules below from expanding long messages.
+ */
+[data-chat-preview] {
+  display: block;
+  min-inline-size: 0;
+  max-inline-size: 100%;
+  overflow: hidden;
+  overflow-wrap: normal;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/*
+ * Keep every page, dashboard, modal, menu and nested panel scrollable without
+ * drawing a scrollbar track. Mouse wheels, touch gestures, keyboard scrolling
+ * and programmatic scrolling continue to work normally.
+ */
+html,
+body,
+* {
+  -ms-overflow-style: none !important;
+  scrollbar-width: none !important;
+}
+
+*::-webkit-scrollbar {
+  display: none !important;
+  width: 0 !important;
+  height: 0 !important;
+}
+
+:where(main, section, article, aside, header, footer, nav, form, fieldset, div) {
+  min-inline-size: 0;
+}
+
+:where(img, video, canvas, iframe) {
+  max-inline-size: 100%;
+}
+
+:where(p, li, dd, dt, h1, h2, h3, h4, h5, h6, a, button, label, code, pre) {
+  overflow-wrap: anywhere;
+}
+
+:where(button, a, input, select, textarea, [role="button"]) {
+  max-inline-size: 100%;
+  touch-action: manipulation;
+}
+
+@media (max-width: 767px) {
+  :root {
+    --mobile-page-gutter: 1rem;
+    --mobile-control-height: 2.75rem;
+  }
+
+  [data-site-header] {
+    top: max(0.75rem, env(safe-area-inset-top));
+  }
+
+  [data-app-content] {
+    inline-size: 100%;
+    max-inline-size: 100%;
+  }
+
+  [data-app-shell="admin"] main :where(.p-8, .p-7, .p-6),
+  [data-app-shell="client"] [data-mobile-page-surface] > :where(.p-8, .p-7, .p-6, .p-5) {
+    padding: var(--mobile-page-gutter);
+  }
+
+  [data-app-shell="admin"] main :where(.px-8, .px-7, .px-6),
+  [data-app-shell="client"] [data-mobile-page-surface] :where(.px-8, .px-7, .px-6) {
+    padding-inline: var(--mobile-page-gutter);
+  }
+
+  [data-app-shell] main :where(.grid-cols-3, .grid-cols-4, .grid-cols-5, .grid-cols-6) {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  [data-mobile-wrap-actions] {
+    flex-wrap: wrap;
+  }
+
+  :where(button:not([aria-label]), a[role="button"], a[class*="rounded"]:not([aria-label])) {
+    min-block-size: var(--mobile-control-height);
+    white-space: normal;
+    line-height: 1.2;
+  }
+
+  :where(button, [role="button"])[aria-label] {
+    min-block-size: 2.5rem;
+    min-inline-size: 2.5rem;
+  }
+
+  :where(
+    input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]),
+    select,
+    textarea,
+    [contenteditable="true"]
+  ) {
+    min-block-size: var(--mobile-control-height);
+    max-inline-size: 100%;
+    font-size: 16px;
+  }
+
+  :where(main, [role="dialog"]) table {
+    display: block;
+    inline-size: 100%;
+    max-inline-size: 100%;
+    overflow-x: auto;
+    overscroll-behavior-inline: contain;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  :where(main, [role="dialog"]) :where(pre, .overflow-x-auto) {
+    max-inline-size: 100%;
+    overscroll-behavior-inline: contain;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  [data-slot="dialog-overlay"],
+  [data-slot="alert-dialog-overlay"] {
+    background: rgb(4 11 55 / 55%);
+    backdrop-filter: blur(4px);
+  }
+
+  [data-slot="dialog-content"],
+  [data-slot="alert-dialog-content"] {
+    inset: auto 0 0 0 !important;
+    top: auto !important;
+    right: 0 !important;
+    bottom: 0 !important;
+    left: 0 !important;
+    display: flex;
+    max-block-size: calc(100dvh - max(0.5rem, env(safe-area-inset-top)));
+    inline-size: 100%;
+    max-inline-size: 100%;
+    transform: none !important;
+    translate: 0 0 !important;
+    --tw-translate-x: 0px !important;
+    --tw-translate-y: 0px !important;
+    flex-direction: column;
+    overflow: hidden;
+    border-radius: 1.5rem 1.5rem 0 0;
+    padding: 1rem;
+    padding-block-end: max(1rem, env(safe-area-inset-bottom));
+  }
+
+  .workspace-dialog-position {
+    top: auto !important;
+    right: 0 !important;
+    bottom: 0 !important;
+    left: 0 !important;
+    transform: none !important;
+  }
+
+  [data-slot="dialog-scroll-area"] {
+    max-block-size: none;
+    min-block-size: 0;
+    flex: 1 1 auto;
+    overscroll-behavior: contain;
+  }
+
+  [data-slot="dialog-scroll-area"] :where(.grid-cols-2, .grid-cols-3),
+  [data-slot="alert-dialog-content"] :where(.grid-cols-2, .grid-cols-3) {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  [data-slot="dialog-footer"] > :where(button, a),
+  [data-slot="alert-dialog-content"] [class*="flex-col-reverse"] > :where(button, a) {
+    inline-size: 100%;
+  }
+
+  /*
+   * Older hand-built modals use a fixed full-screen flex wrapper instead of
+   * the shared dialog component. Give those surfaces the same phone behavior.
+   */
+  :where(.fixed.inset-0):has(> :where(div, form).bg-white[class*="max-w"]) {
+    align-items: flex-end;
+    padding: 0;
+  }
+
+  :where(.fixed.inset-0) > :where(div, form).bg-white[class*="max-w"] {
+    inline-size: 100%;
+    max-inline-size: 100%;
+    max-block-size: calc(100dvh - max(0.5rem, env(safe-area-inset-top)));
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    border-radius: 1.5rem 1.5rem 0 0;
+    padding-block-end: max(1rem, env(safe-area-inset-bottom));
+  }
+
+  :where(.fixed.inset-0) > :where(div, form).bg-white[class*="max-w"]
+    :where(.p-8, .p-7, .p-6, .px-8, .px-7, .px-6) {
+    padding-inline: var(--mobile-page-gutter);
+  }
+
+  :where(
+    [role="dialog"],
+    [data-slot="dialog-content"],
+    [data-slot="alert-dialog-content"],
+    .fixed.inset-0 > :where(div, form).bg-white[class*="max-w"]
+  ) button:not([aria-label]) {
+    min-block-size: var(--mobile-control-height);
+    white-space: normal;
+    line-height: 1.2;
+  }
+
+  [data-app-shell="auth"] form,
+  [data-app-shell="auth"] form > * {
+    max-inline-size: 100%;
+  }
+
+  [data-chat-shell] {
+    border-inline: 0;
+    border-radius: 0;
+  }
+
+  [data-chat-sidebar-header],
+  [data-chat-thread] {
+    padding-inline: var(--mobile-page-gutter);
+  }
+
+  [data-chat-composer] {
+    padding-block-end: max(0.75rem, env(safe-area-inset-bottom));
+  }
+}
+
+@media (max-width: 380px) {
+  :root {
+    --mobile-page-gutter: 0.875rem;
+  }
+
+  [data-app-shell] main :where(.grid-cols-2) {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

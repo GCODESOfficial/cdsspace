@@ -10,7 +10,9 @@ import {
   Mail,
   MessageSquare,
   Megaphone,
+  Image as ImageIcon,
   Send,
+  Trash2,
   Users,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
@@ -62,6 +64,8 @@ export default function AdminAnnouncementsPage() {
   const [title, setTitle] = useState("");
   const [message, setMessage] = useState("");
   const [link, setLink] = useState("");
+  const [visual, setVisual] = useState<File | null>(null);
+  const [visualPreview, setVisualPreview] = useState<string | null>(null);
   const [lastSent, setLastSent] = useState<{ count: number; target: string } | null>(null);
 
   useEffect(() => {
@@ -163,6 +167,21 @@ export default function AdminAnnouncementsPage() {
     setSubmitting(true);
     setLastSent(null);
     try {
+      let imageUrl: string | null = null;
+      if (visual) {
+        const uploadForm = new FormData();
+        uploadForm.append("file", visual);
+        const uploadResponse = await fetch("/api/admin/announcements/upload", {
+          method: "POST",
+          credentials: "include",
+          body: uploadForm,
+        });
+        const uploadPayload = await uploadResponse.json();
+        if (!uploadResponse.ok || !uploadPayload.ok) {
+          throw new Error(uploadPayload.error || "Could not upload announcement visual.");
+        }
+        imageUrl = uploadPayload.url;
+      }
       const res = await fetch("/api/admin/announcements", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -179,6 +198,7 @@ export default function AdminAnnouncementsPage() {
           title,
           message,
           link,
+          imageUrl,
         }),
       });
       const json = await res.json();
@@ -187,6 +207,9 @@ export default function AdminAnnouncementsPage() {
       setTitle("");
       setMessage("");
       setLink("");
+      setVisual(null);
+      if (visualPreview) URL.revokeObjectURL(visualPreview);
+      setVisualPreview(null);
       await appAlert({
         title: "Announcement sent",
         message: `Delivered to ${json.recipient_count} recipient${json.recipient_count === 1 ? "" : "s"}.`,
@@ -283,6 +306,50 @@ export default function AdminAnnouncementsPage() {
                 className="h-12 w-full rounded-xl border border-gray-200 bg-gray-50 px-4 text-[14px] font-medium text-[#0D1B39] outline-none transition focus:border-blue-300 focus:bg-white focus:ring-2 focus:ring-blue-100"
               />
             </Field>
+            {audience === "clients" && (
+              <Field label="Optional visual for chat and email">
+                {visualPreview ? (
+                  <div className="relative overflow-hidden rounded-2xl border border-gray-200 bg-gray-50">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src={visualPreview} alt="Announcement visual preview" className="max-h-80 w-full object-contain" />
+                    <button
+                      type="button"
+                      onClick={() => {
+                        URL.revokeObjectURL(visualPreview);
+                        setVisual(null);
+                        setVisualPreview(null);
+                      }}
+                      className="absolute right-3 top-3 grid h-10 w-10 place-items-center rounded-xl bg-white text-red-600 shadow-md"
+                      aria-label="Remove visual"
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </button>
+                  </div>
+                ) : (
+                  <label className="flex min-h-32 cursor-pointer flex-col items-center justify-center rounded-2xl border border-dashed border-blue-200 bg-blue-50/50 p-5 text-center transition hover:bg-blue-50">
+                    <ImageIcon className="h-6 w-6 text-[#0A4FE8]" />
+                    <span className="mt-2 text-[13px] font-bold text-[#0D1B39]">Upload message visual</span>
+                    <span className="mt-1 text-[11px] text-gray-500">PNG, JPG, WEBP or GIF · up to 10MB</span>
+                    <input
+                      type="file"
+                      accept="image/png,image/jpeg,image/webp,image/gif"
+                      className="sr-only"
+                      onChange={(event) => {
+                        const file = event.target.files?.[0] || null;
+                        if (!file) return;
+                        if (file.size > 10 * 1024 * 1024) {
+                          void appAlert({ title: "Visual too large", message: "Choose an image no larger than 10MB.", kind: "error" });
+                          event.target.value = "";
+                          return;
+                        }
+                        setVisual(file);
+                        setVisualPreview(URL.createObjectURL(file));
+                      }}
+                    />
+                  </label>
+                )}
+              </Field>
+            )}
           </div>
         </section>
 

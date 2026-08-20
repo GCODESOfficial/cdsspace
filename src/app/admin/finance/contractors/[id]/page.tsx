@@ -13,9 +13,12 @@ import StatCard from "@/components/finance/StatCard";
 import ModalHeader from "@/components/finance/ModalHeader";
 import { findBankByCode } from "@/lib/finance/banks";
 import { Currency, FinanceContractor, FinanceContractorAssignment, FinanceContractorPayment, formatMoney } from "@/lib/finance/types";
+import { convertFinanceAmount } from "@/lib/finance/currency-display";
+import { useFinanceDisplayCurrency } from "@/components/finance/FinanceCurrencySelector";
 import { appAlert, appConfirm, appPrompt } from "@/lib/app-notify";
 
 export default function ContractorDetailPage({ params }: { params: Promise<{ id: string }> }) {
+  const { currency: displayCurrency, rates } = useFinanceDisplayCurrency();
   const { id } = use(params);
   const [contractor, setContractor] = useState<FinanceContractor | null>(null);
   const [assignments, setAssignments] = useState<FinanceContractorAssignment[]>([]);
@@ -71,8 +74,8 @@ export default function ContractorDetailPage({ params }: { params: Promise<{ id:
 
   if (!contractor) return <FinanceShell title="Loading…"><div className={`${glassCard} p-10 text-gray-500`}>Loading…</div></FinanceShell>;
 
-  const totalAgreed = assignments.reduce((s, a) => s + Number(a.agreed_amount), 0);
-  const totalPaid = payments.reduce((s, p) => s + Number(p.amount), 0);
+  const totalAgreed = assignments.reduce((s, a) => s + convertFinanceAmount(a.agreed_amount, a.currency, displayCurrency, rates), 0);
+  const totalPaid = payments.reduce((s, p) => s + convertFinanceAmount(p.amount, p.currency, displayCurrency, rates), 0);
   const balance = totalAgreed - totalPaid;
   const bank = contractor.bank_code ? findBankByCode(contractor.bank_code) : null;
 
@@ -86,7 +89,7 @@ export default function ContractorDetailPage({ params }: { params: Promise<{ id:
         {/* Profile */}
         <div className={`${glassCard} p-6`}>
           <div className="flex items-center gap-3 mb-4">
-            <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-violet-500 to-purple-500 grid place-items-center text-white text-xl font-bold shadow-lg shadow-violet-500/20">
+            <div className="w-14 h-14 rounded-2xl bg-[#0A4FE8] grid place-items-center text-white text-xl font-bold shadow-lg shadow-blue-600/20">
               {contractor.name.charAt(0).toUpperCase()}
             </div>
             <div>
@@ -106,9 +109,9 @@ export default function ContractorDetailPage({ params }: { params: Promise<{ id:
 
         {/* Stats */}
         <div className="lg:col-span-2 grid grid-cols-1 md:grid-cols-3 gap-5">
-          <StatCard icon={Handshake} label="Agreed Total" value={formatMoney(totalAgreed)} accent="from-blue-500 to-indigo-500" />
-          <StatCard icon={CheckCircle2} label="Paid" value={formatMoney(totalPaid)} accent="from-emerald-500 to-teal-500" />
-          <StatCard icon={Clock} label="Balance" value={formatMoney(balance)} accent="from-amber-500 to-orange-500" />
+          <StatCard icon={Handshake} label="Agreed Total" value={formatMoney(totalAgreed, displayCurrency)} accent="bg-[#0A4FE8]" />
+          <StatCard icon={CheckCircle2} label="Paid" value={formatMoney(totalPaid, displayCurrency)} accent="from-emerald-500 to-teal-500" />
+          <StatCard icon={Clock} label="Balance" value={formatMoney(balance, displayCurrency)} accent="from-amber-500 to-orange-500" />
         </div>
       </div>
 
@@ -117,7 +120,7 @@ export default function ContractorDetailPage({ params }: { params: Promise<{ id:
         <h2 className="text-xl font-semibold text-gray-900">Project Assignments</h2>
         <Dialog open={assignOpen} onOpenChange={setAssignOpen}>
           <DialogTrigger asChild>
-            <Button size="sm" className="rounded-xl bg-gradient-to-b from-blue-600 to-blue-700 shadow-lg shadow-blue-600/30"><Plus className="w-4 h-4 mr-1" /> Assign Project</Button>
+            <Button size="sm" className="rounded-xl bg-[#0A4FE8] shadow-lg shadow-blue-600/30"><Plus className="w-4 h-4 mr-1" /> Assign Project</Button>
           </DialogTrigger>
           <DialogContent className="bg-white max-w-md rounded-2xl border-0 shadow-2xl p-7">
             <ModalHeader icon={Briefcase} title="Assign to Project" subtitle="Set the agreed contractor amount" />
@@ -136,7 +139,7 @@ export default function ContractorDetailPage({ params }: { params: Promise<{ id:
             </div>
             <DialogFooter className="mt-5">
               <Button variant="outline" className="rounded-xl" onClick={() => setAssignOpen(false)}>Cancel</Button>
-              <Button onClick={saveAssign} className="rounded-xl bg-gradient-to-b from-blue-600 to-blue-700">Save</Button>
+              <Button onClick={saveAssign} className="rounded-xl bg-[#0A4FE8]">Save</Button>
             </DialogFooter>
           </DialogContent>
         </Dialog>
@@ -155,7 +158,8 @@ export default function ContractorDetailPage({ params }: { params: Promise<{ id:
               <div className="flex items-center gap-3">
                 <div className="text-right">
                   <div className="text-xs text-gray-500">Agreed</div>
-                  <div className="font-bold text-gray-900">{formatMoney(a.agreed_amount, a.currency)}</div>
+                  <div className="font-bold text-gray-900">{formatMoney(convertFinanceAmount(a.agreed_amount, a.currency, displayCurrency, rates), displayCurrency)}</div>
+                  {a.currency !== displayCurrency && <div className="text-[11px] text-gray-400">Original: {formatMoney(a.agreed_amount, a.currency)}</div>}
                 </div>
                 <button onClick={() => removeAssign(a.id)} className="w-9 h-9 rounded-lg hover:bg-red-50 grid place-items-center text-gray-400 hover:text-red-600"><Trash2 className="w-4 h-4" /></button>
               </div>
@@ -169,7 +173,7 @@ export default function ContractorDetailPage({ params }: { params: Promise<{ id:
         <h2 className="text-xl font-semibold text-gray-900">Payments Made</h2>
         <Dialog open={payOpen} onOpenChange={setPayOpen}>
           <DialogTrigger asChild>
-            <Button size="sm" className="rounded-xl bg-gradient-to-b from-blue-600 to-blue-700 shadow-lg shadow-blue-600/30"><Plus className="w-4 h-4 mr-1" /> Record Payment</Button>
+            <Button size="sm" className="rounded-xl bg-[#0A4FE8] shadow-lg shadow-blue-600/30"><Plus className="w-4 h-4 mr-1" /> Record Payment</Button>
           </DialogTrigger>
           <DialogContent className="bg-white max-w-md rounded-2xl border-0 shadow-2xl p-7">
             <ModalHeader icon={Receipt} title="Record Payment" subtitle="Track payments made to this contractor" accent="from-emerald-500 to-teal-500" />
@@ -202,7 +206,7 @@ export default function ContractorDetailPage({ params }: { params: Promise<{ id:
             </div>
             <DialogFooter className="mt-5">
               <Button variant="outline" className="rounded-xl" onClick={() => setPayOpen(false)}>Cancel</Button>
-              <Button onClick={savePay} className="rounded-xl bg-gradient-to-b from-blue-600 to-blue-700">Save</Button>
+              <Button onClick={savePay} className="rounded-xl bg-[#0A4FE8]">Save</Button>
             </DialogFooter>
           </DialogContent>
         </Dialog>
@@ -214,7 +218,8 @@ export default function ContractorDetailPage({ params }: { params: Promise<{ id:
           {payments.map((p) => (
             <div key={p.id} className={`${glassCard} p-5 flex items-center justify-between`}>
               <div>
-                <div className="font-semibold text-gray-900">{formatMoney(p.amount, p.currency)}</div>
+                <div className="font-semibold text-gray-900">{formatMoney(convertFinanceAmount(p.amount, p.currency, displayCurrency, rates), displayCurrency)}</div>
+                {p.currency !== displayCurrency && <div className="text-[11px] text-gray-400">Original: {formatMoney(p.amount, p.currency)}</div>}
                 <div className="text-xs text-gray-500">Paid {new Date(p.paid_on).toLocaleDateString()}{p.payment_ref ? ` • Ref: ${p.payment_ref}` : ""}</div>
                 {p.notes && <div className="text-xs text-gray-500 mt-1">{p.notes}</div>}
               </div>

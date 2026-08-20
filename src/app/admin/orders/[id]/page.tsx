@@ -37,7 +37,7 @@ interface StatusUpdate {
 interface OrderDetail {
 	id: string;
 	displayId: string;
-	type: "design" | "banner";
+	type: "design" | "banner" | "merch";
 	title: string;
 	status: string;
 	created_at: string;
@@ -61,6 +61,8 @@ interface OrderDetail {
 }
 
 const STATUS_COLORS: Record<string, string> = {
+  AWAITING_QUOTE: "bg-orange-500/20 text-orange-300",
+  AWAITING_PAYMENT: "bg-sky-500/20 text-sky-300",
 	PENDING: "bg-yellow-500/20 text-yellow-300 border-yellow-500/30",
 	IN_REVIEW: "bg-blue-500/20 text-blue-300 border-blue-500/30",
 	ACTIVE: "bg-green-500/20 text-green-300 border-green-500/30",
@@ -71,7 +73,7 @@ const STATUS_COLORS: Record<string, string> = {
 };
 
 const DESIGN_STATUSES = ["PENDING", "IN_REVIEW", "ACTIVE", "COMPLETED"];
-const BANNER_STATUSES = ["PENDING", "ACTIVE", "DRAFT", "SCHEDULED", "ARCHIVED", "COMPLETED"];
+const BANNER_STATUSES = ["AWAITING_QUOTE", "AWAITING_PAYMENT", "PENDING", "ACTIVE", "DRAFT", "SCHEDULED", "ARCHIVED", "COMPLETED"];
 
 function formatDate(dateStr: string) {
 	const d = new Date(dateStr);
@@ -246,7 +248,7 @@ export default function AdminOrderDetailPage() {
 									: "bg-orange-500/20 text-orange-300 border-orange-500/30"
 							}
 						>
-							{order.type === "design" ? "Design" : "Banner"}
+							{order.type === "design" ? "Design" : order.type === "merch" ? "Merch" : "Banner"}
 						</Badge>
 						<Badge className={STATUS_COLORS[order.status] || "bg-gray-500/20 text-gray-300"}>
 							{order.status.replace("_", " ")}
@@ -261,7 +263,7 @@ export default function AdminOrderDetailPage() {
 
 				<div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
 					{/* Client Info Card */}
-					<Card className="bg-gradient-to-r from-[#08129C] to-[#072056] border-gray-700 p-6">
+					<Card className="bg-[#0A4FE8] border-gray-700 p-6">
 						<h3 className="text-lg font-semibold text-white mb-4">Client Information</h3>
 						<div className="space-y-3">
 							<div>
@@ -288,7 +290,7 @@ export default function AdminOrderDetailPage() {
 					</Card>
 
 					{/* Order Details Card */}
-					<Card className="bg-gradient-to-r from-[#08129C] to-[#072056] border-gray-700 p-6">
+					<Card className="bg-[#0A4FE8] border-gray-700 p-6">
 						<h3 className="text-lg font-semibold text-white mb-4">Order Details</h3>
 						{detailFields.length > 0 ? (
 							<div className="space-y-3">
@@ -308,7 +310,7 @@ export default function AdminOrderDetailPage() {
 				</div>
 
 				{/* Status Management */}
-				<Card className="bg-gradient-to-r from-[#08129C] to-[#072056] border-gray-700 p-6 mb-6">
+				<Card className="bg-[#0A4FE8] border-gray-700 p-6 mb-6">
 					<h3 className="text-lg font-semibold text-white mb-4">Status Management</h3>
 					<div className="flex items-center gap-2 mb-4">
 						<span className="text-sm text-gray-400">Current Status:</span>
@@ -346,7 +348,7 @@ export default function AdminOrderDetailPage() {
 					<Button
 						onClick={handleStatusUpdate}
 						disabled={isUpdatingStatus || newStatus === order.status}
-						className="mt-4 bg-gradient-to-r from-[#FFFFFF] to-[#5BA8FF] text-[#151D48] font-semibold hover:opacity-90"
+						className="mt-4 bg-[#0A4FE8] text-white font-semibold hover:bg-[#083FC0]"
 					>
 						{isUpdatingStatus ? (
 							<>
@@ -360,7 +362,7 @@ export default function AdminOrderDetailPage() {
 				</Card>
 
 				{/* Admin Notes */}
-				<Card className="bg-gradient-to-r from-[#08129C] to-[#072056] border-gray-700 p-6 mb-6">
+				<Card className="bg-[#0A4FE8] border-gray-700 p-6 mb-6">
 					<h3 className="text-lg font-semibold text-white mb-4">Admin Notes</h3>
 					<Textarea
 						placeholder="Internal notes for the team..."
@@ -372,7 +374,7 @@ export default function AdminOrderDetailPage() {
 					<Button
 						onClick={handleSaveNotes}
 						disabled={isSavingNotes}
-						className="bg-gradient-to-r from-[#FFFFFF] to-[#5BA8FF] text-[#151D48] font-semibold hover:opacity-90"
+						className="bg-[#0A4FE8] text-white font-semibold hover:bg-[#083FC0]"
 					>
 						{isSavingNotes ? (
 							<>
@@ -389,7 +391,7 @@ export default function AdminOrderDetailPage() {
 				</Card>
 
 				{/* Status History Timeline */}
-				<Card className="bg-gradient-to-r from-[#08129C] to-[#072056] border-gray-700 p-6">
+				<Card className="bg-[#0A4FE8] border-gray-700 p-6">
 					<h3 className="text-lg font-semibold text-white mb-4">Status History</h3>
 					{order.status_updates && order.status_updates.length > 0 ? (
 						<div className="relative">

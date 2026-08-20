@@ -43,15 +43,16 @@ export const Footer = () => {
                 { label: "Home", href: "/" },
                 { label: "About", href: "/about" },
                 { label: "Work", href: "/work" },
-                { label: "Contact", href: "/consultation" },
+                { label: "Consultation", href: "/consultation" },
+                { label: "Contact", href: "/contact" },
             ]
         },
         {
             title: "CDS Studio",
             links: [
-                { label: "Blog", href: "/blog" },
+                { label: "Intelligence", href: "/intelligence" },
                 { label: "Brand Brief", href: "/consultation" },
-                { label: "Partnership", href: "/partnership" },
+                { label: "Brand Marketers", href: "/marketer" },
                 { label: "Rollup Banners", href: "/banners" },
                 { label: "Merch", href: "/merch" },
                 { label: "Links", href: "/Links" },
@@ -201,6 +202,21 @@ export const Footer = () => {
                                 <p className="text-brand-mute text-base md:text-[16px] font-medium leading-[1.5] tracking-[-0.16px]">
                                     CDS Space helps brands and product teams design, build, and scale digital experiences with clarity and speed.
                                 </p>
+                                <div className="mt-8 flex h-[66px] w-full max-w-[199px] overflow-hidden rounded-[8px] border border-white/85 text-white">
+                                    <div className="flex w-[70px] shrink-0 items-center justify-center border-r border-white/85 p-1.5">
+                                        <Image
+                                            src="/DUNS.svg"
+                                            alt=""
+                                            aria-hidden="true"
+                                            width={209}
+                                            height={184}
+                                            className="h-[54px] w-auto object-contain"
+                                        />
+                                    </div>
+                                    <p className="flex items-center px-3 text-[11px] font-medium leading-[1.08] text-white">
+                                        CDS Space is<br />Dun &amp; Bradstreet<br />Registered
+                                    </p>
+                                </div>
                             </div>
 
                             {/* Vertical Divider */}
@@ -301,7 +317,7 @@ export const Footer = () => {
                             href={CDS_MAP.directionsUrl}
                             target="_blank"
                             rel="noopener noreferrer"
-                            className="flex-1 inline-flex items-center justify-center gap-2 h-11 px-5 rounded-xl bg-gradient-to-b from-blue-600 to-blue-700 text-white font-medium shadow-lg shadow-blue-600/30 hover:from-blue-600 hover:to-blue-800 transition"
+                            className="flex-1 inline-flex items-center justify-center gap-2 h-11 px-5 rounded-xl bg-[#0A4FE8] text-white font-medium shadow-lg shadow-blue-600/30 hover:bg-[#083FC2] transition"
                         >
                             <Navigation className="w-4 h-4" /> Get Directions
                         </a>

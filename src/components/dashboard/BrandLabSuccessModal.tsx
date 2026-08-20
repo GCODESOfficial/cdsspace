@@ -115,7 +115,7 @@ export const BrandLabSuccessModal = ({ isOpen, onClose }: BrandLabSuccessModalPr
                                     onClick={onClose}
                                     className="bg-[#f4f6fb] border border-[#648efc] rounded-full p-[2px] transition-transform hover:scale-[1.02] active:scale-[0.98] w-fit"
                                 >
-                                    <div className="bg-linear-to-br from-[#0035C1] to-[#0575FF] px-[32px] py-[15px] rounded-full">
+                                    <div className="bg-[#0A4FE8] px-[32px] py-[15px] rounded-full">
                                         <span className="text-[#f4f6fb] text-[18px] font-medium tracking-[-0.18px]">
                                             Got it
                                         </span>

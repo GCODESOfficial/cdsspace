@@ -208,7 +208,7 @@ export default function AdminBrandBriefDetailPage({
 
     if (loadError) {
         return (
-            <FinanceShell title="Brand Brief" back={{ href: "/admin/brand-briefs", label: "Brand Briefs" }}>
+            <FinanceShell hideNav title="Brand Brief" back={{ href: "/admin/brand-briefs", label: "Brand Briefs" }}>
                 <div className={`${glassCard} p-8`}>
                     <h3 className="text-lg font-semibold text-gray-900 mb-2">Couldn't open this brief</h3>
                     <p className="text-gray-600 text-sm mb-4">{loadError}</p>
@@ -220,7 +220,7 @@ export default function AdminBrandBriefDetailPage({
 
     if (!brief || !draft) {
         return (
-            <FinanceShell title="Loading…">
+            <FinanceShell hideNav title="Loading…">
                 <div className={`${glassCard} p-10 text-gray-500`}>Loading brief…</div>
             </FinanceShell>
         );
@@ -230,6 +230,7 @@ export default function AdminBrandBriefDetailPage({
 
     return (
         <FinanceShell
+            hideNav
             title={brief.brand_name || brief.invite_label || "Brand brief"}
             subtitle={brief.contact_name ?? undefined}
             back={{ href: "/admin/brand-briefs", label: "Brand Briefs" }}
@@ -245,7 +246,7 @@ export default function AdminBrandBriefDetailPage({
                             <X className="w-4 h-4 mr-1.5" /> Cancel
                         </Button>
                         <Button
-                            className="h-11 px-4 rounded-xl bg-gradient-to-b from-blue-600 to-blue-700 shadow-lg shadow-blue-600/30"
+                            className="h-11 px-4 rounded-xl bg-[#0A4FE8] shadow-lg shadow-blue-600/30"
                             onClick={saveEdit}
                             disabled={saving}
                         >

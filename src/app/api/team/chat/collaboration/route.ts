@@ -1,7 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { NextResponse } from "next/server";
 import { getChatViewer } from "@/lib/team-chat-auth";
-import { canViewTeamThread, getViewerReactionKey } from "@/lib/team-chat-server";
+import { canViewTeamThread, getViewerReactionKey, isAttachmentRestrictedThread } from "@/lib/team-chat-server";
 import { glashQuery } from "@/lib/glashdb/postgres";
 import { canShareProtectedChatResource } from "@/lib/chat-resource-permissions";
 
@@ -120,6 +120,13 @@ export async function POST(req: Request) {
         )
       )[0];
     } else if (kind === "file") {
+      // Files may only be shared in group spaces - block in member↔member DMs.
+      if (await isAttachmentRestrictedThread(threadId)) {
+        return NextResponse.json(
+          { ok: false, error: "Sharing files isn't allowed in direct chats - use your department or project group chat." },
+          { status: 403 },
+        );
+      }
       const metadata = {
         resourceType: body?.invoiceId ? "invoice" : body?.projectId ? "project" : null,
         resourceId: body?.invoiceId || body?.projectId || null,

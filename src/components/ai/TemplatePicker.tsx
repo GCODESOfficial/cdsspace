@@ -97,7 +97,7 @@ export function TemplatePicker({
       >
         <div className="px-4 sm:px-6 py-4 border-b border-gray-100 flex items-start justify-between gap-3">
           <div className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-[#0A4FE8] to-[#7B3AED] text-white flex items-center justify-center">
+            <div className="w-9 h-9 rounded-xl bg-[#0A4FE8] text-white flex items-center justify-center">
               <LayoutTemplate className="w-4 h-4" />
             </div>
             <div>

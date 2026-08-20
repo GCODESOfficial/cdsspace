@@ -122,10 +122,9 @@ const TeamCard = ({ member, index }: { member: TeamMember, index: number }) => {
         >
             <div className="w-full h-full bg-white rounded-[24px] overflow-hidden flex flex-col relative border border-[#C8D1E0] shadow-sm transition-all duration-300">
 
-                {/* Profile Image & Gradient - Node 5992:1477 etc */}
+                {/* Profile image */}
                 <div className="flex-grow w-full relative bg-white overflow-hidden">
-                    {/* Background Gradient - Node 5992:1525 style */}
-                    <div className="absolute inset-0 bg-gradient-to-t from-[#5BA8FF] via-white/20 to-white z-0" />
+                    <div className="absolute inset-0 z-0 bg-[#EAF1FF]" />
 
                     <div className="absolute inset-0 z-10 flex items-end justify-center">
                         {member.image === "placeholder-female" ? (

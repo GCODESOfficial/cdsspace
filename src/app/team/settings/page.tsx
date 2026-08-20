@@ -1,14 +1,16 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { Loader2, Save, UserRound, Lock, Globe, Check } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { Loader2, Save, UserRound, Lock, Globe, Check, Camera } from "lucide-react";
 import { initials } from "@/lib/utils";
 import { useTranslation, LOCALES, type Locale } from "@/lib/i18n/context";
+import { EmailVerificationCard } from "@/components/team/EmailVerificationCard";
 
 interface Profile {
   id: string;
   full_name: string;
   email: string;
+  email_verified_at: string | null;
   username: string;
   avatar_url: string | null;
   role_title: string | null;
@@ -110,8 +112,46 @@ function ProfileForm({ profile, onUpdate }: { profile: Profile; onUpdate: (p: Pr
   const [phone, setPhone] = useState(profile.phone || "");
   const [location, setLocation] = useState(profile.location || "");
   const [bio, setBio] = useState(profile.bio || "");
+  const [avatarUrl, setAvatarUrl] = useState(profile.avatar_url);
+  const [uploadingAvatar, setUploadingAvatar] = useState(false);
   const [saving, setSaving] = useState(false);
   const [toast, setToast] = useState<{ ok: boolean; msg: string } | null>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
+
+  function flash(ok: boolean, msg: string) {
+    setToast({ ok, msg });
+    setTimeout(() => setToast(null), 2500);
+  }
+
+  async function onAvatarPick(event: React.ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+    if (!file.type.startsWith("image/")) {
+      flash(false, "Please choose an image file.");
+      return;
+    }
+    setUploadingAvatar(true);
+    try {
+      const fd = new FormData();
+      fd.append("file", file);
+      const res = await fetch("/api/team/avatar", { method: "POST", body: fd, credentials: "include" });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok || !json.ok) {
+        flash(false, json.error || "Upload failed");
+        return;
+      }
+      setAvatarUrl(json.avatar_url);
+      onUpdate({ ...profile, avatar_url: json.avatar_url });
+      // Refresh the shell so the sidebar/topbar avatar updates immediately.
+      window.dispatchEvent(new Event("refresh-team-session"));
+      flash(true, "Photo updated");
+    } catch {
+      flash(false, "Upload failed");
+    } finally {
+      setUploadingAvatar(false);
+    }
+  }
 
   async function save() {
     setSaving(true);
@@ -135,15 +175,55 @@ function ProfileForm({ profile, onUpdate }: { profile: Profile; onUpdate: (p: Pr
     <div className="bg-white rounded-2xl border border-brand-stroke/30 p-6 md:p-8 space-y-6">
       {/* Avatar */}
       <div className="flex flex-col items-start gap-4 sm:flex-row sm:items-center sm:gap-5">
-        <div className="w-20 h-20 rounded-full bg-brand-blue text-white text-2xl font-bold flex items-center justify-center">
-          {initials(profile.full_name)}
+        <div className="relative">
+          <div className="w-20 h-20 rounded-full overflow-hidden bg-brand-blue text-white text-2xl font-bold flex items-center justify-center">
+            {avatarUrl ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={avatarUrl} alt={profile.full_name} className="w-full h-full object-cover" />
+            ) : (
+              initials(profile.full_name)
+            )}
+          </div>
+          <button
+            type="button"
+            onClick={() => fileRef.current?.click()}
+            disabled={uploadingAvatar}
+            aria-label="Change photo"
+            className="absolute -bottom-1 -right-1 flex h-8 w-8 items-center justify-center rounded-full bg-white text-brand-blue shadow ring-1 ring-brand-stroke/40 transition hover:bg-brand-bg disabled:opacity-60"
+          >
+            {uploadingAvatar ? <Loader2 className="w-4 h-4 animate-spin" /> : <Camera className="w-4 h-4" />}
+          </button>
+          <input
+            ref={fileRef}
+            type="file"
+            accept="image/png,image/jpeg,image/webp,image/gif"
+            className="hidden"
+            onChange={onAvatarPick}
+          />
         </div>
         <div>
           <p className="text-[14px] font-semibold text-brand-navy">{profile.full_name}</p>
           <p className="text-[12px] text-brand-body/60">@{profile.username}</p>
           <p className="text-[11px] text-brand-body/50 mt-1">{profile.email}</p>
+          <button
+            type="button"
+            onClick={() => fileRef.current?.click()}
+            disabled={uploadingAvatar}
+            className="mt-2 text-[12px] font-semibold text-brand-blue hover:underline disabled:opacity-60"
+          >
+            {uploadingAvatar ? "Uploading…" : "Change photo"}
+          </button>
+          <p className="text-[10.5px] text-brand-body/40 mt-0.5">PNG, JPG, WEBP or GIF · up to 4MB</p>
         </div>
       </div>
+
+      <EmailVerificationCard
+        email={profile.email}
+        emailVerifiedAt={profile.email_verified_at}
+        onVerified={(verifiedEmail, verifiedAt) => {
+          onUpdate({ ...profile, email: verifiedEmail, email_verified_at: verifiedAt });
+        }}
+      />
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <Field label="Full name" value={full_name} onChange={setFullName} />

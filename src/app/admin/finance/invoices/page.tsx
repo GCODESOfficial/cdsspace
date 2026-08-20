@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
-import { Plus, FileText, Search, CheckCircle2, Clock, Send, Trash2, X, Check, Copy, Share2, Mail, Loader2 } from "lucide-react";
+import { Plus, FileText, Search, CheckCircle2, Clock, Send, Trash2, X, Check, Copy, Share2, Mail, Loader2, BellRing, RotateCcw, ShieldCheck } from "lucide-react";
 import FinanceShell, { glassCard } from "@/components/finance/FinanceShell";
 import StatCard from "@/components/finance/StatCard";
 import ActivityPanel from "@/components/admin/ActivityPanel";
@@ -11,11 +11,15 @@ import { Currency, formatFinanceDate, formatMoney } from "@/lib/finance/types";
 import { buildInvoiceShareMessage } from "@/lib/finance/share";
 import { appAlert, appConfirm, appPrompt, appToast } from "@/lib/app-notify";
 import CreateProjectFromInvoiceModal, { type InvoiceForProject } from "@/components/finance/CreateProjectFromInvoiceModal";
+import { useFinanceDisplayCurrency } from "@/components/finance/FinanceCurrencySelector";
+import { convertFinanceAmount } from "@/lib/finance/currency-display";
 
 interface Row {
   id: string; invoice_number: string; client_name: string; currency: Currency;
   total: number; status: string; issue_date: string; due_date: string | null;
   finance_projects?: { name: string; client: string } | null;
+  invoice_payment_submissions?: Array<{ id: string; status: string; submitted_at: string; method: string }>;
+  deleted_at?: string | null; deletion_reason?: string | null; deleted_by?: string | null;
 }
 
 const STATUS: Record<string, string> = {
@@ -33,13 +37,20 @@ export default function InvoicesPage() {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [working, setWorking] = useState(false);
   const [emailingId, setEmailingId] = useState<string | null>(null);
+  const [remindingId, setRemindingId] = useState<string | null>(null);
   const [projectPrompt, setProjectPrompt] = useState<InvoiceForProject | null>(null);
+  const [isSuperAdmin, setIsSuperAdmin] = useState(false);
+  const [showArchived, setShowArchived] = useState(false);
+  const { currency: displayCurrency, rates } = useFinanceDisplayCurrency();
 
-  const load = () => {
+  const load = (archived = showArchived) => {
     setLoading(true);
-    fetch("/api/admin/finance/invoices").then((r) => r.json()).then((d) => { setRows(d.invoices ?? []); setLoading(false); });
+    fetch(`/api/admin/finance/invoices${archived ? "?archived=1" : ""}`).then((r) => r.json()).then((d) => { setRows(d.invoices ?? []); setLoading(false); });
   };
-  useEffect(() => { load(); }, []);
+  useEffect(() => {
+    load(false);
+    fetch("/api/admin-check", { cache: "no-store" }).then((response) => response.ok ? response.json() : null).then((data) => setIsSuperAdmin(data?.role === "super_admin")).catch(() => undefined);
+  }, []);
 
   const markPaid = async (id: string, row?: Row) => {
     await fetch(`/api/admin/finance/invoices/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ status: "paid" }) });
@@ -78,12 +89,23 @@ export default function InvoicesPage() {
     setWorking(false); clearSelection(); load();
   };
   const bulkDelete = async () => {
-    if (!(await appConfirm(`Delete ${selected.size} invoice${selected.size === 1 ? "" : "s"}? This cannot be undone.`))) return;
+    if (!isSuperAdmin) return void appAlert("Only a super admin can archive invoices.");
+    const reason = await appPrompt(`Why are you archiving ${selected.size} invoice${selected.size === 1 ? "" : "s"}? This reason will remain in the audit log.`);
+    if (!reason?.trim()) return;
     setWorking(true);
-    await Promise.all(
-      Array.from(selected).map((id) => fetch(`/api/admin/finance/invoices/${id}`, { method: "DELETE" }))
-    );
+    const responses = await Promise.all(Array.from(selected).map((id) => fetch(`/api/admin/finance/invoices/${id}`, {
+      method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ reason: reason.trim() }),
+    })));
+    if (responses.some((response) => !response.ok)) appAlert("One or more invoices could not be archived.");
     setWorking(false); clearSelection(); load();
+  };
+
+  const restoreInvoice = async (id: string) => {
+    const response = await fetch(`/api/admin/finance/invoices/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ restore: true }) });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) return void appAlert(payload.error || "Could not restore this invoice.");
+    appToast({ message: "Invoice restored to the active list.", kind: "success" });
+    load(true);
   };
 
   const bulkDuplicate = async () => {
@@ -184,15 +206,35 @@ export default function InvoicesPage() {
     appAlert(`Emailed ${sent} invoice${sent === 1 ? "" : "s"}${failed ? ` · ${failed} skipped (no client email?)` : ""}.`);
   };
 
+  const remindPayment = async (row: Row) => {
+    if (!(await appConfirm(`Send ${row.client_name} a payment reminder for ${row.invoice_number} by client chat and email?`))) return;
+    setRemindingId(row.id);
+    try {
+      const response = await fetch(`/api/admin/finance/invoices/${row.id}/reminder`, { method: "POST" });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error || "Could not send the payment reminder.");
+      const channels = [data.chat_sent ? "client chat" : null, data.email_sent ? "email" : null].filter(Boolean).join(" and ");
+      appToast({ message: `Payment reminder sent by ${channels || "the available channel"}.`, kind: "success" });
+      if (data.warning) appAlert(`Chat was sent, but email delivery reported: ${data.warning}`);
+    } catch (reason) {
+      appAlert(reason instanceof Error ? reason.message : "Could not send the payment reminder.");
+    } finally {
+      setRemindingId(null);
+    }
+  };
+
   const filtered = rows.filter((r) =>
     r.invoice_number.toLowerCase().includes(search.toLowerCase()) ||
     r.client_name.toLowerCase().includes(search.toLowerCase())
   );
+  const pendingValidation = showArchived ? [] : filtered.filter((row) => (row.invoice_payment_submissions || []).some((submission) => submission.status === "pending"));
+  const tableRows = showArchived ? filtered : filtered.filter((row) => !pendingValidation.includes(row));
 
   const totals = rows.reduce(
     (acc, r) => {
-      if (r.status === "paid") acc.paid += Number(r.total);
-      else if (r.status !== "cancelled") acc.outstanding += Number(r.total);
+      const value = convertFinanceAmount(r.total, r.currency, displayCurrency, rates);
+      if (r.status === "paid") acc.paid += value;
+      else if (r.status !== "cancelled") acc.outstanding += value;
       return acc;
     },
     { paid: 0, outstanding: 0 }
@@ -204,21 +246,22 @@ export default function InvoicesPage() {
       subtitle="Generate, send & track invoices."
       actions={
         <Link href="/admin/finance/invoices/new">
-          <Button className="h-11 px-5 rounded-xl bg-gradient-to-b from-blue-600 to-blue-700 shadow-lg shadow-blue-600/30">
+          <Button className="h-11 rounded-xl bg-[#0A4FE8] px-5 shadow-lg shadow-blue-600/20 hover:bg-[#083FC2]">
             <Plus className="w-4 h-4 mr-1.5" /> New Invoice
           </Button>
         </Link>
       }
     >
       <div className="grid grid-cols-1 md:grid-cols-3 gap-5 mb-8">
-        <StatCard icon={FileText} label="Total Invoices" value={String(rows.length)} accent="from-blue-500 to-indigo-500" />
-        <StatCard icon={CheckCircle2} label="Paid" value={formatMoney(totals.paid)} accent="from-emerald-500 to-teal-500" />
-        <StatCard icon={Clock} label="Outstanding" value={formatMoney(totals.outstanding)} accent="from-amber-500 to-orange-500" />
+        <StatCard icon={FileText} label="Total Invoices" value={String(rows.length)} accent="bg-[#0A4FE8]" />
+        <StatCard icon={CheckCircle2} label={`Paid · ${displayCurrency}`} value={formatMoney(totals.paid, displayCurrency)} accent="from-emerald-500 to-teal-500" />
+        <StatCard icon={Clock} label={`Outstanding · ${displayCurrency}`} value={formatMoney(totals.outstanding, displayCurrency)} accent="from-amber-500 to-orange-500" />
       </div>
 
       <div className={`${glassCard} p-4 mb-6 flex items-center gap-3`}>
         <Search className="w-5 h-5 text-gray-400 ml-2" />
         <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search by invoice number or client…" className="flex-1 bg-transparent outline-none text-sm" />
+        {isSuperAdmin && <button type="button" onClick={() => { const next = !showArchived; setShowArchived(next); clearSelection(); load(next); }} className={`shrink-0 rounded-xl px-3 py-2 text-[11px] font-semibold ${showArchived ? "bg-[#0A4FE8] text-white" : "border border-slate-200 bg-white text-slate-600"}`}>{showArchived ? "View active" : "View archived"}</button>}
       </div>
 
       {loading ? (
@@ -233,6 +276,15 @@ export default function InvoicesPage() {
         </div>
       ) : (
         <>
+          {pendingValidation.length > 0 && (
+            <section className="mb-5 rounded-2xl border border-amber-200 bg-amber-50 p-4">
+              <div className="mb-3 flex items-center gap-2 text-amber-900"><ShieldCheck className="h-5 w-5" /><h2 className="text-sm font-bold">Client payments awaiting admin validation</h2><span className="ml-auto rounded-full bg-amber-200 px-2 py-0.5 text-[11px] font-bold">{pendingValidation.length}</span></div>
+              <div className="space-y-2">{pendingValidation.map((row) => <div key={row.id} className="flex flex-col gap-3 rounded-xl bg-white p-3 sm:flex-row sm:items-center">
+                <div className="min-w-0 flex-1"><p className="truncate text-[13px] font-bold text-[#0D1B39]">{row.invoice_number} · {row.client_name}</p><p className="text-[11px] text-slate-500">{formatMoney(row.total, row.currency)} · Client paid - pending admin validation</p></div>
+                <Link href={`/admin/finance/invoices/${row.id}#payment-verification`} className="shrink-0 rounded-lg bg-amber-500 px-3 py-2 text-[11px] font-bold text-white hover:bg-amber-600">Verify now</Link>
+              </div>)}</div>
+            </section>
+          )}
           {selected.size > 0 && (
             <div className={`${glassCard} p-3 mb-4 flex items-center gap-3 border border-blue-200 bg-blue-50/60`}>
               <div className="flex items-center gap-2 px-2">
@@ -259,9 +311,9 @@ export default function InvoicesPage() {
                 <button disabled={working} onClick={bulkShare} className="text-[11px] font-semibold uppercase tracking-wider px-3 py-1.5 rounded-lg bg-white text-gray-700 ring-1 ring-gray-200 hover:bg-gray-50 transition disabled:opacity-50 inline-flex items-center gap-1.5">
                   <Share2 className="w-3.5 h-3.5" /> Copy Messages
                 </button>
-                <button disabled={working} onClick={bulkDelete} className="text-[11px] font-semibold uppercase tracking-wider px-3 py-1.5 rounded-lg bg-red-50 text-red-700 ring-1 ring-red-200 hover:bg-red-100 transition disabled:opacity-50 inline-flex items-center gap-1.5">
+                {isSuperAdmin && !showArchived && <button disabled={working} onClick={bulkDelete} className="text-[11px] font-semibold px-3 py-1.5 rounded-lg bg-red-50 text-red-700 ring-1 ring-red-200 hover:bg-red-100 transition disabled:opacity-50 inline-flex items-center gap-1.5">
                   <Trash2 className="w-3.5 h-3.5" /> Delete
-                </button>
+                </button>}
                 <button onClick={clearSelection} className="w-8 h-8 rounded-lg hover:bg-white/70 grid place-items-center text-gray-500 hover:text-gray-800">
                   <X className="w-4 h-4" />
                 </button>
@@ -269,20 +321,20 @@ export default function InvoicesPage() {
             </div>
           )}
 
-          <div className={`${glassCard} overflow-hidden`}>
-            <table className="w-full text-sm">
+          <div className={`${glassCard} overflow-x-auto`}>
+            <table className="w-full min-w-[820px] table-fixed text-sm">
               <thead className="bg-white/50">
                 <tr className="text-left text-[11px] uppercase tracking-wider text-gray-500">
                   <th className="pl-5 pr-2 py-4 w-10">
                     <input
                       type="checkbox"
                       className="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
-                      checked={filtered.length > 0 && filtered.every((r) => selected.has(r.id))}
-                      onChange={() => toggleAll(filtered.map((r) => r.id))}
+                      checked={tableRows.length > 0 && tableRows.every((r) => selected.has(r.id))}
+                      onChange={() => toggleAll(tableRows.map((r) => r.id))}
                     />
                   </th>
                   <th className="px-5 py-4">Invoice</th>
-                  <th className="px-5 py-4">Client</th>
+                  <th className="w-[145px] px-3 py-4">Client</th>
                   <th className="px-5 py-4">Issued</th>
                   <th className="px-5 py-4">Total</th>
                   <th className="px-5 py-4">Status</th>
@@ -290,8 +342,9 @@ export default function InvoicesPage() {
                 </tr>
               </thead>
               <tbody>
-                {filtered.map((r) => {
+                {tableRows.map((r) => {
                   const isSel = selected.has(r.id);
+                  const pendingVerification = (r.invoice_payment_submissions || []).find((submission) => submission.status === "pending");
                   return (
                     <tr key={r.id} className={`border-t border-white/60 transition ${isSel ? "bg-blue-50/60" : "hover:bg-white/50"}`}>
                       <td className="pl-5 pr-2 py-4">
@@ -303,15 +356,24 @@ export default function InvoicesPage() {
                         />
                       </td>
                       <td className="px-5 py-4 font-mono font-semibold text-gray-900">{r.invoice_number}</td>
-                      <td className="px-5 py-4">{r.client_name}</td>
+                      <td className="w-[145px] max-w-[145px] px-3 py-4"><p className="truncate" title={r.client_name}>{r.client_name}</p></td>
                       <td className="px-5 py-4 text-gray-500">{formatFinanceDate(r.issue_date)}</td>
-                      <td className="px-5 py-4 font-semibold">{formatMoney(r.total, r.currency)}</td>
+                      <td className="px-5 py-4 font-semibold"><span>{formatMoney(convertFinanceAmount(r.total, r.currency, displayCurrency, rates), displayCurrency)}</span>{r.currency !== displayCurrency && <small className="block truncate text-[9px] font-medium text-slate-400">Original: {formatMoney(r.total, r.currency)}</small>}</td>
                       <td className="px-5 py-4">
-                        <span className={`text-[10px] uppercase tracking-wider font-semibold px-2.5 py-1 rounded-full ${STATUS[r.status] ?? STATUS.draft}`}>{r.status}</span>
+                        {pendingVerification ? (
+                          <span className="text-[10px] uppercase tracking-wider font-semibold px-2.5 py-1 rounded-full bg-amber-50 text-amber-700 ring-1 ring-amber-200">Paid claimed · verify</span>
+                        ) : (
+                          <span className={`text-[10px] uppercase tracking-wider font-semibold px-2.5 py-1 rounded-full ${STATUS[r.status] ?? STATUS.draft}`}>{r.status}</span>
+                        )}
                       </td>
                       <td className="px-5 py-4 text-right">
                         <div className="flex items-center justify-end gap-2">
-                          {r.status !== "paid" && r.status !== "cancelled" && (
+                          {showArchived ? (
+                            <button type="button" onClick={() => void restoreInvoice(r.id)} className="inline-flex items-center gap-1 whitespace-nowrap rounded-lg bg-[#0A4FE8] px-3 py-1.5 text-[11px] font-semibold text-white hover:bg-[#083FC2]"><RotateCcw className="h-3.5 w-3.5" />Restore</button>
+                          ) : pendingVerification && (
+                            <Link href={`/admin/finance/invoices/${r.id}#payment-verification`} className="rounded-lg bg-amber-500 px-3 py-1.5 text-[11px] font-bold uppercase tracking-wider text-white transition hover:bg-amber-600">Verify now</Link>
+                          )}
+                          {!showArchived && r.status !== "paid" && r.status !== "cancelled" && (
                             <button
                               onClick={() => markPaid(r.id, r)}
                               className="text-[11px] font-semibold uppercase tracking-wider px-3 py-1.5 rounded-lg bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200 hover:bg-emerald-100 transition"
@@ -319,15 +381,25 @@ export default function InvoicesPage() {
                               Mark Paid
                             </button>
                           )}
-                          <button
+                          {!showArchived && ["sent", "overdue"].includes(r.status) && (
+                            <button
+                              onClick={() => void remindPayment(r)}
+                              disabled={remindingId === r.id}
+                              title="Send payment reminder by client chat and email"
+                              className="inline-flex items-center gap-1 rounded-lg bg-amber-50 px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wider text-amber-700 ring-1 ring-amber-200 transition hover:bg-amber-100 disabled:opacity-50"
+                            >
+                              {remindingId === r.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <BellRing className="h-3.5 w-3.5" />} Reminder
+                            </button>
+                          )}
+                          {!showArchived && <button
                             onClick={() => emailInvoice(r.id)}
                             disabled={emailingId === r.id}
                             title="Email to client"
                             className="inline-flex items-center gap-1 text-[11px] font-semibold uppercase tracking-wider px-3 py-1.5 rounded-lg bg-white text-gray-700 ring-1 ring-gray-200 hover:bg-gray-50 transition disabled:opacity-50"
                           >
                             {emailingId === r.id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Mail className="w-3.5 h-3.5" />} Email
-                          </button>
-                          <Link href={`/admin/finance/invoices/${r.id}`} className="text-blue-600 hover:underline text-xs font-medium">Open →</Link>
+                          </button>}
+                          <Link href={`/admin/finance/invoices/${r.id}`} className="whitespace-nowrap text-xs font-medium text-blue-600 hover:underline">Open →</Link>
                         </div>
                       </td>
                     </tr>

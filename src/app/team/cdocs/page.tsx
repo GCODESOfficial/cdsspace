@@ -3,7 +3,8 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { FileText, Plus, Archive, ArchiveRestore, Trash2, Copy, Link2, Loader2, Search, Clock, Tag as TagIcon } from "lucide-react";
+import { FileText, Plus, Archive, ArchiveRestore, Trash2, Copy, Link2, Loader2, Search, Clock, Tag as TagIcon, MessagesSquare } from "lucide-react";
+import { ShareInChatModal } from "@/components/chat/ShareInChatModal";
 import { CDOC_CATEGORIES, CDOC_SUBCATEGORIES } from "@/lib/cdocs-categories";
 import { appAlert, appConfirm, appPrompt } from "@/lib/app-notify";
 
@@ -31,6 +32,7 @@ export default function CDocsListPage() {
   const [search, setSearch] = useState("");
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [showTemplatePicker, setShowTemplatePicker] = useState(false);
+  const [shareDoc, setShareDoc] = useState<Doc | null>(null);
 
   async function fetchDocs() {
     setLoading(true);
@@ -187,6 +189,9 @@ export default function CDocsListPage() {
                       </Link>
                     </div>
                     <div className="flex items-center gap-2 sm:shrink-0">
+                      <button onClick={() => setShareDoc(d)} className="inline-flex flex-1 sm:flex-none items-center justify-center p-2.5 rounded-xl text-[#0A4FE8] hover:bg-blue-50" title="Share in chat">
+                        <MessagesSquare className="w-4 h-4" />
+                      </button>
                       <button onClick={() => copyShareLink(d)} className="inline-flex flex-1 sm:flex-none items-center justify-center p-2.5 rounded-xl text-gray-400 hover:text-[#0A4FE8] hover:bg-blue-50" title="Copy share link">
                         <Link2 className="w-4 h-4" />
                       </button>
@@ -202,6 +207,13 @@ export default function CDocsListPage() {
       </div>
 
       {showTemplatePicker && <TemplatePicker onPick={(body, title, category, subcategory) => { setShowTemplatePicker(false); createNew(body, title, category, subcategory); }} onClose={() => setShowTemplatePicker(false)} />}
+
+      <ShareInChatModal
+        open={!!shareDoc}
+        onClose={() => setShareDoc(null)}
+        shareText={shareDoc ? `${shareDoc.title || "Document"}: ${window.location.origin}/cdocs/${shareDoc.share_token}` : ""}
+        title={`Document · ${shareDoc?.title || "Untitled"}`}
+      />
     </div>
   );
 }

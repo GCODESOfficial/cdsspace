@@ -13,9 +13,12 @@ import ModalHeader from "@/components/finance/ModalHeader";
 import BankPicker from "@/components/finance/BankPicker";
 import { findBankByCode } from "@/lib/finance/banks";
 import { FinanceEmployee, FinancePayrollRun, FinancePayrollItem, formatMoney } from "@/lib/finance/types";
+import { convertFinanceAmount } from "@/lib/finance/currency-display";
+import { useFinanceDisplayCurrency } from "@/components/finance/FinanceCurrencySelector";
 import { appAlert, appConfirm, appPrompt } from "@/lib/app-notify";
 
 export default function PayrollRunPage({ params }: { params: Promise<{ id: string }> }) {
+  const { currency: displayCurrency, rates } = useFinanceDisplayCurrency();
   const { id } = use(params);
   const [run, setRun] = useState<FinancePayrollRun | null>(null);
   const [items, setItems] = useState<FinancePayrollItem[]>([]);
@@ -91,10 +94,10 @@ export default function PayrollRunPage({ params }: { params: Promise<{ id: strin
           <Button variant="outline" className="h-11 px-4 rounded-xl text-red-600 border-red-200 hover:bg-red-50" onClick={removeRun}>Delete</Button>
           <Dialog open={open} onOpenChange={setOpen}>
             <DialogTrigger asChild>
-              <Button className="h-11 px-5 rounded-xl bg-gradient-to-b from-blue-600 to-blue-700 shadow-lg shadow-blue-600/30"><Plus className="w-4 h-4 mr-1.5" /> Add Item</Button>
+              <Button className="h-11 px-5 rounded-xl bg-[#0A4FE8] shadow-lg shadow-blue-600/30"><Plus className="w-4 h-4 mr-1.5" /> Add Item</Button>
             </DialogTrigger>
             <DialogContent className="bg-white max-w-md rounded-2xl border-0 shadow-2xl p-7">
-              <ModalHeader icon={UserPlus} title="Add Payroll Item" subtitle="Pull from employee or enter manually" accent="from-cyan-500 to-sky-500" />
+              <ModalHeader icon={UserPlus} title="Add Payroll Item" subtitle="Pull from employee or enter manually" accent="bg-[#0A4FE8]" />
               <div className="space-y-4 mt-2">
                 <Field label="Employee (optional)">
                   <Select value={form.employee_id || "_manual"} onValueChange={pickEmployee}>
@@ -114,7 +117,7 @@ export default function PayrollRunPage({ params }: { params: Promise<{ id: strin
               </div>
               <DialogFooter className="mt-5">
                 <Button variant="outline" className="rounded-xl" onClick={() => setOpen(false)}>Cancel</Button>
-                <Button onClick={save} className="rounded-xl bg-gradient-to-b from-blue-600 to-blue-700">Add</Button>
+                <Button onClick={save} className="rounded-xl bg-[#0A4FE8]">Add</Button>
               </DialogFooter>
             </DialogContent>
           </Dialog>
@@ -122,8 +125,8 @@ export default function PayrollRunPage({ params }: { params: Promise<{ id: strin
       }
     >
       <div className="grid grid-cols-1 md:grid-cols-2 gap-5 mb-8">
-        <StatCard icon={Banknote} label="Total Amount" value={formatMoney(run.total, run.currency)} accent="from-cyan-500 to-sky-500" />
-        <StatCard icon={ListOrdered} label="Items" value={String(items.length)} accent="from-blue-500 to-indigo-500" />
+        <StatCard icon={Banknote} label="Total Amount" value={formatMoney(convertFinanceAmount(run.total, run.currency, displayCurrency, rates), displayCurrency)} sub={run.currency !== displayCurrency ? `Original: ${formatMoney(run.total, run.currency)}` : undefined} accent="bg-[#0A4FE8]" />
+        <StatCard icon={ListOrdered} label="Items" value={String(items.length)} accent="bg-[#0A4FE8]" />
       </div>
 
       {items.length === 0 ? (
@@ -144,7 +147,10 @@ export default function PayrollRunPage({ params }: { params: Promise<{ id: strin
               {items.map((it) => (
                 <tr key={it.id} className="border-t border-white/60 hover:bg-white/50">
                   <td className="px-5 py-4 font-mono text-gray-900">{it.account_number}</td>
-                  <td className="px-5 py-4 font-semibold">{formatMoney(it.amount, run.currency)}</td>
+                  <td className="px-5 py-4 font-semibold">
+                    <div>{formatMoney(convertFinanceAmount(it.amount, run.currency, displayCurrency, rates), displayCurrency)}</div>
+                    {run.currency !== displayCurrency && <div className="mt-0.5 text-[11px] font-normal text-gray-400">Original: {formatMoney(it.amount, run.currency)}</div>}
+                  </td>
                   <td className="px-5 py-4 text-gray-500">{findBankByCode(it.bank_code)?.name ?? it.bank_code} <span className="text-xs text-gray-400">({it.bank_code})</span></td>
                   <td className="px-5 py-4 text-gray-500">{it.narration}</td>
                   <td className="px-5 py-4 text-right">

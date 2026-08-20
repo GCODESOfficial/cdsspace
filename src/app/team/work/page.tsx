@@ -9,6 +9,7 @@ import {
   ArrowLeft,
   ArrowRight,
   BriefcaseBusiness,
+  Brain,
   CalendarDays,
   Check,
   CheckCircle2,
@@ -23,11 +24,13 @@ import {
   Lock,
   MessageSquare,
   Milestone,
+  Pencil,
   Plus,
   Search,
+  Trash2,
   Send,
   ShieldCheck,
-  Sparkles,
+  TrendingUp,
   Unlink,
   Users,
   X,
@@ -39,7 +42,7 @@ import {
   UserRound,
 } from "lucide-react";
 import { AnimatePresence, motion } from "framer-motion";
-import { appAlert } from "@/lib/app-notify";
+import { appAlert, appConfirm } from "@/lib/app-notify";
 import { BRAND_BRIEF_FIELD_LABELS } from "@/lib/brand-brief";
 
 type ProjectStatus = "new" | "active" | "paused" | "delayed" | "awaiting_client" | "under_review" | "completed" | "archived";
@@ -68,6 +71,7 @@ interface Project {
   task_count: number;
   milestone_count: number;
   team_count: number;
+  can_edit_project: boolean;
 }
 
 interface Assignment {
@@ -80,6 +84,9 @@ interface Assignment {
   member_role_title: string | null;
   member_department: string | null;
   member_avatar_url: string | null;
+  is_project_leader: boolean;
+  can_edit_project: boolean;
+  can_manage_tasks: boolean;
 }
 
 interface MilestoneRow {
@@ -284,16 +291,26 @@ function label(value: string) {
   return value.replace(/_/g, " ").replace(/\b\w/g, (char) => char.toUpperCase());
 }
 
+// Accepts both bare `YYYY-MM-DD` and full ISO timestamps (the DB driver may
+// return either), so date-only columns don't render as "Invalid Date".
+function toDate(value: string | null): Date | null {
+  if (!value) return null;
+  const d = /^\d{4}-\d{2}-\d{2}$/.test(value) ? new Date(`${value}T12:00:00`) : new Date(value);
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+
 function formatDate(value: string | null) {
-  if (!value) return "Not set";
-  return new Date(`${value}T12:00:00`).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
+  const d = toDate(value);
+  if (!d) return "Not set";
+  return d.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
 }
 
 function daysUntil(value: string | null) {
-  if (!value) return null;
+  const end = toDate(value);
+  if (!end) return null;
   const start = new Date();
   start.setHours(0, 0, 0, 0);
-  const end = new Date(`${value}T00:00:00`);
+  end.setHours(0, 0, 0, 0);
   return Math.ceil((end.getTime() - start.getTime()) / 86_400_000);
 }
 
@@ -392,6 +409,7 @@ export default function TeamWorkPage() {
   const [projectForm, setProjectForm] = useState(emptyProjectForm);
   const [taskForm, setTaskForm] = useState(emptyTaskForm);
   const [milestoneForm, setMilestoneForm] = useState(emptyMilestoneForm);
+  const [editingMilestoneId, setEditingMilestoneId] = useState<string | null>(null);
   const [docForm, setDocForm] = useState(emptyDocForm);
   const [approvalForm, setApprovalForm] = useState(emptyApprovalForm);
   const [commentDrafts, setCommentDrafts] = useState<Record<string, string>>({});
@@ -570,15 +588,71 @@ export default function TeamWorkPage() {
     }
   };
 
-  const createMilestone = async (event: React.FormEvent) => {
+  const submitMilestone = async (event: React.FormEvent) => {
     event.preventDefault();
     if (!selectedProject) return;
+    if (editingMilestoneId) {
+      const json = await postAction("update_milestone", { ...milestoneForm, milestone_id: editingMilestoneId, project_id: selectedProject.id }, { silent: true });
+      if (json?.milestone) {
+        const updated = json.milestone as MilestoneRow;
+        setData((prev) => (prev ? { ...prev, milestones: prev.milestones.map((m) => (m.id === updated.id ? updated : m)) } : prev));
+        setMilestoneForm(emptyMilestoneForm);
+        setEditingMilestoneId(null);
+      }
+      return;
+    }
     const json = await postAction("create_milestone", { ...milestoneForm, project_id: selectedProject.id }, { silent: true });
     if (json?.milestone) {
       const created = json.milestone as MilestoneRow;
       setData((prev) => (prev ? { ...prev, milestones: [...prev.milestones, created] } : prev));
       setMilestoneForm(emptyMilestoneForm);
     }
+  };
+
+  const startEditMilestone = (milestone: MilestoneRow) => {
+    setEditingMilestoneId(milestone.id);
+    setMilestoneForm({
+      description: milestone.description || "",
+      duration_start: milestone.duration_start ? String(milestone.duration_start).slice(0, 10) : "",
+      due_date: (milestone.due_date || milestone.duration_end) ? String(milestone.due_date || milestone.duration_end).slice(0, 10) : "",
+      assigned_to: milestone.assigned_to || "",
+    });
+  };
+
+  const cancelEditMilestone = () => {
+    setEditingMilestoneId(null);
+    setMilestoneForm(emptyMilestoneForm);
+  };
+
+  // Optimistic patch for status / progress / mark-done on a milestone card.
+  const patchMilestone = async (milestone: MilestoneRow, patch: Record<string, unknown>) => {
+    if (!selectedProject) return;
+    setData((current) =>
+      current ? { ...current, milestones: current.milestones.map((m) => (m.id === milestone.id ? ({ ...m, ...patch } as MilestoneRow) : m)) } : current,
+    );
+    const json = await postAction("update_milestone", { milestone_id: milestone.id, project_id: selectedProject.id, ...patch }, { silent: true });
+    if (json?.milestone) {
+      const updated = json.milestone as MilestoneRow;
+      setData((current) => (current ? { ...current, milestones: current.milestones.map((m) => (m.id === updated.id ? updated : m)) } : current));
+    } else {
+      await load();
+    }
+  };
+
+  const deleteMilestone = async (milestone: MilestoneRow) => {
+    if (!selectedProject) return;
+    if (!(await appConfirm({ title: "Delete milestone", message: `Delete "${milestone.description}"? This cannot be undone.` }))) return;
+    setData((current) => (current ? { ...current, milestones: current.milestones.filter((m) => m.id !== milestone.id) } : current));
+    const json = await postAction("delete_milestone", { milestone_id: milestone.id, project_id: selectedProject.id }, { silent: true });
+    if (!json?.deleted) await load();
+    if (editingMilestoneId === milestone.id) cancelEditMilestone();
+  };
+
+  const completeProject = async () => {
+    if (!selectedProject) return;
+    if (!(await appConfirm({ title: "Complete project", message: `Mark "${selectedProject.name}" as completed?` }))) return;
+    const json = await postAction("update_project", { project_id: selectedProject.id, status: "completed", completion_date: new Date().toISOString().slice(0, 10) }, { silent: true });
+    if (json?.project) await load();
   };
 
   const addDocument = async (event: React.FormEvent) => {
@@ -709,7 +783,7 @@ export default function TeamWorkPage() {
             <button
               type="button"
               onClick={() => setCreateOpen(true)}
-              className="inline-flex h-12 items-center justify-center gap-2 rounded-full bg-gradient-to-b from-blue-600 to-blue-700 px-6 text-[14px] font-bold text-white shadow-lg shadow-blue-600/25 transition hover:from-blue-700 hover:to-blue-800 active:scale-95"
+              className="inline-flex h-12 items-center justify-center gap-2 rounded-full bg-[#0A4FE8] px-6 text-[14px] font-bold text-white shadow-lg shadow-blue-600/25 transition hover:bg-[#083FC2] active:scale-95"
             >
               <Plus className="h-4 w-4" />
               <span className="hidden sm:inline">New Project</span>
@@ -732,7 +806,7 @@ export default function TeamWorkPage() {
             <button
               type="button"
               onClick={() => setCreateOpen(true)}
-              className="mt-5 inline-flex h-11 items-center gap-2 rounded-full bg-gradient-to-b from-blue-600 to-blue-700 px-6 text-[13.5px] font-bold text-white shadow-lg shadow-blue-600/25 transition hover:from-blue-700 hover:to-blue-800 active:scale-95"
+              className="mt-5 inline-flex h-11 items-center gap-2 rounded-full bg-[#0A4FE8] px-6 text-[13.5px] font-bold text-white shadow-lg shadow-blue-600/25 transition hover:bg-[#083FC2] active:scale-95"
             >
               <Plus className="h-4 w-4" /> Create the first project
             </button>
@@ -825,7 +899,14 @@ export default function TeamWorkPage() {
 
         {selectedProject ? (
           <section className="min-w-0 space-y-4">
-            <ProjectHeader project={selectedProject} onChat={openProjectChat} working={working === "ensure_project_chat"} />
+            <ProjectHeader
+              project={selectedProject}
+              onChat={openProjectChat}
+              working={working === "ensure_project_chat"}
+              canManage={selectedProject.can_edit_project}
+              onComplete={completeProject}
+              completing={working === "update_project"}
+            />
 
             <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_320px]">
               <div className="min-w-0 rounded-2xl border border-white/80 bg-white p-3 shadow-sm sm:p-4">
@@ -877,6 +958,8 @@ export default function TeamWorkPage() {
                       commentDrafts={commentDrafts}
                       setCommentDrafts={setCommentDrafts}
                       addComment={addComment}
+                      canManage={selectedProject.can_edit_project}
+                      viewerId={myId}
                     />
                   )}
                   {tab === "milestones" && (
@@ -884,8 +967,14 @@ export default function TeamWorkPage() {
                       milestones={projectMilestones}
                       form={milestoneForm}
                       setForm={setMilestoneForm}
-                      onSubmit={createMilestone}
+                      onSubmit={submitMilestone}
                       working={working}
+                      canManage={selectedProject.can_edit_project}
+                      editingId={editingMilestoneId}
+                      onEdit={startEditMilestone}
+                      onCancelEdit={cancelEditMilestone}
+                      onPatch={patchMilestone}
+                      onDelete={deleteMilestone}
                     />
                   )}
                   {tab === "timeline" && <TimelineTab milestones={projectMilestones} tasks={projectTasks} />}
@@ -944,7 +1033,7 @@ export default function TeamWorkPage() {
                   </div>
                 </Panel>
 
-                <Panel title="Smart Analysis" icon={Sparkles}>
+                <Panel title="Smart Analysis" icon={Brain}>
                   <div className="space-y-2">
                     {smartInsights.map((insight) => (
                       <div key={insight} className="rounded-2xl bg-blue-50 px-3 py-2 text-[12px] leading-5 text-blue-800">
@@ -1061,7 +1150,8 @@ function ProjectListItem({ project, active, onClick }: { project: Project; activ
   );
 }
 
-function ProjectHeader({ project, onChat, working }: { project: Project; onChat: () => void; working: boolean }) {
+function ProjectHeader({ project, onChat, working, canManage, onComplete, completing }: { project: Project; onChat: () => void; working: boolean; canManage: boolean; onComplete: () => void; completing: boolean }) {
+  const isCompleted = project.status === "completed" || project.status === "archived";
   return (
     <div className="rounded-2xl border border-white/80 bg-white p-4 shadow-sm sm:p-5">
       <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
@@ -1075,15 +1165,33 @@ function ProjectHeader({ project, onChat, working }: { project: Project; onChat:
           <p className="mt-1 text-[13.5px] text-brand-body/65">{project.client || "Internal project"}</p>
           {project.description && <p className="mt-3 max-w-3xl text-[13px] leading-6 text-brand-body/70">{project.description}</p>}
         </div>
-        <button
-          type="button"
-          onClick={onChat}
-          disabled={working}
-          className="inline-flex h-11 shrink-0 items-center justify-center gap-2 rounded-2xl bg-brand-navy px-4 text-[13px] font-bold text-white transition hover:bg-[#101C3F] disabled:opacity-60"
-        >
-          {working ? <Loader2 className="h-4 w-4 animate-spin" /> : <MessageSquare className="h-4 w-4" />}
-          Project chat
-        </button>
+        <div className="flex shrink-0 flex-wrap items-center gap-2">
+          {canManage && !isCompleted && (
+            <button
+              type="button"
+              onClick={onComplete}
+              disabled={completing}
+              className="inline-flex h-11 items-center justify-center gap-2 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 text-[13px] font-bold text-emerald-700 transition hover:bg-emerald-100 disabled:opacity-60"
+            >
+              {completing ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
+              Mark completed
+            </button>
+          )}
+          {isCompleted && (
+            <span className="inline-flex h-11 items-center gap-2 rounded-2xl bg-emerald-50 px-4 text-[13px] font-bold text-emerald-700">
+              <CheckCircle2 className="h-4 w-4" /> Completed
+            </span>
+          )}
+          <button
+            type="button"
+            onClick={onChat}
+            disabled={working}
+            className="inline-flex h-11 items-center justify-center gap-2 rounded-2xl bg-brand-navy px-4 text-[13px] font-bold text-white transition hover:bg-[#101C3F] disabled:opacity-60"
+          >
+            {working ? <Loader2 className="h-4 w-4 animate-spin" /> : <MessageSquare className="h-4 w-4" />}
+            Project chat
+          </button>
+        </div>
       </div>
       <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <TimelineCell label="Start" value={formatDate(project.duration_start)} />
@@ -1107,14 +1215,29 @@ function TimelineCell({ label: cellLabel, value }: { label: string; value: strin
 function OverviewTab({ project, assignments, insights, activity }: { project: Project; assignments: Assignment[]; insights: string[]; activity: ActivityRow[] }) {
   return (
     <div className="grid gap-4">
-      <div className="grid gap-3 md:grid-cols-3">
-        <ProgressPanel title="Progress" value={project.progress} sub={`${project.task_count} tasks`} />
-        <ProgressPanel title="Milestones" value={project.milestone_count ? Math.round((project.progress + 20) / 1.2) : 0} sub={`${project.milestone_count} planned`} />
-        <ProgressPanel title="Team Coverage" value={Math.min(100, assignments.length * 18)} sub={`${assignments.length} assignment${assignments.length === 1 ? "" : "s"}`} />
+      <div className="grid gap-3 sm:grid-cols-3">
+        <ProgressPanel
+          icon={TrendingUp}
+          title="Progress"
+          value={project.progress}
+          sub={`${project.task_count} task${project.task_count === 1 ? "" : "s"}`}
+        />
+        <ProgressPanel
+          icon={Milestone}
+          title="Milestones"
+          value={project.milestone_count ? Math.round((project.progress + 20) / 1.2) : 0}
+          sub={`${project.milestone_count} planned`}
+        />
+        <ProgressPanel
+          icon={Users}
+          title="Team Coverage"
+          value={Math.min(100, assignments.length * 18)}
+          sub={`${assignments.length} assignment${assignments.length === 1 ? "" : "s"}`}
+        />
       </div>
 
       <div className="grid gap-4 lg:grid-cols-2">
-        <Panel title="Project Intelligence" icon={Sparkles}>
+        <Panel title="Project Intelligence" icon={Brain}>
           <div className="space-y-2">
             {insights.map((insight) => (
               <div key={insight} className="rounded-2xl bg-brand-bg/70 px-3 py-2 text-[12px] leading-5 text-brand-body">
@@ -1142,16 +1265,24 @@ function OverviewTab({ project, assignments, insights, activity }: { project: Pr
   );
 }
 
-function ProgressPanel({ title, value, sub }: { title: string; value: number; sub: string }) {
+function ProgressPanel({ icon: Icon, title, value, sub }: { icon: React.ElementType; title: string; value: number; sub: string }) {
   const normalized = Math.max(0, Math.min(100, value || 0));
   return (
-    <div className="rounded-3xl bg-brand-bg/60 p-4">
-      <div className="flex items-center justify-between">
-        <p className="text-[12px] font-bold uppercase tracking-[0.12em] text-brand-body/50">{title}</p>
-        <p className="text-[18px] font-bold text-brand-navy">{normalized}%</p>
+    // Matches the canonical `Metric` card: icon + value share the top row, and
+    // the label sits on its own full-width line below so a long label like
+    // "Team Coverage" never collides with (or wraps into) the value.
+    <div className="rounded-3xl border border-white/80 bg-white p-4 shadow-sm sm:p-5">
+      <div className="flex items-center justify-between gap-3">
+        <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-blue-50 text-brand-blue">
+          <Icon className="h-4.5 w-4.5" />
+        </span>
+        <span className="whitespace-nowrap text-[24px] font-bold leading-none tracking-tight tabular-nums text-brand-navy">
+          {normalized}%
+        </span>
       </div>
-      <div className="mt-3 h-2 overflow-hidden rounded-full bg-white">
-        <div className="h-full rounded-full bg-brand-blue" style={{ width: `${normalized}%` }} />
+      <p className="mt-3 text-[11px] font-bold uppercase tracking-[0.12em] text-brand-body/50">{title}</p>
+      <div className="mt-2 h-2 overflow-hidden rounded-full bg-brand-bg">
+        <div className="h-full rounded-full bg-brand-blue transition-all duration-500" style={{ width: `${normalized}%` }} />
       </div>
       <p className="mt-2 text-[12px] text-brand-body/55">{sub}</p>
     </div>
@@ -1173,6 +1304,8 @@ function TasksTab({
   commentDrafts,
   setCommentDrafts,
   addComment,
+  canManage,
+  viewerId,
 }: {
   tasks: TaskRow[];
   members: TeamMemberOption[];
@@ -1188,6 +1321,8 @@ function TasksTab({
   commentDrafts: Record<string, string>;
   setCommentDrafts: React.Dispatch<React.SetStateAction<Record<string, string>>>;
   addComment: (task: TaskRow) => void;
+  canManage: boolean;
+  viewerId: string;
 }) {
   const [quick, setQuick] = useState("");
   const [showWizard, setShowWizard] = useState(false);
@@ -1200,21 +1335,25 @@ function TasksTab({
   return (
     <div className="grid gap-4">
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-        <div className="relative flex-1">
-          <Plus className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-brand-body/35" />
-          <input
-            value={quick}
-            onChange={(event) => setQuick(event.target.value)}
-            onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); submitQuick(); } }}
-            placeholder="Quick-add a task, then press Enter"
-            className="h-11 w-full rounded-2xl border border-brand-stroke/50 bg-brand-bg/50 pl-9 pr-24 text-[13px] font-medium outline-none transition focus:border-brand-blue/40 focus:bg-white focus:ring-4 focus:ring-blue-100"
-          />
-          {quick.trim() && (
-            <button type="button" onClick={submitQuick} className="absolute right-1.5 top-1/2 inline-flex -translate-y-1/2 items-center gap-1 rounded-xl bg-brand-navy px-3 py-1.5 text-[11px] font-bold text-white">
-              Add <CornerDownLeft className="h-3 w-3" />
-            </button>
-          )}
-        </div>
+        {canManage ? (
+          <div className="relative flex-1">
+            <Plus className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-brand-body/35" />
+            <input
+              value={quick}
+              onChange={(event) => setQuick(event.target.value)}
+              onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); submitQuick(); } }}
+              placeholder="Quick-add a task, then press Enter"
+              className="h-11 w-full rounded-2xl border border-brand-stroke/50 bg-brand-bg/50 pl-9 pr-24 text-[13px] font-medium outline-none transition focus:border-brand-blue/40 focus:bg-white focus:ring-4 focus:ring-blue-100"
+            />
+            {quick.trim() && (
+              <button type="button" onClick={submitQuick} className="absolute right-1.5 top-1/2 inline-flex -translate-y-1/2 items-center gap-1 rounded-xl bg-brand-navy px-3 py-1.5 text-[11px] font-bold text-white">
+                Add <CornerDownLeft className="h-3 w-3" />
+              </button>
+            )}
+          </div>
+        ) : (
+          <p className="flex-1 rounded-2xl border border-brand-stroke/40 bg-brand-bg/50 px-4 py-3 text-[12px] text-brand-body/60">Project leaders manage task creation. Assigned members can update their own task status.</p>
+        )}
         <div className="flex items-center gap-1 rounded-full bg-brand-bg/70 p-1">
           {([["list", "List", ListIcon], ["board", "Board", LayoutGrid]] as const).map(([key, text, Icon]) => (
             <button
@@ -1231,7 +1370,7 @@ function TasksTab({
         </div>
       </div>
 
-      <div className="rounded-2xl border border-brand-stroke/40 bg-white">
+      {canManage && <div className="rounded-2xl border border-brand-stroke/40 bg-white">
         <button
           type="button"
           onClick={() => setShowWizard((open) => !open)}
@@ -1245,12 +1384,12 @@ function TasksTab({
             <TaskWizard form={form} setForm={setForm} members={members} departments={departments} onSubmit={onSubmit} working={working} embedded />
           </div>
         )}
-      </div>
+      </div>}
 
       {tasks.length === 0 ? (
         <EmptyState icon={Milestone} title="No tasks yet" body="Quick-add above, or open the detailed form to assign responsibility." />
       ) : view === "board" ? (
-        <TaskBoard tasks={tasks} onUpdateTask={onUpdateTask} />
+        <TaskBoard tasks={tasks} onUpdateTask={onUpdateTask} canUpdateTask={(task) => canManage || task.assignee_id === viewerId || task.reviewer_id === viewerId} />
       ) : (
         <div className="grid gap-3">
           {tasks.map((task) => (
@@ -1269,16 +1408,17 @@ function TasksTab({
                   </p>
                 </div>
                 <div className="grid gap-2 sm:grid-cols-2 lg:w-[260px]">
-                  <select value={task.status} onChange={(event) => onUpdateTask(task, { status: event.target.value })} className={smallInputClass}>
+                  <select disabled={!canManage && task.assignee_id !== viewerId && task.reviewer_id !== viewerId} value={task.status} onChange={(event) => onUpdateTask(task, { status: event.target.value })} className={`${smallInputClass} disabled:cursor-not-allowed disabled:opacity-55`}>
                     {TASK_STATUS_OPTIONS.map((status) => <option key={status} value={status}>{label(status)}</option>)}
                   </select>
                   <input
                     type="number"
                     min={0}
                     max={100}
+                    disabled={!canManage && task.assignee_id !== viewerId && task.reviewer_id !== viewerId}
                     value={task.progress}
                     onChange={(event) => onUpdateTask(task, { progress: Number(event.target.value) })}
-                    className={smallInputClass}
+                    className={`${smallInputClass} disabled:cursor-not-allowed disabled:opacity-55`}
                   />
                 </div>
               </div>
@@ -1347,26 +1487,38 @@ function TaskWizard({ form, setForm, members, departments, onSubmit, working, em
   );
 }
 
-function MilestonesTab({ milestones, form, setForm, onSubmit, working }: {
+const MILESTONE_STATUS_OPTIONS = ["pending", "in_progress", "completed", "paid"];
+
+function MilestonesTab({ milestones, form, setForm, onSubmit, working, canManage, editingId, onEdit, onCancelEdit, onPatch, onDelete }: {
   milestones: MilestoneRow[];
   form: typeof emptyMilestoneForm;
   setForm: (form: typeof emptyMilestoneForm) => void;
   onSubmit: (event: React.FormEvent) => void;
   working: string | null;
+  canManage: boolean;
+  editingId: string | null;
+  onEdit: (milestone: MilestoneRow) => void;
+  onCancelEdit: () => void;
+  onPatch: (milestone: MilestoneRow, patch: Record<string, unknown>) => void;
+  onDelete: (milestone: MilestoneRow) => void;
 }) {
   const [showForm, setShowForm] = useState(false);
+  const editing = editingId != null;
+  // Keep the form open whenever we're editing an existing milestone.
+  const formOpen = showForm || editing;
+  const busy = working === "create_milestone" || working === "update_milestone";
   return (
     <div className="grid gap-4">
       <div className="rounded-2xl border border-brand-stroke/40 bg-white">
         <button
           type="button"
-          onClick={() => setShowForm((open) => !open)}
+          onClick={() => { if (editing) { onCancelEdit(); } setShowForm((open) => !open); }}
           className="flex w-full items-center gap-2 px-4 py-3 text-[13px] font-bold text-brand-navy"
         >
-          <Plus className="h-4 w-4 text-brand-blue" /> Add milestone (start &amp; due date)
-          <ChevronRight className={`ml-auto h-4 w-4 text-brand-body/40 transition ${showForm ? "rotate-90" : ""}`} />
+          <Plus className="h-4 w-4 text-brand-blue" /> {editing ? "Editing milestone" : "Add milestone (start & due date)"}
+          <ChevronRight className={`ml-auto h-4 w-4 text-brand-body/40 transition ${formOpen ? "rotate-90" : ""}`} />
         </button>
-        {showForm && (
+        {formOpen && (
           <form onSubmit={onSubmit} className="grid gap-3 border-t border-brand-stroke/40 p-4">
             <Field label="Milestone title"><TextInput value={form.description} onChange={(description) => setForm({ ...form, description })} placeholder="e.g. Design handoff" required /></Field>
             <div className="grid gap-3 sm:grid-cols-2">
@@ -1374,13 +1526,18 @@ function MilestonesTab({ milestones, form, setForm, onSubmit, working }: {
               <Field label="Due date"><TextInput value={form.due_date} onChange={(due_date) => setForm({ ...form, due_date })} type="date" /></Field>
             </div>
             <Field label="Owner (optional)"><TextInput value={form.assigned_to} onChange={(assigned_to) => setForm({ ...form, assigned_to })} placeholder="Person or department" /></Field>
-            <div className="flex justify-end">
+            <div className="flex justify-end gap-2">
+              {editing && (
+                <button type="button" onClick={() => { onCancelEdit(); setShowForm(false); }} className="rounded-2xl border border-brand-stroke/50 px-4 py-2.5 text-[13px] font-bold text-brand-body/70">
+                  Cancel
+                </button>
+              )}
               <button
                 type="submit"
-                disabled={working === "create_milestone" || !form.description.trim()}
+                disabled={busy || !form.description.trim()}
                 className="inline-flex items-center gap-2 rounded-2xl bg-brand-navy px-4 py-2.5 text-[13px] font-bold text-white disabled:opacity-50"
               >
-                {working === "create_milestone" ? "Adding…" : "Add milestone"}
+                {busy ? "Saving…" : editing ? "Save changes" : "Add milestone"}
               </button>
             </div>
           </form>
@@ -1391,26 +1548,56 @@ function MilestonesTab({ milestones, form, setForm, onSubmit, working }: {
         <EmptyState icon={Milestone} title="No milestones" body="Add a milestone above to start tracking phases with their start and due dates." />
       ) : (
         <div className="grid gap-3">
-          {milestones.map((milestone, index) => (
-            <div key={milestone.id} className="flex gap-3 rounded-3xl border border-brand-stroke/40 bg-white p-4">
-              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-blue-50 text-[13px] font-bold text-brand-blue">
-                {index + 1}
-              </div>
-              <div className="min-w-0 flex-1">
-                <div className="flex flex-wrap gap-1.5">
-                  <Pill value={label(milestone.status)} className={statusClass(milestone.status)} />
-                  <Pill value={`${milestone.progress || 0}%`} />
-                  <Pill value={label(milestone.approval_status)} />
+          {milestones.map((milestone, index) => {
+            const done = milestone.status === "completed" || milestone.status === "paid" || milestone.approval_status === "approved";
+            return (
+              <div key={milestone.id} className="flex gap-3 rounded-3xl border border-brand-stroke/40 bg-white p-4">
+                <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl text-[13px] font-bold ${done ? "bg-emerald-50 text-emerald-600" : "bg-blue-50 text-brand-blue"}`}>
+                  {done ? <Check className="h-5 w-5" /> : index + 1}
                 </div>
-                <h3 className="mt-2 text-[15px] font-bold text-brand-navy">{milestone.description}</h3>
-                <p className="mt-1 text-[12px] text-brand-body/55">
-                  {milestone.assigned_to || "Unassigned"}
-                  {milestone.duration_start ? ` · Start ${formatDate(milestone.duration_start)}` : ""}
-                  {` · Due ${formatDate(milestone.due_date || milestone.duration_end)}`}
-                </p>
+                <div className="min-w-0 flex-1">
+                  <div className="flex flex-wrap gap-1.5">
+                    <Pill value={label(milestone.status)} className={statusClass(milestone.status)} />
+                    <Pill value={`${milestone.progress || 0}%`} />
+                    {milestone.approval_status && milestone.approval_status !== milestone.status && <Pill value={label(milestone.approval_status)} />}
+                  </div>
+                  <h3 className="mt-2 text-[15px] font-bold text-brand-navy">{milestone.description}</h3>
+                  <p className="mt-1 text-[12px] text-brand-body/55">
+                    {milestone.assigned_to || "Unassigned"}
+                    {milestone.duration_start ? ` · Start ${formatDate(milestone.duration_start)}` : ""}
+                    {` · Due ${formatDate(milestone.due_date || milestone.duration_end)}`}
+                  </p>
+
+                  {canManage && (
+                    <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-brand-stroke/30 pt-3">
+                      {!done && (
+                        <button
+                          type="button"
+                          onClick={() => onPatch(milestone, { mark_done: true })}
+                          className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-2.5 py-1.5 text-[12px] font-semibold text-white transition hover:bg-emerald-700"
+                        >
+                          <Check className="h-3.5 w-3.5" /> Mark done
+                        </button>
+                      )}
+                      <select
+                        value={MILESTONE_STATUS_OPTIONS.includes(milestone.status) ? milestone.status : "pending"}
+                        onChange={(e) => onPatch(milestone, { status: e.target.value })}
+                        className="rounded-lg border border-brand-stroke/50 bg-white px-2 py-1.5 text-[12px] font-semibold text-brand-navy"
+                      >
+                        {MILESTONE_STATUS_OPTIONS.map((s) => <option key={s} value={s}>{label(s)}</option>)}
+                      </select>
+                      <button type="button" onClick={() => { onEdit(milestone); setShowForm(true); }} className="inline-flex items-center gap-1.5 rounded-lg border border-brand-stroke/50 px-2.5 py-1.5 text-[12px] font-semibold text-brand-body/70 transition hover:text-brand-navy">
+                        <Pencil className="h-3.5 w-3.5" /> Edit
+                      </button>
+                      <button type="button" onClick={() => onDelete(milestone)} className="inline-flex items-center gap-1.5 rounded-lg border border-red-200 px-2.5 py-1.5 text-[12px] font-semibold text-red-600 transition hover:bg-red-50">
+                        <Trash2 className="h-3.5 w-3.5" /> Delete
+                      </button>
+                    </div>
+                  )}
+                </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
     </div>
@@ -1486,7 +1673,7 @@ function BrandBriefPanel({ brief, canManage, attachableBriefs, onAttach, onDetac
             type="button"
             disabled={!chosen || busy}
             onClick={() => chosen && onAttach(chosen)}
-            className="inline-flex h-11 shrink-0 items-center justify-center gap-2 rounded-full bg-gradient-to-b from-blue-600 to-blue-700 px-5 text-[13px] font-bold text-white shadow-lg shadow-blue-600/25 transition hover:from-blue-700 hover:to-blue-800 active:scale-95 disabled:opacity-60"
+            className="inline-flex h-11 shrink-0 items-center justify-center gap-2 rounded-full bg-[#0A4FE8] px-5 text-[13px] font-bold text-white shadow-lg shadow-blue-600/25 transition hover:bg-[#083FC2] active:scale-95 disabled:opacity-60"
           >
             {working === "attach_brief" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Link2 className="h-4 w-4" />} Link brief
           </button>
@@ -1618,7 +1805,7 @@ function FilesTab({ documents, form, setForm, onSubmit, working, brief, canManag
             <Field label="Folder"><select value={form.folder} onChange={(e) => setForm({ ...form, folder: e.target.value })} className={inputClass}>{DOCUMENT_FOLDERS.map((f) => <option key={f} value={f}>{f}</option>)}</select></Field>
           </div>
           <div className="mt-4 flex justify-end">
-            <button type="submit" disabled={working === "add_document"} className="inline-flex h-11 items-center gap-2 rounded-full bg-gradient-to-b from-blue-600 to-blue-700 px-6 text-[13px] font-bold text-white shadow-lg shadow-blue-600/25 transition hover:from-blue-700 hover:to-blue-800 active:scale-95 disabled:opacity-60">
+            <button type="submit" disabled={working === "add_document"} className="inline-flex h-11 items-center gap-2 rounded-full bg-[#0A4FE8] px-6 text-[13px] font-bold text-white shadow-lg shadow-blue-600/25 transition hover:bg-[#083FC2] active:scale-95 disabled:opacity-60">
               {working === "add_document" ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileUp className="h-4 w-4" />} Add file
             </button>
           </div>
@@ -1677,7 +1864,7 @@ function ApprovalsTab({ approvals, tasks, milestones, members, form, setForm, on
             <Field label="Note"><TextInput value={form.note} onChange={(note) => setForm({ ...form, note })} placeholder="What needs review?" /></Field>
           </div>
           <div className="mt-4 flex justify-end">
-            <button type="submit" disabled={working === "request_approval"} className="inline-flex h-11 items-center gap-2 rounded-full bg-gradient-to-b from-blue-600 to-blue-700 px-6 text-[13px] font-bold text-white shadow-lg shadow-blue-600/25 transition hover:from-blue-700 hover:to-blue-800 active:scale-95 disabled:opacity-60">
+            <button type="submit" disabled={working === "request_approval"} className="inline-flex h-11 items-center gap-2 rounded-full bg-[#0A4FE8] px-6 text-[13px] font-bold text-white shadow-lg shadow-blue-600/25 transition hover:bg-[#083FC2] active:scale-95 disabled:opacity-60">
               {working === "request_approval" ? <Loader2 className="h-4 w-4 animate-spin" /> : <ShieldCheck className="h-4 w-4" />} Request approval
             </button>
           </div>
@@ -1910,7 +2097,7 @@ function WizardNav({ step, total, onBack, onNext, submitLabel, submitting, canNe
       </button>
       {isLast ? (
         <button type="submit" disabled={submitting}
-          className="inline-flex h-11 items-center gap-2 rounded-full bg-gradient-to-b from-blue-600 to-blue-700 px-6 text-[13px] font-bold text-white shadow-lg shadow-blue-600/25 transition hover:from-blue-700 hover:to-blue-800 active:scale-95 disabled:opacity-60">
+          className="inline-flex h-11 items-center gap-2 rounded-full bg-[#0A4FE8] px-6 text-[13px] font-bold text-white shadow-lg shadow-blue-600/25 transition hover:bg-[#083FC2] active:scale-95 disabled:opacity-60">
           {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />} {submitLabel}
         </button>
       ) : (
@@ -1959,9 +2146,10 @@ function boardBucket(status: TaskStatus): TaskStatus {
   return status;
 }
 
-function TaskBoard({ tasks, onUpdateTask }: {
+function TaskBoard({ tasks, onUpdateTask, canUpdateTask }: {
   tasks: TaskRow[];
   onUpdateTask: (task: TaskRow, patch: Record<string, unknown>) => void;
+  canUpdateTask: (task: TaskRow) => boolean;
 }) {
   const [dragId, setDragId] = useState<string | null>(null);
   const [overCol, setOverCol] = useState<TaskStatus | null>(null);
@@ -1978,7 +2166,7 @@ function TaskBoard({ tasks, onUpdateTask }: {
               setOverCol(null);
               const task = tasks.find((t) => t.id === dragId);
               setDragId(null);
-              if (task && boardBucket(task.status) !== col.key) onUpdateTask(task, { status: col.key });
+              if (task && canUpdateTask(task) && boardBucket(task.status) !== col.key) onUpdateTask(task, { status: col.key });
             }}
             className={`flex w-[240px] shrink-0 flex-col rounded-2xl border p-2.5 transition ${
               overCol === col.key ? "border-brand-blue bg-blue-50/60" : "border-brand-stroke/40 bg-brand-bg/40"
@@ -1995,10 +2183,10 @@ function TaskBoard({ tasks, onUpdateTask }: {
                 items.map((task) => (
                   <div
                     key={task.id}
-                    draggable
+                    draggable={canUpdateTask(task)}
                     onDragStart={() => setDragId(task.id)}
                     onDragEnd={() => { setDragId(null); setOverCol(null); }}
-                    className={`cursor-grab rounded-xl border border-brand-stroke/40 bg-white p-3 shadow-sm transition active:cursor-grabbing ${
+                    className={`${canUpdateTask(task) ? "cursor-grab active:cursor-grabbing" : "cursor-default"} rounded-xl border border-brand-stroke/40 bg-white p-3 shadow-sm transition ${
                       dragId === task.id ? "opacity-40" : "hover:border-brand-blue/40"
                     }`}
                   >
@@ -2214,7 +2402,7 @@ function TimelineTab({ milestones, tasks }: { milestones: MilestoneRow[]; tasks:
               <p className="mb-1 truncate text-[12px] font-semibold text-brand-navy">{row.label}</p>
               <div className="relative h-7 rounded-full bg-brand-bg">
                 <div
-                  className="absolute inset-y-0 flex items-center overflow-hidden rounded-full bg-gradient-to-r from-blue-600 to-blue-500"
+                  className="absolute inset-y-0 flex items-center overflow-hidden rounded-full bg-[#0A4FE8]"
                   style={{ left: `${left}%`, width: `${width}%` }}
                 >
                   <div className="h-full rounded-full bg-blue-800/40" style={{ width: `${row.progress}%` }} />

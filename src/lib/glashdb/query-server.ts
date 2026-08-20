@@ -8,6 +8,7 @@ import {
 import { glashQuery } from "@/lib/glashdb/postgres";
 
 const IDENT = /^[a-zA-Z_][a-zA-Z0-9_]*$/;
+const jsonColumnsByTable = new Map<string, Promise<Set<string>>>();
 
 function quoteIdent(value: string) {
   const parts = String(value).split(".");
@@ -142,6 +143,27 @@ function normalizeRows(payload: any) {
   return Array.isArray(payload) ? payload : [payload];
 }
 
+async function jsonColumnsForTable(table: string) {
+  let pending = jsonColumnsByTable.get(table);
+  if (!pending) {
+    pending = glashQuery<{ column_name: string }>(
+      `select column_name
+         from information_schema.columns
+        where table_schema = 'public'
+          and table_name = $1
+          and data_type in ('json', 'jsonb')`,
+      [table],
+    ).then((rows) => new Set(rows.map((row) => row.column_name)));
+    jsonColumnsByTable.set(table, pending);
+  }
+  return pending;
+}
+
+function mutationValue(value: any, column: string, jsonColumns: Set<string>) {
+  if (value == null || !jsonColumns.has(column)) return value;
+  return JSON.stringify(value);
+}
+
 function returnResult(rows: any[], payload: GlashQueryPayload): GlashQueryResult {
   if (payload.resultMode === "single") {
     if (rows.length !== 1) return { data: null, error: { message: `Expected single row, received ${rows.length}.` } };
@@ -196,7 +218,11 @@ export async function executeGlashQueryPayload(payload: GlashQueryPayload): Prom
       const rows = normalizeRows(payload.payload).filter(Boolean);
       if (!rows.length) return { data: [], error: null };
       const columns = mutationColumns(rows);
-      const valuesSql = rows.map((row) => `(${columns.map((column) => pushParam(params, row[column] ?? null)).join(", ")})`).join(", ");
+      const jsonColumns = await jsonColumnsForTable(payload.table);
+      const valuesSql = rows.map((row) => `(${columns.map((column) => {
+        const value = row[column] ?? null;
+        return pushParam(params, mutationValue(value, column, jsonColumns));
+      }).join(", ")})`).join(", ");
       const conflict = String(payload.options?.onConflict || "").split(",").map((item) => item.trim()).filter(Boolean);
       const conflictSql = payload.action === "upsert" && conflict.length
         ? ` on conflict (${conflict.map(quoteIdent).join(", ")}) do update set ${columns
@@ -213,7 +239,8 @@ export async function executeGlashQueryPayload(payload: GlashQueryPayload): Prom
       const patch = payload.payload || {};
       const columns = Object.keys(patch);
       if (!columns.length) return { data: [], error: null };
-      const setSql = columns.map((column) => `${quoteIdent(column)} = ${pushParam(params, patch[column])}`).join(", ");
+      const jsonColumns = await jsonColumnsForTable(payload.table);
+      const setSql = columns.map((column) => `${quoteIdent(column)} = ${pushParam(params, mutationValue(patch[column], column, jsonColumns))}`).join(", ");
       sql = `update ${table} set ${setSql}${where()} returning ${selectSql(payload.columns)}`;
       const rows = await glashQuery(sql, params);
       return returnResult(rows, payload);

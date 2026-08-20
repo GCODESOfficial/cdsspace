@@ -266,7 +266,7 @@ export function FeaturedWorksModal({
 					<Button
 						type="button"
 						onClick={handleSaveChanges}
-						className="bg-gradient-to-r from-[#08129C] to-[#072056] text-white rounded-lg hover:scale-105 cursor-pointer"
+						className="bg-[#0A4FE8] text-white rounded-lg hover:scale-105 cursor-pointer"
 					>
 						Save Changes
 					</Button>

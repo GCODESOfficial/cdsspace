@@ -84,7 +84,7 @@ export function WorkspacePlaceholder({
       </div>
 
       {teamLink && (
-        <div className="mt-4 rounded-2xl border border-gray-100 bg-gradient-to-r from-[#0A4FE8]/[0.04] to-white p-5 flex items-center justify-between">
+        <div className="mt-4 rounded-2xl border border-gray-100 bg-[#F5F8FF] p-5 flex items-center justify-between">
           <div>
             <p className="text-[13px] font-semibold text-[#0D1B39]">
               Team members already use this module

@@ -1,10 +1,10 @@
 "use client";
 
 import { useState, useEffect, useRef, useCallback } from "react";
-import { appPrompt } from "@/lib/app-notify";
+import { appAlert, appPrompt } from "@/lib/app-notify";
 import { motion, AnimatePresence } from "framer-motion";
-import { Bookmark, Languages, Loader2, MessageSquare, Pin, Send, Star, X } from "lucide-react";
-import { createClient } from "@/lib/supabase/client";
+import { Bookmark, ChevronDown, Languages, Loader2, MessageSquare, Pin, Send, Star, X } from "lucide-react";
+import { useClientAccount } from "@/components/dashboard/ClientAccountProvider";
 
 interface ChatMessage {
   id: string;
@@ -23,31 +23,24 @@ interface ChatMessage {
 }
 
 export function ChatWidget() {
+  const { account } = useClientAccount();
   const [isOpen, setIsOpen] = useState(false);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
-  const [userId, setUserId] = useState<string | null>(null);
+  const userId = account.userId;
   const [isSending, setIsSending] = useState(false);
   const [actionBusy, setActionBusy] = useState<string | null>(null);
   const [unreadCount, setUnreadCount] = useState(0);
+  const [isAtLatest, setIsAtLatest] = useState(true);
+  const [newMessageCount, setNewMessageCount] = useState(0);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const messagesScrollRef = useRef<HTMLDivElement>(null);
+  const isAtLatestRef = useRef(true);
+  const initialScrollPending = useRef(true);
+  const renderedLastMessageId = useRef<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  const roomId = userId ? `client_${userId}` : null;
-
-  // Get current user
-  useEffect(() => {
-    const getUser = async () => {
-      const supabase = createClient();
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
-      if (user) {
-        setUserId(user.id);
-      }
-    };
-    getUser();
-  }, []);
+  const roomId = `client_${userId}`;
 
   // Fetch messages
   const fetchMessages = useCallback(async () => {
@@ -77,12 +70,41 @@ export function ChatWidget() {
     return () => clearInterval(interval);
   }, [fetchMessages]);
 
-  // Scroll to bottom when messages change or panel opens
+  const scrollToLatest = useCallback((behavior: ScrollBehavior = "smooth") => {
+    messagesEndRef.current?.scrollIntoView({ behavior, block: "end" });
+    isAtLatestRef.current = true;
+    setIsAtLatest(true);
+    setNewMessageCount(0);
+  }, []);
+
+  const handleMessagesScroll = useCallback(() => {
+    const container = messagesScrollRef.current;
+    if (!container) return;
+    const nearBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 100;
+    isAtLatestRef.current = nearBottom;
+    setIsAtLatest(nearBottom);
+    if (nearBottom) setNewMessageCount(0);
+  }, []);
+
   useEffect(() => {
-    if (isOpen) {
-      messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    if (!isOpen) return;
+    const last = messages.at(-1);
+    if (!last) return;
+    const changed = renderedLastMessageId.current !== last.id;
+    renderedLastMessageId.current = last.id;
+    if (initialScrollPending.current) {
+      initialScrollPending.current = false;
+      requestAnimationFrame(() => scrollToLatest("auto"));
+      return;
     }
-  }, [messages, isOpen]);
+    if (!changed) return;
+    if (isAtLatestRef.current || last.sender_role === "client") requestAnimationFrame(() => scrollToLatest(last.sender_role === "client" ? "smooth" : "auto"));
+    else setNewMessageCount((count) => count + 1);
+  }, [messages, isOpen, scrollToLatest]);
+
+  useEffect(() => {
+    if (!isOpen) initialScrollPending.current = true;
+  }, [isOpen]);
 
   // Focus input when panel opens
   useEffect(() => {
@@ -97,7 +119,7 @@ export function ChatWidget() {
       fetch("/api/chat/read", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ roomId }),
+        body: JSON.stringify({ roomId, actor: "client" }),
       }).then(() => {
         setUnreadCount(0);
       });
@@ -122,17 +144,23 @@ export function ChatWidget() {
       is_read: false,
     };
     setMessages((prev) => [...prev, optimisticMsg]);
+    requestAnimationFrame(() => scrollToLatest("smooth"));
 
     try {
-      await fetch("/api/chat/messages", {
+      const response = await fetch("/api/chat/messages", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ roomId, message: text }),
+        body: JSON.stringify({ roomId, message: text, actor: "client" }),
       });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.error || "Message could not be sent");
       // Refetch to get the real message with server ID
       await fetchMessages();
     } catch (err) {
       console.error("Failed to send message:", err);
+      setMessages((current) => current.filter((message) => message.id !== optimisticMsg.id));
+      setInput(text);
+      await appAlert(err instanceof Error ? err.message : "Message could not be sent");
     } finally {
       setIsSending(false);
     }
@@ -152,7 +180,7 @@ export function ChatWidget() {
     if (msg.id.startsWith("temp_")) return;
     setActionBusy(msg.id);
     try {
-      const payload: Record<string, unknown> = { action };
+      const payload: Record<string, unknown> = { action, actor: "client" };
       if (action === "translate") {
         const language = await appPrompt({ title: "Translate message", message: "Translate this message to which language?", defaultValue: "English" });
         if (!language?.trim()) return;
@@ -200,14 +228,13 @@ export function ChatWidget() {
     }
   });
 
-  if (!userId) return null;
-
   return (
     <>
       {/* Floating Button */}
       <button
         onClick={() => setIsOpen((prev) => !prev)}
         className="fixed bottom-4 right-4 sm:bottom-6 sm:right-6 z-50 w-[52px] h-[52px] sm:w-14 sm:h-14 rounded-full bg-[#08129C] text-white shadow-lg hover:bg-[#0a18c0] transition-colors flex items-center justify-center"
+        aria-label={isOpen ? "Close Chat/Meet" : "Open Chat/Meet"}
       >
         <MessageSquare className="w-6 h-6" />
         {unreadCount > 0 && (
@@ -236,13 +263,14 @@ export function ChatWidget() {
               <button
                 onClick={() => setIsOpen(false)}
                 className="w-8 h-8 rounded-full hover:bg-white/20 flex items-center justify-center transition-colors"
+                aria-label="Close Chat/Meet"
               >
                 <X className="w-4 h-4" />
               </button>
             </div>
 
             {/* Messages */}
-            <div className="flex-1 overflow-y-auto px-4 py-3 space-y-1 bg-gray-50">
+            <div ref={messagesScrollRef} onScroll={handleMessagesScroll} className="flex-1 overflow-y-auto px-4 py-3 space-y-1 bg-gray-50">
               {messages.length === 0 && (
                 <div className="flex items-center justify-center h-full text-gray-400 text-sm">
                   No messages yet. Start the conversation!
@@ -351,6 +379,18 @@ export function ChatWidget() {
               ))}
               <div ref={messagesEndRef} />
             </div>
+
+            {!isAtLatest && (
+              <button
+                type="button"
+                onClick={() => scrollToLatest("smooth")}
+                className="absolute bottom-[76px] right-4 z-10 inline-flex h-10 min-w-10 items-center justify-center gap-1 rounded-full bg-[#08129C] px-3 text-xs font-semibold text-white shadow-lg"
+                aria-label="Go to the latest message"
+              >
+                <ChevronDown className="h-4 w-4" />
+                {newMessageCount > 0 && <span>{newMessageCount > 99 ? "99+" : newMessageCount}</span>}
+              </button>
+            )}
 
             {/* Input */}
             <div className="px-4 py-3 bg-white border-t border-gray-200 shrink-0">

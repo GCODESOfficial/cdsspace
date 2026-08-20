@@ -80,7 +80,7 @@ export default function CosmicStarfield({ starCount = 120 }: { starCount?: numbe
         />
       )}
 
-      {/* Stars */}
+      {/* Ambient particles */}
       {stars.map((star) => {
         let glow = 0;
         let scale = 1;

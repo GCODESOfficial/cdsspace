@@ -134,37 +134,37 @@ export default function Navbar() {
 
     <div className='h-[80%] justify-between flex flex-col gap-2'>
     <Link href="/Home" className="hover:text-gray-300" onClick={toggleMenu}>
-<div className="rounded-lg p-3 text-center transition bg-gradient-to-t from-[#020839] via-[#020936] to-[#051b63] hover:bg-[#0000FF] hover:bg-none">
+<div className="rounded-lg p-3 text-center transition bg-[#0A4FE8] hover:bg-[#0000FF] hover:bg-none">
   HOME
 </div>
 </Link>
 <Link href="/Works" className="hover:text-gray-300" onClick={toggleMenu}>
-  <div className="rounded-lg p-3 bg-gradient-to-t from-[#020839] via-[#020936] to-[#051b63] text-center transition">
+  <div className="rounded-lg p-3 bg-[#0A4FE8] text-center transition">
   WORK
   </div>
   </Link>
   <Link href="/About" className="hover:text-gray-300" onClick={toggleMenu}>
-  <div className="rounded-lg p-3 bg-gradient-to-t from-[#020839] via-[#020936] to-[#051b63] text-center transition">
+  <div className="rounded-lg p-3 bg-[#0A4FE8] text-center transition">
   ABOUT
   </div>
   </Link>
   <Link href="/Career" className="hover:text-gray-300" onClick={toggleMenu}>
-  <div className="rounded-lg p-3 bg-gradient-to-t from-[#020839] via-[#020936] to-[#051b63] text-center transition">
+  <div className="rounded-lg p-3 bg-[#0A4FE8] text-center transition">
  CAREER
   </div>
   </Link>
   <Link href="/Contact" className="hover:text-gray-300" onClick={toggleMenu}>
-  <div className="rounded-lg p-3 bg-gradient-to-t from-[#020839] via-[#020936] to-[#051b63] text-center transition">
+  <div className="rounded-lg p-3 bg-[#0A4FE8] text-center transition">
  CONTACT
   </div>
   </Link>
   <Link href="/" className="hover:text-gray-300" onClick={toggleMenu}>
-  <div className="rounded-lg p-3 bg-gradient-to-t from-[#020839] via-[#020936] to-[#051b63] text-center transition">
+  <div className="rounded-lg p-3 bg-[#0A4FE8] text-center transition">
   CSCN
   </div>
   </Link>
   <Link href="/Links" className="hover:text-gray-300" onClick={toggleMenu}>
-  <div className="rounded-lg p-3 bg-gradient-to-t from-[#020839] via-[#020936] to-[#051b63] text-center transition">
+  <div className="rounded-lg p-3 bg-[#0A4FE8] text-center transition">
   LINKS
   </div>
   </Link>

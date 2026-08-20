@@ -4,7 +4,7 @@ import { getOgFonts } from "@/lib/og/fonts";
 import { getPublishedPost } from "@/lib/blog/queries";
 
 export const runtime = "nodejs";
-export const alt = "CDS Space Blog";
+export const alt = "CDS Space Intelligence";
 export const size = OG_SIZE;
 export const contentType = OG_CONTENT_TYPE;
 
@@ -32,10 +32,10 @@ export default async function Image({ params }: { params: Params }) {
 
   return new ImageResponse(
     await renderBrandCard({
-      eyebrow: post?.category || "Blog",
-      title: post?.title || "CDS Space Blog",
-      description: post?.excerpt || "Insights, research, and growth from CDS Space.",
-      domainPath: "/blog",
+      eyebrow: post?.category || "Intelligence",
+      title: post?.title || "CDS Space Intelligence",
+      description: post?.excerpt || "Research, audits, and market insights for businesses building the future.",
+      domainPath: "/intelligence",
     }),
     { ...size, fonts },
   );

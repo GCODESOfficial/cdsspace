@@ -13,7 +13,7 @@
  */
 
 export interface DefaultLegalDoc {
-    slug: "privacy" | "terms";
+    slug: "privacy" | "terms" | "brand-marketer-agreement";
     title: string;
     subtitle: string;
     effective_date: string;
@@ -295,7 +295,76 @@ const TERMS_CONTENT = `
 <p><em>Note: This document is a good-faith compliance framework based on publicly available statutes as of the effective date. It is not legal advice. Have it reviewed by qualified counsel in each jurisdiction where you operate before relying on it.</em></p>
 `.trim();
 
-export const DEFAULT_LEGAL_DOCS: Record<"privacy" | "terms", DefaultLegalDoc> = {
+const BRAND_MARKETER_AGREEMENT_CONTENT = `
+<h2 id="purpose">1. Purpose and Acceptance</h2>
+<p>This Brand Marketer Agreement (the &ldquo;<strong>Agreement</strong>&rdquo;) governs participation in the CDS Space Brand Marketer Programme. It is between <strong>CDS Space</strong> (&ldquo;<strong>CDS Space</strong>&rdquo;, &ldquo;<strong>we</strong>&rdquo;, &ldquo;<strong>us</strong>&rdquo;) and the individual or organisation registering as a brand marketer (&ldquo;<strong>Marketer</strong>&rdquo;, &ldquo;<strong>you</strong>&rdquo;). By signing during onboarding, you also agree to the CDS Space <a href="/terms">Terms of Service</a> and <a href="/privacy">Privacy Policy</a>.</p>
+
+<h2 id="relationship">2. Independent Relationship</h2>
+<p>You participate as an independent, non-exclusive marketer. Nothing in this Agreement creates employment, agency, partnership, franchise, joint venture, fiduciary duty, or authority to bind CDS Space. You control how and when you promote CDS Space, subject to this Agreement and applicable law, and are responsible for your own taxes, registrations, insurance, devices, data and business expenses.</p>
+
+<h2 id="eligibility">3. Eligibility and Verification</h2>
+<ul>
+  <li>You must be at least 18 years old and legally able to enter a contract.</li>
+  <li>You must provide accurate profile, identity, contact and payout information and keep it current.</li>
+  <li>We may request reasonable identity, tax, anti-fraud or know-your-customer verification before activating a code, approving a payout, or issuing a printed ID card.</li>
+  <li>Your marketer ID card identifies programme membership only. It is not a government identity, professional licence, employment card, payment card or authority to collect money for CDS Space.</li>
+</ul>
+
+<h2 id="code">4. Marketer Code and Attribution</h2>
+<p>After onboarding you choose a unique marketer code, subject to availability and our naming rules. A client must provide that code through the CDS Space invoice or payment experience <strong>before the relevant invoice is recorded as paid</strong>. The valid code stored on that invoice is the attribution record. Codes are personal to the approved marketer, may not impersonate another person or brand, and may not be sold, transferred, shared between marketer accounts or used to create self-referrals.</p>
+<p>Attribution is not normally applied retroactively. CDS Space may correct a clear technical or administrative attribution error when supported by reliable records, but is not obliged to decide private disputes between marketers.</p>
+
+<h2 id="commission">5. Five Per Cent Commission</h2>
+<ul>
+  <li>An eligible attributed invoice earns a commission equal to <strong>5% of the final invoice total actually recorded as paid</strong>.</li>
+  <li>The commission is created only when the attributed invoice changes to paid status. Draft, sent, overdue, cancelled, unpaid, fraudulent, test or complimentary invoices do not earn commission.</li>
+  <li>The commission ledger records the currency of the source invoice. Any agreed conversion for payout may use the rate and fees disclosed at the time the payout is processed.</li>
+  <li>If a payment is refunded, charged back, reversed, disputed, duplicated, written off or found to be fraudulent, the related commission may be reversed or offset against future earnings.</li>
+  <li>CDS Space may exclude taxes, pass-through third-party costs or amounts that were never successfully received where the applicable proposal or invoice expressly says so.</li>
+</ul>
+
+<h2 id="payouts">6. Payouts</h2>
+<p>You must maintain valid payout details in your portal. Earnings shown as approved are eligible for payout under the minimum threshold, processing window and verification requirements displayed in the portal at the time of request. Bank, mobile-money, foreign-exchange, withholding-tax or intermediary fees may apply and will be disclosed or reflected in the payout record where known. We may pause a payout while investigating fraud, ownership, sanctions, chargeback or attribution concerns.</p>
+
+<h2 id="conduct">7. Marketing Standards</h2>
+<p>You must represent CDS Space accurately, professionally and lawfully. You must not:</p>
+<ul>
+  <li>make false claims, guarantees, undisclosed endorsements or misleading price, delivery or earnings statements;</li>
+  <li>use spam, purchased contact lists, automated harassment, unlawful cold messaging or deceptive advertising;</li>
+  <li>bid on or register confusingly similar CDS Space names, domains, social handles or search keywords without written permission;</li>
+  <li>alter the CDS Space logo, issue unofficial invoices, collect client payments, sign contracts, quote binding prices or promise project scope on our behalf;</li>
+  <li>offer unauthorised rebates or split commission with a client to manipulate attribution;</li>
+  <li>infringe intellectual property, privacy, publicity, consumer-protection or advertising laws.</li>
+</ul>
+
+<h2 id="brand">8. CDS Space Brand and ID Card</h2>
+<p>While your account is active, CDS Space grants you a limited, revocable, non-exclusive, non-transferable licence to use the approved marketer ID card and supplied promotional assets solely to refer prospective clients. All CDS Space names, logos, artwork, templates and goodwill remain ours. You must stop using them immediately when your account is suspended or terminated and must not print or distribute a card that is expired, altered or no longer valid.</p>
+
+<h2 id="privacy">9. Client Information and Confidentiality</h2>
+<p>Only collect or share the minimum client information necessary to make a lawful introduction. Do not upload passwords, payment-card data, sensitive identifiers or confidential creative material into the marketer portal. Information visible in the portal is confidential and may be used only to manage referrals and payouts. Personal data is handled under our Privacy Policy and applicable data-protection law.</p>
+
+<h2 id="records">10. Records, Errors and Audit</h2>
+<p>The CDS Space invoice, payment status, stored marketer code and commission ledger are the primary programme records. You should report a suspected error promptly and provide supporting information. We may audit programme activity, correct duplicate or erroneous credits, and retain financial and agreement records for legal, tax, fraud-prevention and dispute purposes.</p>
+
+<h2 id="suspension">11. Suspension and Termination</h2>
+<p>Either party may end participation at any time by notice. We may suspend or terminate immediately for fraud, impersonation, misuse of client data or brand assets, unlawful promotion, repeated complaints, payment manipulation, sanctions risk, or material breach. Valid approved earnings accrued before termination remain payable subject to reversals, verification, set-off and applicable law. No commission accrues on invoices paid after the marketer code is deactivated unless CDS Space confirms otherwise in writing.</p>
+
+<h2 id="liability">12. Disclaimers and Liability</h2>
+<p>Participation does not guarantee introductions, sales, income, payout timing or programme availability. To the maximum extent permitted by law, CDS Space is not liable for indirect, incidental, special, punitive or consequential loss, lost opportunity or loss caused by inaccurate payout details, third-party banking delays, unauthorised representations or your breach. Nothing excludes liability that cannot lawfully be excluded.</p>
+
+<h2 id="changes">13. Changes to the Programme</h2>
+<p>We may update programme rules, verification requirements, payout methods or this Agreement. Material changes will be communicated through the marketer portal or email before taking effect where reasonably practicable. A change does not reduce a commission already recorded as earned except where that commission is reversed under Section 5.</p>
+
+<h2 id="law">14. Governing Law and Disputes</h2>
+<p>This Agreement is governed by the laws of the Federal Republic of Nigeria. Before filing a claim, each party will try in good faith to resolve the matter through written notice and negotiation for at least 30 days. Subject to mandatory protections that apply in your country, the courts of Lagos State, Nigeria have jurisdiction. The dispute provisions in the Terms of Service also apply.</p>
+
+<h2 id="general">15. General</h2>
+<p>This Agreement, the Terms of Service, Privacy Policy and any written payout notice form the entire agreement for the programme. If a provision is unenforceable, the remainder continues. A delay in enforcing a right is not a waiver. You may not assign this Agreement without our written consent. Notices to CDS Space should be sent to <a href="mailto:support@cdsspace.pro">support@cdsspace.pro</a>.</p>
+
+<p><em>This operational agreement should be reviewed by qualified counsel before production publication. It is not a substitute for jurisdiction-specific legal advice.</em></p>
+`.trim();
+
+export const DEFAULT_LEGAL_DOCS: Record<"privacy" | "terms" | "brand-marketer-agreement", DefaultLegalDoc> = {
     privacy: {
         slug: "privacy",
         title: "Privacy Policy",
@@ -312,10 +381,18 @@ export const DEFAULT_LEGAL_DOCS: Record<"privacy" | "terms", DefaultLegalDoc> = 
         effective_date: "2026-04-20",
         content: TERMS_CONTENT,
     },
+    "brand-marketer-agreement": {
+        slug: "brand-marketer-agreement",
+        title: "Brand Marketer Agreement",
+        subtitle:
+            "The rules for marketer verification, referral-code attribution, 5% commission, payouts, approved CDS Space brand use, and programme conduct.",
+        effective_date: "2026-08-04",
+        content: BRAND_MARKETER_AGREEMENT_CONTENT,
+    },
 };
 
 export type LegalSlug = keyof typeof DEFAULT_LEGAL_DOCS;
 
 export function isLegalSlug(value: string): value is LegalSlug {
-    return value === "privacy" || value === "terms";
+    return value === "privacy" || value === "terms" || value === "brand-marketer-agreement";
 }

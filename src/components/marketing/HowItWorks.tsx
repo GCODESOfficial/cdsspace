@@ -51,7 +51,7 @@ export const HowItWorks = () => {
                     {/* Interactive Preview Element */}
                     <div className="relative animate-reveal opacity-0" style={{ animationDelay: '0.5s' }}>
                         <div className="aspect-square rounded-[3rem] bg-brand-navy p-1 flex items-center justify-center overflow-hidden">
-                            <div className="absolute inset-0 bg-gradient-to-br from-brand-blue/20 to-transparent" />
+                            <div className="absolute inset-0 bg-brand-blue/10" />
                             <div className="w-[85%] h-[85%] rounded-[2rem] bg-white shadow-2xl p-8 flex flex-col justify-between">
                                 <div className="flex justify-between items-start">
                                     <div className="w-12 h-12 rounded-xl bg-brand-bg flex items-center justify-center">

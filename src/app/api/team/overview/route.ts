@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getTeamSession } from "@/lib/team-auth";
 import { glashQuery } from "@/lib/glashdb/postgres";
+import { lagosDate } from "@/lib/timebook";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -21,6 +22,11 @@ type Meeting = {
   status: string;
 };
 
+type Attendance = {
+  clock_in_at: string | null;
+  clock_out_at: string | null;
+};
+
 export async function GET() {
   const session = await getTeamSession();
   if (!session) {
@@ -28,7 +34,7 @@ export async function GET() {
   }
 
   // Independent lookups run together to keep the overview snappy.
-  const [projects, unreadMessages, meetingIds, resumeRows] = await Promise.all([
+  const [projects, unreadMessages, meetingIds, resumeRows, attendanceRows] = await Promise.all([
     glashQuery<RecentProject>(
       `select distinct p.id,
               p.name as title,
@@ -79,9 +85,16 @@ export async function GET() {
         limit 1`,
       [session.id],
     ).catch(() => []),
+    glashQuery<Attendance>(
+      `select clock_in_at, clock_out_at
+         from public.team_time_entries
+        where team_member_id = $1 and work_date = $2::date
+        limit 1`,
+      [session.id, lagosDate()],
+    ).catch(() => []),
   ]);
 
-  // Resume completion — the share of key profile fields that are filled in.
+  // Resume completion - the share of key profile fields that are filled in.
   // Drives the "finish your resume" nudge on the overview.
   const resume = resumeRows[0] || null;
   const RESUME_FIELDS = ["headline", "about", "avatar_url", "location", "skills", "past_roles", "projects", "education"];
@@ -122,6 +135,7 @@ export async function GET() {
       recent_work: recentProjects,
       upcoming_meetings: upcomingMeetings,
       resume_completion: resumeCompletion,
+      attendance: attendanceRows[0] || null,
     },
   });
 }

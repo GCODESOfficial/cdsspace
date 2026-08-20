@@ -11,11 +11,12 @@ export const WORK_TRACKING_CATEGORIES = [
   "development",
   "content",
   "meeting",
+  "learning",
   "research",
   "administration",
   "communication",
   "project_management",
-  "idle",
+  "unclassified",
   "break",
   "productive_work",
 ] as const;
@@ -64,7 +65,10 @@ export function inferActivityCategories(input: SnapshotSignals): WorkTrackingCat
   const categories: WorkTrackingCategory[] = [];
   if (input.activity_state === "break") categories.push("break");
   if (input.activity_state === "idle" || Number(input.idle_seconds || 0) >= DEFAULT_IDLE_THRESHOLD_SECONDS) {
-    categories.push("idle");
+    // A quiet tab is ambiguous: reading, studying and work in another tool can
+    // all look the same to a browser. Preserve it as unclassified evidence
+    // rather than asserting that the member was idle.
+    categories.push("unclassified");
   }
   if (includesAny(text, ["figma", "photoshop", "illustrator", "canva", "adobe", "sketch", "design", "ui", "ux", "brand"])) {
     categories.push("design");
@@ -77,6 +81,9 @@ export function inferActivityCategories(input: SnapshotSignals): WorkTrackingCat
   }
   if (includesAny(text, ["meet", "zoom", "teams", "call", "cmeet", "meeting", "calendar"])) {
     categories.push("meeting");
+  }
+  if (includesAny(text, ["study", "studying", "course", "learning", "training", "tutorial"])) {
+    categories.push("learning");
   }
   if (includesAny(text, ["google search", "research", "competitor", "youtube", "article", "linkedin", "behance", "dribbble"])) {
     categories.push("research");
@@ -107,16 +114,13 @@ export function inferDetectedWebsites(input: SnapshotSignals) {
 
 export function scoreSnapshot(input: SnapshotSignals) {
   const categories = inferActivityCategories(input);
-  const idleSeconds = Number(input.idle_seconds || 0);
   if (categories.includes("break")) return { productivity: 0, focus: 0 };
-  if (categories.includes("idle")) {
-    const idlePenalty = Math.min(60, Math.round(idleSeconds / 10));
-    return { productivity: clampScore(45 - idlePenalty), focus: clampScore(55 - idlePenalty) };
-  }
   if (categories.includes("development") || categories.includes("design")) return { productivity: 90, focus: 88 };
   if (categories.includes("content") || categories.includes("project_management")) return { productivity: 84, focus: 82 };
   if (categories.includes("meeting") || categories.includes("communication")) return { productivity: 74, focus: 70 };
-  if (categories.includes("research") || categories.includes("administration")) return { productivity: 78, focus: 76 };
+  if (categories.includes("learning") || categories.includes("research")) return { productivity: 82, focus: 86 };
+  if (categories.includes("administration")) return { productivity: 78, focus: 76 };
+  if (categories.includes("unclassified")) return { productivity: 75, focus: 75 };
   return { productivity: 80, focus: 78 };
 }
 
@@ -151,17 +155,16 @@ export function aggregateSnapshots(snapshots: any[] = [], options: { intervalSec
   const productivityScores: number[] = [];
   const focusScores: number[] = [];
   let activeMinutes = 0;
-  let idleMinutes = 0;
   let meetingMinutes = 0;
 
   for (const snapshot of snapshots) {
-    const categories = uniqueStrings(snapshot.ai_categories?.length ? snapshot.ai_categories : inferActivityCategories(snapshot));
+    const categories = uniqueStrings(
+      snapshot.ai_categories?.length ? snapshot.ai_categories : inferActivityCategories(snapshot),
+    ).map((category) => category === "idle" ? "unclassified" : category);
     const isBreak = snapshot.activity_state === "break" || categories.includes("break");
-    const isIdle = snapshot.activity_state === "idle" || categories.includes("idle");
     const minutes = isBreak ? 0 : intervalMinutes;
 
     if (!isBreak) activeMinutes += minutes;
-    if (isIdle) idleMinutes += minutes;
     if (categories.includes("meeting")) meetingMinutes += minutes;
 
     addMinutes(categoryMinutes, categories, minutes);
@@ -190,7 +193,7 @@ export function aggregateSnapshots(snapshots: any[] = [], options: { intervalSec
   const productivity = average(productivityScores);
   const focus = average(focusScores);
   const attendance = clampScore(Number(options.attendanceScore ?? (activeMinutes ? 85 : 0)));
-  const consistency = clampScore(100 - Math.min(80, idleMinutes * 2));
+  const consistency = snapshots.length ? clampScore(82 + Math.min(12, snapshots.length)) : 0;
   const collaboration = clampScore((categoryMinutes.meeting || 0) + (categoryMinutes.communication || 0) > 0 ? 82 : 68);
   const reliability = clampScore((attendance * 0.55) + (consistency * 0.45));
   const overall = clampScore(
@@ -203,12 +206,10 @@ export function aggregateSnapshots(snapshots: any[] = [], options: { intervalSec
   );
 
   const topProject = topJson(projectMinutes, 1)[0]?.name || "Unassigned";
-  const topApp = topJson(appMinutes, 1)[0]?.name || "No captured app";
-  const idlePct = activeMinutes ? Math.round((idleMinutes / activeMinutes) * 100) : 0;
-
+  const topApp = topJson(appMinutes, 1)[0]?.name || "No activity source";
   return {
     active_minutes: activeMinutes,
-    idle_minutes: idleMinutes,
+    idle_minutes: 0,
     meeting_minutes: meetingMinutes,
     productivity_score: productivity,
     focus_score: focus,
@@ -222,22 +223,23 @@ export function aggregateSnapshots(snapshots: any[] = [], options: { intervalSec
     time_by_project: projectMinutes,
     deliverables: uniqueStrings(deliverables),
     summary: snapshots.length
-      ? `Worked mainly on ${topProject}, with ${Math.round(activeMinutes / 60 * 10) / 10} tracked hours. ${topApp} was the most active workspace. Idle time was ${idlePct}%.`
-      : "No tracked work activity was captured for this period.",
+      ? `Recorded focus was mainly on ${topProject}, with ${Math.round(activeMinutes / 60 * 10) / 10} hours of task-context evidence. ${topApp} supplied the activity updates.`
+      : "No work-focus evidence was recorded for this period.",
     strengths: [
-      productivity >= 85 ? "High productive activity detected" : "Baseline productive activity captured",
+      productivity >= 85 ? "Strong member-confirmed productive focus" : "Member-confirmed focus was recorded",
       focus >= 85 ? "Strong focus pattern" : "Focus pattern needs more data",
     ],
     concerns: [
-      ...(idlePct > 20 ? ["Idle time is higher than expected"] : []),
-      ...(activeMinutes === 0 ? ["No active work tracking data captured"] : []),
+      ...(activeMinutes === 0 ? ["No task-context activity was recorded"] : []),
     ],
     manager_recommendations: [
-      idlePct > 20 ? "Review blockers or workload clarity with this team member" : "Use project contribution data in the next performance check-in",
+      activeMinutes === 0
+        ? "Check whether attendance or work-focus updates were missed"
+        : "Use the task context in the next performance check-in",
     ],
     hidden_achievements: uniqueStrings(deliverables).length
       ? uniqueStrings(deliverables).slice(0, 5)
-      : [`Detected contribution focus around ${topProject}`],
+      : [`Recorded contribution focus around ${topProject}`],
   };
 }
 

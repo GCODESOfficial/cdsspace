@@ -40,6 +40,7 @@ export async function deliverAnnouncementToClientChat(
   clientUserIds: string[],
   title: string,
   message: string,
+  imageUrl: string | null = null,
 ): Promise<number> {
   if (clientUserIds.length === 0) return 0;
 
@@ -53,10 +54,11 @@ export async function deliverAnnouncementToClientChat(
 
   const body = composeChatBody(title, message);
   await glashQuery(
-    `insert into public.chat_messages (room_id, sender_id, sender_role, message)
-     select 'client_' || cid, $1::uuid, 'admin', $2
+    `insert into public.chat_messages (room_id, sender_id, sender_role, message, file_url, metadata)
+     select 'client_' || cid, $1::uuid, 'admin', $2, $4,
+            jsonb_build_object('kind', 'announcement', 'title', $5)
        from unnest($3::uuid[]) as t(cid)`,
-    [ceo.id, body, clientUserIds],
+    [ceo.id, body, clientUserIds, imageUrl, title],
   );
   return clientUserIds.length;
 }
@@ -130,14 +132,23 @@ export async function deliverAnnouncementToTeamChat(
 }
 
 /** Minimal branded HTML wrapper for an announcement email. */
-function announcementEmailHtml(title: string, message: string, link: string | null): string {
-  const safeMessage = message.replace(/\n/g, "<br/>");
+function escapeHtml(value: string) {
+  return value.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;").replaceAll("'", "&#039;");
+}
+
+function announcementEmailHtml(title: string, message: string, link: string | null, imageUrl: string | null): string {
+  const safeTitle = escapeHtml(title);
+  const safeMessage = escapeHtml(message).replace(/\n/g, "<br/>");
   const cta = link
-    ? `<p style="margin:24px 0 0"><a href="${link}" style="display:inline-block;background:#0A4FE8;color:#fff;text-decoration:none;font-weight:600;padding:12px 22px;border-radius:12px">Open in CDS Space</a></p>`
+    ? `<p style="margin:24px 0 0"><a href="${escapeHtml(link)}" style="display:inline-block;background:#0A4FE8;color:#fff;text-decoration:none;font-weight:600;padding:12px 22px;border-radius:12px">Open in CDS Space</a></p>`
+    : "";
+  const visual = imageUrl
+    ? `<img src="${escapeHtml(imageUrl)}" alt="${safeTitle}" style="display:block;width:100%;max-height:420px;object-fit:cover;border-radius:14px;margin:0 0 20px;" />`
     : "";
   return brandedEmailHtml(
     `
-      <h1 style="margin:0 0 12px;font-size:22px;line-height:1.3;color:#0D1B39;">${title}</h1>
+      ${visual}
+      <h1 style="margin:0 0 12px;font-size:22px;line-height:1.3;color:#0D1B39;">${safeTitle}</h1>
       <p style="margin:0;color:#4B5563;font-size:15px;line-height:1.6;">${safeMessage}</p>
       ${cta}
       <p style="margin:24px 0 0;color:#9CA3AF;font-size:12px;">You're receiving this because you have a CDS Space account.</p>
@@ -156,6 +167,7 @@ export async function deliverAnnouncementByEmail(
   title: string,
   message: string,
   link: string | null,
+  imageUrl: string | null = null,
 ): Promise<{ sent: number; failed: number }> {
   const recipients = Array.from(
     new Set(emails.map((e) => (e || "").trim().toLowerCase()).filter(Boolean)),
@@ -165,7 +177,7 @@ export async function deliverAnnouncementByEmail(
   if (EMAIL_MODE === "smtp" && (!process.env.EMAIL_USER || !process.env.EMAIL_PASS)) return { sent: 0, failed: 0 };
 
   const transporter = createEmailTransport();
-  const html = announcementEmailHtml(title, message, link);
+  const html = announcementEmailHtml(title, message, link, imageUrl);
 
   const results = await Promise.allSettled(
     recipients.map((to) =>

@@ -1,19 +1,27 @@
 import { NextRequest, NextResponse } from "next/server";
 import { financeDb, requireFinanceAdminAsync } from "@/lib/finance/api-auth";
-import { generateInvoiceNumber, randomToken } from "@/lib/finance/types";
+import { CURRENCIES, generateInvoiceNumber, randomToken } from "@/lib/finance/types";
 import { isMissingInvoiceExtensionColumn, stripInvoiceExtensionFields } from "@/lib/finance/invoice-schema-fallback";
 import { logActivity } from "@/lib/activity-log";
 import { recordResourceVersion } from "@/lib/admin-versioning";
+import { resolveClientBillingCurrency } from "@/lib/client-billing-server";
 
 export async function GET(req: NextRequest) {
   const denied = await requireFinanceAdminAsync(req, "finance_invoices"); if (denied) return denied;
   const sb = financeDb();
-  const { data, error } = await sb
+  const archived = new URL(req.url).searchParams.get("archived") === "1";
+  let query = sb
     .from("finance_invoices")
-    .select("*, finance_projects(name, client)")
-    .order("created_at", { ascending: false });
+    .select("*, finance_projects(name, client), invoice_payment_submissions(id, status, submitted_at, method)");
+  query = archived ? query.not("deleted_at", "is", null) : query.is("deleted_at", null);
+  const { data, error } = await query.order("created_at", { ascending: false });
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-  return NextResponse.json({ invoices: data ?? [] });
+  const invoices = [...(data ?? [])].sort((a: any, b: any) => {
+    const aPending = (a.invoice_payment_submissions || []).some((entry: any) => entry.status === "pending") ? 1 : 0;
+    const bPending = (b.invoice_payment_submissions || []).some((entry: any) => entry.status === "pending") ? 1 : 0;
+    return bPending - aPending || new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+  });
+  return NextResponse.json({ invoices });
 }
 
 export async function POST(req: NextRequest) {
@@ -21,7 +29,7 @@ export async function POST(req: NextRequest) {
   const body = await req.json();
   const {
     project_id = null, milestone_id = null, client_name, client_email, client_address,
-    currency = "NGN", tax_rate = 0, discount = 0, status = "draft",
+    currency: requestedCurrency = "NGN", tax_rate = 0, discount = 0, status = "draft",
     scope = "custom", period_month = null, issue_date, due_date, notes,
     payment_terms, revisions_note, working_hours,
     delivery_speed = "standard", delivery_period = null,
@@ -38,6 +46,10 @@ export async function POST(req: NextRequest) {
   const public_token = randomToken(28);
 
   const sb = financeDb();
+  const requestedCurrencyCode = CURRENCIES.includes(String(requestedCurrency).toUpperCase() as (typeof CURRENCIES)[number])
+    ? String(requestedCurrency).toUpperCase()
+    : "NGN";
+  const currency = await resolveClientBillingCurrency(sb, client_email, requestedCurrencyCode);
   const insertPayload = {
     invoice_number, project_id, milestone_id, client_name,
     client_email: client_email || null, client_address: client_address || null,

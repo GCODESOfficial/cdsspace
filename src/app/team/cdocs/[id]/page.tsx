@@ -5,7 +5,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
-import { ArrowLeft, Save, Download, Link2, History, Stamp, PenLine, Sun, Moon, Trash2, Archive, Check, Loader2 } from "lucide-react";
+import { ArrowLeft, Save, Download, Link2, History, Stamp, PenLine, Sun, Moon, Trash2, Archive, Check, Loader2, MessagesSquare } from "lucide-react";
+import { ShareInChatModal } from "@/components/chat/ShareInChatModal";
 import { appAlert, appConfirm, appPrompt } from "@/lib/app-notify";
 import { RichDocEditor } from "@/components/cdocs/rich-doc-editor";
 
@@ -40,6 +41,7 @@ export default function CDocEditor() {
   const [theme, setTheme] = useState<"light" | "dark">("light");
   const [stamped, setStamped] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [shareChat, setShareChat] = useState(false);
   const [savedAt, setSavedAt] = useState<string | null>(null);
   const [activity, setActivity] = useState<ActivityEntry[]>([]);
   const [showActivity, setShowActivity] = useState(false);
@@ -157,6 +159,9 @@ export default function CDocEditor() {
           <button onClick={() => setStamped(!stamped)} className={`p-2 rounded-lg hover:bg-gray-100/10 ${stamped ? "text-[#0A4FE8]" : ""}`} title="Toggle CDS Space stamp">
             <Stamp className="w-4 h-4" />
           </button>
+          <button onClick={() => setShareChat(true)} className="p-2 rounded-lg hover:bg-gray-100/10 text-[#0A4FE8]" title="Share in chat">
+            <MessagesSquare className="w-4 h-4" />
+          </button>
           <button onClick={copyShareLink} className="p-2 rounded-lg hover:bg-gray-100/10" title="Copy share link">
             <Link2 className="w-4 h-4" />
           </button>
@@ -224,6 +229,13 @@ export default function CDocEditor() {
           </div>
         </div>
       )}
+
+      <ShareInChatModal
+        open={shareChat}
+        onClose={() => setShareChat(false)}
+        shareText={doc ? `${title || "Document"}: ${window.location.origin}/cdocs/${doc.share_token}` : ""}
+        title={`Document · ${title || "Untitled"}`}
+      />
     </div>
   );
 }

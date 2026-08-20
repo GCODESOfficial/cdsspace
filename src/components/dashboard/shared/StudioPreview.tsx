@@ -9,7 +9,9 @@ interface StudioPreviewProps {
     children?: React.ReactNode;
     isEmpty?: boolean;
     className?: string;
+    previewClassName?: string;
     footer?: React.ReactNode;
+    statusLabel?: string;
 }
 
 /**
@@ -22,22 +24,24 @@ export const StudioPreview = ({
     children,
     isEmpty = false,
     className,
-    footer
+    previewClassName,
+    footer,
+    statusLabel,
 }: StudioPreviewProps) => {
     return (
-        <div className={cn(
-            "hidden lg:flex flex-col w-[260px] xl:w-[280px] 2xl:w-[360px] bg-white border-l border-brand-stroke shrink-0 h-screen sticky top-0 z-40 rounded-[16px]",
+        <div data-preview-status={statusLabel} className={cn(
+            "hidden h-full min-h-[calc(100vh-96px)] w-full flex-col bg-white lg:flex",
             className
         )}>
-            <div className="flex flex-col h-full p-4 overflow-y-auto scrollbar-hide">
+            <div className="flex min-h-0 flex-1 flex-col p-4">
                 {/* Header Title & Subtitle - Scaled down */}
-                <div className="text-center space-y-1 2xl:space-y-1.5 mb-8 2xl:mb-12 pt-4">
+                <div className="mb-5 space-y-1 pt-3 text-center 2xl:mb-7 2xl:space-y-1.5">
                     <h2 className="text-[#040B37] text-[16px] xl:text-[18px] 2xl:text-[22px] font-bold tracking-tight">{title}</h2>
                     <p className="text-[#4B5563] text-[12px] xl:text-[13px] 2xl:text-[14px] font-medium">{subtitle}</p>
                 </div>
 
                 {/* Mockup Presentation Container - More compact Aspect Ratio */}
-                <div className="aspect-square bg-[#F4F6FB] rounded-[20px] 2xl:rounded-[28px] border-2 border-[#E3E8F4] border-dashed flex flex-col items-center justify-center p-6 2xl:p-10 relative overflow-hidden group">
+                <div className={cn("relative flex min-h-[420px] flex-1 flex-col items-center justify-center overflow-hidden rounded-[20px] border-2 border-dashed border-[#E3E8F4] bg-[#F4F6FB] p-6 2xl:rounded-[28px] 2xl:p-10", previewClassName)}>
                     {isEmpty ? (
                         <div className="flex flex-col items-center justify-center gap-4 2xl:gap-6 text-center animate-in fade-in zoom-in duration-500">
                             {/* Smaller Eye Icon Box */}

@@ -1,14 +1,16 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { motion } from "framer-motion";
 import Link from "next/link";
-import { createClient } from "@/lib/supabase/client";
 import { supabase } from "@/lib/supabase";
+import { useClientAccount } from "@/components/dashboard/ClientAccountProvider";
+import { UniversalShareButton } from "@/components/share/UniversalShareButton";
 import { formatFinanceDate } from "@/lib/finance/types";
+import { BRANDING_WOTD_BLUE, getBrandingWordDateKey } from "@/lib/branding-word-of-day";
 import {
-    Plus, FileText, Image as ImageIcon, Package, Handshake, Calendar, MessageSquare,
-    ShoppingBag, Loader2, ArrowRight, Volume2, Share2, Download,
+    Plus, FileText, Image as ImageIcon, Package, Calendar, MessageSquare,
+    ShoppingBag, Loader2, ArrowRight, Volume2, Download,
     X, Check, BookOpen, Clock, FileCheck, Star,
 } from "lucide-react";
 
@@ -19,6 +21,8 @@ interface BrandingWord {
     part_of_speech: string | null;
     meaning: string;
     example: string | null;
+    feature_date?: string | null;
+    created_at?: string | null;
 }
 
 interface PendingJob {
@@ -45,54 +49,72 @@ interface ChatMessage {
     created_at: string;
 }
 
+interface RecentDelivery {
+    id: string;
+    title: string;
+    description: string | null;
+    delivery_type: "brand_identity" | "design";
+    published_at: string;
+    file_count: number;
+    url: string;
+}
+
+const INSTANT_WOTD_FALLBACK: BrandingWord = {
+    id: "instant-branding-word",
+    word: "Identity",
+    pronunciation: "/aɪˈdɛntɪti/",
+    part_of_speech: "noun",
+    meaning: "The distinctive visual and verbal system that makes a brand recognisable and memorable.",
+    example: "A consistent identity helps customers recognise the brand at every touchpoint.",
+};
+
+const WOTD_CACHE_KEY = "cds.dashboard.wotd";
+
 const QUICK_ACTIONS = [
-    { label: "Brand Brief", desc: "Define your brand", icon: FileText, href: "/brand-brief", color: "bg-blue-50 text-brand-blue" },
+    { label: "Brand Brief", desc: "Define your brand", icon: FileText, href: "/dashboard/brand-brief", color: "bg-blue-50 text-brand-blue" },
     { label: "New Banner", desc: "Order a banner", icon: ImageIcon, href: "/dashboard/banners", color: "bg-amber-50 text-amber-600" },
     { label: "Order Merch", desc: "Branded items", icon: Package, href: "/dashboard/merch", color: "bg-emerald-50 text-emerald-600" },
-    { label: "Partnership", desc: "Earn referrals", icon: Handshake, href: "/partnership", color: "bg-purple-50 text-purple-600" },
+    { label: "Brand Identity", desc: "View your identity", icon: FileCheck, href: "/dashboard/brand-identity", color: "bg-purple-50 text-purple-600" },
 ];
 
+const SPEECH_LOCALES: Record<string, string> = {
+    en: "en-US",
+    fr: "fr-FR",
+    es: "es-ES",
+    pt: "pt-PT",
+    ar: "ar-SA",
+    de: "de-DE",
+    zh: "zh-CN",
+    ru: "ru-RU",
+    nl: "nl-NL",
+};
+
 export default function DashboardPage() {
-    const [userName, setUserName] = useState("there");
-    const [userId, setUserId] = useState<string | null>(null);
-    const [userEmail, setUserEmail] = useState("");
-    const [word, setWord] = useState<BrandingWord | null>(null);
+    const { account, dashboardPath } = useClientAccount();
+    const userId = account.userId;
+    const userEmail = account.email;
+    const userName = account.fullName?.split(" ")[0] || account.email.split("@")[0] || "there";
+    const [word, setWord] = useState<BrandingWord>(INSTANT_WOTD_FALLBACK);
     const [pendingJobs, setPendingJobs] = useState<PendingJob[]>([]);
     const [invoices, setInvoices] = useState<Invoice[]>([]);
     const [messages, setMessages] = useState<ChatMessage[]>([]);
+    const [recentDeliveries, setRecentDeliveries] = useState<RecentDelivery[]>([]);
     const [isLoading, setIsLoading] = useState(true);
     const [showBookingModal, setShowBookingModal] = useState(false);
-    const [showShareMenu, setShowShareMenu] = useState(false);
+    const wordHeadingRef = useRef<HTMLHeadingElement>(null);
 
     useEffect(() => {
-        async function loadData() {
+        // Fast account data - renders the dashboard immediately, never blocked
+        // by the slow (image-generating, up to 2min) Word of the Day request.
+        async function loadCore() {
             try {
-                const sb = createClient();
-                const { data: { user } } = await sb.auth.getUser();
-                if (!user) { setIsLoading(false); return; }
-
-                setUserId(user.id);
-                setUserEmail(user.email || "");
-                const name = user.user_metadata?.full_name?.split(" ")[0] || user.email?.split("@")[0] || "there";
-                setUserName(name);
-
-                // All dashboard data in one parallel batch (avoids a request
-                // waterfall — everything below only depends on `user`).
-                const [wordsRes, designsRes, bannersRes, invsRes, msgsRes] = await Promise.all([
-                    supabase.from("branding_words").select("id, word, pronunciation, part_of_speech, meaning, example"),
-                    supabase.from("design_requests").select("id, title, status, created_at").eq("user_id", user.id).neq("status", "COMPLETED").order("created_at", { ascending: false }).limit(5),
-                    supabase.from("banner_requests").select("id, title, status, created_at").eq("user_id", user.id).neq("status", "COMPLETED").order("created_at", { ascending: false }).limit(5),
-                    supabase.from("finance_invoices").select("id, invoice_number, total, currency, status, issue_date").eq("client_email", user.email || "").order("issue_date", { ascending: false }).limit(5),
-                    supabase.from("chat_messages").select("id, message, sender_role, created_at").eq("room_id", `client_${user.id}`).order("created_at", { ascending: false }).limit(5),
+                const [designsRes, bannersRes, invsRes, msgsRes, deliveriesRes] = await Promise.all([
+                    supabase.from("design_requests").select("id, title, status, created_at").eq("user_id", userId).neq("status", "COMPLETED").order("created_at", { ascending: false }).limit(5),
+                    supabase.from("banner_requests").select("id, title, status, created_at").eq("user_id", userId).neq("status", "COMPLETED").order("created_at", { ascending: false }).limit(5),
+                    supabase.from("finance_invoices").select("id, invoice_number, total, currency, status, issue_date").eq("user_id", userId).order("issue_date", { ascending: false }).limit(5),
+                    supabase.from("chat_messages").select("id, message, sender_role, created_at").eq("room_id", `client_${userId}`).order("created_at", { ascending: false }).limit(5),
+                    fetch("/api/client/deliveries/recent", { cache: "no-store" }),
                 ]);
-
-                // Word of the day (rotates by day index)
-                const words = wordsRes.data;
-                if (words && words.length > 0) {
-                    const dayIndex = Math.floor(Date.now() / (1000 * 60 * 60 * 24)) % words.length;
-                    setWord(words[dayIndex]);
-                }
-
                 const jobs = [
                     // eslint-disable-next-line @typescript-eslint/no-explicit-any
                     ...(((designsRes.data as any[]) || []).map((d: any) => ({ ...d, type: "design" }))),
@@ -102,36 +124,77 @@ export default function DashboardPage() {
                 setPendingJobs(jobs);
                 setInvoices(invsRes.data || []);
                 setMessages(msgsRes.data || []);
+                const deliveryPayload = await deliveriesRes.json().catch(() => ({}));
+                if (deliveriesRes.ok) setRecentDeliveries(deliveryPayload.deliveries || []);
             } catch (e) {
                 console.error(e);
             } finally {
                 setIsLoading(false);
             }
         }
-        loadData();
-    }, []);
 
-    const speak = (text: string) => {
-        if (typeof window !== "undefined" && "speechSynthesis" in window) {
-            const utterance = new SpeechSynthesisUtterance(text);
-            utterance.rate = 0.9;
-            window.speechSynthesis.speak(utterance);
+        // Word of the Day uses a lightweight read endpoint. Print artwork and
+        // scheduled-content generation run separately and never block the card.
+        async function loadWord() {
+            try {
+                const cached = localStorage.getItem(WOTD_CACHE_KEY);
+                if (cached) {
+                    const parsed = JSON.parse(cached) as { date: string; word: BrandingWord };
+                    const today = getBrandingWordDateKey();
+                    if (parsed.date === today && parsed.word?.word) setWord(parsed.word);
+                }
+                const res = await fetch("/api/branding-word-of-the-day/print", { cache: "no-store" });
+                const data = res.ok ? await res.json() : null;
+                if (data?.ok && data.word) {
+                    setWord(data.word);
+                    localStorage.setItem(WOTD_CACHE_KEY, JSON.stringify({ date: data.date_key, word: data.word }));
+                }
+            } catch { /* the immediate word keeps the complete card visible */ }
         }
-    };
 
-    const shareWord = (platform: string) => {
-        if (!word) return;
-        const text = `📚 Branding Word of the Day: ${word.word}\n${word.pronunciation || ""}\n\n${word.meaning}\n\n- from CDS Space`;
-        const encoded = encodeURIComponent(text);
-        const urls: Record<string, string> = {
-            whatsapp: `https://wa.me/?text=${encoded}`,
-            facebook: `https://www.facebook.com/sharer/sharer.php?u=https://cdsspace.pro&quote=${encoded}`,
-            twitter: `https://twitter.com/intent/tweet?text=${encoded}`,
-            linkedin: `https://www.linkedin.com/sharing/share-offsite/?url=https://cdsspace.pro&summary=${encoded}`,
-            telegram: `https://t.me/share/url?url=https://cdsspace.pro&text=${encoded}`,
-        };
-        if (urls[platform]) window.open(urls[platform], "_blank");
-        setShowShareMenu(false);
+        loadCore();
+        loadWord();
+    }, [userId]);
+
+    const speak = async (sourceText: string) => {
+        if (typeof window === "undefined" || !("speechSynthesis" in window)) return;
+
+        const selectedLanguage = (localStorage.getItem("cds.lang") || document.documentElement.lang || "en")
+            .toLowerCase()
+            .split(/[-_]/)[0];
+        const speechLocale = SPEECH_LOCALES[selectedLanguage] || selectedLanguage || "en-US";
+        const visibleText = wordHeadingRef.current?.textContent?.trim();
+        let spokenText = visibleText || sourceText;
+
+        // The DOM translation normally makes the heading available immediately.
+        // If the user presses play before that finishes, translate this word now
+        // so the voice and the spoken content still match the selected language.
+        if (selectedLanguage !== "en" && (!visibleText || visibleText === sourceText)) {
+            try {
+                const response = await fetch("/api/translate", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ q: [sourceText], source: "en", target: selectedLanguage }),
+                });
+                const data = response.ok ? await response.json() : null;
+                const translated = data?.translations?.[0];
+                if (typeof translated === "string" && translated.trim()) spokenText = translated.trim();
+            } catch {
+                // Keep the visible/source word as the offline fallback.
+            }
+        }
+
+        const utterance = new SpeechSynthesisUtterance(spokenText);
+        utterance.lang = speechLocale;
+        utterance.rate = 0.9;
+
+        const voices = window.speechSynthesis.getVoices();
+        const exactVoice = voices.find((voice) => voice.lang.toLowerCase() === speechLocale.toLowerCase());
+        const languageVoice = voices.find((voice) => voice.lang.toLowerCase().split(/[-_]/)[0] === selectedLanguage);
+        utterance.voice = exactVoice || languageVoice || null;
+
+        window.speechSynthesis.cancel();
+        window.speechSynthesis.speak(utterance);
     };
 
     const downloadCard = async () => {
@@ -156,22 +219,9 @@ export default function DashboardPage() {
             ]);
         } catch { /* fall back to whatever's available */ }
 
-        // Background gradient
-        const gradient = ctx.createLinearGradient(0, 0, 1080, 1080);
-        gradient.addColorStop(0, "#0035C1");
-        gradient.addColorStop(1, "#0575FF");
-        ctx.fillStyle = gradient;
+        // Solid WOTD print background.
+        ctx.fillStyle = BRANDING_WOTD_BLUE;
         ctx.fillRect(0, 0, 1080, 1080);
-
-        // Subtle pattern
-        ctx.fillStyle = "rgba(255,255,255,0.04)";
-        for (let x = 0; x < 1080; x += 60) {
-            for (let y = 0; y < 1080; y += 60) {
-                ctx.beginPath();
-                ctx.arc(x, y, 1.5, 0, Math.PI * 2);
-                ctx.fill();
-            }
-        }
 
         // Header label
         ctx.fillStyle = "rgba(255,255,255,0.7)";
@@ -241,7 +291,7 @@ export default function DashboardPage() {
                             animate={{ opacity: 1, y: 0 }}
                             transition={{ delay: i * 0.05 }}
                         >
-                            <Link href={a.href} className="group block bg-white/80 backdrop-blur-xl border border-white/70 rounded-2xl shadow-[0_10px_40px_rgba(15,40,90,0.05)] p-5 hover:border-brand-blue/30 hover:shadow-[0_8px_30px_rgba(0,53,193,0.06)] transition-all">
+                            <Link href={dashboardPath(a.href)} className="group block bg-white/80 backdrop-blur-xl border border-white/70 rounded-2xl shadow-[0_10px_40px_rgba(15,40,90,0.05)] p-5 hover:border-brand-blue/30 hover:shadow-[0_8px_30px_rgba(0,53,193,0.06)] transition-all">
                                 <div className={`w-10 h-10 rounded-xl ${a.color} flex items-center justify-center mb-3 group-hover:scale-110 transition`}>
                                     <a.icon className="w-5 h-5" />
                                 </div>
@@ -253,17 +303,48 @@ export default function DashboardPage() {
                 </div>
             </div>
 
+            {/* Recent Deliveries */}
+            <section className="mb-8 rounded-2xl border border-white/70 bg-white/80 p-5 shadow-[0_10px_40px_rgba(15,40,90,0.05)] backdrop-blur-xl lg:p-6">
+                <div className="mb-4 flex items-center justify-between gap-4">
+                    <div>
+                        <h2 className="text-[17px] font-semibold text-brand-navy">Recent deliveries</h2>
+                        <p className="mt-1 text-[12px] text-brand-body/55">Your newest finished work from CDS Space.</p>
+                    </div>
+                    <Link href={dashboardPath("/dashboard/documents")} className="inline-flex shrink-0 items-center gap-1.5 text-[12px] font-semibold text-brand-blue hover:underline">
+                        View documents <ArrowRight className="h-3.5 w-3.5" />
+                    </Link>
+                </div>
+                {isLoading ? (
+                    <div className="grid min-h-28 place-items-center"><Loader2 className="h-5 w-5 animate-spin text-brand-blue/40" /></div>
+                ) : recentDeliveries.length === 0 ? (
+                    <div className="rounded-xl border border-dashed border-brand-stroke/30 bg-[#F8FAFD] px-5 py-7 text-center text-[12px] text-brand-body/45">Your completed work will appear here as soon as it is delivered.</div>
+                ) : (
+                    <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+                        {recentDeliveries.map((delivery) => (
+                            <a key={delivery.id} href={delivery.url} target="_blank" rel="noopener noreferrer" className="group rounded-xl border border-brand-stroke/20 bg-white p-4 transition hover:border-blue-200 hover:shadow-[0_8px_24px_rgba(10,79,232,0.08)]">
+                                <div className="flex items-start gap-3">
+                                    <div className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-blue-50 text-brand-blue"><FileCheck className="h-5 w-5" /></div>
+                                    <div className="min-w-0 flex-1">
+                                        <p className="truncate text-[13px] font-semibold text-brand-navy" title={delivery.title}>{delivery.title}</p>
+                                        <p className="mt-1 text-[10px] text-brand-body/50">{delivery.delivery_type === "brand_identity" ? "Brand identity" : "Design delivery"} · {delivery.file_count} {delivery.file_count === 1 ? "file" : "files"}</p>
+                                        <p className="mt-2 text-[10px] text-brand-body/45">Delivered {new Date(delivery.published_at).toLocaleDateString()}</p>
+                                    </div>
+                                    <ArrowRight className="mt-1 h-4 w-4 shrink-0 text-brand-mute transition group-hover:translate-x-0.5 group-hover:text-brand-blue" />
+                                </div>
+                            </a>
+                        ))}
+                    </div>
+                )}
+            </section>
+
             {/* Top Row: Word of Day + Book Session */}
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-5 mb-8">
                 {/* Word of the Day - takes 2 cols */}
                 <motion.div
                     initial={{ opacity: 0, scale: 0.98 }}
                     animate={{ opacity: 1, scale: 1 }}
-                    className="lg:col-span-2 relative bg-gradient-to-br from-[#0035C1] to-[#0575FF] rounded-2xl p-7 lg:p-8 text-white overflow-hidden"
+                    className="lg:col-span-2 relative bg-[#0050DB] rounded-2xl p-7 lg:p-8 text-white overflow-hidden"
                 >
-                    <div className="absolute top-0 right-0 w-64 h-64 bg-blue-300/20 rounded-full blur-3xl pointer-events-none" />
-                    <div className="absolute -bottom-12 -left-12 w-48 h-48 bg-blue-400/10 rounded-full blur-2xl pointer-events-none" />
-
                     <div className="relative">
                         <div className="flex items-center gap-2 mb-3">
                             <BookOpen className="w-4 h-4" />
@@ -273,9 +354,12 @@ export default function DashboardPage() {
                         {word ? (
                             <>
                                 <div className="flex items-center gap-3 mb-2 flex-wrap">
-                                    <h2 className="text-[36px] lg:text-[44px] font-bold leading-tight">{word.word}</h2>
-                                    <button onClick={() => speak(word.word)}
-                                        className="p-2 rounded-full bg-white/15 hover:bg-white/25 transition" title="Pronounce">
+                                    <h2 ref={wordHeadingRef} data-word-heading className="text-[36px] lg:text-[44px] font-bold leading-tight">{word.word}</h2>
+                                    <button onClick={() => void speak(word.word)}
+                                        data-word-pronunciation
+                                        className="p-2 rounded-full bg-white/15 hover:bg-white/25 transition"
+                                        title="Pronounce"
+                                        aria-label="Pronounce the branding word of the day">
                                         <Volume2 className="w-4 h-4" />
                                     </button>
                                 </div>
@@ -288,34 +372,16 @@ export default function DashboardPage() {
                                         className="flex items-center gap-2 px-4 py-2 bg-white text-brand-navy rounded-full text-[12px] font-semibold hover:bg-white/90 transition">
                                         <Download className="w-3.5 h-3.5" /> Save Card
                                     </button>
-                                    <button onClick={() => setShowShareMenu(!showShareMenu)}
-                                        className="flex items-center gap-2 px-4 py-2 bg-white/15 hover:bg-white/25 rounded-full text-[12px] font-semibold transition">
-                                        <Share2 className="w-3.5 h-3.5" /> Share
-                                    </button>
-                                    {showShareMenu && (
-                                        <motion.div
-                                            initial={{ opacity: 0, x: -8 }}
-                                            animate={{ opacity: 1, x: 0 }}
-                                            className="flex items-center gap-1.5 flex-wrap bg-white rounded-full p-1.5 shadow-lg"
-                                        >
-                                            {[
-                                                { key: "whatsapp", label: "WhatsApp", color: "bg-green-500" },
-                                                { key: "facebook", label: "Facebook", color: "bg-blue-600" },
-                                                { key: "twitter", label: "X", color: "bg-black" },
-                                                { key: "linkedin", label: "LinkedIn", color: "bg-blue-700" },
-                                                { key: "telegram", label: "Telegram", color: "bg-sky-500" },
-                                            ].map(p => (
-                                                <button key={p.key} onClick={() => shareWord(p.key)}
-                                                    className={`${p.color} text-white text-[11px] font-semibold px-3 py-1.5 rounded-full hover:opacity-90 transition`}>
-                                                    {p.label}
-                                                </button>
-                                            ))}
-                                        </motion.div>
-                                    )}
+                                    <UniversalShareButton
+                                        title={`Branding Word of the Day: ${word.word}`}
+                                        text={`Branding Word of the Day: ${word.word}\n${word.pronunciation || ""}\n\n${word.meaning}\n\nFrom CDS Space`}
+                                        url="/"
+                                        className="min-h-0 rounded-full border-white/10 bg-white/15 px-4 py-2 text-[12px] text-white shadow-none hover:bg-white/25"
+                                    />
                                 </div>
                             </>
                         ) : (
-                            <div className="py-8"><Loader2 className="w-6 h-6 animate-spin text-white/40" /></div>
+                            <p className="py-8 text-[14px] text-white/70">Branding insight is ready.</p>
                         )}
                     </div>
                 </motion.div>
@@ -344,7 +410,7 @@ export default function DashboardPage() {
             {/* Three Column Data Widgets */}
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
                 {/* Pending Jobs */}
-                <Widget title="Pending Jobs" icon={<Clock className="w-4 h-4 text-amber-500" />} viewAllHref="/dashboard/orders" delay={0.15}>
+                <Widget title="Pending Jobs" icon={<Clock className="w-4 h-4 text-amber-500" />} viewAllHref={dashboardPath("/dashboard/orders")} delay={0.15}>
                     {isLoading ? (
                         <div className="py-6 flex justify-center"><Loader2 className="w-5 h-5 animate-spin text-brand-blue/40" /></div>
                     ) : pendingJobs.length === 0 ? (
@@ -367,7 +433,7 @@ export default function DashboardPage() {
                 </Widget>
 
                 {/* Past Invoices */}
-                <Widget title="Past Invoices" icon={<FileCheck className="w-4 h-4 text-emerald-500" />} viewAllHref="/dashboard/invoices" delay={0.2}>
+                <Widget title="Past Invoices" icon={<FileCheck className="w-4 h-4 text-emerald-500" />} viewAllHref={dashboardPath("/dashboard/invoices")} delay={0.2}>
                     {isLoading ? (
                         <div className="py-6 flex justify-center"><Loader2 className="w-5 h-5 animate-spin text-brand-blue/40" /></div>
                     ) : invoices.length === 0 ? (
@@ -391,7 +457,7 @@ export default function DashboardPage() {
                 </Widget>
 
                 {/* Recent Messages */}
-                <Widget title="Recent Messages" icon={<MessageSquare className="w-4 h-4 text-brand-blue" />} viewAllHref="/dashboard/messages" delay={0.25}>
+                <Widget title="Recent Messages" icon={<MessageSquare className="w-4 h-4 text-brand-blue" />} viewAllHref={dashboardPath("/dashboard/messages")} delay={0.25}>
                     {isLoading ? (
                         <div className="py-6 flex justify-center"><Loader2 className="w-5 h-5 animate-spin text-brand-blue/40" /></div>
                     ) : messages.length === 0 ? (

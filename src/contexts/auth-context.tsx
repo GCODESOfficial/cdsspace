@@ -80,6 +80,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const supabase = createClient()
 
     await supabase.auth.signOut()
+    await fetch("/api/auth/logout", { method: "POST", credentials: "include" }).catch(() => null)
     router.push("/login")
     router.refresh()
   }

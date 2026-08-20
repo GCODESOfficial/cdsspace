@@ -6,6 +6,7 @@ import { getTeamSession } from "@/lib/team-auth";
 import {
   attendanceScores,
   attendanceStatus,
+  isAfterAutoCheckout,
   isEarlyLogout,
   lagosDate,
   lagosMinutes,
@@ -19,6 +20,7 @@ import {
 } from "@/lib/timebook";
 import { getTimebookOffice } from "@/lib/timebook-office";
 import { notifySuperAdmin } from "@/lib/notify-admin";
+import { autoCheckoutOpenTimeEntries } from "@/lib/timebook-auto-checkout";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -47,7 +49,7 @@ function statusForEntry(entry: any, flexibleBreak = false) {
 
 function locationFromBody(body: any) {
   // Clients send coordinates either nested under `location` or as flat
-  // top-level fields (my-day / timebook pages) — accept both shapes.
+  // top-level fields (my-day / timebook pages) - accept both shapes.
   const loc = body?.location ?? body ?? {};
   const num = (value: any) => {
     if (value == null || value === "") return null;
@@ -60,6 +62,10 @@ function locationFromBody(body: any) {
     accuracy: num(loc.accuracy),
     clientCapturedAt: loc.captured_at || null,
   };
+}
+
+function hasLocation(loc: ReturnType<typeof locationFromBody>) {
+  return Number.isFinite(loc.latitude) && Number.isFinite(loc.longitude);
 }
 
 async function ensureProfile(db: any, memberId: string) {
@@ -86,7 +92,7 @@ async function ensureProfile(db: any, memberId: string) {
 
 // Completed check-in/out cycles recorded on the entry. Entries clocked out
 // before the multi-session feature have an empty `sessions` array but a
-// clock_out_at — count that as one completed session.
+// clock_out_at - count that as one completed session.
 function completedSessions(entry: any): Array<{ clock_in_at: string; clock_out_at: string; minutes: number }> {
   const sessions = Array.isArray(entry?.sessions) ? entry.sessions : [];
   if (sessions.length === 0 && entry?.clock_in_at && entry?.clock_out_at) {
@@ -173,6 +179,10 @@ export async function GET() {
   try {
     const db = getGlashDbAdmin() as any;
     const workDate = lagosDate();
+    const monthStart = `${workDate.slice(0, 7)}-01`;
+    await autoCheckoutOpenTimeEntries({ workDate, source: "team_timebook_get" }).catch((error) => {
+      console.error("[timebook] auto checkout failed:", error);
+    });
     const profile = await ensureProfile(db, session.id);
     const entry = await getTodayEntry(db, session.id, workDate);
 
@@ -180,8 +190,10 @@ export async function GET() {
       .from("team_time_entries")
       .select("*")
       .eq("team_member_id", session.id)
+      .gte("work_date", monthStart)
+      .lte("work_date", workDate)
       .order("work_date", { ascending: false })
-      .limit(30);
+      .limit(31);
 
     const { data: leaveRequests } = await db
       .from("team_leave_requests")
@@ -221,6 +233,14 @@ export async function POST(req: NextRequest) {
   const workDate = lagosDate();
 
   try {
+    // A member explicitly pressing Check out must win over the safety sweep.
+    // Previously this sweep ran first and closed the row automatically after
+    // 18:15, making the manual checkout appear to lose the member's check-in.
+    if (action !== "clock_out") {
+      await autoCheckoutOpenTimeEntries({ workDate, source: "team_timebook_post" }).catch((error) => {
+        console.error("[timebook] auto checkout failed:", error);
+      });
+    }
     const profile = await ensureProfile(db, session.id);
     const workMode = (profile.work_mode || "onsite") as WorkMode;
     const officeRequired = officeRequiredFor(workMode, profile.hybrid_office_days ?? [], workDate);
@@ -246,18 +266,19 @@ export async function POST(req: NextRequest) {
     }
 
     let entry = await getTodayEntry(db, session.id, workDate);
+    const isNightRecheckIn = action === "clock_in" && !!entry?.clock_out_at && isAfterAutoCheckout();
     const now = new Date().toISOString();
     const loc = locationFromBody(body);
     const office = await getTimebookOffice();
-    const geo = locationFlags(loc, office);
-    const commonLocationPatch = {
+    const geo = locationFlags(loc, office, { requireCoordinates: (action === "clock_in" && !isNightRecheckIn) || action === "location_ping" });
+    const commonLocationPatch = hasLocation(loc) ? {
       last_location_lat: loc.latitude,
       last_location_lng: loc.longitude,
       last_location_accuracy: loc.accuracy,
       last_location_distance_meters: geo.distance,
       last_location_inside_geofence: geo.inside,
       last_location_at: now,
-    };
+    } : {};
 
     if (action === "clock_in") {
       // Face verification is no longer required to clock in. Check-in is gated by
@@ -280,7 +301,7 @@ export async function POST(req: NextRequest) {
         }, { status: 400 });
       }
       let bypassCode: any = null;
-      if (officeRequired && !geo.inside) {
+      if (officeRequired && !isNightRecheckIn && !geo.inside) {
         if (body?.geofence_bypass_code) {
           try {
             bypassCode = await validateBypassCode(db, body.geofence_bypass_code, session.id);
@@ -294,9 +315,10 @@ export async function POST(req: NextRequest) {
             }, { status: 403 });
           }
         } else {
+          const limit = Math.round(geo.effectiveRadius ?? office.radiusMeters);
           const reason = geo.distance == null
             ? "their location could not be read (GPS off or permission denied)"
-            : `they are ~${geo.distance >= 1000 ? `${(geo.distance / 1000).toFixed(1)}km` : `${geo.distance}m`} from the office (limit ${office.radiusMeters}m)`;
+            : `they are ~${geo.distance >= 1000 ? `${(geo.distance / 1000).toFixed(1)}km` : `${geo.distance}m`} from the office (limit ${limit}m)`;
           void notifySuperAdmin({
             type: "team_alert",
             title: "Geofence check-in blocked",
@@ -306,8 +328,8 @@ export async function POST(req: NextRequest) {
           return NextResponse.json({
             ok: false,
             error: geo.distance == null
-              ? "We could not read your location. Turn on GPS / allow location access in your browser (and make sure you are not using a VPN), then try again — or use a super-admin bypass code."
-              : `Office geofence check failed. You are ~${geo.distance >= 1000 ? `${(geo.distance / 1000).toFixed(1)}km` : `${geo.distance}m`} away — you must be within ${office.radiusMeters}m of the office to clock in today, or use a super-admin bypass code.`,
+              ? "We could not read your location. Turn on GPS / allow location access in your browser (and make sure you are not using a VPN), then try again - or use a super-admin bypass code."
+              : `Office geofence check failed. You are ~${geo.distance >= 1000 ? `${(geo.distance / 1000).toFixed(1)}km` : `${geo.distance}m`} away - you must be within ${limit}m of the office to clock in today, or use a super-admin bypass code.`,
             allow_bypass: true,
             distance_meters: geo.distance,
             flags: geo.flags,
@@ -321,6 +343,7 @@ export async function POST(req: NextRequest) {
       const flags = Array.from(new Set([
         ...(isResume ? entry.flags ?? [] : []),
         ...geo.flags,
+        ...(isNightRecheckIn ? ["night_session"] : []),
         ...(bypassCode ? ["geofence_bypass"] : []),
       ]));
       let data: any;
@@ -342,9 +365,18 @@ export async function POST(req: NextRequest) {
             ...commonLocationPatch,
           })
           .eq("id", entry.id)
+          .eq("clock_out_at", entry.clock_out_at)
           .select("*")
-          .single();
+          .maybeSingle();
         if (result.error) return NextResponse.json({ ok: false, error: result.error.message }, { status: 500 });
+        if (!result.data) {
+          const concurrentEntry = await getTodayEntry(db, session.id, workDate);
+          return NextResponse.json({
+            ok: false,
+            error: concurrentEntry?.clock_out_at ? "This attendance session was updated in another tab. Try again." : "You are already clocked in.",
+            entry: concurrentEntry,
+          }, { status: 409 });
+        }
         data = result.data;
       } else {
         const payload = {
@@ -372,10 +404,22 @@ export async function POST(req: NextRequest) {
         };
         const result = await db
           .from("team_time_entries")
-          .upsert(payload, { onConflict: "team_member_id,work_date" })
+          // Never overwrite an existing attendance row during a concurrent
+          // check-in. The daily unique constraint is the final race guard.
+          .insert(payload)
           .select("*")
           .single();
-        if (result.error) return NextResponse.json({ ok: false, error: result.error.message }, { status: 500 });
+        if (result.error) {
+          if (String(result.error.code || "") === "23505") {
+            const concurrentEntry = await getTodayEntry(db, session.id, workDate);
+            return NextResponse.json({
+              ok: false,
+              error: concurrentEntry?.clock_out_at ? "You have already completed this attendance session." : "You are already clocked in.",
+              entry: concurrentEntry,
+            }, { status: 409 });
+          }
+          return NextResponse.json({ ok: false, error: result.error.message }, { status: 500 });
+        }
         data = result.data;
       }
       entry = data;
@@ -402,6 +446,7 @@ export async function POST(req: NextRequest) {
         metadata: {
           work_mode: workMode,
           office_required: officeRequired,
+          night_session: isNightRecheckIn,
           session_number: sessionNumber,
           geofence_bypass_code_id: bypassCode?.id ?? null,
           geofence_bypass_reason: bypassCode?.reason ?? null,
@@ -411,6 +456,8 @@ export async function POST(req: NextRequest) {
         const statusLabel = status === "on_time" ? "on time" : String(status).replace(/_/g, " ");
         const where = bypassCode
           ? "with a bypass code"
+          : isNightRecheckIn
+            ? "as a night work session"
           : geo.inside
             ? "inside the office geofence"
             : geo.distance != null
@@ -419,15 +466,32 @@ export async function POST(req: NextRequest) {
         void notifySuperAdmin({
           type: "team_checkin",
           title: `${session.full_name} checked in`,
-          message: `${session.full_name} clocked in ${statusLabel} (${where})${sessionNumber > 1 ? ` — session ${sessionNumber} of ${MAX_DAILY_SESSIONS} today` : ""}.`,
-          link: "/admin/team-today",
+          message: `${session.full_name} clocked in ${statusLabel} (${where})${sessionNumber > 1 ? ` - session ${sessionNumber} of ${MAX_DAILY_SESSIONS} today` : ""}.`,
+          link: "/admin/work-tracking",
         });
       }
       return NextResponse.json({ ok: true, entry: { ...entry, effective_status: statusForEntry(entry, profile.flexible_break_enabled) } });
     }
 
+    if (action === "clock_out" && entry?.clock_in_at && entry.clock_out_at) {
+      const wasAutomaticallyClosed = Array.isArray(entry.flags) && entry.flags.includes("auto_clock_out");
+      return NextResponse.json({
+        ok: true,
+        entry: { ...entry, effective_status: statusForEntry(entry, profile.flexible_break_enabled) },
+        already_clocked_out: true,
+        attendance_preserved: true,
+        message: wasAutomaticallyClosed
+          ? "Your attendance was already safely checked out. Your original check-in and worked time remain recorded."
+          : "You were already checked out. Your attendance remains recorded.",
+      });
+    }
+
     if (!entry?.clock_in_at) {
       return NextResponse.json({ ok: false, error: "Clock in first." }, { status: 400 });
+    }
+
+    if (entry.clock_out_at) {
+      return NextResponse.json({ ok: false, error: "You are not currently clocked in." }, { status: 400 });
     }
 
     if (action === "break_start" || action === "break_end") {
@@ -510,8 +574,9 @@ export async function POST(req: NextRequest) {
 
     if (action === "clock_out") {
       // Minutes for the CURRENT session only (session_started_at is null on
-      // entries created before multi-session support — fall back to clock_in_at),
+      // entries created before multi-session support - fall back to clock_in_at),
       // then accumulate with any earlier completed sessions today.
+      const locationMeasured = hasLocation(loc);
       const sessionStart = entry.session_started_at || entry.clock_in_at;
       const priorSessions = Array.isArray(entry.sessions) ? entry.sessions : [];
       const sessionMinutes = workMinutes(sessionStart, now, entry.break_start_at, entry.break_end_at);
@@ -526,11 +591,11 @@ export async function POST(req: NextRequest) {
         .update({
           clock_out_at: now,
           sessions,
-          clock_out_lat: loc.latitude,
-          clock_out_lng: loc.longitude,
-          clock_out_accuracy: loc.accuracy,
-          clock_out_distance_meters: geo.distance,
-          clock_out_inside_geofence: geo.inside,
+          clock_out_lat: locationMeasured ? loc.latitude : null,
+          clock_out_lng: locationMeasured ? loc.longitude : null,
+          clock_out_accuracy: locationMeasured ? loc.accuracy : null,
+          clock_out_distance_meters: locationMeasured ? geo.distance : null,
+          clock_out_inside_geofence: locationMeasured ? geo.inside : null,
           current_status: "offline",
           total_work_minutes: totalMinutes,
           overtime_minutes: overtime,
@@ -540,9 +605,29 @@ export async function POST(req: NextRequest) {
           ...commonLocationPatch,
         })
         .eq("id", entry.id)
+        .is("clock_out_at", null)
         .select("*")
-        .single();
+        .maybeSingle();
       if (error) return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
+      // A cron or another tab may have closed the row while this request was
+      // calculating totals. Treat that as a successful, preserved checkout.
+      if (!data) {
+        const latest = await getTodayEntry(db, session.id, workDate);
+        return NextResponse.json({
+          ok: true,
+          entry: latest ? { ...latest, effective_status: statusForEntry(latest, profile.flexible_break_enabled) } : entry,
+          already_clocked_out: true,
+          attendance_preserved: true,
+          message: "Your attendance is checked out and your worked time remains recorded.",
+        });
+      }
+
+      await db
+        .from("team_work_tracking_sessions")
+        .update({ status: "stopped", ended_at: now, pause_reason: "attendance_closed" })
+        .eq("team_member_id", session.id)
+        .eq("work_date", workDate)
+        .in("status", ["active", "paused"]);
       await logEvent(db, req, {
         entry: data,
         memberId: session.id,
@@ -551,8 +636,8 @@ export async function POST(req: NextRequest) {
         fromStatus: entry.current_status,
         toStatus: "offline",
         location: loc,
-        distance: geo.distance,
-        inside: geo.inside,
+        distance: locationMeasured ? geo.distance : null,
+        inside: locationMeasured ? geo.inside : null,
         flags,
         metadata: { total_work_minutes: totalMinutes, overtime_minutes: overtime, early_logout: early, session_number: sessions.length },
       });
@@ -562,7 +647,12 @@ export async function POST(req: NextRequest) {
         message: `${session.full_name} clocked out after ${Math.floor(totalMinutes / 60)}h ${totalMinutes % 60}m${early ? " (early logout)" : ""}${overtime > 0 ? ` with ${overtime}m overtime` : ""}${sessions.length > 1 ? ` (session ${sessions.length} of ${MAX_DAILY_SESSIONS})` : ""}.`,
         link: "/admin/timebook",
       });
-      return NextResponse.json({ ok: true, entry: data });
+      return NextResponse.json({
+        ok: true,
+        entry: { ...data, effective_status: statusForEntry(data, profile.flexible_break_enabled) },
+        attendance_preserved: true,
+        message: "Checked out. Your attendance and worked time have been recorded.",
+      });
     }
 
     return NextResponse.json({ ok: false, error: "Unsupported timebook action." }, { status: 400 });

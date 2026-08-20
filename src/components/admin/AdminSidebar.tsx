@@ -30,13 +30,14 @@ import {
   ClipboardCheck,
   Building2,
   Boxes,
+  Wand2,
+  Images,
   Briefcase as BriefcaseIcon,
   Award,
   UserPlus,
   Calendar,
   Clock,
-  CalendarCheck,
-  ListChecks,
+  KanbanSquare,
   Scale,
   Video,
   PenLine,
@@ -46,13 +47,18 @@ import {
   Brain,
   X,
   Megaphone,
-  Fingerprint,
   Newspaper,
-  Sparkles,
+  Bot,
   Archive,
   Settings as SettingsIcon,
   Clapperboard,
   GraduationCap,
+  PanelLeftClose,
+  PanelLeftOpen,
+  PackageCheck,
+  Rocket,
+  Handshake,
+  Mail,
 } from "lucide-react";
 
 const topLevelItems = [
@@ -60,20 +66,34 @@ const topLevelItems = [
 ];
 
 const communicationNavItems = [
-  { label: "Client Conversation", href: "/admin/messages", icon: MessageSquare, permission: "messages" },
   { label: "Team Chat", href: "/admin/chat", icon: MessageSquare, permission: "team_chat" },
   { label: "Announcements", href: "/admin/announcements", icon: Megaphone, permission: "team_chat.broadcast" },
 ];
 
 const contentWebNavItems = [
   { label: "Upload Works", href: "/admin/upload-works", icon: Upload, permission: "upload_works" },
-  { label: "Blog", href: "/admin/blog", icon: Newspaper, permission: "blog" },
   { label: "FAQs", href: "/admin/faqs", icon: HelpCircle, permission: "dashboard" },
 ];
 
 const clientEngagementNavItems = [
+  { label: "Overview", href: "/admin/clients", icon: BarChart3, permission: "clients" },
+  { label: "Chat/Meet", href: "/admin/messages", icon: MessageSquare, permission: "messages" },
   { label: "Consultations", href: "/admin/consultations", icon: Calendar, permission: "consultations" },
+  { label: "Client mailings", href: "/admin/clients/mailings", icon: Mail, permission: "clients.mailings.view" },
   { label: "Brand Briefs", href: "/admin/brand-briefs", icon: FileText, permission: "dashboard" },
+  { label: "Banner Commerce", href: "/admin/clients/banners", icon: Images, permission: "clients.banners.view" },
+  { label: "Merch Commerce", href: "/admin/clients/merch", icon: PackageCheck, permission: "clients.merch.view" },
+  { label: "Sales Settings", href: "/admin/clients/sales-settings", icon: SettingsIcon, permission: "clients.sales_settings.view" },
+  { label: "Client Orders", href: "/admin/orders", icon: ShoppingBag, permission: "orders" },
+  { label: "Deliveries", href: "/admin/clients/deliveries", icon: PackageCheck, permission: "deliveries" },
+];
+
+const dealsNavItems = [
+  { label: "Overview", href: "/admin/deals", icon: LayoutDashboard, permission: "deals" },
+  { label: "Growth Engine", href: "/admin/deals/growth", icon: Rocket, permission: "clients.growth.view" },
+  { label: "Proposals", href: "/admin/deals/proposals", icon: FileText, permission: "deals.proposals" },
+  { label: "Brand audits", href: "/admin/deals/brand-audits", icon: ClipboardCheck, permission: "deals.audits" },
+  { label: "Prospect checklist", href: "/admin/deals/prospects", icon: Users, permission: "deals.prospects" },
 ];
 
 const complianceNavItems = [
@@ -82,15 +102,31 @@ const complianceNavItems = [
 ];
 
 const contentHubNavItems = [
+  { label: "CREATE Studio", href: "/create", icon: Wand2, permission: "content_hub" },
+  { label: "CREATE Management", href: "/admin/create", icon: Wand2, permission: "create.view" },
   { label: "Dashboard", href: "/admin/content-hub", icon: LayoutDashboard, permission: "content_hub" },
   { label: "Content Calendar", href: "/admin/content-hub/calendar", icon: Calendar, permission: "content_hub.calendar" },
   { label: "Content Library", href: "/admin/content-hub/library", icon: Boxes, permission: "content_hub" },
+  { label: "Visual Library", href: "/admin/content-hub/visual-library", icon: Images, permission: "content_hub.visual_library" },
   { label: "Create Content", href: "/admin/content-hub/create", icon: PenLine, permission: "content_hub.create" },
   { label: "BSD Studio", href: "/admin/content-hub/studio", icon: Clapperboard, permission: "content_hub.studio" },
-  { label: "AI Assistant", href: "/admin/content-hub/ai", icon: Sparkles, permission: "content_hub.ai" },
+  { label: "AI Assistant", href: "/admin/content-hub/ai", icon: Bot, permission: "content_hub.ai" },
   { label: "Approval Queue", href: "/admin/content-hub/approvals", icon: ClipboardCheck, permission: "content_hub.approve" },
   { label: "Archived", href: "/admin/content-hub/archived", icon: Archive, permission: "content_hub" },
   { label: "Settings", href: "/admin/content-hub/settings", icon: SettingsIcon, permission: "content_hub.settings" },
+];
+
+const intelligenceNavItems = [
+  { label: "Dashboard", href: "/admin/intelligence", icon: LayoutDashboard, permission: "blog" },
+  { label: "Publications", href: "/admin/intelligence/library", icon: Boxes, permission: "blog.view" },
+  { label: "Create Publication", href: "/admin/intelligence/create", icon: PenLine, permission: "blog.create" },
+  { label: "Private Reports", href: "/admin/intelligence/private", icon: ShieldCheck, permission: "blog.view" },
+  { label: "Comments", href: "/admin/intelligence/comments", icon: MessageSquare, permission: "blog.view" },
+  { label: "Analytics", href: "/admin/intelligence/analytics", icon: BarChart3, permission: "blog.view" },
+  { label: "Authors", href: "/admin/intelligence/authors", icon: Users, permission: "blog.authors" },
+  { label: "Taxonomy", href: "/admin/intelligence/taxonomy", icon: Tag, permission: "blog.create" },
+  { label: "Archive", href: "/admin/intelligence/archive", icon: Archive, permission: "blog.view" },
+  { label: "Settings", href: "/admin/intelligence/settings", icon: SettingsIcon, permission: "blog.settings" },
 ];
 
 const workspaceNavItems = [
@@ -105,12 +141,9 @@ const workspaceNavItems = [
 const hrmNavItems = [
   { label: "Overview", href: "/admin/hrm", icon: BarChart3, permission: "applicants" },
   { label: "Team Members", href: "/admin/team-members", icon: UserPlus, permission: "team_members" },
-  { label: "Team Today", href: "/admin/team-today", icon: CalendarCheck, permission: "team_today" },
-  { label: "Daily Tasks", href: "/admin/daily-tasks", icon: ListChecks, permission: "team_today" },
-  { label: "Timebook", href: "/admin/timebook", icon: Clock, permission: "timebook" },
-  { label: "Time Machine", href: "/admin/time-machine", icon: Fingerprint, permission: "time_machine" },
-  { label: "Work Tracking", href: "/admin/work-tracking", icon: Activity, permission: "work_tracking" },
-  { label: "Team Reports", href: "/admin/team-reports", icon: BarChart3, permission: "all" },
+  { label: "Attendance", href: "/admin/timebook", icon: Clock, permission: "timebook" },
+  { label: "Work Activity", href: "/admin/work-tracking", icon: Activity, permission: "work_tracking" },
+  { label: "Team Reports", href: "/admin/team-reports", icon: BarChart3, permission: "team_reports" },
   { label: "Departments", href: "/admin/departments", icon: Building2, permission: "departments" },
   { label: "Sub-admins", href: "/admin/sub-admins", icon: ShieldCheck, permission: "sub_admins" },
   { label: "Applications", href: "/admin/applications", icon: Users, permission: "applicants" },
@@ -140,7 +173,7 @@ const projectsNavItems = [
 const clientsNavItems = [
   { label: "Overview", href: "/admin/clients", icon: BarChart3, permission: "clients" },
   { label: "Client / Brand List", href: "/admin/clients/list", icon: Building2, permission: "clients" },
-  { label: "Client Orders", href: "/admin/orders", icon: ShoppingBag, permission: "orders" },
+  { label: "Vendors", href: "/admin/vendors", icon: UserCog, permission: "clients" },
   { label: "Testimonials", href: "/admin/testimonials", icon: Quote, permission: "testimonials" },
 ];
 
@@ -161,16 +194,21 @@ interface NavGroupProps {
   permissions: string[];
   isSuperAdmin: boolean;
   onNavigate?: () => void;
+  // When the desktop rail is collapsed we render an icon-only trigger that
+  // asks the shell to expand before opening the group.
+  collapsed?: boolean;
+  onExpandRequest?: () => void;
+  badges?: Record<string, number>;
 }
 
 // Remembers which nav groups are expanded, keyed by label. Module-level so the
 // state survives the sidebar re-mounting on navigation (same reason the scroll
-// position is persisted) — so an expanded menu stays open after you click into
+// position is persisted) - so an expanded menu stays open after you click into
 // one of its items instead of collapsing.
 const OPEN_NAV_GROUPS = new Set<string>();
 
-function NavGroup({ label, icon: GroupIcon, items, pathname, permissions, isSuperAdmin, onNavigate }: NavGroupProps) {
-  const exactRoutes = ["/admin/finance", "/admin/projects", "/admin/clients", "/admin/hrm"];
+function NavGroup({ label, icon: GroupIcon, items, pathname, permissions, isSuperAdmin, onNavigate, collapsed = false, onExpandRequest, badges = {} }: NavGroupProps) {
+  const exactRoutes = ["/admin/finance", "/admin/projects", "/admin/clients", "/admin/deals", "/admin/hrm", "/admin/content-hub", "/admin/intelligence"];
 
   // Filter sub-items by per-item permission. "super_admin_only" is a
   // reserved key that only renders when the session role is super_admin.
@@ -184,6 +222,7 @@ function NavGroup({ label, icon: GroupIcon, items, pathname, permissions, isSupe
   );
   // Start open if the user had it open, or the current route lives in this group.
   const [open, setOpen] = useState(() => OPEN_NAV_GROUPS.has(label) || isAnyActive);
+  const groupBadge = visibleItems.reduce((total, item) => total + Math.max(0, badges[item.href] || 0), 0);
 
   // Navigating into this group auto-expands it and remembers that.
   useEffect(() => {
@@ -205,19 +244,54 @@ function NavGroup({ label, icon: GroupIcon, items, pathname, permissions, isSupe
   // Hide the entire group if no sub-items survive the permission filter
   if (visibleItems.length === 0) return null;
 
+  // Collapsed rail: single icon trigger. Clicking expands the shell and opens
+  // this group so the sub-items are visible right away.
+  if (collapsed) {
+    return (
+      <div className="pt-1">
+        <button
+          onClick={() => {
+            OPEN_NAV_GROUPS.add(label);
+            setOpen(true);
+            onExpandRequest?.();
+          }}
+          title={label}
+          aria-label={label}
+          className={`relative flex min-h-11 w-full items-center justify-center rounded-xl py-2.5 transition-all ${
+            isAnyActive
+              ? "bg-blue-50 text-[#0A4FE8]"
+              : "text-gray-500 hover:bg-gray-50 hover:text-gray-800"
+          }`}
+        >
+          <GroupIcon className="w-[20px] h-[20px] flex-shrink-0" strokeWidth={1.8} />
+          {groupBadge > 0 && (
+            <span className="absolute right-1 top-1 grid h-[18px] min-w-[18px] place-items-center rounded-full bg-rose-500 px-1 text-[9px] font-bold leading-none text-white">
+              {groupBadge > 99 ? "99+" : groupBadge}
+            </span>
+          )}
+        </button>
+      </div>
+    );
+  }
+
   return (
     <div className="pt-1">
       <button
         onClick={toggleOpen}
-        className={`flex items-center justify-between w-full gap-3 px-4 py-2.5 rounded-xl text-[13.5px] font-medium transition-all ${
+        className={`flex min-h-11 items-center justify-between w-full gap-3 px-4 py-2.5 rounded-xl text-[13.5px] font-medium transition-all ${
           isAnyActive && !open
             ? "bg-blue-50 text-[#0A4FE8]"
             : "text-gray-500 hover:bg-gray-50 hover:text-gray-800"
         }`}
       >
-        <div className="flex items-center gap-3">
+        <div className="flex min-w-0 items-center gap-3">
           <GroupIcon className="w-[18px] h-[18px] flex-shrink-0" strokeWidth={1.8} />
-          {label}
+          <span>{label}</span>
+          {groupBadge > 0 && (
+            <span className="grid h-5 min-w-5 place-items-center rounded-full bg-rose-500 px-1.5 text-[10px] font-bold leading-none text-white">
+              {groupBadge > 99 ? "99+" : groupBadge}
+            </span>
+          )}
         </div>
         <ChevronDown className={`w-3.5 h-3.5 transition-transform duration-200 ${open ? "rotate-180" : ""}`} />
       </button>
@@ -233,14 +307,19 @@ function NavGroup({ label, icon: GroupIcon, items, pathname, permissions, isSupe
                 key={sub.href}
                 href={sub.href}
                 onClick={onNavigate}
-                className={`flex items-center gap-2.5 px-3 py-2 rounded-lg text-[12.5px] font-medium transition-all ${
+                className={`flex min-h-10 items-center gap-2.5 px-3 py-2 rounded-lg text-[12.5px] font-medium transition-all ${
                   isActive
                     ? "bg-[#0A4FE8] text-white shadow-sm shadow-blue-200"
                     : "text-gray-500 hover:bg-gray-50 hover:text-gray-800"
                 }`}
               >
                 <sub.icon className="w-[15px] h-[15px] flex-shrink-0" strokeWidth={1.8} />
-                {sub.label}
+                <span className="min-w-0 flex-1 truncate">{sub.label}</span>
+                {(badges[sub.href] || 0) > 0 && (
+                  <span className={`grid h-5 min-w-5 place-items-center rounded-full px-1.5 text-[10px] font-bold leading-none ${isActive ? "bg-white text-[#0A4FE8]" : "bg-rose-500 text-white"}`}>
+                    {badges[sub.href] > 99 ? "99+" : badges[sub.href]}
+                  </span>
+                )}
               </Link>
             );
           })}
@@ -253,16 +332,61 @@ function NavGroup({ label, icon: GroupIcon, items, pathname, permissions, isSupe
 interface AdminSidebarProps {
   mobileOpen?: boolean;
   onMobileClose?: () => void;
+  collapsed?: boolean;
+  onToggleCollapse?: () => void;
 }
 
-export default function AdminSidebar({ mobileOpen = false, onMobileClose }: AdminSidebarProps) {
+export default function AdminSidebar({ mobileOpen = false, onMobileClose, collapsed = false, onToggleCollapse }: AdminSidebarProps) {
   const pathname = usePathname();
   const router = useRouter();
   const { session } = useAdminSession();
   const desktopNavRef = useRef<HTMLElement | null>(null);
+  const [clientUnreadCount, setClientUnreadCount] = useState(0);
+  const unreadInitialLoad = useRef(true);
+  const newestUnreadAt = useRef<string | null>(null);
+  const unreadRequestActive = useRef(false);
 
   const permissions = session?.permissions || [];
   const isSuperAdmin = session?.role === "super_admin";
+  const canViewClientMessages = isSuperAdmin || hasPermission(permissions, "messages");
+
+  useEffect(() => {
+    if (!session || !canViewClientMessages) return;
+
+    const fetchUnread = async () => {
+      if (unreadRequestActive.current) return;
+      unreadRequestActive.current = true;
+      try {
+        const response = await fetch("/api/chat/unread-summary", { cache: "no-store" });
+        if (!response.ok) return;
+        const payload = await response.json();
+        const count = Number(payload.unreadCount || 0);
+        const latest = typeof payload.newestUnreadAt === "string" ? payload.newestUnreadAt : null;
+        const isNewMessage = !unreadInitialLoad.current && latest && latest !== newestUnreadAt.current &&
+          (!newestUnreadAt.current || new Date(latest).getTime() > new Date(newestUnreadAt.current).getTime());
+
+        if (isNewMessage && count > 0) {
+          const audio = new Audio("/special-notification.mp3");
+          audio.volume = 0.8;
+          void audio.play().catch(() => {});
+        }
+
+        unreadInitialLoad.current = false;
+        newestUnreadAt.current = latest;
+        setClientUnreadCount(count);
+      } catch {
+        // Keep the last known count during a transient network error.
+      } finally {
+        unreadRequestActive.current = false;
+      }
+    };
+
+    void fetchUnread();
+    const interval = window.setInterval(() => {
+      if (!document.hidden) void fetchUnread();
+    }, 8_000);
+    return () => window.clearInterval(interval);
+  }, [canViewClientMessages, session]);
 
   const rememberSidebarScroll = useCallback(() => {
     if (typeof window === "undefined") return;
@@ -294,6 +418,11 @@ export default function AdminSidebar({ mobileOpen = false, onMobileClose }: Admi
     onMobileClose?.();
   }, [onMobileClose]);
 
+  // Collapsed rail group icons ask the shell to expand before opening.
+  const requestExpand = useCallback(() => {
+    if (collapsed) onToggleCollapse?.();
+  }, [collapsed, onToggleCollapse]);
+
   const signOut = async () => {
     await fetch("/api/admin-logout", { method: "POST" });
     router.push("/admin/login");
@@ -304,31 +433,81 @@ export default function AdminSidebar({ mobileOpen = false, onMobileClose }: Admi
     (item) => isSuperAdmin || hasPermission(permissions, item.permission)
   );
 
-  const SidebarContent = ({ mobile = false }: { mobile?: boolean }) => (
+  const SidebarContent = ({ mobile = false }: { mobile?: boolean }) => {
+    const isCollapsed = !mobile && collapsed;
+    const onNavigate = mobile ? handleMobileNavigate : handleDesktopNavigate;
+
+    const navGroupCommon = {
+      pathname,
+      permissions,
+      isSuperAdmin,
+      onNavigate,
+      collapsed: isCollapsed,
+      onExpandRequest: requestExpand,
+    };
+
+    return (
     <div className="flex h-full flex-col bg-white">
-      <div className={`border-b border-gray-100 ${mobile ? "px-4 py-4" : "px-6 pt-7 pb-4"}`}>
-        <div className="flex items-center justify-between gap-3">
-          <Image src="/images/cds-logo.svg" alt="CDS Space" width={100} height={36} className="brightness-0" />
-          {mobile && (
+      {/* Header: logo + collapse toggle (desktop) / close (mobile) */}
+      <div
+        className={`border-b border-[#EEF2F8] ${
+          mobile ? "px-4 py-4" : isCollapsed ? "px-2 pt-6 pb-4" : "px-6 pt-7 pb-5"
+        }`}
+      >
+        {isCollapsed ? (
+          <div className="flex justify-center">
             <button
               type="button"
-              onClick={onMobileClose}
-              className="flex h-10 w-10 items-center justify-center rounded-full text-gray-500 transition hover:bg-gray-100 hover:text-gray-900"
-              aria-label="Close navigation"
+              onClick={onToggleCollapse}
+              className="flex h-10 w-10 items-center justify-center rounded-xl text-gray-500 transition hover:bg-blue-50 hover:text-[#0A4FE8]"
+              aria-label="Expand sidebar"
+              title="Expand sidebar"
             >
-              <X className="h-5 w-5" />
+              <PanelLeftOpen className="h-5 w-5" />
             </button>
-          )}
-        </div>
+          </div>
+        ) : (
+          <div className="flex items-center justify-between gap-3">
+            <Image src="/images/cds-logo.svg" alt="CDS Space" width={112} height={40} className="brightness-0" />
+            {mobile ? (
+              <button
+                type="button"
+                onClick={onMobileClose}
+                className="flex h-10 w-10 items-center justify-center rounded-full text-gray-500 transition hover:bg-gray-100 hover:text-gray-900"
+                aria-label="Close navigation"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={onToggleCollapse}
+                className="hidden lg:flex h-9 w-9 items-center justify-center rounded-xl text-gray-400 transition hover:bg-blue-50 hover:text-[#0A4FE8]"
+                aria-label="Collapse sidebar"
+                title="Collapse sidebar"
+              >
+                <PanelLeftClose className="h-5 w-5" />
+              </button>
+            )}
+          </div>
+        )}
       </div>
 
-      {session && (
+      {session && !isCollapsed && (
         <div className={mobile ? "px-4 pb-4 pt-4" : "px-6 pb-4"}>
-          <div className={`px-3 py-1.5 rounded-lg text-[11px] font-medium inline-flex items-center gap-1.5 ${
-            isSuperAdmin ? "bg-amber-50 text-amber-600" : "bg-blue-50 text-[#0A4FE8]"
-          }`}>
+          <div className="inline-flex max-w-full items-center gap-1.5 rounded-lg bg-blue-50 px-3 py-1.5 text-[11px] font-semibold text-[#0A4FE8] ring-1 ring-blue-100">
             <ShieldCheck className="w-3 h-3" />
-            {isSuperAdmin ? "Super Admin" : session.name}
+            <span className="truncate">{isSuperAdmin ? "CDS Space Super Admin" : session.name}</span>
+          </div>
+        </div>
+      )}
+      {session && isCollapsed && (
+        <div className="px-2 pb-3 pt-3 flex justify-center">
+          <div
+            className="flex h-9 w-9 items-center justify-center rounded-lg bg-blue-50 text-[#0A4FE8] ring-1 ring-blue-100"
+            title={isSuperAdmin ? "CDS Space Super Admin" : session.name}
+          >
+            <ShieldCheck className="w-4 h-4" />
           </div>
         </div>
       )}
@@ -336,7 +515,7 @@ export default function AdminSidebar({ mobileOpen = false, onMobileClose }: Admi
       <nav
         ref={mobile ? undefined : desktopNavRef}
         onScroll={mobile ? undefined : rememberSidebarScroll}
-        className={`flex-1 space-y-0.5 overflow-y-auto pb-4 ${mobile ? "px-3" : "px-3"}`}
+        className={`flex-1 space-y-0.5 overflow-y-auto overflow-x-hidden pb-4 ${isCollapsed ? "px-2" : "px-3"}`}
       >
         {visibleTopLevel.map((item) => {
           const isActive = item.href === "/admin"
@@ -346,117 +525,68 @@ export default function AdminSidebar({ mobileOpen = false, onMobileClose }: Admi
             <Link
               key={item.href}
               href={item.href}
-              onClick={mobile ? handleMobileNavigate : handleDesktopNavigate}
-              className={`flex items-center gap-3 px-4 py-2.5 rounded-xl text-[13.5px] font-medium transition-all ${
+              onClick={onNavigate}
+              title={isCollapsed ? item.label : undefined}
+              aria-label={isCollapsed ? item.label : undefined}
+              className={`flex min-h-11 items-center rounded-xl text-[13.5px] font-medium transition-all ${
+                isCollapsed ? "justify-center py-2.5" : "gap-3 px-4 py-2.5"
+              } ${
                 isActive
                   ? "bg-[#0A4FE8] text-white shadow-md shadow-blue-200"
                   : "text-gray-500 hover:bg-gray-50 hover:text-gray-800"
               }`}
             >
-              <item.icon className="w-[18px] h-[18px] flex-shrink-0" />
-              {item.label}
+              <item.icon className={`${isCollapsed ? "w-[20px] h-[20px]" : "w-[18px] h-[18px]"} flex-shrink-0`} />
+              {!isCollapsed && item.label}
             </Link>
           );
         })}
 
-        <NavGroup
-          label="Communication"
-          icon={MessageSquare}
-          items={communicationNavItems}
-          pathname={pathname}
-          permissions={permissions}
-          isSuperAdmin={isSuperAdmin}
-          onNavigate={mobile ? handleMobileNavigate : handleDesktopNavigate}
-        />
-        <NavGroup
-          label="Web Content"
-          icon={Newspaper}
-          items={contentWebNavItems}
-          pathname={pathname}
-          permissions={permissions}
-          isSuperAdmin={isSuperAdmin}
-          onNavigate={mobile ? handleMobileNavigate : handleDesktopNavigate}
-        />
-        <NavGroup
-          label="Clients"
-          icon={Calendar}
-          items={clientEngagementNavItems}
-          pathname={pathname}
-          permissions={permissions}
-          isSuperAdmin={isSuperAdmin}
-          onNavigate={mobile ? handleMobileNavigate : handleDesktopNavigate}
-        />
-        <NavGroup
-          label="Compliance"
-          icon={Scale}
-          items={complianceNavItems}
-          pathname={pathname}
-          permissions={permissions}
-          isSuperAdmin={isSuperAdmin}
-          onNavigate={mobile ? handleMobileNavigate : handleDesktopNavigate}
-        />
+        <NavGroup label="Chat" icon={MessageSquare} items={communicationNavItems} {...navGroupCommon} />
+        <NavGroup label="Web Content" icon={Newspaper} items={contentWebNavItems} {...navGroupCommon} />
+        <NavGroup label="Deals" icon={Handshake} items={dealsNavItems} {...navGroupCommon} />
+        <NavGroup label="Sales Hub" icon={Briefcase} items={clientEngagementNavItems} badges={{ "/admin/messages": clientUnreadCount }} {...navGroupCommon} />
+        <NavGroup label="Compliance" icon={Scale} items={complianceNavItems} {...navGroupCommon} />
 
-        <div className="pt-4 pb-1 px-4">
-          <p className="text-[10px] font-bold text-gray-300 uppercase tracking-[0.12em]">Operations</p>
-        </div>
+        {isCollapsed ? (
+          <div className="my-2 flex justify-center">
+            <span className="h-px w-8 bg-gray-100" />
+          </div>
+        ) : (
+          <div className="pt-4 pb-1 px-4">
+            <p className="text-[10px] font-bold text-gray-300 uppercase tracking-[0.12em]">Operations</p>
+          </div>
+        )}
 
-        <NavGroup
-          label="Content Hub"
-          icon={Sparkles}
-          items={contentHubNavItems}
-          pathname={pathname}
-          permissions={permissions}
-          isSuperAdmin={isSuperAdmin}
-          onNavigate={mobile ? handleMobileNavigate : handleDesktopNavigate}
-        />
-        <NavGroup
-          label="Finance"
-          icon={Wallet}
-          items={financeNavItems}
-          pathname={pathname}
-          permissions={permissions}
-          isSuperAdmin={isSuperAdmin}
-          onNavigate={mobile ? handleMobileNavigate : handleDesktopNavigate}
-        />
-        <NavGroup
-          label="Projects"
-          icon={Boxes}
-          items={projectsNavItems}
-          pathname={pathname}
-          permissions={permissions}
-          isSuperAdmin={isSuperAdmin}
-          onNavigate={mobile ? handleMobileNavigate : handleDesktopNavigate}
-        />
-        <NavGroup
-          label="CRM"
-          icon={Building2}
-          items={clientsNavItems}
-          pathname={pathname}
-          permissions={permissions}
-          isSuperAdmin={isSuperAdmin}
-          onNavigate={mobile ? handleMobileNavigate : handleDesktopNavigate}
-        />
-        <NavGroup
-          label="HRM"
-          icon={UserPlus}
-          items={hrmNavItems}
-          pathname={pathname}
-          permissions={permissions}
-          isSuperAdmin={isSuperAdmin}
-          onNavigate={mobile ? handleMobileNavigate : handleDesktopNavigate}
-        />
-        <NavGroup
-          label="Workspace"
-          icon={LayoutGrid}
-          items={workspaceNavItems}
-          pathname={pathname}
-          permissions={permissions}
-          isSuperAdmin={isSuperAdmin}
-          onNavigate={mobile ? handleMobileNavigate : handleDesktopNavigate}
-        />
+        {(isSuperAdmin || hasPermission(permissions, "team_today")) && (
+          <Link
+            href="/admin/taskboard"
+            onClick={onNavigate}
+            title={isCollapsed ? "Taskboard" : undefined}
+            aria-label={isCollapsed ? "Taskboard" : undefined}
+            className={`flex min-h-11 items-center rounded-xl text-[13.5px] font-medium transition-all ${
+              isCollapsed ? "justify-center py-2.5" : "gap-3 px-4 py-2.5"
+            } ${
+              pathname?.startsWith("/admin/taskboard")
+                ? "bg-[#0A4FE8] text-white shadow-md shadow-blue-200"
+                : "text-gray-500 hover:bg-gray-50 hover:text-gray-800"
+            }`}
+          >
+            <KanbanSquare className={`${isCollapsed ? "w-[20px] h-[20px]" : "w-[18px] h-[18px]"} flex-shrink-0`} />
+            {!isCollapsed && "Taskboard"}
+          </Link>
+        )}
+
+        <NavGroup label="Content Hub" icon={LayoutGrid} items={contentHubNavItems} {...navGroupCommon} />
+        <NavGroup label="Intelligence" icon={Newspaper} items={intelligenceNavItems} {...navGroupCommon} />
+        <NavGroup label="Finance" icon={Wallet} items={financeNavItems} {...navGroupCommon} />
+        <NavGroup label="Projects" icon={Boxes} items={projectsNavItems} {...navGroupCommon} />
+        <NavGroup label="CRM" icon={Building2} items={clientsNavItems} {...navGroupCommon} />
+        <NavGroup label="HRM" icon={UserPlus} items={hrmNavItems} {...navGroupCommon} />
+        <NavGroup label="Workspace" icon={LayoutGrid} items={workspaceNavItems} {...navGroupCommon} />
       </nav>
 
-      <div className="px-3 pb-6 pt-2 border-t border-gray-50 space-y-1">
+      <div className={`pb-6 pt-2 border-t border-gray-50 space-y-1 ${isCollapsed ? "px-2" : "px-3"}`}>
         <button
           type="button"
           onClick={async () => {
@@ -473,27 +603,39 @@ export default function AdminSidebar({ mobileOpen = false, onMobileClose }: Admi
             }
             router.push("/team");
           }}
-          className="group flex items-center gap-3 px-4 py-2.5 rounded-xl text-[13.5px] font-semibold text-white transition-all w-full shadow-[0_6px_18px_rgba(28,78,209,0.18)]"
+          className={`group flex min-h-11 items-center rounded-xl text-[13.5px] font-semibold text-white transition-all w-full shadow-[0_8px_22px_rgba(10,79,232,0.22)] ${
+            isCollapsed ? "justify-center py-2.5" : "gap-3 px-4 py-2.5"
+          }`}
           style={{ backgroundImage: "linear-gradient(146.28deg, #0035C1 8.83%, #0575FF 86.3%)" }}
           title="Switch to the Team Portal"
+          aria-label="Open Team Portal"
         >
-          <ArrowRightLeft className="w-[18px] h-[18px]" />
-          Open Team Portal
+          <ArrowRightLeft className="w-[18px] h-[18px] flex-shrink-0" />
+          {!isCollapsed && "Open Team Portal"}
         </button>
         <button
           onClick={signOut}
-          className="flex items-center gap-3 px-4 py-2.5 rounded-xl text-[13.5px] font-medium text-gray-400 hover:text-red-500 hover:bg-red-50 transition-all w-full"
+          className={`flex min-h-11 items-center rounded-xl text-[13.5px] font-medium text-gray-400 hover:text-red-500 hover:bg-red-50 transition-all w-full ${
+            isCollapsed ? "justify-center py-2.5" : "gap-3 px-4 py-2.5"
+          }`}
+          title={isCollapsed ? "Logout" : undefined}
+          aria-label="Logout"
         >
-          <LogOut className="w-[18px] h-[18px]" />
-          Logout
+          <LogOut className="w-[18px] h-[18px] flex-shrink-0" />
+          {!isCollapsed && "Logout"}
         </button>
       </div>
     </div>
-  );
+    );
+  };
 
   return (
     <>
-      <aside className="fixed left-0 top-0 hidden h-screen w-[230px] border-r border-gray-100 bg-white z-40 lg:block">
+      <aside
+        className={`fixed start-0 top-0 z-40 hidden h-screen border-e border-gray-100 bg-white transition-[width] duration-200 lg:block ${
+          collapsed ? "w-[76px]" : "w-[230px]"
+        }`}
+      >
         <SidebarContent />
       </aside>
 
@@ -510,11 +652,11 @@ export default function AdminSidebar({ mobileOpen = false, onMobileClose }: Admi
               aria-label="Close navigation overlay"
             />
             <motion.aside
-              initial={{ x: "-100%" }}
+              initial={{ x: "var(--drawer-offset)" }}
               animate={{ x: 0 }}
-              exit={{ x: "-100%" }}
+              exit={{ x: "var(--drawer-offset)" }}
               transition={{ type: "spring", damping: 28, stiffness: 260 }}
-              className="fixed inset-y-0 left-0 z-50 w-[86vw] max-w-[320px] border-r border-gray-100 bg-white shadow-2xl lg:hidden"
+              className="fixed inset-y-0 start-0 z-50 w-[86vw] max-w-[320px] border-e border-gray-100 bg-white shadow-2xl [--drawer-offset:-100%] rtl:[--drawer-offset:100%] lg:hidden"
             >
               <SidebarContent mobile />
             </motion.aside>

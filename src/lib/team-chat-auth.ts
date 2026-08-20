@@ -1,6 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { cookies } from "next/headers";
 import { getTeamSession, type TeamSession } from "@/lib/team-auth";
+import { verifyAdminCookie } from "@/lib/admin-session-cookie";
 
 export type ChatViewer =
   | { kind: "admin"; email: string; name: string; role: "super_admin" | "sub_admin" }
@@ -13,21 +14,16 @@ export type ChatViewer =
  */
 export async function getChatViewer(): Promise<ChatViewer | null> {
   const store = await cookies();
-  const rawAdmin = store.get("admin_session")?.value;
-  if (rawAdmin) {
-    try {
-      const s = JSON.parse(rawAdmin);
-      if (s.role === "super_admin" || s.role === "sub_admin") {
-        return { 
-          kind: "admin", 
-          email: s.email, 
-          name: s.name || "Admin",
-          role: s.role 
-        };
-      }
-    } catch {
-      /* fallthrough */
-    }
+  const s = verifyAdminCookie<{ role: "super_admin" | "sub_admin"; email: string; name?: string }>(
+    store.get("admin_session")?.value,
+  );
+  if (s && (s.role === "super_admin" || s.role === "sub_admin")) {
+    return {
+      kind: "admin",
+      email: s.email,
+      name: s.name || "Admin",
+      role: s.role,
+    };
   }
   const team = await getTeamSession();
   if (team) return { kind: "team", session: team };

@@ -171,7 +171,7 @@ export default function PricelistEditorPage() {
                         {list.published ? "Unpublish" : "Publish"}
                     </button>
                     <button type="button" onClick={() => save()} disabled={saving}
-                        className="inline-flex items-center gap-2 rounded-full bg-gradient-to-b from-blue-600 to-blue-700 px-5 py-2 text-sm font-semibold text-white shadow-lg shadow-blue-600/30 hover:from-blue-700 hover:to-blue-800 disabled:opacity-60">
+                        className="inline-flex items-center gap-2 rounded-full bg-[#0A4FE8] px-5 py-2 text-sm font-semibold text-white shadow-lg shadow-blue-600/30 hover:bg-[#083FC2] disabled:opacity-60">
                         {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />} Save
                     </button>
                 </div>
@@ -352,7 +352,7 @@ export default function PricelistEditorPage() {
 
             <div className="mt-8 flex justify-end">
                 <button type="button" onClick={() => save()} disabled={saving}
-                    className="inline-flex items-center gap-2 rounded-full bg-gradient-to-b from-blue-600 to-blue-700 px-6 py-2.5 text-sm font-semibold text-white shadow-lg shadow-blue-600/30 hover:from-blue-700 hover:to-blue-800 disabled:opacity-60">
+                    className="inline-flex items-center gap-2 rounded-full bg-[#0A4FE8] px-6 py-2.5 text-sm font-semibold text-white shadow-lg shadow-blue-600/30 hover:bg-[#083FC2] disabled:opacity-60">
                     {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />} Save changes
                 </button>
             </div>

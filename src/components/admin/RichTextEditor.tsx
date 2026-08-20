@@ -3,9 +3,10 @@
 import { useEditor, EditorContent, type Editor } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import Link from "@tiptap/extension-link";
+import Image from "@tiptap/extension-image";
 import Placeholder from "@tiptap/extension-placeholder";
 import Underline from "@tiptap/extension-underline";
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { cn } from "@/lib/utils";
 import {
     Bold,
@@ -24,6 +25,7 @@ import {
     Heading3,
     Pilcrow,
     RemoveFormatting,
+    ImagePlus,
 } from "lucide-react";
 import { appAlert, appConfirm, appPrompt } from "@/lib/app-notify";
 
@@ -32,6 +34,13 @@ interface RichTextEditorProps {
     onChange: (html: string) => void;
     placeholder?: string;
     className?: string;
+    onGenerateVisual?: () => void;
+    insertImage?: {
+        id: string;
+        src: string;
+        alt?: string;
+        title?: string;
+    } | null;
 }
 
 /**
@@ -43,7 +52,15 @@ interface RichTextEditorProps {
  * The editor content is styled with the same `.legal-prose` class the public
  * pages use, so what the admin sees while editing is what visitors see.
  */
-export function RichTextEditor({ value, onChange, placeholder, className }: RichTextEditorProps) {
+export function RichTextEditor({
+    value,
+    onChange,
+    placeholder,
+    className,
+    onGenerateVisual,
+    insertImage,
+}: RichTextEditorProps) {
+    const insertedImageId = useRef<string | null>(null);
     const editor = useEditor({
         extensions: [
             StarterKit.configure({
@@ -51,6 +68,13 @@ export function RichTextEditor({ value, onChange, placeholder, className }: Rich
                 // StarterKit enables horizontalRule, blockquote, lists by default
             }),
             Underline,
+            Image.configure({
+                inline: false,
+                allowBase64: false,
+                HTMLAttributes: {
+                    class: "blog-inline-visual",
+                },
+            }),
             Link.configure({
                 openOnClick: false,
                 autolink: true,
@@ -85,6 +109,17 @@ export function RichTextEditor({ value, onChange, placeholder, className }: Rich
         editor.commands.setContent(value || "", { emitUpdate: false });
     }, [value, editor]);
 
+    useEffect(() => {
+        if (!editor || !insertImage || insertedImageId.current === insertImage.id) return;
+        editor.chain().focus().setImage({
+            src: insertImage.src,
+            alt: insertImage.alt || "",
+            title: insertImage.title || undefined,
+        }).run();
+        editor.chain().focus().createParagraphNear().run();
+        insertedImageId.current = insertImage.id;
+    }, [editor, insertImage]);
+
     if (!editor) {
         return (
             <div className="bg-white border border-gray-200 rounded-2xl p-5 min-h-[560px] text-sm text-gray-400">
@@ -95,7 +130,7 @@ export function RichTextEditor({ value, onChange, placeholder, className }: Rich
 
     return (
         <div className={cn("bg-white border border-gray-200 rounded-2xl overflow-hidden", className)}>
-            <Toolbar editor={editor} />
+            <Toolbar editor={editor} onGenerateVisual={onGenerateVisual} />
             <div className="px-5 py-4">
                 <EditorContent editor={editor} />
             </div>
@@ -107,7 +142,7 @@ export function RichTextEditor({ value, onChange, placeholder, className }: Rich
 /*  Toolbar                                                            */
 /* ------------------------------------------------------------------ */
 
-function Toolbar({ editor }: { editor: Editor }) {
+function Toolbar({ editor, onGenerateVisual }: { editor: Editor; onGenerateVisual?: () => void }) {
     return (
         <div className="flex flex-wrap items-center gap-1 px-3 py-2 border-b border-gray-100 bg-gray-50/80 sticky top-0 z-10">
             {/* Text style */}
@@ -183,7 +218,10 @@ function Toolbar({ editor }: { editor: Editor }) {
                 active={editor.isActive("link")}
                 onClick={async () => {
                     const prev = editor.getAttributes("link").href as string | undefined;
-                    const url = (await appPrompt("Link URL (leave blank to remove):", prev ?? "https://"));
+                    const url = await appPrompt({
+                        message: "Link URL (leave blank to remove):",
+                        defaultValue: prev ?? "https://",
+                    });
                     if (url === null) return;
                     if (url.trim() === "") {
                         editor.chain().focus().extendMarkRange("link").unsetLink().run();
@@ -205,6 +243,15 @@ function Toolbar({ editor }: { editor: Editor }) {
             )}
 
             <Divider />
+
+            {onGenerateVisual && (
+                <>
+                    <Btn onClick={onGenerateVisual} title="Generate and insert Intelligence visual">
+                        <ImagePlus className="w-4 h-4" />
+                    </Btn>
+                    <Divider />
+                </>
+            )}
 
             {/* Clear formatting */}
             <Btn

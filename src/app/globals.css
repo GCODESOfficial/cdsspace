@@ -1,10 +1,28 @@
 @import "tailwindcss";
 
+/* Runtime font URLs keep the brand typeface compatible with Glash's public
+   asset offload, where /public is served by the edge rather than copied into
+   the application build context. */
+@font-face { font-family: "Neue Campton"; src: url("/font/neue-campton-font-family/NeueCamptonTest-Light-BF67089b6e958ed.otf") format("opentype"); font-weight: 300; font-style: normal; font-display: swap; }
+@font-face { font-family: "Neue Campton"; src: url("/font/neue-campton-font-family/NeueCamptonTest-LightItalic-BF67089b6e98b40.otf") format("opentype"); font-weight: 300; font-style: italic; font-display: swap; }
+@font-face { font-family: "Neue Campton"; src: url("/font/neue-campton-font-family/NeueCamptonTest-Regular-BF67089b6ea9633.otf") format("opentype"); font-weight: 400; font-style: normal; font-display: swap; }
+@font-face { font-family: "Neue Campton"; src: url("/font/neue-campton-font-family/NeueCamptonTest-RegularItalic-BF67089b6eb3766.otf") format("opentype"); font-weight: 400; font-style: italic; font-display: swap; }
+@font-face { font-family: "Neue Campton"; src: url("/font/neue-campton-font-family/NeueCamptonTest-Medium-BF67089b6e9f912.otf") format("opentype"); font-weight: 500; font-style: normal; font-display: swap; }
+@font-face { font-family: "Neue Campton"; src: url("/font/neue-campton-font-family/NeueCamptonTest-MediumItalic-BF67089b6ea6ef3.otf") format("opentype"); font-weight: 500; font-style: italic; font-display: swap; }
+@font-face { font-family: "Neue Campton"; src: url("/font/neue-campton-font-family/NeueCamptonTest-SemiBold-BF67089b6eb62b9.otf") format("opentype"); font-weight: 600; font-style: normal; font-display: swap; }
+@font-face { font-family: "Neue Campton"; src: url("/font/neue-campton-font-family/NeueCamptonTest-SemiBoldItalic-BF67089b6ebdc29.otf") format("opentype"); font-weight: 600; font-style: italic; font-display: swap; }
+@font-face { font-family: "Neue Campton"; src: url("/font/neue-campton-font-family/NeueCamptonTest-Bold-BF67089b65d3e98.otf") format("opentype"); font-weight: 700; font-style: normal; font-display: swap; }
+@font-face { font-family: "Neue Campton"; src: url("/font/neue-campton-font-family/NeueCamptonTest-BoldItalic-BF67089b6e61f5b.otf") format("opentype"); font-weight: 700; font-style: italic; font-display: swap; }
+@font-face { font-family: "Neue Campton"; src: url("/font/neue-campton-font-family/NeueCamptonTest-ExtraBold-BF67089b6e6381f.otf") format("opentype"); font-weight: 800; font-style: normal; font-display: swap; }
+@font-face { font-family: "Neue Campton"; src: url("/font/neue-campton-font-family/NeueCamptonTest-ExtraBoldItalic-BF67089b6e69f0f.otf") format("opentype"); font-weight: 800; font-style: italic; font-display: swap; }
+@font-face { font-family: "Neue Campton"; src: url("/font/neue-campton-font-family/NeueCamptonTest-Black-BF67089b6e2d5e5.otf") format("opentype"); font-weight: 900; font-style: normal; font-display: swap; }
+@font-face { font-family: "Neue Campton"; src: url("/font/neue-campton-font-family/NeueCamptonTest-BlackItalic-BF67089b6e3364d.otf") format("opentype"); font-weight: 900; font-style: italic; font-display: swap; }
+
 @theme {
   /* Brand Colors from Figma */
   --color-brand-navy: #040B37;
-  --color-brand-blue: #1C4ED1;
-  --color-brand-bg: #F4F6FB;
+  --color-brand-blue: #0A4FE8;
+  --color-brand-bg: #F0F5FF;
   --color-brand-title: #040B37;
   --color-brand-body: #4B5563;
   --color-brand-mute: #9CA3AF;
@@ -15,7 +33,7 @@
   --color-brand-cards: #FFFFFF;
 
   /* Typography */
-  --font-sans: var(--font-sans);
+  --font-sans: "Neue Campton", Arial, Helvetica, sans-serif;
 
   /* Animation Scales */
   --animate-reveal: reveal 0.8s cubic-bezier(0.2, 0, 0, 1) forwards;
@@ -24,6 +42,17 @@
 
   /* Brand Gradient */
   --color-brand-gradient: linear-gradient(153.9deg, #0035C1 8.83%, #0575FF 86.3%);
+
+  /* shadcn/ui surface tokens - without these, bg-popover / bg-accent /
+     bg-border resolve to nothing and menus/popovers render transparent. */
+  --color-popover: #FFFFFF;
+  --color-popover-foreground: #040B37;
+  --color-accent: #F1F5F9;
+  --color-accent-foreground: #040B37;
+  --color-border: #E3E8F4;
+  --color-input: #E3E8F4;
+  --color-muted: #F1F5F9;
+  --color-muted-foreground: #64748B;
 }
 
 @keyframes marquee-vertical {
@@ -59,8 +88,14 @@
 }
 
 :root {
-  --background: #F4F6FB;
+  --background: #F0F5FF;
   --foreground: #040B37;
+
+  /* CDS radius ladder. Nested surfaces step down exactly one level. */
+  --radius-step-1: 4px;
+  --radius-step-2: 8px;
+  --radius-step-3: 12px;
+  --radius-step-4: 16px;
 }
 
 html {
@@ -268,6 +303,13 @@ body {
   height: auto;
   border-radius: 8px;
 }
+.legal-prose img.blog-inline-visual {
+  display: block;
+  width: 100%;
+  margin: 2rem 0;
+  border-radius: 16px;
+  box-shadow: 0 18px 50px rgba(4, 11, 55, 0.08);
+}
 
 /* Blog article body - force the site's normal sans font everywhere, even when
    content arrives wrapped in a code / <pre> block, and let it wrap naturally.
@@ -296,6 +338,75 @@ body {
   padding: 0;
 }
 
+/* Intelligence publications: research tables, figures, callouts and footnotes. */
+.intelligence-content {
+  color: #344054;
+  font-size: 16px;
+  line-height: 1.85;
+}
+.intelligence-content > p:first-child {
+  color: #18213f;
+  font-size: 18px;
+  line-height: 1.75;
+}
+.intelligence-content h2 {
+  margin-top: 3rem;
+  font-size: 28px;
+  letter-spacing: -0.025em;
+}
+.intelligence-content h3 {
+  margin-top: 2.25rem;
+  font-size: 21px;
+}
+.intelligence-content blockquote {
+  margin: 2.5rem 0;
+  border: 0;
+  border-left: 4px solid #075be5;
+  border-radius: 0 12px 12px 0;
+  background: #eef4ff;
+  padding: 1.5rem 1.75rem;
+  color: #07123f;
+  font-size: 19px;
+  font-weight: 600;
+  line-height: 1.55;
+}
+.intelligence-content figure {
+  margin: 2.5rem 0;
+}
+.intelligence-content figcaption {
+  margin-top: .65rem;
+  color: #667085;
+  font-size: 11px;
+  line-height: 1.5;
+}
+.intelligence-content table {
+  margin: 2.25rem 0;
+  overflow: hidden;
+  border: 1px solid #dde5f4;
+  border-radius: 12px;
+  background: white;
+}
+.intelligence-content th {
+  background: #f4f7fc;
+  color: #07123f;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+}
+.intelligence-content th,
+.intelligence-content td {
+  padding: .9rem 1rem;
+}
+.intelligence-content sup a {
+  text-decoration: none;
+}
+@media (max-width: 640px) {
+  .intelligence-content { font-size: 15px; }
+  .intelligence-content > p:first-child { font-size: 16px; }
+  .intelligence-content h2 { font-size: 23px; }
+  .intelligence-content blockquote { padding: 1.2rem; font-size: 17px; }
+}
+
 /* Chat message input: internal scroll (up to max-height) without a
    visible scrollbar. Keeps the textbox clean while still letting the
    user scroll through a long draft. */
@@ -307,15 +418,10 @@ body {
   display: none;                    /* Chrome / Safari / new Edge */
 }
 
-/* ─────────────── Branded pixel-art cursor ───────────────
-   The CDS Space 3D arrow replaces the default OS pointer across every page,
-   dashboard and admin view (all share the root layout → this stylesheet).
-   `cursor` is an inherited property, so setting it on html cascades to every
-   element that doesn't declare its own. PNG (not SVG) because Safari/WebKit
-   does not support SVG `cursor:` images. `3 3` is the hotspot at the arrow tip.
-   Source art: public/cursors/cursor.svg - regenerate via scripts/build-cursor.mjs. */
+/* Standard OS cursor everywhere; clickable elements get the hand (pointer)
+   via the rule below, text fields the I-beam, disabled controls not-allowed. */
 html {
-  cursor: url('/cursors/cursor.png') 2 2, auto;
+  cursor: auto;
 }
 
 /* Keep the cursors that carry meaning: I-beam in text fields, hand on things
@@ -336,7 +442,7 @@ summary,
 [role='tab'],
 [role='menuitem'],
 .cursor-pointer {
-  cursor: url('/cursors/cursor.png') 2 2, pointer;
+  cursor: pointer;
 }
 
 :disabled,

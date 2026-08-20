@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { requireFinanceAdmin } from "@/lib/finance/api-auth";
+import { requireFinanceAdminAsync } from "@/lib/finance/api-auth";
 import { getSupabaseAdmin } from "@/lib/supabase";
 import { randomToken } from "@/lib/finance/types";
 
@@ -10,7 +10,7 @@ import { randomToken } from "@/lib/finance/types";
  * original client's answers under a new URL.
  */
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-    const denied = requireFinanceAdmin(req);
+    const denied = await requireFinanceAdminAsync(req, "brand_briefs");
     if (denied) return denied;
 
     const { id } = await params;

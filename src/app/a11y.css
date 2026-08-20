@@ -1,0 +1,99 @@
+/* ==========================================================================
+   CDS Space - Accessibility modes.
+   Toggled by <AccessibilityWidget/> via classes + a data attribute + a CSS
+   variable on <html>. Everything is opt-in, so a user with no preferences set
+   sees the site exactly as designed.
+   ========================================================================== */
+
+/* Visual filters (invert / high-contrast / colour-vision) are composed into a
+   single filter string by JS. Applying it to <html> is the standard approach
+   for these tools. */
+html {
+  filter: var(--a11y-filter, none);
+}
+/* Keep media from being double-inverted when invert is on. */
+html.a11y-invert img,
+html.a11y-invert video,
+html.a11y-invert [style*="background-image"] {
+  filter: invert(1) hue-rotate(180deg);
+}
+
+/* Text size - zoom the body so fixed-px text scales too. */
+html[data-a11y-text="big"] body { zoom: 1.12; }
+html[data-a11y-text="large"] body { zoom: 1.25; }
+
+/* Reduce motion. */
+html.a11y-reduce-motion *,
+html.a11y-reduce-motion *::before,
+html.a11y-reduce-motion *::after {
+  animation-duration: 0.001ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.001ms !important;
+  scroll-behavior: auto !important;
+}
+
+/* Underline links. */
+html.a11y-underline a { text-decoration: underline !important; text-underline-offset: 2px; }
+
+/* Solid surfaces - drop glassmorphism blur. */
+html.a11y-solid * { backdrop-filter: none !important; -webkit-backdrop-filter: none !important; }
+
+/* Readable font - swap the brand typeface for a highly legible system stack. */
+html.a11y-readable,
+html.a11y-readable * {
+  font-family: Verdana, Tahoma, "Segoe UI", Arial, sans-serif !important;
+  letter-spacing: 0.01em;
+}
+
+/* Spacious text. */
+html.a11y-spacious p,
+html.a11y-spacious li,
+html.a11y-spacious span,
+html.a11y-spacious a,
+html.a11y-spacious label,
+html.a11y-spacious td,
+html.a11y-spacious h1,
+html.a11y-spacious h2,
+html.a11y-spacious h3 {
+  line-height: 1.8 !important;
+  letter-spacing: 0.03em !important;
+  word-spacing: 0.08em !important;
+}
+
+/* Strong focus - obvious keyboard focus ring. */
+html.a11y-focus a:focus,
+html.a11y-focus button:focus,
+html.a11y-focus input:focus,
+html.a11y-focus select:focus,
+html.a11y-focus textarea:focus,
+html.a11y-focus [tabindex]:focus,
+html.a11y-focus a:focus-visible,
+html.a11y-focus button:focus-visible,
+html.a11y-focus [tabindex]:focus-visible {
+  outline: 3px solid #0A4FE8 !important;
+  outline-offset: 3px !important;
+  border-radius: 4px;
+}
+
+/* Large cursor. */
+html.a11y-cursor,
+html.a11y-cursor * {
+  cursor: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='40' height='40' viewBox='0 0 24 24' fill='white' stroke='black' stroke-width='1.5'%3E%3Cpath d='M4 2l6 18 3-7 7-3z'/%3E%3C/svg%3E") 4 4, auto !important;
+}
+
+/* The widget itself must never be dimmed/hidden by the modes it controls. */
+#cds-a11y-widget {
+  filter: none !important;
+  isolation: isolate;
+  position: relative;
+  /* The controller must sit above every site/dashboard header and modal. */
+  z-index: 2147483000;
+}
+
+/*
+ * Body zoom is used so fixed-pixel application text grows too. Counter that
+ * zoom only for the controller itself; otherwise selecting Big or Large also
+ * enlarges the fixed dialog beyond the viewport and hides its close control.
+ */
+html[data-a11y-text="big"] #cds-a11y-widget { zoom: 0.892857; }
+html[data-a11y-text="large"] #cds-a11y-widget { zoom: 0.8; }

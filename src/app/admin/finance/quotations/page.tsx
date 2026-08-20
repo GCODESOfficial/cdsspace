@@ -10,6 +10,8 @@ import ActivityPanel from "@/components/admin/ActivityPanel";
 import { Currency, formatFinanceDate, formatMoney } from "@/lib/finance/types";
 import { buildQuotationShareMessage } from "@/lib/finance/share";
 import { appAlert, appConfirm, appToast } from "@/lib/app-notify";
+import { useFinanceDisplayCurrency } from "@/components/finance/FinanceCurrencySelector";
+import { convertFinanceAmount } from "@/lib/finance/currency-display";
 
 interface Row {
   id: string;
@@ -40,6 +42,7 @@ export default function QuotationsPage() {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [working, setWorking] = useState(false);
   const [emailingId, setEmailingId] = useState<string | null>(null);
+  const { currency: displayCurrency, rates } = useFinanceDisplayCurrency();
 
   const load = () => {
     setLoading(true);
@@ -219,7 +222,7 @@ export default function QuotationsPage() {
 
   const totals = rows.reduce(
     (acc, r) => {
-      if (r.status !== "cancelled") acc.estimate += Number(r.total);
+      if (r.status !== "cancelled") acc.estimate += convertFinanceAmount(r.total, r.currency, displayCurrency, rates);
       if (r.status === "accepted") acc.accepted += 1;
       if (r.status === "converted") acc.converted += 1;
       return acc;
@@ -233,16 +236,16 @@ export default function QuotationsPage() {
       subtitle="Create rough project estimates outside the books."
       actions={
         <Link href="/admin/finance/quotations/new">
-          <Button className="h-11 px-5 rounded-xl bg-gradient-to-b from-blue-600 to-blue-700 shadow-lg shadow-blue-600/30">
+          <Button className="h-11 px-5 rounded-xl bg-[#0A4FE8] shadow-lg shadow-blue-600/30">
             <Plus className="w-4 h-4 mr-1.5" /> New Quotation
           </Button>
         </Link>
       }
     >
       <div className="grid grid-cols-1 md:grid-cols-3 gap-5 mb-8">
-        <StatCard icon={FileText} label="Total Quotations" value={String(rows.length)} accent="from-blue-500 to-indigo-500" />
+        <StatCard icon={FileText} label="Total Quotations" value={String(rows.length)} accent="bg-[#0A4FE8]" />
         <StatCard icon={CheckCircle2} label="Accepted" value={String(totals.accepted)} accent="from-emerald-500 to-teal-500" />
-        <StatCard icon={FileText} label="Estimated Pipeline" value={formatMoney(totals.estimate)} accent="from-amber-500 to-orange-500" />
+        <StatCard icon={FileText} label={`Estimated Pipeline · ${displayCurrency}`} value={formatMoney(totals.estimate, displayCurrency)} accent="from-amber-500 to-orange-500" />
       </div>
 
       <div className={`${glassCard} p-4 mb-6 flex items-center gap-3`}>
@@ -336,7 +339,7 @@ export default function QuotationsPage() {
                       <td className="px-5 py-4">{r.project_name}</td>
                       <td className="px-5 py-4">{r.client_name}</td>
                       <td className="px-5 py-4 text-gray-500">{formatFinanceDate(r.issue_date)}</td>
-                      <td className="px-5 py-4 font-semibold">{formatMoney(r.total, r.currency)}</td>
+                      <td className="px-5 py-4 font-semibold">{formatMoney(convertFinanceAmount(r.total, r.currency, displayCurrency, rates), displayCurrency)}{r.currency !== displayCurrency && <small className="block text-[9px] font-medium text-gray-400">Original: {formatMoney(r.total, r.currency)}</small>}</td>
                       <td className="px-5 py-4">
                         <span className={`text-[10px] uppercase tracking-wider font-semibold px-2.5 py-1 rounded-full ${STATUS[r.status] ?? STATUS.draft}`}>{r.status}</span>
                       </td>

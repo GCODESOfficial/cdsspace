@@ -12,6 +12,8 @@ import FinanceShell, { glassCard } from "@/components/finance/FinanceShell";
 import StatCard from "@/components/finance/StatCard";
 import ModalHeader from "@/components/finance/ModalHeader";
 import { CURRENCIES, Currency, formatMoney } from "@/lib/finance/types";
+import { convertFinanceAmount } from "@/lib/finance/currency-display";
+import { useFinanceDisplayCurrency } from "@/components/finance/FinanceCurrencySelector";
 import { appAlert, appConfirm } from "@/lib/app-notify";
 
 interface Inflow {
@@ -59,6 +61,7 @@ function formatDate(value: string | null | undefined) {
 }
 
 export default function InflowPage() {
+  const { currency: displayCurrency, rates } = useFinanceDisplayCurrency();
   const [inflows, setInflows] = useState<Inflow[]>([]);
   const [projects, setProjects] = useState<Array<{ id: string; name: string; client: string }>>([]);
   const [loading, setLoading] = useState(true);
@@ -145,14 +148,14 @@ export default function InflowPage() {
     const monthKey = new Date().toISOString().slice(0, 7);
     return inflows.reduce(
       (acc, entry) => {
-        const amount = Number(entry.amount || 0);
+        const amount = convertFinanceAmount(entry.amount, entry.currency, displayCurrency, rates);
         acc.total += amount;
         if (entry.received_on?.slice(0, 7) === monthKey) acc.thisMonth += amount;
         return acc;
       },
       { total: 0, thisMonth: 0 },
     );
-  }, [inflows]);
+  }, [displayCurrency, inflows, rates]);
 
   return (
     <FinanceShell
@@ -170,7 +173,7 @@ export default function InflowPage() {
           }}
         >
           <DialogTrigger asChild>
-            <Button onClick={openNew} className="h-11 px-5 rounded-xl bg-gradient-to-b from-blue-600 to-blue-700 shadow-lg shadow-blue-600/30">
+            <Button onClick={openNew} className="h-11 px-5 rounded-xl bg-[#0A4FE8] shadow-lg shadow-blue-600/30">
               <Plus className="w-4 h-4 mr-1.5" /> New Inflow
             </Button>
           </DialogTrigger>
@@ -225,15 +228,15 @@ export default function InflowPage() {
             </div>
             <DialogFooter className="mt-5">
               <Button variant="outline" className="h-11 px-5 rounded-xl" onClick={() => setOpen(false)}>Cancel</Button>
-              <Button onClick={save} className="h-11 px-5 rounded-xl bg-gradient-to-b from-blue-600 to-blue-700 shadow-lg shadow-blue-600/30">Save Inflow</Button>
+              <Button onClick={save} className="h-11 px-5 rounded-xl bg-[#0A4FE8] shadow-lg shadow-blue-600/30">Save Inflow</Button>
             </DialogFooter>
           </DialogContent>
         </Dialog>
       }
     >
       <div className="grid grid-cols-1 gap-5 mb-8 md:grid-cols-3">
-        <StatCard icon={Banknote} label="Total Inflow" value={formatMoney(totals.total)} accent="from-emerald-500 to-teal-500" />
-        <StatCard icon={CalendarDays} label="This Month" value={formatMoney(totals.thisMonth)} accent="from-blue-500 to-indigo-500" />
+        <StatCard icon={Banknote} label="Total Inflow" value={formatMoney(totals.total, displayCurrency)} accent="from-emerald-500 to-teal-500" />
+        <StatCard icon={CalendarDays} label="This Month" value={formatMoney(totals.thisMonth, displayCurrency)} accent="bg-[#0A4FE8]" />
         <StatCard icon={TrendingUp} label="Entries" value={String(inflows.length)} accent="from-fuchsia-500 to-pink-500" />
       </div>
 
@@ -260,7 +263,8 @@ export default function InflowPage() {
                   credit
                 </span>
               </div>
-              <div className="text-2xl font-bold text-gray-900">{formatMoney(entry.amount, entry.currency)}</div>
+              <div className="text-2xl font-bold text-gray-900">{formatMoney(convertFinanceAmount(entry.amount, entry.currency, displayCurrency, rates), displayCurrency)}</div>
+              {entry.currency !== displayCurrency && <div className="mt-0.5 text-[11px] text-gray-400">Original: {formatMoney(entry.amount, entry.currency)}</div>}
               <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-xs text-gray-500">
                 <span>{formatDate(entry.received_on)}</span>
                 {entry.payment_method && <span>{entry.payment_method}</span>}
@@ -309,7 +313,10 @@ export default function InflowPage() {
                     <td className="px-5 py-4 font-medium text-gray-900">{entry.title}</td>
                     <td className="px-5 py-4 text-gray-500">{entry.source || "-"}</td>
                     <td className="px-5 py-4 text-gray-500">{entry.reference || "-"}</td>
-                    <td className="px-5 py-4 text-right font-semibold text-emerald-700">{formatMoney(entry.amount, entry.currency)}</td>
+                    <td className="px-5 py-4 text-right font-semibold text-emerald-700">
+                      <div>{formatMoney(convertFinanceAmount(entry.amount, entry.currency, displayCurrency, rates), displayCurrency)}</div>
+                      {entry.currency !== displayCurrency && <div className="mt-0.5 text-[11px] font-normal text-gray-400">Original: {formatMoney(entry.amount, entry.currency)}</div>}
+                    </td>
                   </tr>
                 ))}
               </tbody>

@@ -2,7 +2,7 @@
 -- Run manually in the SQL editor.
 --
 -- Lets admins schedule a meeting for a consultation request: pick a date/time
--- (scheduled_at already exists) and attach a meeting link — either a pre-set
+-- (scheduled_at already exists) and attach a meeting link - either a pre-set
 -- cMeet room or an external Zoom / Google Meet URL.
 
 alter table public.consultation_requests

@@ -40,8 +40,23 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   }
   if (!before.items.length) return NextResponse.json({ error: "Quotation has no items to convert." }, { status: 400 });
 
+  const linkedClientUserId = typeof before.quotation.user_id === "string" && before.quotation.user_id
+    ? before.quotation.user_id
+    : null;
+  if (linkedClientUserId) {
+    const unpricedItem = before.items.find((item: any) => Number(item.unit_price) <= 0 || Number(item.total) <= 0);
+    if (unpricedItem || Number(before.quotation.total) <= 0) {
+      return NextResponse.json({
+        error: "Add real prices to every custom quotation item before converting it to the client invoice.",
+      }, { status: 400 });
+    }
+  }
+
   const invoice_number = generateInvoiceNumber();
   const public_token = randomToken(28);
+  const clientInvoiceDueDate = linkedClientUserId
+    ? new Date(Date.now() + 7 * 86400000).toISOString().slice(0, 10)
+    : null;
   const invoiceNotes = [
     before.quotation.notes,
     `Converted from quotation ${before.quotation.quotation_number}.`,
@@ -49,6 +64,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
 
   const invoicePayload = {
     invoice_number,
+    user_id: linkedClientUserId,
     project_id: before.quotation.project_id,
     milestone_id: before.quotation.milestone_id,
     client_name: before.quotation.client_name,
@@ -60,11 +76,11 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     tax_amount: before.quotation.tax_amount,
     discount: before.quotation.discount,
     total: before.quotation.total,
-    status: body.status === "sent" ? "sent" : "draft",
+    status: linkedClientUserId || body.status === "sent" ? "sent" : "draft",
     scope: before.quotation.scope,
     period_month: before.quotation.period_month,
     issue_date: new Date().toISOString().slice(0, 10),
-    due_date: null,
+    due_date: clientInvoiceDueDate,
     notes: invoiceNotes || null,
     revisions_note: before.quotation.revisions_note || undefined,
     working_hours: before.quotation.working_hours || undefined,
@@ -104,6 +120,40 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     .select()
     .single();
   if (quoteError) return NextResponse.json({ error: quoteError.message }, { status: 500 });
+
+  if (linkedClientUserId) {
+    await Promise.all([
+      sb
+        .from("banner_requests")
+        .update({
+          invoice_id: invoice.id,
+          currency: invoice.currency,
+          subtotal: invoice.subtotal,
+          total: invoice.total,
+          status: "AWAITING_PAYMENT",
+        })
+        .eq("quotation_id", id),
+      sb
+        .from("merch_orders")
+        .update({
+          invoice_id: invoice.id,
+          currency: invoice.currency,
+          subtotal: invoice.subtotal,
+          total: invoice.total,
+          amount: invoice.total,
+          status: "AWAITING_PAYMENT",
+        })
+        .eq("quotation_id", id),
+      sb.from("notifications").insert({
+        user_id: linkedClientUserId,
+        type: "new_order",
+        title: "Your custom banner invoice is ready",
+        message: `${invoice.invoice_number} has been priced and is ready for review and payment.`,
+        link: "/dashboard/invoices",
+        is_read: false,
+      }),
+    ]);
+  }
 
   const after = await getQuotationSnapshot(sb, id);
   const quoteLabel = `${quotation.quotation_number} - ${quotation.project_name} - ${quotation.client_name}`;

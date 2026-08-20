@@ -18,8 +18,34 @@ function remotePatternFromEnv(value?: string): RemotePattern | null {
 }
 
 const dbImageHost = remotePatternFromEnv(process.env.NEXT_PUBLIC_GLASHDB_URL);
+const intelligenceFrameOrigin = (() => {
+  try { return new URL(process.env.NEXT_PUBLIC_GLASHDB_URL || "https://cdsspace.pro").origin; }
+  catch { return "https://cdsspace.pro"; }
+})();
+const productionSecurity = process.env.NODE_ENV === "production";
+const contentSecurityPolicy = [
+  "default-src 'self'",
+  "base-uri 'self'",
+  "object-src 'none'",
+  "form-action 'self'",
+  "frame-ancestors 'self'",
+  `frame-src 'self' ${intelligenceFrameOrigin} https://challenges.cloudflare.com https://www.youtube-nocookie.com https://player.vimeo.com`,
+  "img-src 'self' data: blob: https:",
+  "media-src 'self' blob: https:",
+  "font-src 'self' data: https:",
+  "style-src 'self' 'unsafe-inline'",
+  `script-src 'self' 'unsafe-inline'${productionSecurity ? "" : " 'unsafe-eval'"} https://challenges.cloudflare.com https://va.vercel-scripts.com`,
+  "script-src-attr 'none'",
+  "connect-src 'self' https: wss:",
+  "worker-src 'self' blob:",
+  ...(productionSecurity ? ["upgrade-insecure-requests"] : []),
+].join("; ");
 
 const nextConfig: NextConfig = {
+  // Allow an isolated verification build while a developer server owns .next.
+  // Production and normal local development keep the standard directory.
+  distDir: process.env.CDS_NEXT_DIST_DIR || ".next",
+  serverExternalPackages: ["@napi-rs/canvas"],
   turbopack: {
     root: path.resolve(__dirname),
   },
@@ -28,6 +54,12 @@ const nextConfig: NextConfig = {
   // it actually uses (big win for bundle size + hydration on icon-heavy pages).
   experimental: {
     optimizePackageImports: ["lucide-react", "framer-motion", "date-fns", "recharts"],
+    serverActions: {
+      bodySizeLimit: "512kb",
+    },
+    // Content Hub Visual Library accepts videos up to 100MB. The proxy buffers
+    // multipart overhead too, so leave a little headroom above the per-file cap.
+    proxyClientMaxBodySize: "110mb",
   },
   // Generated database types are out of date with the live schema.
   // Don't fail the production build on stale-type errors.
@@ -94,6 +126,23 @@ const nextConfig: NextConfig = {
 
     return [
       {
+        source: "/:path*",
+        headers: [
+          {
+            key: "Content-Security-Policy",
+            value: contentSecurityPolicy,
+          },
+          { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
+          { key: "X-Content-Type-Options", value: "nosniff" },
+          { key: "X-Frame-Options", value: "SAMEORIGIN" },
+          { key: "X-DNS-Prefetch-Control", value: "off" },
+          { key: "Cross-Origin-Opener-Policy", value: "same-origin-allow-popups" },
+          { key: "Cross-Origin-Resource-Policy", value: "same-site" },
+          { key: "Permissions-Policy", value: "camera=(self), microphone=(self), geolocation=(self), payment=(self)" },
+          ...(productionSecurity ? [{ key: "Strict-Transport-Security", value: "max-age=63072000; includeSubDomains; preload" }] : []),
+        ],
+      },
+      {
         source: "/:path*.:ext(svg|png|jpg|jpeg|gif|webp|avif|ico|mp4|webm|mp3|pdf|woff|woff2)",
         headers: durableAssetCache,
       },
@@ -106,6 +155,26 @@ const nextConfig: NextConfig = {
   // Redirect cdsspace.com → cdsspace.pro
   async redirects() {
     return [
+      {
+        source: "/blog/:path*",
+        destination: "/intelligence/:path*",
+        permanent: true,
+      },
+      {
+        source: "/dashboard/blog",
+        destination: "/dashboard/intelligence",
+        permanent: true,
+      },
+      {
+        source: "/:username/dashboard/blog",
+        destination: "/:username/dashboard/intelligence",
+        permanent: true,
+      },
+      {
+        source: "/admin/blog",
+        destination: "/admin/intelligence",
+        permanent: true,
+      },
       {
         source: "/:path*",
         has: [{ type: "host", value: "cdsspace.com" }],

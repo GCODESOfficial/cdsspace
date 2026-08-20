@@ -53,7 +53,7 @@ export default function VideoPreviewPlayer() {
 >
   {!isPlaying && (
     <video
-      src="/videos/cds.mp4"
+      src="/videos/cds-preview.mp4"
       autoPlay
       loop
       muted

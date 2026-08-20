@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getAdminSessionAsync } from "@/app/api/admin-check/route";
 import { hasPermission } from "@/lib/admin-permissions";
 import { getSupabaseAdmin } from "@/lib/supabase";
+import { findClientDuplicates } from "@/lib/client-directory-server";
 
 /**
  * Lightweight client-directory lookup used by the invoice form (and any
@@ -11,7 +12,7 @@ import { getSupabaseAdmin } from "@/lib/supabase";
  *     → returns up to N matches from the `clients` admin table.
  *
  *   POST /api/admin/clients/lookup
- *     Body: { name, brand_name?, email?, phone?, address?, industry? }
+ *     Body: { name, brand_name?, email?, phone?, address?, industries? }
  *     → creates a new row in `clients` and returns it. Used for the
  *       "Add new client" shortcut on the invoice form so admins never
  *       have to leave the flow to open the Client/Brand List.
@@ -41,7 +42,7 @@ export async function GET(req: NextRequest) {
     const sb = getSupabaseAdmin() as any;
     let query = sb
         .from("clients")
-        .select("id, name, brand_name, email, phone, whatsapp, industry, contact_person, address, status")
+        .select("id, name, brand_name, email, phone, whatsapp, industry, industries, contact_person, address, status")
         .order("name", { ascending: true })
         .limit(limit);
 
@@ -54,6 +55,19 @@ export async function GET(req: NextRequest) {
     const { data, error } = await query;
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
+    const emails = Array.from(new Set((data ?? [])
+        .map((client: any) => String(client.email || "").trim())
+        .filter(Boolean)));
+    const { data: profiles } = emails.length
+        ? await sb.from("profiles").select("email, billing_currency")
+            .in("email", emails)
+            .neq("email_verified_at", null)
+            .eq("account_status", "active")
+        : { data: [] };
+    const currencyByEmail = new Map(
+        (profiles ?? []).map((profile: any) => [String(profile.email || "").toLowerCase(), profile.billing_currency || null]),
+    );
+
     const clients = (data ?? []).map((c: any) => ({
         id: c.id,
         name: c.name,
@@ -62,9 +76,11 @@ export async function GET(req: NextRequest) {
         phone: c.phone ?? null,
         whatsapp: c.whatsapp ?? null,
         industry: c.industry ?? null,
+        industries: c.industries ?? (c.industry ? [c.industry] : []),
         contact_person: c.contact_person ?? null,
         address: c.address ?? null,
         status: c.status ?? null,
+        billing_currency: currencyByEmail.get(String(c.email || "").toLowerCase()) || null,
     }));
     return NextResponse.json({ clients });
 }
@@ -79,17 +95,13 @@ export async function POST(req: NextRequest) {
 
     const sb = getSupabaseAdmin() as any;
 
-    // De-dupe on exact (case-insensitive) name so we don't pollute the
-    // directory if the admin creates the same client twice.
-    const { data: existing } = await sb
-        .from("clients")
-        .select("id, name, brand_name, email, phone, address, industry, contact_person, status")
-        .ilike("name", name)
-        .limit(1)
-        .maybeSingle();
-    if (existing) {
-        return NextResponse.json({ client: existing, existing: true });
+    const rawIndustries = Array.isArray(body?.industries) ? body.industries : [body?.industry];
+    const industryMap = new Map<string, string>();
+    for (const value of rawIndustries) {
+        const industry = typeof value === "string" ? value.trim().slice(0, 140) : "";
+        if (industry && !industryMap.has(industry.toLowerCase())) industryMap.set(industry.toLowerCase(), industry);
     }
+    const industries = [...industryMap.values()].slice(0, 12);
 
     const payload = {
         name,
@@ -97,11 +109,20 @@ export async function POST(req: NextRequest) {
         email: body?.email?.toString().trim() || null,
         phone: body?.phone?.toString().trim() || null,
         whatsapp: body?.whatsapp?.toString().trim() || null,
-        industry: body?.industry?.toString().trim() || null,
+        industry: industries[0] || null,
+        industries,
         contact_person: body?.contact_person?.toString().trim() || null,
         address: body?.address?.toString().trim() || null,
         status: "active",
     };
+
+    const duplicates = await findClientDuplicates(payload);
+    if (duplicates.manual.length || duplicates.profiles.length) {
+        return NextResponse.json({
+            error: "A matching client already exists. Choose the existing record or merge it with the platform account.",
+            duplicates,
+        }, { status: 409 });
+    }
 
     const { data, error } = await sb.from("clients").insert(payload).select().single();
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });

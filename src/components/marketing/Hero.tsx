@@ -170,18 +170,23 @@ export const Hero = () => {
                         From strategy to execution, CDS designs digital brands that scale, convert, and stay consistent.
                     </p>
 
-                    {/* 4. CTA Button Group - Node 5808:4936 (y=421px, gap=32px) */}
+                    {/* 4. Hero actions - side by side on larger screens, stacked on mobile */}
                     <div
-                        className="mt-8 p-[2px] bg-[#F4F6FB] border border-[#648EFC] rounded-[100px] animate-reveal opacity-0 w-full max-w-[340px] sm:w-auto sm:max-w-none flex justify-center"
+                        className="mt-8 flex w-full max-w-[340px] flex-col gap-3 opacity-0 animate-reveal sm:w-auto sm:max-w-none sm:flex-row sm:items-center sm:justify-center"
                         style={{ animationDelay: '0.4s' }}
                         data-node-id="5808:4936"
                     >
                         <Link
                             href="/consultation"
-                            className="flex items-center justify-center px-8 py-[15px] rounded-[100px] text-[16px] md:text-[18px] font-medium text-brand-bg transition-opacity hover:opacity-90 tracking-[-0.18px] whitespace-nowrap w-full sm:w-auto"
-                            style={{ background: 'var(--color-brand-gradient)' }}
+                            className="flex w-full items-center justify-center whitespace-nowrap rounded-[100px] border border-brand-blue bg-brand-blue px-8 py-[15px] text-[16px] font-medium tracking-[-0.18px] text-white shadow-[0_10px_24px_rgba(10,79,232,0.18)] transition-colors hover:bg-[#0843c7] sm:w-auto md:text-[18px]"
                         >
                             <span>Schedule a Strategy Session</span>
+                        </Link>
+                        <Link
+                            href="/dashboard"
+                            className="flex w-full items-center justify-center whitespace-nowrap rounded-[100px] border border-brand-blue bg-transparent px-8 py-[15px] text-[16px] font-medium tracking-[-0.18px] text-brand-blue transition-colors hover:bg-brand-blue/5 sm:w-auto md:text-[18px]"
+                        >
+                            <span>My Account</span>
                         </Link>
                     </div>
                 </div>

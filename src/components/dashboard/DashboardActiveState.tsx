@@ -18,6 +18,7 @@ import { cn } from "@/lib/utils";
 import Image from "next/image";
 import Link from "next/link";
 import { DashboardData, DashboardProject, DashboardAsset } from "@/types/dashboard";
+import { useClientAccount } from "@/components/dashboard/ClientAccountProvider";
 
 /**
  * GlobalStatCard - Aggregated metric for the Billion Dollar Dashboard.
@@ -89,7 +90,7 @@ const PipelineItem = ({ project }: { project: DashboardProject }) => (
                     initial={{ width: 0 }}
                     animate={{ width: `${project.progress}%` }}
                     transition={{ duration: 1, delay: 0.5 }}
-                    className="h-full bg-linear-to-r from-brand-blue to-[#0575FF]"
+                    className="h-full bg-[#0A4FE8]"
                 />
             </div>
         </div>
@@ -101,6 +102,7 @@ const PipelineItem = ({ project }: { project: DashboardProject }) => (
  * Accepts structured data to ensure future API compatibility.
  */
 export const DashboardActiveState = ({ data }: { data: DashboardData }) => {
+    const { dashboardPath } = useClientAccount();
     return (
         <div className="w-full h-full p-4 lg:p-6 xl:p-12 2xl:p-16 space-y-8 lg:space-y-12 xl:space-y-20 pb-24">
             {/* 1. Global Stats Row */}
@@ -165,12 +167,12 @@ export const DashboardActiveState = ({ data }: { data: DashboardData }) => {
                             {[
                                 { name: "Merch", icon: "/dashboard/plate.svg", href: "/dashboard/merch" },
                                 { name: "Banner", icon: "/dashboard/clipboard.svg", href: "/dashboard/banners" },
-                                { name: "Brief", icon: "/dashboard/files-01.svg", href: "/brand-brief" },
-                                { name: "Partners", icon: "/dashboard/agreement-02.svg", href: "/partnership" }
+                                { name: "Brief", icon: "/dashboard/files-01.svg", href: "/dashboard/brand-brief" },
+                                { name: "Identity", icon: "/dashboard/agreement-02.svg", href: "/dashboard/brand-identity" }
                             ].map((studio, i) => (
                                 <Link
                                     key={i}
-                                    href={studio.href}
+                                    href={dashboardPath(studio.href)}
                                     className="flex flex-col items-center gap-3 lg:gap-4 p-4 lg:p-6 bg-white border border-brand-stroke rounded-[16px] lg:rounded-[20px] hover:border-brand-blue/30 transition-all hover:-translate-y-1 group"
                                 >
                                     <div className="size-8 lg:size-12 rounded-full bg-brand-bg flex items-center justify-center group-hover:bg-brand-blue/5">
@@ -198,7 +200,7 @@ export const DashboardActiveState = ({ data }: { data: DashboardData }) => {
                                     <h3 className="text-white text-[16px] lg:text-[22px] font-bold tracking-tight">{data.nextMilestone.title}</h3>
                                     <p className="text-white/60 text-[11px] lg:text-[14px] leading-relaxed">{data.nextMilestone.description}</p>
                                 </div>
-                                <Link href={data.nextMilestone.actionHref} className="inline-flex items-center gap-2 text-white font-bold text-[12px] lg:text-[14px] group-hover:gap-3 transition-all">
+                                <Link href={dashboardPath(data.nextMilestone.actionHref === "/brand-brief" ? "/dashboard/brand-brief" : data.nextMilestone.actionHref)} className="inline-flex items-center gap-2 text-white font-bold text-[12px] lg:text-[14px] group-hover:gap-3 transition-all">
                                     <span>{data.nextMilestone.actionLabel}</span>
                                     <ArrowRight className="size-3.5 lg:size-4" />
                                 </Link>

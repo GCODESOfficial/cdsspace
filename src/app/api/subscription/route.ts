@@ -1,17 +1,37 @@
 import { NextResponse } from "next/server";
-import { createClient } from "@/lib/supabase/server";
 import { supabaseAdmin } from "@/lib/supabase";
+import { verifyUser } from "@/lib/admin-auth";
 
 export const dynamic = "force-dynamic";
 
+async function loadPendingSubscription(userId: string) {
+    const { data: pending, error } = await supabaseAdmin!
+        .from("subscriptions")
+        .select("id, plan, industry, design_quantity, amount, currency, invoice_id, created_at")
+        .eq("user_id", userId)
+        .eq("status", "pending")
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+    if (error || !pending) return null;
+
+    const { data: invoice } = pending.invoice_id
+        ? await supabaseAdmin!
+            .from("finance_invoices")
+            .select("invoice_number, public_token, total, currency, status")
+            .eq("id", pending.invoice_id)
+            .maybeSingle()
+        : { data: null };
+    return { ...pending, invoice: invoice || null };
+}
+
 export async function GET() {
     try {
-        const supabase = await createClient();
-        const { data: { user }, error: authError } = await supabase.auth.getUser();
-
-        if (authError || !user) {
+        const session = await verifyUser();
+        if (!session) {
             return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
         }
+        const { user } = session;
 
         // Find first active subscription for user, join profiles
         const { data: subscription, error: fetchError } = await supabaseAdmin!
@@ -27,6 +47,8 @@ export async function GET() {
             console.error("Supabase fetch error:", fetchError);
             return NextResponse.json({ error: "Internal Server Error" }, { status: 500 });
         }
+
+        const pending = await loadPendingSubscription(user.id);
 
         // Monthly Reset Logic
         if (subscription) {
@@ -50,46 +72,27 @@ export async function GET() {
                     return NextResponse.json({ error: "Internal Server Error" }, { status: 500 });
                 }
 
-                return NextResponse.json({ subscription: updated });
+                return NextResponse.json({ subscription: updated, pending });
             }
         }
 
-        return NextResponse.json({ subscription });
+        return NextResponse.json({ subscription, pending });
     } catch (error) {
         console.error("API Error [subscription]:", error);
         return NextResponse.json({ error: "Internal Server Error" }, { status: 500 });
     }
 }
 
-export async function PATCH(request: Request) {
+export async function PATCH(_request: Request) {
     try {
-        const supabase = await createClient();
-        const { data: { user }, error: authError } = await supabase.auth.getUser();
-
-        if (authError || !user) {
+        const session = await verifyUser();
+        if (!session) {
             return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
         }
-
-        const body = await request.json();
-        const { plan } = body;
-
-        if (!plan) {
-            return NextResponse.json({ error: "Missing plan" }, { status: 400 });
-        }
-
-        const { data: updated, error: updateError } = await supabaseAdmin!
-            .from("subscriptions")
-            .update({ plan })
-            .eq("user_id", user.id)
-            .eq("status", "active")
-            .select();
-
-        if (updateError) {
-            console.error("Supabase update error:", updateError);
-            return NextResponse.json({ error: "Internal Server Error" }, { status: 500 });
-        }
-
-        return NextResponse.json({ success: true, updated });
+        return NextResponse.json({
+            error: "Plan changes require a priced checkout and verified payment.",
+            checkout: "/api/subscription/checkout",
+        }, { status: 409 });
     } catch (error) {
         console.error("API Error [subscription PATCH]:", error);
         return NextResponse.json({ error: "Internal Server Error" }, { status: 500 });

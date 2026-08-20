@@ -268,7 +268,7 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    const { member, sessionToken, deviceType } = await createTeamSession(challenge.team_member_id, req);
+    const { member, sessionToken, deviceType } = await createTeamSession(challenge.team_member_id, req, { source: "face_login" });
     await recordLoginAttendance({
       req,
       memberId: challenge.team_member_id,

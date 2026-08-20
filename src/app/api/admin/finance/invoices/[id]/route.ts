@@ -3,11 +3,11 @@ import { financeDb, requireFinanceAdminAsync } from "@/lib/finance/api-auth";
 import { isMissingInvoiceExtensionColumn, stripInvoiceExtensionFields } from "@/lib/finance/invoice-schema-fallback";
 import { logActivity } from "@/lib/activity-log";
 import { recordResourceVersion } from "@/lib/admin-versioning";
-import { sendEmail } from "@/lib/email-from";
-import { brandedEmailHtml } from "@/lib/email-template";
-import { formatMoney } from "@/lib/finance/types";
-
-const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL?.replace(/\/$/, "") || "https://cdsspace.pro";
+import { resolveClientBillingCurrency } from "@/lib/client-billing-server";
+import { CURRENCIES } from "@/lib/finance/types";
+import { emailInvoiceReceipt } from "@/lib/finance/receipt-server";
+import { deliverInvoicePaymentConfirmation } from "@/lib/finance/payment-confirmation";
+import { getAdminSessionAsync } from "@/app/api/admin-check/route";
 
 async function getInvoiceSnapshot(sb: any, id: string) {
   const { data: invoice, error } = await sb
@@ -35,12 +35,57 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
   if (error) return NextResponse.json({ error: error.message }, { status: 404 });
   const { data: items } = await sb
     .from("finance_invoice_items").select("*").eq("invoice_id", id).order("position");
-  return NextResponse.json({ invoice, items: items ?? [] });
+  const { data: bannerOrder } = await sb
+    .from("banner_requests")
+    .select("id, is_custom")
+    .eq("invoice_id", id)
+    .limit(1)
+    .maybeSingle();
+  const { data: paymentSubmissions } = await sb
+    .from("invoice_payment_submissions")
+    .select("*")
+    .eq("invoice_id", id)
+    .order("submitted_at", { ascending: false });
+  const submissionsWithProof = await Promise.all((paymentSubmissions ?? []).map(async (submission: Record<string, any>) => {
+    let proofUrl: string | null = null;
+    if (submission.proof_storage_path) {
+      const { data } = await (sb as any).storage.from("payment-proofs").createSignedUrl(submission.proof_storage_path, 60 * 60);
+      proofUrl = data?.signedUrl || null;
+    }
+    const safe: Record<string, any> = { ...submission, proof_url: proofUrl };
+    delete safe.proof_storage_path;
+    return safe;
+  }));
+  const { data: receipt } = await sb.from("finance_receipts").select("*").eq("invoice_id", id).maybeSingle();
+  const { data: paymentReminders } = await sb
+    .from("invoice_payment_reminders")
+    .select("id, sent_by, chat_sent_at, email_to, email_sent_at, email_error, created_at")
+    .eq("invoice_id", id)
+    .order("created_at", { ascending: false })
+    .limit(20);
+  return NextResponse.json({
+    invoice,
+    items: items ?? [],
+    bannerOrder: bannerOrder ?? null,
+    paymentSubmissions: submissionsWithProof,
+    paymentReminders: paymentReminders ?? [],
+    receipt: receipt ? { ...receipt, invoice_number: invoice.invoice_number } : null,
+  });
 }
 
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const body = await req.json();
+  if (body?.restore === true) {
+    const session = await getAdminSessionAsync(req);
+    if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    if (session.role !== "super_admin") return NextResponse.json({ error: "Only a super admin can restore an archived invoice." }, { status: 403 });
+    const sb = financeDb();
+    const { data, error } = await sb.from("finance_invoices").update({ deleted_at: null, deleted_by: null, deletion_reason: null }).eq("id", id).not("deleted_at", "is", null).select().single();
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    await logActivity({ action: "invoice.restore", page: "finance/invoices", resource_type: "invoice", resource_id: id, resource_label: `${data.invoice_number} · ${data.client_name}` });
+    return NextResponse.json({ invoice: data });
+  }
   const bodyKeys = Object.keys(body ?? {});
   const permissionKey = bodyKeys.length === 1 && body.status === "paid"
     ? "finance_invoices.mark_paid"
@@ -57,6 +102,29 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   const sb = financeDb();
   const before = await getInvoiceSnapshot(sb, id);
   if (!before.invoice) return NextResponse.json({ error: "Invoice not found" }, { status: 404 });
+
+  if ("delivery_period" in body) {
+    const { data: linkedBanner } = await sb
+      .from("banner_requests")
+      .select("is_custom")
+      .eq("invoice_id", id)
+      .limit(1)
+      .maybeSingle();
+    if (linkedBanner && !linkedBanner.is_custom && body.delivery_period !== "3 business days") {
+      return NextResponse.json({ error: "Standard banner orders use a fixed 3 business day production period. Only custom banner orders can change it." }, { status: 409 });
+    }
+  }
+
+  if ("currency" in body || "client_email" in body) {
+    const requestedCurrency = CURRENCIES.includes(String(body.currency || before.invoice.currency).toUpperCase() as (typeof CURRENCIES)[number])
+      ? String(body.currency || before.invoice.currency).toUpperCase()
+      : String(before.invoice.currency || "NGN");
+    patch.currency = await resolveClientBillingCurrency(
+      sb,
+      body.client_email ?? before.invoice.client_email,
+      requestedCurrency,
+    );
+  }
 
   // Recalculate totals if items are provided
   if (body.items && Array.isArray(body.items)) {
@@ -126,29 +194,14 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     metadata: { patch },
   });
 
-  // Payment-confirmation email - fires only on the transition INTO "paid", and
-  // only when the invoice carries a client email. Best-effort (never blocks the
-  // status update).
+  // Receipt email - best effort and sent only once after the database trigger
+  // has issued the immutable receipt for the paid transition.
   if (patch.status === "paid" && before.invoice.status !== "paid" && data?.client_email) {
     try {
-      const url = `${SITE_URL}/invoice/${data.public_token}`;
-      const html = brandedEmailHtml(
-        `
-        <h2 style="margin:0 0 12px;color:#0D1B39;">Payment confirmed</h2>
-        <p>Hi ${data.client_name || "there"},</p>
-        <p>We've received your payment for <strong>Invoice ${data.invoice_number}</strong> (${formatMoney(data.total, data.currency)}). It is now marked <strong>paid</strong> - thank you!</p>
-        <p style="text-align:center;margin:24px 0;"><a href="${url}" style="display:inline-block;background:linear-gradient(146deg,#0035C1,#0575FF);color:#fff;text-decoration:none;padding:14px 28px;border-radius:999px;font-weight:700;">View invoice</a></p>
-        <p style="color:#6b7280;font-size:13px;">This email confirms your payment has been received and recorded. No further action is needed.</p>
-      `,
-        { eyebrow: "Payment Confirmed", preheader: `Payment received for Invoice ${data.invoice_number}` },
-      );
-      await sendEmail({
-        to: data.client_email,
-        subject: `Payment confirmed - Invoice ${data.invoice_number}`,
-        html,
-      });
+      await emailInvoiceReceipt(sb, id);
+      await deliverInvoicePaymentConfirmation(sb, id);
       await logActivity({
-        action: "invoice.payment_confirmation_email",
+        action: "invoice.receipt_email",
         page: "finance/invoices",
         resource_type: "invoice",
         resource_id: id,
@@ -163,28 +216,40 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 }
 
 export async function DELETE(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  const denied = await requireFinanceAdminAsync(req, "finance_invoices.delete"); if (denied) return denied;
+  const session = await getAdminSessionAsync(req);
+  if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  if (session.role !== "super_admin") return NextResponse.json({ error: "Only a super admin can archive an invoice." }, { status: 403 });
   const { id } = await params;
+  const body = await req.json().catch(() => ({}));
+  const reason = String(body.reason || "").trim();
+  if (reason.length < 5) return NextResponse.json({ error: "A clear reason for archiving this invoice is required." }, { status: 400 });
   const sb = financeDb();
   const before = await getInvoiceSnapshot(sb, id);
-  const { error } = await sb.from("finance_invoices").delete().eq("id", id);
+  if (!before.invoice) return NextResponse.json({ error: "Invoice not found." }, { status: 404 });
+  const { data: archived, error } = await sb.from("finance_invoices").update({
+    deleted_at: new Date().toISOString(),
+    deleted_by: session.email,
+    deletion_reason: reason,
+  }).eq("id", id).is("deleted_at", null).select().single();
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
   await logActivity({
-    action: "invoice.delete",
+    action: "invoice.archive",
     page: "finance/invoices",
     resource_type: "invoice",
     resource_id: id,
     resource_label: `${before.invoice?.invoice_number || id} · ${before.invoice?.client_name || ""}`.trim(),
+    metadata: { reason, archived_by: session.email },
   });
   await recordResourceVersion({
-    action: "invoice.delete",
+    action: "invoice.archive",
     page: "finance/invoices",
     resource_type: "invoice",
     resource_id: id,
     resource_label: `${before.invoice?.invoice_number || id} · ${before.invoice?.client_name || ""}`.trim(),
     before_data: before,
-    after_data: null,
+    after_data: { invoice: archived, items: before.items },
+    metadata: { reason, archived_by: session.email },
   });
 
   return NextResponse.json({ ok: true });

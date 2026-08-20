@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { ArrowDownToLine, ArrowLeft, BarChart3, Briefcase, FileText, Receipt, ScrollText, Tag, Tags, Users, Wallet } from "lucide-react";
 import { ReactNode } from "react";
+import FinanceCurrencySelector from "@/components/finance/FinanceCurrencySelector";
 
 const NAV = [
   { href: "/admin/finance", label: "Overview", icon: BarChart3, exact: true },
@@ -38,10 +39,7 @@ export default function FinanceShell({
   const pathname = usePathname();
   return (
     <div className="min-h-screen relative -m-0">
-      {/* gradient backdrop */}
-      <div className="absolute inset-0 -z-10 bg-gradient-to-br from-blue-100 via-white to-blue-50" />
-      <div className="absolute top-0 right-0 -z-10 h-[420px] w-[420px] rounded-full bg-blue-300/30 blur-3xl" />
-      <div className="absolute bottom-0 left-1/3 -z-10 h-[360px] w-[360px] rounded-full bg-indigo-200/30 blur-3xl" />
+      <div className="absolute inset-0 -z-10 bg-[#F3F6FD]" />
 
       <div className="px-4 pt-4 pb-12 sm:px-6 sm:pt-6 lg:px-8 lg:pt-8 lg:pb-16 max-w-[1500px] mx-auto">
         {/* sub-nav pill bar */}
@@ -55,7 +53,7 @@ export default function FinanceShell({
                 href={n.href}
                 className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium whitespace-nowrap transition ${
                   active
-                    ? "bg-gradient-to-b from-blue-600 to-blue-700 text-white shadow-lg shadow-blue-600/30"
+                    ? "bg-[#0A4FE8] text-white shadow-lg shadow-blue-600/20"
                     : "text-gray-600 hover:bg-white/70 hover:text-gray-900"
                 }`}
               >
@@ -65,6 +63,7 @@ export default function FinanceShell({
             );
           })}
         </nav>
+        )}
 
         {/* header */}
         <div className="flex flex-col gap-4 mb-8 sm:flex-row sm:items-end sm:justify-between">
@@ -77,7 +76,10 @@ export default function FinanceShell({
             <h1 className="text-3xl sm:text-[34px] leading-tight font-bold text-gray-900 tracking-tight">{title}</h1>
             {subtitle && <p className="text-gray-500 mt-1">{subtitle}</p>}
           </div>
-          {actions && <div className="flex flex-wrap items-center gap-2">{actions}</div>}
+          <div className="flex flex-wrap items-center gap-2">
+            {!hideNav && <FinanceCurrencySelector />}
+            {actions}
+          </div>
         </div>
 
         {children}

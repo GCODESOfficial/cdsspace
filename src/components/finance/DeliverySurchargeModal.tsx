@@ -41,11 +41,6 @@ export default function DeliverySurchargeModal({
   }, [speed, meta.surchargeType, meta.defaultSurcharge]);
 
   const Icon = speed === "flash" ? Zap : speed === "super_express" ? Rocket : ClockIcon;
-  const accent =
-    speed === "flash" ? "from-rose-500 to-orange-500"
-    : speed === "super_express" ? "from-fuchsia-500 to-purple-500"
-    : "from-blue-500 to-indigo-500";
-
   const amount =
     mode === "pct"
       ? Math.round(Number(subtotal) * (Number(pct || 0) / 100) * 100) / 100
@@ -72,7 +67,7 @@ export default function DeliverySurchargeModal({
       >
         <div className="px-6 py-5 border-b border-gray-100 flex items-start justify-between gap-3">
           <div className="flex items-center gap-3">
-            <div className={`w-11 h-11 rounded-xl bg-gradient-to-br ${accent} grid place-items-center shadow-lg shadow-blue-600/20`}>
+            <div className={`w-11 h-11 rounded-xl bg-[#0A4FE8] grid place-items-center shadow-lg shadow-blue-600/20`}>
               <Icon className="w-5 h-5 text-white" />
             </div>
             <div>
@@ -152,7 +147,7 @@ export default function DeliverySurchargeModal({
           <Button
             onClick={confirm}
             disabled={disabled}
-            className="h-10 px-5 rounded-xl bg-gradient-to-b from-blue-600 to-blue-700 text-white shadow-lg shadow-blue-600/30 disabled:opacity-60"
+            className="h-10 px-5 rounded-xl bg-[#0A4FE8] text-white shadow-lg shadow-blue-600/30 disabled:opacity-60"
           >
             Add Surcharge
           </Button>

@@ -355,7 +355,7 @@ export const BrandLab = ({ onBack }: BrandLabProps) => {
 
                                     <button
                                         onClick={() => setStep(2)}
-                                        className="w-full h-14 lg:h-16 rounded-full flex items-center justify-center text-white text-[18px] font-medium shadow-lg hover:scale-[1.01] transition-all bg-linear-to-r from-[#0035C1] to-[#0575FF]"
+                                        className="w-full h-14 lg:h-16 rounded-full flex items-center justify-center text-white text-[18px] font-medium shadow-lg hover:scale-[1.01] transition-all bg-[#0A4FE8]"
                                     >
                                         Next
                                     </button>
@@ -471,7 +471,7 @@ export const BrandLab = ({ onBack }: BrandLabProps) => {
                                             </button>
                                             <button
                                                 onClick={() => setStep(3)}
-                                                className="flex-[1.2] h-14 lg:h-16 rounded-full text-white font-bold transition-all hover:scale-[1.01] bg-linear-to-r from-[#0035C1] to-[#0575FF] text-[16px] lg:text-[18px]"
+                                                className="flex-[1.2] h-14 lg:h-16 rounded-full text-white font-bold transition-all hover:scale-[1.01] bg-[#0A4FE8] text-[16px] lg:text-[18px]"
                                             >
                                                 Next
                                             </button>
@@ -574,7 +574,7 @@ export const BrandLab = ({ onBack }: BrandLabProps) => {
                                             </button>
                                             <button
                                                 onClick={() => setStep(4)}
-                                                className="flex-[1.2] h-14 lg:h-16 rounded-full text-white font-bold transition-all hover:scale-[1.01] bg-linear-to-r from-[#0035C1] to-[#0575FF] text-[16px] lg:text-[18px]"
+                                                className="flex-[1.2] h-14 lg:h-16 rounded-full text-white font-bold transition-all hover:scale-[1.01] bg-[#0A4FE8] text-[16px] lg:text-[18px]"
                                             >
                                                 Next
                                             </button>
@@ -828,7 +828,7 @@ export const BrandLab = ({ onBack }: BrandLabProps) => {
                                             </button>
                                             <button
                                                 onClick={() => setIsSuccessModalOpen(true)}
-                                                className="flex-[1.2] h-14 lg:h-16 rounded-full text-white font-bold transition-all hover:scale-[1.01] bg-linear-to-r from-[#0035C1] to-[#0575FF] text-[16px] lg:text-[18px] order-1 md:order-2"
+                                                className="flex-[1.2] h-14 lg:h-16 rounded-full text-white font-bold transition-all hover:scale-[1.01] bg-[#0A4FE8] text-[16px] lg:text-[18px] order-1 md:order-2"
                                             >
                                                 Complete Registration
                                             </button>

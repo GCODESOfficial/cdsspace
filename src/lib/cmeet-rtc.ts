@@ -94,7 +94,13 @@ function buildRtcConfig(): RTCConfiguration {
       });
     }
   }
-  return { iceServers: servers, iceTransportPolicy: "all", bundlePolicy: "max-bundle" };
+  return {
+    iceServers: servers,
+    iceTransportPolicy: "all",
+    bundlePolicy: "max-bundle",
+    rtcpMuxPolicy: "require",
+    iceCandidatePoolSize: 10,
+  };
 }
 const RTC_CONFIG = buildRtcConfig();
 
@@ -305,17 +311,17 @@ export class CMeetClient {
   // Replace the outgoing video track on every peer connection without
   // renegotiation. Used for screen-share toggle and cam/mic changes.
   async replaceVideoTrack(newTrack: MediaStreamTrack | null, opts: { sharing?: boolean } = {}) {
-    this.peers.forEach(p => {
+    if (newTrack) newTrack.contentHint = opts.sharing ? "detail" : "motion";
+    await Promise.all(Array.from(this.peers.values()).map(async p => {
       const sender = p.connection.getSenders().find(s => s.track?.kind === "video");
-      if (sender) sender.replaceTrack(newTrack);
-    });
-    // Update the local stream so the UI preview reflects it
+      if (sender) await sender.replaceTrack(newTrack);
+    }));
+    // Keep the stream used for newly joining peers current. Track lifetime
+    // remains owned by the call UI so a camera can stay warm while a screen
+    // is presented and be restored without another permission round-trip.
     if (this.localStream) {
       const existingVideo = this.localStream.getVideoTracks()[0];
-      if (existingVideo) {
-        this.localStream.removeTrack(existingVideo);
-        try { existingVideo.stop(); } catch { /* noop */ }
-      }
+      if (existingVideo) this.localStream.removeTrack(existingVideo);
       if (newTrack) this.localStream.addTrack(newTrack);
     }
     if (typeof opts.sharing === "boolean") {
@@ -521,7 +527,10 @@ export class CMeetClient {
     };
 
     // Add our local tracks
-    this.localStream?.getTracks().forEach(track => pc.addTrack(track, this.localStream!));
+    this.localStream?.getTracks().forEach(track => {
+      if (track.kind === "video" && !track.contentHint) track.contentHint = this.iAmSharing ? "detail" : "motion";
+      pc.addTrack(track, this.localStream!);
+    });
 
     entry = {
       peerId, name, stream: remoteStream,

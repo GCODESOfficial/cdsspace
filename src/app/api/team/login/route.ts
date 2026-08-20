@@ -5,8 +5,7 @@ import {
   sessionCookieOptions,
 } from "@/lib/team-auth";
 import { glashMaybeOne } from "@/lib/glashdb/postgres";
-import { createTeamSession } from "@/lib/team-login-security";
-import { insertActivityLog } from "@/lib/activity-log";
+import { createTeamSession, locationFromPayload } from "@/lib/team-login-security";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -53,24 +52,20 @@ export async function POST(req: NextRequest) {
   // Login only authenticates. Attendance/clock-in happens separately through
   // the geofenced timebook flow (POST /api/team/timebook action=clock_in), so
   // logging in never bypasses the office geofence check.
-  const { member: sessionMember, sessionToken, deviceType } = await createTeamSession(member.id, req);
-  void insertActivityLog({
-    actor_kind: "team",
-    actor_id: member.id,
-    actor_name: member.full_name || member.username,
-    actor_is_admin: false,
-    action: "team.login",
-    page: "team/login",
-    resource_type: "team_session",
-    resource_id: member.id,
-    resource_label: `${deviceType} login`,
-    metadata: {
-      source: "team_login",
-      device_type: deviceType,
-      user_agent: req.headers.get("user-agent") || null,
-      ip_address: req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || null,
-    },
-  }).catch((err) => console.error("[audit] team login log failed:", err));
+  const location = locationFromPayload(body.location);
+  const clientDevice = body.client_device && typeof body.client_device === "object"
+    ? {
+        platform: typeof body.client_device.platform === "string" ? body.client_device.platform.slice(0, 120) : null,
+        timezone: typeof body.client_device.timezone === "string" ? body.client_device.timezone.slice(0, 120) : null,
+        language: typeof body.client_device.language === "string" ? body.client_device.language.slice(0, 40) : null,
+        screen: typeof body.client_device.screen === "string" ? body.client_device.screen.slice(0, 40) : null,
+      }
+    : undefined;
+  const { member: sessionMember, sessionToken, deviceType } = await createTeamSession(member.id, req, {
+    source: "team_login",
+    location,
+    clientDevice,
+  });
 
   const res = NextResponse.json({ ok: true, member: sessionMember, device_type: deviceType });
   res.cookies.set(TEAM_SESSION_COOKIE, sessionToken, sessionCookieOptions());

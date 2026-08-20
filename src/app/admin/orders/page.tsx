@@ -10,10 +10,13 @@ interface OrderProfile { full_name: string; email: string; }
 interface Order {
   id: string; displayId: string; type: "design" | "banner" | "merch" | "recurring"; title: string;
   status: string; created_at: string; profile: OrderProfile | null;
+  paymentPendingValidation?: boolean; paymentSubmittedAt?: string | null; invoiceId?: string | null;
 }
 interface OrderStats { total: number; pending: number; inProgress: number; completed: number; }
 
 const STATUS_COLORS: Record<string, string> = {
+  AWAITING_QUOTE: "bg-orange-50 text-orange-700",
+  AWAITING_PAYMENT: "bg-sky-50 text-sky-700",
   PENDING: "bg-amber-50 text-amber-600",
   IN_REVIEW: "bg-blue-50 text-[#0A4FE8]",
   ACTIVE: "bg-emerald-50 text-emerald-600",
@@ -23,7 +26,7 @@ const STATUS_COLORS: Record<string, string> = {
   ARCHIVED: "bg-gray-100 text-gray-400",
 };
 
-const ALL_STATUSES = ["All", "PENDING", "IN_REVIEW", "ACTIVE", "COMPLETED", "DRAFT", "SCHEDULED", "ARCHIVED"];
+const ALL_STATUSES = ["All", "AWAITING_QUOTE", "AWAITING_PAYMENT", "PENDING", "IN_REVIEW", "ACTIVE", "COMPLETED", "DRAFT", "SCHEDULED", "ARCHIVED"];
 
 export default function AdminOrdersPage() {
   const [orders, setOrders] = useState<Order[]>([]);
@@ -41,8 +44,8 @@ export default function AdminOrdersPage() {
     setSelected(copy);
   };
   const toggleAll = () => {
-    if (selected.size === filtered.length) setSelected(new Set());
-    else setSelected(new Set(filtered.map(o => o.id)));
+    if (selected.size === regularOrders.length) setSelected(new Set());
+    else setSelected(new Set(regularOrders.map(o => o.id)));
   };
   const handleBulkArchive = async () => {
     if (!(await appConfirm(`Archive ${selected.size} orders?`))) return;
@@ -70,6 +73,8 @@ export default function AdminOrdersPage() {
   }, [statusFilter, searchQuery]);
 
   const filtered = useMemo(() => typeFilter === "all" ? orders : orders.filter(o => o.type === typeFilter), [orders, typeFilter]);
+  const paymentValidationOrders = useMemo(() => filtered.filter((order) => order.paymentPendingValidation), [filtered]);
+  const regularOrders = useMemo(() => filtered.filter((order) => !order.paymentPendingValidation), [filtered]);
 
   const statCards = [
     { label: "Total Orders", value: stats.total, icon: ShoppingBag, color: "blue" as const },
@@ -82,14 +87,14 @@ export default function AdminOrdersPage() {
   const iconBgMap = { blue: "bg-blue-100", orange: "bg-orange-100", purple: "bg-purple-100", green: "bg-emerald-100" };
 
   return (
-    <div className="p-8 max-w-[1200px]">
+    <div className="p-4 sm:p-8 max-w-[1200px]">
       <div className="mb-8">
-        <p className="text-[#0A4FE8] text-sm font-semibold">Management</p>
+        <p className="text-[#0A4FE8] text-sm font-semibold">Sales Hub</p>
         <h1 className="text-[28px] font-bold text-[#0D1B39] tracking-tight">Client Orders</h1>
       </div>
 
       {/* Stats */}
-      <div className="grid grid-cols-4 gap-5 mb-8">
+      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-5 mb-8">
         {statCards.map((s) => (
           <div key={s.label} className={`${colorMap[s.color].split(" ")[0]} rounded-2xl p-5`}>
             <div className={`${iconBgMap[s.color]} w-10 h-10 rounded-xl flex items-center justify-center mb-4`}>
@@ -100,6 +105,30 @@ export default function AdminOrdersPage() {
           </div>
         ))}
       </div>
+
+      {paymentValidationOrders.length > 0 && (
+        <section className="mb-6 rounded-2xl border border-amber-200 bg-amber-50/60 p-4 sm:p-5">
+          <div className="mb-3 flex items-center justify-between gap-3">
+            <div>
+              <h2 className="font-semibold text-[#0D1B39]">Payments awaiting validation</h2>
+              <p className="text-xs text-amber-800">Clients have submitted payment details. Review these orders first.</p>
+            </div>
+            <span className="rounded-full bg-amber-100 px-3 py-1 text-xs font-semibold text-amber-800">{paymentValidationOrders.length}</span>
+          </div>
+          <div className="space-y-2">
+            {paymentValidationOrders.map((order) => (
+              <Link key={order.id} href={`/admin/orders/${order.id}`} className="flex min-w-0 items-center gap-3 rounded-xl border border-amber-100 bg-white p-3 hover:border-amber-300">
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-sm font-semibold text-[#0D1B39]">{order.profile?.full_name || order.profile?.email || "Client"} · {order.title}</p>
+                  <p className="text-xs text-gray-500">{order.displayId}</p>
+                </div>
+                <span className="hidden shrink-0 rounded-full bg-amber-100 px-2.5 py-1 text-[11px] font-semibold text-amber-800 sm:inline-flex">Client paid - pending admin validation</span>
+                <span className="shrink-0 text-sm font-semibold text-[#0A4FE8]">Open</span>
+              </Link>
+            ))}
+          </div>
+        </section>
+      )}
 
       {/* Filters */}
       <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
@@ -136,24 +165,25 @@ export default function AdminOrdersPage() {
         </div>
 
         {/* Table */}
-        <table className="w-full">
+        <div className="overflow-x-auto">
+        <table className="w-full min-w-[860px] table-fixed">
           <thead>
             <tr className="border-b border-gray-100">
               <th className="py-2.5 px-4 w-10">
-                <input type="checkbox" checked={filtered.length > 0 && selected.size === filtered.length} onChange={toggleAll} className="w-4 h-4 rounded border-gray-300 text-[#0A4FE8] cursor-pointer" />
+                <input type="checkbox" checked={regularOrders.length > 0 && selected.size === regularOrders.length} onChange={toggleAll} className="w-4 h-4 rounded border-gray-300 text-[#0A4FE8] cursor-pointer" />
               </th>
               {["Order ID", "Type", "Title", "Client", "Status", "Date", ""].map((h) => (
-                <th key={h} className={`py-2.5 px-4 text-[11px] font-semibold text-gray-400 uppercase tracking-wider ${h === "" ? "text-right pr-6" : "text-left"}`}>{h}</th>
+                <th key={h} className={`py-2.5 px-4 text-[11px] font-semibold text-gray-400 uppercase tracking-wider ${h === "" ? "w-20 text-right pr-6" : h === "Client" ? "w-[150px] text-left" : "text-left"}`}>{h}</th>
               ))}
             </tr>
           </thead>
           <tbody>
             {isLoading ? (
               <tr><td colSpan={8} className="py-16 text-center"><Loader2 className="w-6 h-6 animate-spin text-blue-400 mx-auto" /></td></tr>
-            ) : filtered.length === 0 ? (
+            ) : regularOrders.length === 0 ? (
               <tr><td colSpan={8} className="py-16 text-center text-gray-400 text-sm">No orders found</td></tr>
             ) : (
-              filtered.map((order) => (
+              regularOrders.map((order) => (
                 <tr key={order.id} className={`border-b border-gray-50 hover:bg-blue-50/30 transition ${selected.has(order.id) ? "bg-blue-50/50" : ""}`}>
                   <td className="py-3 px-4">
                     <input type="checkbox" checked={selected.has(order.id)} onChange={() => toggleSelect(order.id)} className="w-4 h-4 rounded border-gray-300 text-[#0A4FE8] cursor-pointer" />
@@ -168,9 +198,9 @@ export default function AdminOrdersPage() {
                     }`}>{order.type.charAt(0).toUpperCase() + order.type.slice(1)}</span>
                   </td>
                   <td className="py-3 px-4 text-[13px] font-medium text-[#0D1B39] max-w-[200px] truncate">{order.title}</td>
-                  <td className="py-3 px-4">
-                    <p className="text-[13px] text-[#0D1B39]">{order.profile?.full_name || "Unknown"}</p>
-                    <p className="text-[11px] text-gray-400">{order.profile?.email || ""}</p>
+                  <td className="min-w-0 py-3 px-4">
+                    <p title={order.profile?.full_name || "Unknown"} className="truncate text-[13px] text-[#0D1B39]">{order.profile?.full_name || "Unknown"}</p>
+                    <p title={order.profile?.email || ""} className="truncate text-[11px] text-gray-400">{order.profile?.email || ""}</p>
                   </td>
                   <td className="py-3 px-4">
                     <span className={`inline-block px-2.5 py-1 rounded-md text-[11px] font-medium ${STATUS_COLORS[order.status] || "bg-gray-100 text-gray-500"}`}>
@@ -182,8 +212,8 @@ export default function AdminOrdersPage() {
                   </td>
                   <td className="py-3 px-4 text-right">
                     <Link href={`/admin/orders/${order.id}`}>
-                      <button className="p-1.5 rounded-md text-gray-400 hover:text-[#0A4FE8] hover:bg-blue-50 transition">
-                        <ExternalLink className="w-4 h-4" />
+                      <button className="inline-flex items-center gap-1 whitespace-nowrap rounded-md p-1.5 text-[#0A4FE8] transition hover:bg-blue-50">
+                        <span className="text-xs font-semibold">Open</span><ExternalLink className="w-3.5 h-3.5" />
                       </button>
                     </Link>
                   </td>
@@ -192,6 +222,7 @@ export default function AdminOrdersPage() {
             )}
           </tbody>
         </table>
+        </div>
       </div>
     </div>
   );

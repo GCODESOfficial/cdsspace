@@ -6,7 +6,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { Copy, Download, ExternalLink, FileText, History, Loader2, Pencil, RotateCcw, Share2, Trash2, Check, Mail } from "lucide-react";
+import { Copy, Download, ExternalLink, FileText, History, Loader2, Pencil, RotateCcw, Trash2, Check, Mail } from "lucide-react";
+import { UniversalShareButton } from "@/components/share/UniversalShareButton";
 import FinanceShell, { glassCard } from "@/components/finance/FinanceShell";
 import QuotationDocument from "@/components/finance/QuotationDocument";
 import { QUOTATION_DELIVERY_PERIODS, type FinanceQuotation, type FinanceQuotationItem, type FinanceQuotationSample } from "@/lib/finance/types";
@@ -44,7 +45,6 @@ export default function QuotationDetailPage({ params }: { params: Promise<{ id: 
   const [samples, setSamples] = useState<FinanceQuotationSample[]>([]);
   const [copied, setCopied] = useState(false);
   const [savedTerms, setSavedTerms] = useState(false);
-  const [shareOpen, setShareOpen] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [versions, setVersions] = useState<VersionRow[]>([]);
@@ -173,7 +173,8 @@ export default function QuotationDetailPage({ params }: { params: Promise<{ id: 
       window.location.href = `/admin/finance/invoices/${quotation.converted_invoice_id}`;
       return;
     }
-    if (!(await appConfirm(`Convert ${quotation.quotation_number} to a draft invoice?`))) return;
+    const conversionTarget = quotation.user_id ? "a priced invoice and send it to the client" : "a draft invoice";
+    if (!(await appConfirm(`Convert ${quotation.quotation_number} to ${conversionTarget}?`))) return;
     setConverting(true);
     try {
       const r = await fetch(`/api/admin/finance/quotations/${id}/convert`, { method: "POST" });
@@ -291,33 +292,7 @@ export default function QuotationDetailPage({ params }: { params: Promise<{ id: 
           <a href={publicUrl} target="_blank" rel="noopener noreferrer">
             <Button variant="outline" size="sm" className="rounded-lg"><ExternalLink className="w-4 h-4 mr-1" />Open</Button>
           </a>
-          <div className="relative">
-            <Button variant="outline" size="sm" className="rounded-lg" onClick={() => setShareOpen((s) => !s)}>
-              <Share2 className="w-4 h-4 mr-1" /> Share
-            </Button>
-            {shareOpen && (
-              <>
-                <div className="fixed inset-0 z-40" onClick={() => setShareOpen(false)} />
-                <div className="absolute right-0 top-full mt-2 z-50 bg-white rounded-xl shadow-2xl border border-gray-100 p-1.5 flex items-center gap-1">
-                  {(() => {
-                    const encodedUrl = encodeURIComponent(publicUrl);
-                    const encodedText = encodeURIComponent(shareMessage);
-                    const targets = [
-                      { key: "whatsapp", label: "WhatsApp", color: "bg-[#25D366] hover:bg-[#1eb957]", href: `https://api.whatsapp.com/send?text=${encodedText}` },
-                      { key: "facebook", label: "Facebook", color: "bg-[#1877F2] hover:bg-[#0f66d8]", href: `https://www.facebook.com/sharer/sharer.php?u=${encodedUrl}&quote=${encodedText}` },
-                      { key: "x", label: "X", color: "bg-black hover:bg-neutral-800", href: `https://twitter.com/intent/tweet?text=${encodedText}` },
-                      { key: "linkedin", label: "LinkedIn", color: "bg-[#0A66C2] hover:bg-[#0957a7]", href: `https://www.linkedin.com/sharing/share-offsite/?url=${encodedUrl}` },
-                    ];
-                    return targets.map((t) => (
-                      <a key={t.key} href={t.href} target="_blank" rel="noopener noreferrer" onClick={() => setShareOpen(false)} className={`${t.color} text-white text-[11px] font-semibold px-3 py-1.5 rounded-full transition whitespace-nowrap`}>
-                        {t.label}
-                      </a>
-                    ));
-                  })()}
-                </div>
-              </>
-            )}
-          </div>
+          <UniversalShareButton title={`Quotation ${quotation.quotation_number}`} text={shareMessage} url={publicUrl} className="min-h-10 rounded-lg px-3" />
         </div>
       </div>
 
@@ -396,6 +371,7 @@ export default function QuotationDetailPage({ params }: { params: Promise<{ id: 
       </div>
 
       <QuotationDocument quotation={quotation} items={items} samples={samples} />
+
     </FinanceShell>
   );
 }

@@ -1,4 +1,5 @@
 import { Footer } from "@/components/layout/Footer";
+import { MarketingAssetProtection } from "@/components/marketing/MarketingAssetProtection";
 
 /**
  * Layout for the full-page expanded work view.
@@ -13,6 +14,7 @@ export default function WorkFullLayout({
 }>) {
     return (
         <>
+            <MarketingAssetProtection />
             {children}
             <Footer />
         </>

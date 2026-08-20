@@ -5,7 +5,7 @@ import { PenLine, Loader2, RefreshCw, Check } from "lucide-react";
 import type { AIKind } from "@/lib/ai/prompts";
 
 /**
- * Inline "✨ AI draft" button for any form field.
+ * Inline AI drafting button for any form field.
  *
  * Instead of opening a review modal, it writes the generated text DIRECTLY
  * into the target field via `onAccept`. The user can immediately edit what
@@ -78,7 +78,7 @@ export function AIAssistButton<I extends Record<string, unknown>>({
             ? "bg-rose-500 text-white"
             : filled
             ? "bg-emerald-500 text-white"
-            : "bg-gradient-to-r from-[#0A4FE8] to-[#7B3AED] text-white"
+            : "bg-[#0A4FE8] text-white"
         }`}
       >
         <Icon className={`w-3 h-3 ${loading ? "animate-spin" : ""}`} />

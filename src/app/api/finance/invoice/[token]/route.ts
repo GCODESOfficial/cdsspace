@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { financeDb } from "@/lib/finance/api-auth";
+import { getPaystackStatus } from "@/lib/paystack";
 
 /**
  * Public invoice lookup. Accepts EITHER the shareable `public_token` OR the
@@ -32,5 +33,33 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ tok
     .select("*")
     .eq("invoice_id", invoice.id)
     .order("position");
-  return NextResponse.json({ invoice, items: items ?? [] });
+  const safeInvoice = { ...invoice };
+  delete safeInvoice.user_id;
+  delete safeInvoice.marketer_user_id;
+  const [{ data: paymentSubmission }, { data: receipt }, { data: bankAccounts }] = await Promise.all([
+    sb.from("invoice_payment_submissions")
+      .select("id, method, status, amount, currency, payer_name, payer_email, transfer_reference, proof_file_name, proof_mime_type, proof_size_bytes, submitted_at, reviewed_at, admin_note")
+      .eq("invoice_id", invoice.id)
+      .order("submitted_at", { ascending: false })
+      .limit(1)
+      .maybeSingle(),
+    sb.from("finance_receipts")
+      .select("id, receipt_number, invoice_id, public_token, client_name, client_email, amount, currency, payment_method, payment_reference, paid_at, emailed_at, created_at")
+      .eq("invoice_id", invoice.id)
+      .maybeSingle(),
+    sb.from("sales_bank_accounts")
+      .select("id, currency, country_code, bank_name, account_name, account_number, iban, swift_bic, routing_number, bank_address, instructions, logo_url, active, sort_order")
+      .eq("currency", invoice.currency)
+      .eq("active", true)
+      .order("sort_order")
+      .order("bank_name"),
+  ]);
+  return NextResponse.json({
+    invoice: safeInvoice,
+    items: items ?? [],
+    paymentSubmission: paymentSubmission ?? null,
+    receipt: receipt ? { ...receipt, invoice_number: invoice.invoice_number } : null,
+    bankAccounts: bankAccounts ?? [],
+    paymentOptions: { paystack: getPaystackStatus().configured, bankTransfer: (bankAccounts?.length || 0) > 0 },
+  });
 }

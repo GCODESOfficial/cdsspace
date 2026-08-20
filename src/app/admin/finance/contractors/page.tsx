@@ -69,7 +69,7 @@ export default function ContractorsPage() {
           </Button>
           <Dialog open={open} onOpenChange={setOpen}>
             <DialogTrigger asChild>
-              <Button className="h-11 px-5 rounded-xl bg-gradient-to-b from-blue-600 to-blue-700 shadow-lg shadow-blue-600/30">
+              <Button className="h-11 px-5 rounded-xl bg-[#0A4FE8] shadow-lg shadow-blue-600/30">
                 <Plus className="w-4 h-4 mr-1.5" /> New Contractor
               </Button>
             </DialogTrigger>
@@ -92,7 +92,7 @@ export default function ContractorsPage() {
               </div>
               <DialogFooter className="mt-5">
                 <Button variant="outline" className="h-11 px-5 rounded-xl" onClick={() => setOpen(false)}>Cancel</Button>
-                <Button onClick={save} className="h-11 px-5 rounded-xl bg-gradient-to-b from-blue-600 to-blue-700 shadow-lg shadow-blue-600/30">Save</Button>
+                <Button onClick={save} className="h-11 px-5 rounded-xl bg-[#0A4FE8] shadow-lg shadow-blue-600/30">Save</Button>
               </DialogFooter>
             </DialogContent>
           </Dialog>
@@ -127,7 +127,7 @@ export default function ContractorsPage() {
             <Link key={c.id} href={`/admin/finance/contractors/${c.id}`}>
               <div className={`${glassCard} p-5 hover:-translate-y-0.5 transition`}>
                 <div className="flex items-start gap-3">
-                  <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-violet-500 to-purple-500 grid place-items-center text-white font-semibold shadow-lg shadow-violet-500/20">
+                  <div className="w-12 h-12 rounded-xl bg-[#0A4FE8] grid place-items-center text-white font-semibold shadow-lg shadow-blue-600/20">
                     {c.name.charAt(0).toUpperCase()}
                   </div>
                   <div className="flex-1 min-w-0">

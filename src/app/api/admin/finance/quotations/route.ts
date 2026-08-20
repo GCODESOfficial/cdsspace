@@ -1,9 +1,10 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { NextRequest, NextResponse } from "next/server";
 import { financeDb, requireFinanceAdminAsync } from "@/lib/finance/api-auth";
-import { generateQuotationNumber, randomToken, DEFAULT_QUOTATION_ESTIMATE_NOTE } from "@/lib/finance/types";
+import { CURRENCIES, generateQuotationNumber, randomToken, DEFAULT_QUOTATION_ESTIMATE_NOTE } from "@/lib/finance/types";
 import { logActivity } from "@/lib/activity-log";
 import { recordResourceVersion } from "@/lib/admin-versioning";
+import { resolveClientBillingCurrency } from "@/lib/client-billing-server";
 
 function cleanSamples(samples: unknown[]) {
   return samples
@@ -47,7 +48,7 @@ export async function POST(req: NextRequest) {
     client_name,
     client_email,
     client_address,
-    currency = "NGN",
+    currency: requestedCurrency = "NGN",
     tax_rate = 0,
     discount = 0,
     status = "draft",
@@ -75,6 +76,10 @@ export async function POST(req: NextRequest) {
   const quotation_number = generateQuotationNumber();
   const public_token = randomToken(28);
   const sb = financeDb();
+  const requestedCurrencyCode = CURRENCIES.includes(String(requestedCurrency).toUpperCase() as (typeof CURRENCIES)[number])
+    ? String(requestedCurrency).toUpperCase()
+    : "NGN";
+  const currency = await resolveClientBillingCurrency(sb, client_email, requestedCurrencyCode);
 
   const insertPayload = {
     quotation_number,

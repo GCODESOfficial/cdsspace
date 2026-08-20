@@ -11,9 +11,19 @@ CREATE TABLE IF NOT EXISTS public.plan_pricing (
   price_usd NUMERIC(10,2) NOT NULL DEFAULT 0,
   price_ngn NUMERIC(12,2) NOT NULL DEFAULT 0,
   price_rwf NUMERIC(12,2) NOT NULL DEFAULT 0,
+  price_gbp NUMERIC(12,2) NOT NULL DEFAULT 0,
+  price_eur NUMERIC(12,2) NOT NULL DEFAULT 0,
+  price_cny NUMERIC(12,2) NOT NULL DEFAULT 0,
+  price_aed NUMERIC(12,2) NOT NULL DEFAULT 0,
   updated_at TIMESTAMPTZ DEFAULT now() NOT NULL,
   UNIQUE(plan, industry)
 );
+
+ALTER TABLE public.plan_pricing
+  ADD COLUMN IF NOT EXISTS price_gbp NUMERIC(12,2) NOT NULL DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS price_eur NUMERIC(12,2) NOT NULL DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS price_cny NUMERIC(12,2) NOT NULL DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS price_aed NUMERIC(12,2) NOT NULL DEFAULT 0;
 
 -- 2. Enable RLS
 ALTER TABLE public.plan_pricing ENABLE ROW LEVEL SECURITY;
@@ -23,7 +33,6 @@ DROP POLICY IF EXISTS "Allow public read on plan_pricing" ON public.plan_pricing
 CREATE POLICY "Allow public read on plan_pricing"
   ON public.plan_pricing FOR SELECT USING (true);
 
--- 4. Authenticated write (admin)
+-- 4. Pricing writes go through the permission-checked admin API. The service
+-- role bypasses RLS, so no browser-authenticated write policy is required.
 DROP POLICY IF EXISTS "Allow authenticated write on plan_pricing" ON public.plan_pricing;
-CREATE POLICY "Allow authenticated write on plan_pricing"
-  ON public.plan_pricing FOR ALL USING (true) WITH CHECK (true);

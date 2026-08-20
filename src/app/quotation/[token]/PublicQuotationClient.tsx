@@ -4,11 +4,11 @@ import { useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { Footer } from "@/components/layout/Footer";
 import QuotationDocument from "@/components/finance/QuotationDocument";
+import { UniversalShareButton } from "@/components/share/UniversalShareButton";
 import { Button } from "@/components/ui/button";
-import { Download, Share2 } from "lucide-react";
+import { Download } from "lucide-react";
 import type { FinanceQuotation, FinanceQuotationItem, FinanceQuotationSample } from "@/lib/finance/types";
 import { buildQuotationShareMessage } from "@/lib/finance/share";
-import { appToast } from "@/lib/app-notify";
 
 export default function PublicQuotationClient({ token }: { token: string }) {
   const sp = useSearchParams();
@@ -88,30 +88,18 @@ export default function PublicQuotationClient({ token }: { token: string }) {
           }
         }
       `}</style>
-      <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-blue-50 py-10 px-4 print:bg-white print:py-0 print:px-0">
+      <div className="min-h-screen bg-[#F5F8FF] py-10 px-4 print:bg-white print:py-0 print:px-0">
         <div className="max-w-[820px] mx-auto mb-6 flex justify-end gap-2 no-print">
-          <Button
-            variant="outline"
-            onClick={() => {
-              const shareText = buildQuotationShareMessage(quotation?.quotation_number, window.location.href);
-              if (navigator.share) {
-                navigator.share({
-                  title: `Quotation ${quotation?.quotation_number || ""}`,
-                  text: shareText,
-                }).catch(() => {});
-              } else {
-                navigator.clipboard.writeText(shareText);
-                appToast({ message: "Quotation link copied to clipboard", kind: "success" });
-              }
-            }}
+          <UniversalShareButton
+            title={`Quotation ${quotation?.quotation_number || ""}`.trim()}
+            text={buildQuotationShareMessage(quotation?.quotation_number, "").trim()}
+            url={`/quotation/${token}`}
             className="h-11 px-5 rounded-xl border-blue-200 text-blue-700 hover:bg-blue-50"
-          >
-            <Share2 className="w-4 h-4 mr-1.5" /> Share
-          </Button>
+          />
           <Button
             onClick={handleDownload}
             disabled={isDownloading}
-            className="h-11 px-5 rounded-xl bg-gradient-to-b from-blue-600 to-blue-700 shadow-lg shadow-blue-600/30 disabled:opacity-70"
+            className="h-11 px-5 rounded-xl bg-[#0A4FE8] shadow-lg shadow-blue-600/30 disabled:opacity-70"
           >
             {isDownloading ? (
               <span className="flex items-center gap-2">

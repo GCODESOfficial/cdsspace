@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { verifyAdmin, verifyUser } from "@/lib/admin-auth";
 import { supabaseAdmin } from "@/lib/supabase";
+import { isLegacyClientUuid } from "@/lib/client-routes";
 
 export const dynamic = "force-dynamic";
 
@@ -13,9 +14,21 @@ export async function GET(request: Request) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const userId = admin ? admin.id : userSession!.user.id;
-
     const { searchParams } = new URL(request.url);
+    const clientActorRequested = searchParams.get("actor") === "client";
+    if (clientActorRequested && !userSession) {
+      return NextResponse.json({ error: "Client session required" }, { status: 401 });
+    }
+
+    const isAdmin = !!admin && !clientActorRequested;
+    const userId = isAdmin ? admin.id : userSession!.user.id;
+    // Environment-authenticated admins do not necessarily have a profiles row.
+    // Notifications are profile-scoped UUIDs, so never query the UUID column with
+    // the email fallback returned by the legacy admin session helper.
+    if (isAdmin && !isLegacyClientUuid(userId)) {
+      return NextResponse.json({ notifications: [] });
+    }
+
     const unreadOnly = searchParams.get("unreadOnly") === "true";
     const limit = parseInt(searchParams.get("limit") || "20", 10);
 
@@ -55,10 +68,19 @@ export async function PATCH(request: Request) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const userId = admin ? admin.id : userSession!.user.id;
-
     const body = await request.json();
     const { ids, markAll } = body;
+
+    const clientActorRequested = body.actor === "client";
+    if (clientActorRequested && !userSession) {
+      return NextResponse.json({ error: "Client session required" }, { status: 401 });
+    }
+
+    const isAdmin = !!admin && !clientActorRequested;
+    const userId = isAdmin ? admin.id : userSession!.user.id;
+    if (isAdmin && !isLegacyClientUuid(userId)) {
+      return NextResponse.json({ success: true });
+    }
 
     if (!ids && !markAll) {
       return NextResponse.json(

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { v4 as uuidv4 } from "uuid";
 import { financeDb, requireFinanceAdminAsync } from "@/lib/finance/api-auth";
+import { assertCleanBuffer } from "@/lib/upload-security";
 
 export async function POST(req: NextRequest) {
   const denied = await requireFinanceAdminAsync(req); if (denied) return denied;
@@ -12,6 +13,7 @@ export async function POST(req: NextRequest) {
   const path = `${folder}/${uuidv4()}.${ext}`;
   const sb = financeDb();
   const buffer = Buffer.from(await file.arrayBuffer());
+  assertCleanBuffer(buffer);
   const { error } = await sb.storage.from("media").upload(path, buffer, { contentType: file.type, upsert: false });
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   const { data } = sb.storage.from("media").getPublicUrl(path);

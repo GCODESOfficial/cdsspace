@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import {
   AlertTriangle,
   CalendarDays,
+  CalendarRange,
   CheckCircle2,
   Clock,
   Download,
@@ -18,6 +19,7 @@ import {
 import type { LucideIcon } from "lucide-react";
 import { appAlert, appToast } from "@/lib/app-notify";
 import { formatWorkMode, statusLabel, TIMEBOOK_OFFICE, WORK_MODES } from "@/lib/timebook";
+import { MonthlyAttendanceReport } from "@/components/admin/MonthlyAttendanceReport";
 
 interface TimebookEntry {
   id: string;
@@ -164,6 +166,7 @@ export default function AdminTimebookPage() {
   const [generatedCode, setGeneratedCode] = useState<string | null>(null);
   const [officeForm, setOfficeForm] = useState({ name: "", address: "", latitude: "", longitude: "", radius_meters: "" });
   const [savingOffice, setSavingOffice] = useState(false);
+  const [monthlyReportOpen, setMonthlyReportOpen] = useState(false);
 
   const load = async () => {
     setLoading(true);
@@ -390,7 +393,7 @@ export default function AdminTimebookPage() {
         <header className="flex flex-col gap-5 xl:flex-row xl:items-end xl:justify-between">
           <div>
             <p className="text-sm font-semibold text-[#0A4FE8]">HRM</p>
-            <h1 className="mt-1 text-3xl font-bold tracking-tight text-[#0D1B39] sm:text-[34px]">Team Timebook</h1>
+            <h1 className="mt-1 text-3xl font-bold tracking-tight text-[#0D1B39] sm:text-[34px]">Attendance</h1>
             <p className="mt-2 max-w-2xl text-sm text-gray-500">
               {officeForm.address || TIMEBOOK_OFFICE.address}
             </p>
@@ -416,18 +419,24 @@ export default function AdminTimebookPage() {
               <FilterInput label="From" value={from} onChange={(value) => { setRangeMode("custom"); setFrom(value); }} />
               <FilterInput label="To" value={to} onChange={(value) => { setRangeMode("custom"); setTo(value); }} />
             </div>
-            <div className="flex items-end gap-2">
+            <div className="grid grid-cols-2 items-end gap-2 sm:flex">
             <button
               onClick={load}
-              className="h-11 rounded-xl bg-[#0A4FE8] px-5 text-sm font-semibold text-white shadow-lg shadow-blue-600/20"
+              className="h-11 w-full rounded-xl bg-[#0A4FE8] px-5 text-sm font-semibold text-white shadow-lg shadow-blue-600/20 sm:w-auto"
             >
               Apply
             </button>
             <button
               onClick={exportCsv}
-              className="inline-flex h-11 items-center gap-2 rounded-xl border border-white bg-white px-4 text-sm font-semibold text-[#0D1B39] shadow-sm"
+              className="inline-flex h-11 w-full items-center justify-center gap-2 rounded-xl border border-white bg-white px-4 text-sm font-semibold text-[#0D1B39] shadow-sm sm:w-auto"
             >
               <Download className="h-4 w-4" /> CSV
+            </button>
+            <button
+              onClick={() => setMonthlyReportOpen(true)}
+              className="col-span-2 inline-flex h-11 w-full items-center justify-center gap-2 rounded-xl border border-blue-200 bg-blue-50 px-4 text-sm font-bold text-[#0A4FE8] shadow-sm sm:w-auto"
+            >
+              <CalendarRange className="h-4 w-4" /> Monthly table
             </button>
             </div>
           </div>
@@ -446,6 +455,18 @@ export default function AdminTimebookPage() {
               <Stat icon={XCircle} label="Absent" value={String(data?.stats.absent ?? 0)} />
               <Stat icon={AlertTriangle} label="Flagged" value={String(data?.stats.flagged ?? 0)} />
             </div>
+
+            {monthlyReportOpen && (
+              <MonthlyAttendanceReport
+                initialMonth={date.slice(0, 7)}
+                members={rows.map((row) => ({
+                  id: row.member.id,
+                  full_name: row.member.full_name,
+                  department: row.member.department,
+                }))}
+                onClose={() => setMonthlyReportOpen(false)}
+              />
+            )}
 
             <section className="rounded-2xl border border-white/80 bg-white p-5 shadow-sm">
               <div className="mb-4 flex items-center gap-2">

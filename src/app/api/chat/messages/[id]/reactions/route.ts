@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
-import { verifyAdmin, verifyUser } from "@/lib/admin-auth";
+import { verifyUser } from "@/lib/admin-auth";
+import { getClientChatAdminActor } from "@/lib/client-chat-admin";
 import { supabaseAdmin } from "@/lib/supabase";
 
 /**
@@ -9,11 +10,15 @@ import { supabaseAdmin } from "@/lib/supabase";
  */
 export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
-    const admin = await verifyAdmin();
+    const admin = await getClientChatAdminActor("messages.send");
     const userSession = await verifyUser();
     if (!admin && !userSession) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-    const userId = admin?.id ?? userSession?.user.id;
+    const userId = admin
+      ? `admin:${admin.email || admin.id}`
+      : userSession?.user.id
+        ? `client:${userSession.user.id}`
+        : null;
     if (!userId) return NextResponse.json({ error: "No user" }, { status: 401 });
 
     const { id } = await params;

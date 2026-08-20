@@ -127,6 +127,10 @@ export async function POST(req: NextRequest) {
   const title = cleanText(body.title);
   const message = cleanText(body.message);
   const link = cleanText(body.link) || null;
+  const imageUrl = cleanText(body.imageUrl) || null;
+  if (imageUrl && !/^https:\/\//i.test(imageUrl)) {
+    return NextResponse.json({ ok: false, error: "The announcement visual URL is invalid." }, { status: 400 });
+  }
 
   if (!["clients", "team", "project"].includes(audience)) {
     return NextResponse.json({ ok: false, error: "Choose a valid audience." }, { status: 400 });
@@ -156,7 +160,11 @@ export async function POST(req: NextRequest) {
       const ids = cleanUuidList(body.clientIds);
       if (ids.length > 0) {
         recipients = await glashQuery<{ id: string; email: string | null }>(
-          `select id, email from public.profiles where id = any($1::uuid[])`,
+          `select id, email
+             from public.profiles
+            where id = any($1::uuid[])
+              and email_verified_at is not null
+              and account_status = 'active'`,
           [ids],
         );
       }
@@ -164,7 +172,9 @@ export async function POST(req: NextRequest) {
       recipients = await glashQuery<{ id: string; email: string | null }>(
         `select id, email
            from public.profiles
-          where coalesce(lower(email), '') <> 'ceo@cdsspace.pro'
+          where email_verified_at is not null
+            and account_status = 'active'
+            and coalesce(lower(email), '') <> 'ceo@cdsspace.pro'
           order by created_at desc`,
       );
     }
@@ -176,16 +186,16 @@ export async function POST(req: NextRequest) {
     if (wantInApp) {
       await glashQuery(
         `insert into public.notifications (user_id, type, title, message, link)
-         select unnest($1::uuid[]), 'status_change', $2, $3, $4`,
+         select unnest($1::uuid[]), 'announcement', $2, $3, $4`,
         [recipientIds, title, message, link || "/dashboard"],
       );
       // Mirror into each client's dashboard Messages as a CDS Space message.
-      await deliverAnnouncementToClientChat(recipientIds, title, message).catch(() => 0);
+      await deliverAnnouncementToClientChat(recipientIds, title, message, imageUrl).catch(() => 0);
       channelSummary.in_app = recipientIds.length;
     }
     if (wantEmail) {
       const emails = recipients.map((r) => r.email).filter((e): e is string => !!e);
-      const emailResult = await deliverAnnouncementByEmail(emails, title, message, link).catch(() => ({ sent: 0, failed: emails.length }));
+      const emailResult = await deliverAnnouncementByEmail(emails, title, message, link, imageUrl).catch(() => ({ sent: 0, failed: emails.length }));
       channelSummary.email = emailResult;
     }
 
@@ -276,6 +286,7 @@ export async function POST(req: NextRequest) {
       audience,
       recipient_count: recipientIds.length,
       link,
+      image_url: imageUrl,
       channels: channelSummary,
     },
   });

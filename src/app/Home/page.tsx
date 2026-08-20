@@ -51,7 +51,7 @@ export default function Home() {
           {/* VIDEO */}
           <div className="relative w-full md:w-[400px] aspect-3/4 md:aspect-auto h-full md:h-[500px] flex justify-center items-center">
             <video
-              src="/brand-container-video.mp4"
+              src="/home/cds-space-brand-reel.mp4"
               autoPlay
               loop
               muted
@@ -72,7 +72,7 @@ export default function Home() {
 
           {/* IMAGES COLUMN */}
           <div className="relative w-full md:w-72 md:h-[500px] flex flex-col items-center md:justify-between gap-2">
-            <div className="w-full h-full md:h-1/2 aspect-square md:aspect-auto rounded-3xl bg-linear-to-br from-[#08129C] to-[#072056] flex items-center justify-center">
+            <div className="w-full h-full md:h-1/2 aspect-square md:aspect-auto rounded-3xl bg-[#0A4FE8] flex items-center justify-center">
               <Image
                 src="/images/unbranded_container.svg"
                 alt="Unbranded Container"
@@ -90,7 +90,7 @@ export default function Home() {
               className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-20"
             />
 
-            <div className="w-full h-full md:h-1/2 aspect-square md:aspect-auto rounded-3xl bg-linear-to-br from-[#08129C] to-[#072056] flex items-center justify-center">
+            <div className="w-full h-full md:h-1/2 aspect-square md:aspect-auto rounded-3xl bg-[#0A4FE8] flex items-center justify-center">
               <Image
                 src="/images/branded_container.svg"
                 alt="Branded Container"
@@ -193,7 +193,7 @@ export default function Home() {
               {/* LEFT VIDEO */}
               <div className="w-full md:w-[48%] h-[250px] md:h-auto rounded-xl overflow-hidden border-6 border-[#040B37]">
                 <video
-                  src="/videos/privix-old.mp4"
+                  src="/videos/cds-preview.mp4"
                   autoPlay
                   loop
                   muted
@@ -227,7 +227,7 @@ export default function Home() {
               {/* RIGHT VIDEO */}
               <div className="w-full md:w-[48%] h-[250px] md:h-auto rounded-2xl overflow-hidden border-6 border-[#040B37]">
                 <video
-                  src="/videos/privix-new.mp4"
+                  src="/videos/video-main.mp4"
                   autoPlay
                   loop
                   muted
@@ -277,9 +277,9 @@ export default function Home() {
                 Tell us your brand dreams. We’ll make them real.
               </p>
             </div>
-            <div className="flex bg-linear-to-b from-[#ffffff] to-[#5BA8FF] justify-center items-center">
+            <div className="flex items-center justify-center bg-[#EAF1FF]">
               <Image
-                src="/images/vision-illustration.gif"
+                src="/images/vision-illustration.svg"
                 alt="Share Your Vision"
                 width={200}
                 height={200}
@@ -303,7 +303,7 @@ export default function Home() {
             </div>
             <div className="w-full max-w-full h-auto rounded-xl overflow-hidden">
               <video
-                src="/videos/cds.mp4"
+                src="/home/cds-space-brand-reel.mp4"
                 autoPlay
                 loop
                 muted

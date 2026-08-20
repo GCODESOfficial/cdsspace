@@ -290,7 +290,7 @@ export const CollaborationLead = ({
                     className={cn(
                         "w-full h-[48px] lg:h-[52px] rounded-full flex items-center justify-center text-white text-[18px] font-medium transition-all shadow-md cursor-pointer",
                         (fullName && email)
-                            ? "bg-linear-to-r from-[#0035C1] to-[#0575FF] hover:brightness-110"
+                            ? "bg-[#0A4FE8] hover:brightness-110"
                             : "bg-[#1c4ed1] opacity-50 cursor-not-allowed"
                     )}
                 >

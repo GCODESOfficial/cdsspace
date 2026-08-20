@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import {
   Briefcase,
@@ -10,8 +10,10 @@ import {
   Clock,
   CalendarCheck,
   LogIn,
+  LogOut,
   ListPlus,
   FileText,
+  ChevronDown,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { useTranslation } from "@/lib/i18n/context";
@@ -26,6 +28,7 @@ interface OverviewData {
   recent_work: { id: string; title: string; category: string | null; cover_image: string | null }[];
   upcoming_meetings: { id: string; title: string; scheduled_for: string | null; room_code: string }[];
   resume_completion?: number;
+  attendance?: { clock_in_at: string | null; clock_out_at: string | null } | null;
 }
 
 export default function TeamOverviewPage() {
@@ -49,84 +52,54 @@ export default function TeamOverviewPage() {
   const resumeCompletion = Math.max(0, Math.min(100, data.resume_completion ?? 0));
 
   return (
-    <div className="space-y-5 md:space-y-6 max-w-[1400px]">
-      {/* Hero greeting */}
+    <div className="space-y-4 max-w-[1400px]">
+      {/* Hero greeting + primary actions */}
       <div
-        className="relative overflow-hidden rounded-[28px] p-5 sm:p-6 md:p-10 text-white"
-        style={{ backgroundImage: "linear-gradient(146.28deg, #0035C1 8.83%, #0575FF 86.3%)" }}
+        className="relative overflow-hidden rounded-[28px] bg-[#0A4FE8] p-5 text-white sm:p-6 md:p-8"
       >
         <div className="absolute -top-20 -right-20 w-80 h-80 bg-white/10 rounded-full blur-3xl" />
         <div className="absolute -bottom-12 -left-12 w-64 h-64 bg-white/5 rounded-full blur-3xl" />
-        <div className="relative">
-          <p className="text-[11px] uppercase tracking-[0.2em] text-white/70 font-semibold mb-2">
-            {t("overview.welcome")}
-          </p>
-          <h1 className="text-[28px] md:text-[36px] font-bold tracking-tight">
-            {member.full_name.split(" ")[0]}
-          </h1>
-          {member.role_title && (
-            <p className="text-white/80 mt-1 text-[14px]">{member.role_title}</p>
-          )}
-          <p className="text-white/80 mt-4 max-w-xl text-[14px] leading-relaxed">
-            Here&apos;s what&apos;s on your plate today. Keep up the craft - the world is watching.
-          </p>
+        <div className="relative flex flex-col gap-5 md:flex-row md:items-start md:justify-between">
+          <div className="min-w-0">
+            <p className="text-[11px] uppercase tracking-[0.2em] text-white/70 font-semibold mb-2">
+              {t("overview.welcome")}
+            </p>
+            <h1 className="text-[28px] md:text-[36px] font-bold tracking-tight">
+              {member.full_name.split(" ")[0]}
+            </h1>
+            {member.role_title && (
+              // Role sits +4px above the supporting line below it.
+              <p className="text-white/90 mt-1 text-[18px] font-medium">{member.role_title}</p>
+            )}
+            <p className="text-white/75 mt-3 max-w-xl text-[14px] leading-relaxed">
+              Here&apos;s what&apos;s on your plate today. Keep up the craft - the world is watching.
+            </p>
+          </div>
+
+          <HeroActions
+            unread={stats.unread_messages}
+            assigned={stats.assigned_work}
+            attendance={data.attendance}
+          />
         </div>
       </div>
 
-      {/* Quick actions */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4">
-        <QuickAction icon={CalendarCheck} label="My Day" desc="Today's tasks & report" href="/team/my-day" accent="bg-blue-50 text-brand-blue" />
-        <QuickAction icon={LogIn} label="Check in" desc="Clock in for today" href="/team/timebook" accent="bg-emerald-50 text-emerald-600" />
-        <QuickAction icon={ListPlus} label="Assign task" desc="Delegate to the team" href="/team/my-day" accent="bg-purple-50 text-purple-600" />
-        <Link
-          href="/team/cresume"
-          className="group bg-white rounded-2xl border border-brand-stroke/30 p-4 hover:border-amber-400/50 hover:shadow-[0_12px_28px_rgba(217,119,6,0.08)] transition"
-        >
-          <div className="flex items-center justify-between">
-            <div className="w-10 h-10 rounded-xl bg-amber-50 text-amber-600 flex items-center justify-center">
-              <FileText className="w-5 h-5" />
-            </div>
-            <span className="text-[20px] font-bold text-brand-navy tracking-tight">{resumeCompletion}%</span>
-          </div>
-          <p className="mt-3 text-[13px] font-bold text-brand-navy">
-            {resumeCompletion >= 100 ? "Resume complete" : "Complete your resume"}
-          </p>
-          <p className="text-[11px] text-brand-body/60 mb-2">
-            {resumeCompletion >= 100 ? "Your profile is all set." : "Stand out to clients and the team."}
-          </p>
-          <div className="h-1.5 rounded-full bg-brand-stroke/30 overflow-hidden">
-            <div className="h-full rounded-full bg-amber-500 transition-all" style={{ width: `${resumeCompletion}%` }} />
-          </div>
-        </Link>
-      </div>
-
-      {/* Stat cards */}
-      <div className="grid grid-cols-1 min-[420px]:grid-cols-2 lg:grid-cols-3 gap-3 md:gap-4">
-        <StatCard
-          icon={Briefcase}
-          label={t("overview.assignedWork")}
-          value={String(stats.assigned_work)}
-          accent="bg-blue-50 text-brand-blue"
-          href="/team/work"
-        />
-        <StatCard
-          icon={MessageSquare}
-          label={t("overview.unreadMessages")}
-          value={String(stats.unread_messages)}
-          accent="bg-purple-50 text-purple-600"
-          href="/team/chat"
-        />
-        <StatCard
-          icon={Video}
-          label={t("overview.upcomingMeetings")}
-          value={String(stats.upcoming_meetings)}
-          accent="bg-amber-50 text-amber-600"
-          href="/team/cmeet"
-        />
-      </div>
+      {/* Primary focus card - info only, not clickable */}
+      <section className="bg-white rounded-2xl border border-brand-stroke/30 p-4 sm:p-5 md:p-6">
+        <div className="mb-4">
+          <h2 className="text-[15px] font-bold text-brand-navy">Today at a glance</h2>
+          <p className="text-[12px] text-brand-body/60">A quick read on where things stand</p>
+        </div>
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+          <FocusStat icon={Briefcase} label={t("overview.assignedWork")} value={String(stats.assigned_work)} accent="bg-blue-50 text-brand-blue" />
+          <FocusStat icon={MessageSquare} label={t("overview.unreadMessages")} value={String(stats.unread_messages)} accent="bg-purple-50 text-purple-600" />
+          <FocusStat icon={Video} label={t("overview.upcomingMeetings")} value={String(stats.upcoming_meetings)} accent="bg-amber-50 text-amber-600" />
+          <FocusResume percent={resumeCompletion} />
+        </div>
+      </section>
 
       {/* Two-col: recent work + upcoming meetings */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
         <div className="lg:col-span-2 bg-white rounded-2xl border border-brand-stroke/30 overflow-hidden">
           <div className="px-4 sm:px-6 py-4 border-b border-brand-stroke/20 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div>
@@ -201,80 +174,186 @@ export default function TeamOverviewPage() {
           </div>
         </div>
       </div>
-
     </div>
   );
 }
 
-function QuickAction({
+/**
+ * The three primary actions that sit at the top-right of the hero on desktop
+ * and become a full-width, evenly-proportioned row on mobile.
+ */
+function HeroActions({
+  unread,
+  assigned,
+  attendance,
+}: {
+  unread: number;
+  assigned: number;
+  attendance?: { clock_in_at: string | null; clock_out_at: string | null } | null;
+}) {
+  const attendanceActive = Boolean(attendance?.clock_in_at && !attendance?.clock_out_at);
+  const attendanceRecorded = Boolean(attendance?.clock_out_at);
+  const AttendanceIcon = attendanceActive ? LogOut : LogIn;
+  const attendanceLabel = attendanceActive ? "Check out" : attendanceRecorded ? "Attendance" : "Check in";
+  return (
+    <div className="flex flex-wrap items-stretch gap-2 w-full md:w-auto md:flex-nowrap md:shrink-0">
+      {/* Primary - full width on mobile (row 1), inline on desktop */}
+      <Link
+        href="/team/taskboard"
+        className="basis-full md:basis-auto inline-flex items-center justify-center gap-1.5 rounded-xl bg-white px-4 py-2.5 text-[13px] font-semibold text-[#0035C1] shadow-sm hover:bg-white/90 transition whitespace-nowrap"
+      >
+        <ListPlus className="w-4 h-4" />
+        Assign task
+      </Link>
+      {/* Secondary - shares row 2 with the dropdown on mobile */}
+      <Link
+        href="/team/timebook"
+        className="flex-1 md:flex-none inline-flex items-center justify-center gap-1.5 rounded-xl bg-white/15 px-4 py-2.5 text-[13px] font-semibold text-white ring-1 ring-inset ring-white/30 hover:bg-white/25 transition whitespace-nowrap"
+      >
+        <AttendanceIcon className="w-4 h-4" />
+        {attendanceLabel}
+      </Link>
+      {/* Dropdown */}
+      <MoreMenu unread={unread} assigned={assigned} className="shrink-0" />
+    </div>
+  );
+}
+
+function MoreMenu({ unread, assigned, className = "" }: { unread: number; assigned: number; className?: string }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setOpen(false);
+    window.addEventListener("mousedown", onDown);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("mousedown", onDown);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+
+  return (
+    <div className={`relative ${className}`} ref={ref}>
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        aria-label="More actions"
+        className="w-full h-full inline-flex items-center justify-center gap-1 rounded-xl bg-white/15 px-3.5 py-2.5 text-[13px] font-semibold text-white ring-1 ring-inset ring-white/30 hover:bg-white/25 transition"
+      >
+        More
+        <ChevronDown className={`w-4 h-4 transition-transform ${open ? "rotate-180" : ""}`} />
+      </button>
+
+      {open && (
+        <div
+          role="menu"
+          className="absolute right-0 top-[calc(100%+8px)] z-40 w-56 rounded-2xl border border-brand-stroke/30 bg-white p-1.5 shadow-[0_18px_44px_rgba(13,27,57,0.16)]"
+        >
+          <MenuLink icon={CalendarCheck} label="My Day" href="/team/my-day" accent="bg-blue-50 text-brand-blue" onSelect={() => setOpen(false)} />
+          <MenuLink icon={MessageSquare} label="Unread messages" href="/team/chat" accent="bg-purple-50 text-purple-600" badge={unread} onSelect={() => setOpen(false)} />
+          <MenuLink icon={Briefcase} label="Assigned work" href="/team/work" accent="bg-blue-50 text-brand-blue" badge={assigned} onSelect={() => setOpen(false)} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+function MenuLink({
   icon: Icon,
   label,
-  desc,
   href,
   accent,
+  badge,
+  onSelect,
 }: {
   icon: LucideIcon;
   label: string;
-  desc: string;
   href: string;
   accent: string;
+  badge?: number;
+  onSelect: () => void;
 }) {
   return (
     <Link
       href={href}
-      className="group bg-white rounded-2xl border border-brand-stroke/30 p-4 hover:border-brand-blue/40 hover:shadow-[0_12px_28px_rgba(28,78,209,0.06)] transition"
+      role="menuitem"
+      onClick={onSelect}
+      className="flex items-center gap-3 rounded-xl px-2.5 py-2 text-[13px] font-medium text-brand-navy hover:bg-brand-bg/60 transition"
     >
-      <div className={`w-10 h-10 rounded-xl ${accent} flex items-center justify-center`}>
-        <Icon className="w-5 h-5" />
-      </div>
-      <p className="mt-3 text-[13px] font-bold text-brand-navy">{label}</p>
-      <p className="text-[11px] text-brand-body/60">{desc}</p>
+      <span className={`w-8 h-8 rounded-lg ${accent} flex items-center justify-center shrink-0`}>
+        <Icon className="w-4 h-4" />
+      </span>
+      <span className="flex-1 truncate">{label}</span>
+      {typeof badge === "number" && badge > 0 && (
+        <span className="min-w-[20px] h-5 px-1.5 rounded-full bg-brand-blue text-white text-[11px] font-bold inline-flex items-center justify-center">
+          {badge}
+        </span>
+      )}
     </Link>
   );
 }
 
-function StatCard({
+function FocusStat({
   icon: Icon,
   label,
   value,
-  subtext,
   accent,
-  href,
 }: {
   icon: LucideIcon;
   label: string;
   value: string;
-  subtext?: string;
   accent: string;
-  href: string;
 }) {
   return (
-    <Link
-      href={href}
-      className="group bg-white rounded-2xl border border-brand-stroke/30 p-4 sm:p-5 hover:border-brand-blue/40 hover:shadow-[0_12px_28px_rgba(28,78,209,0.06)] transition"
-    >
-      <div className={`w-10 h-10 rounded-xl ${accent} flex items-center justify-center mb-4`}>
-        <Icon className="w-5 h-5" />
+    <div className="rounded-xl bg-brand-bg/50 border border-brand-stroke/20 p-4">
+      <div className="flex items-center gap-2">
+        <span className={`w-8 h-8 rounded-lg ${accent} flex items-center justify-center shrink-0`}>
+          <Icon className="w-4 h-4" />
+        </span>
+        <p className="text-[11px] uppercase tracking-[0.12em] font-semibold text-brand-body/50 leading-tight">
+          {label}
+        </p>
       </div>
-      <p className="text-[11px] uppercase tracking-[0.15em] font-semibold text-brand-body/50 mb-1">
-        {label}
+      <p className="mt-3 text-[26px] font-bold text-brand-navy tracking-tight leading-none">{value}</p>
+    </div>
+  );
+}
+
+function FocusResume({ percent }: { percent: number }) {
+  return (
+    <div className="rounded-xl bg-brand-bg/50 border border-brand-stroke/20 p-4">
+      <div className="flex items-center justify-between">
+        <span className="w-8 h-8 rounded-lg bg-amber-50 text-amber-600 flex items-center justify-center shrink-0">
+          <FileText className="w-4 h-4" />
+        </span>
+        <span className="text-[20px] font-bold text-brand-navy tracking-tight leading-none">{percent}%</span>
+      </div>
+      <p className="mt-3 text-[11px] uppercase tracking-[0.12em] font-semibold text-brand-body/50">
+        {percent >= 100 ? "Resume complete" : "Resume progress"}
       </p>
-      <p className="text-[22px] font-bold text-brand-navy tracking-tight">{value}</p>
-      {subtext && <p className="text-[11px] text-brand-body/60 mt-1 truncate">{subtext}</p>}
-    </Link>
+      <div className="mt-2 h-1.5 rounded-full bg-brand-stroke/30 overflow-hidden">
+        <div className="h-full rounded-full bg-amber-500 transition-all" style={{ width: `${percent}%` }} />
+      </div>
+    </div>
   );
 }
 
 function OverviewSkeleton() {
   return (
-    <div className="space-y-6">
-      <div className="rounded-3xl h-48 bg-brand-stroke/30 animate-pulse" />
-      <div className="grid grid-cols-1 min-[420px]:grid-cols-2 lg:grid-cols-3 gap-4">
-        {[1, 2, 3].map((i) => (
-          <div key={i} className="h-32 bg-brand-stroke/30 rounded-2xl animate-pulse" />
-        ))}
+    <div className="space-y-4">
+      <div className="rounded-[28px] h-44 bg-brand-stroke/30 animate-pulse" />
+      <div className="rounded-2xl h-40 bg-brand-stroke/30 animate-pulse" />
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
+        <div className="lg:col-span-2 h-80 bg-brand-stroke/30 rounded-2xl animate-pulse" />
+        <div className="h-80 bg-brand-stroke/30 rounded-2xl animate-pulse" />
       </div>
-      <div className="h-80 bg-brand-stroke/30 rounded-2xl animate-pulse" />
     </div>
   );
 }

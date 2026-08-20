@@ -1,7 +1,6 @@
 "use client";
 
 import React, { useRef, useState } from "react";
-import Image from "next/image";
 import { X, Plus, UploadCloud, FolderOpen, LucideIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -10,6 +9,7 @@ import { cn } from "@/lib/utils";
  */
 export interface AssetFile extends File {
     preview?: string | null;
+    previewKind?: "image" | "pdf";
     status?: "idle" | "uploading" | "success" | "error";
     progress?: number;
     storagePath?: string;
@@ -52,6 +52,19 @@ export const AssetHub = ({
     const [error, setError] = useState<string | null>(null);
     const fileInputRef = useRef<HTMLInputElement>(null);
     const maxBytes = maxSizeMB * 1024 * 1024;
+    const activeFileCount = files.filter((file) => file.status !== "error").length;
+
+    const matchesAcceptedType = (file: File) => {
+        const rules = acceptedTypes.split(",").map((rule) => rule.trim().toLowerCase()).filter(Boolean);
+        if (rules.length === 0) return true;
+        const fileName = file.name.toLowerCase();
+        const mimeType = file.type.toLowerCase();
+        return rules.some((rule) => {
+            if (rule.startsWith(".")) return fileName.endsWith(rule);
+            if (rule.endsWith("/*")) return mimeType.startsWith(rule.slice(0, -1));
+            return mimeType === rule;
+        });
+    };
 
     const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
         const selectedFiles = Array.from(e.target.files || []);
@@ -59,30 +72,46 @@ export const AssetHub = ({
     };
 
     const addFiles = (newFiles: File[]) => {
-        const remainingSlots = maxFiles - files.length;
+        // Failed uploads are replaceable and must never consume an upload slot.
+        const remainingSlots = maxFiles - activeFileCount;
         if (remainingSlots <= 0) return;
 
-        // Filter out files larger than max size
+        // Validate size and type for both picker and drag-and-drop uploads.
         const oversize = newFiles.filter(f => f.size > maxBytes);
-        if (oversize.length > 0) {
-            setError(`${oversize.length} file${oversize.length > 1 ? "s" : ""} exceeded ${maxSizeMB}MB and were skipped.`);
+        const unsupported = newFiles.filter((file) => !matchesAcceptedType(file));
+        if (oversize.length > 0 || unsupported.length > 0) {
+            const messages = [
+                oversize.length > 0 ? `${oversize.length} file${oversize.length > 1 ? "s" : ""} exceeded ${maxSizeMB}MB` : null,
+                unsupported.length > 0 ? `${unsupported.length} file${unsupported.length > 1 ? "s use" : " uses"} an unsupported format` : null,
+            ].filter(Boolean);
+            setError(`${messages.join(" and ")}; ${messages.length > 1 ? "they were" : "it was"} skipped.`);
             setTimeout(() => setError(null), 4000);
         }
-        const validFiles = newFiles.filter(f => f.size <= maxBytes);
+        const validFiles = newFiles.filter((file) => file.size <= maxBytes && matchesAcceptedType(file));
         const filesToAdd = validFiles.slice(0, remainingSlots);
         if (filesToAdd.length === 0) return;
-        const startIndex = files.length;
+
+        const retainedFiles = files.filter((file) => file.status !== "error");
+        files
+            .filter((file) => file.status === "error" && file.preview)
+            .forEach((file) => {
+                if (file.preview?.startsWith("blob:")) URL.revokeObjectURL(file.preview);
+            });
+        const startIndex = retainedFiles.length;
 
         const processedFiles = filesToAdd.map(file => {
-            const isImage = file.type.startsWith('image/');
+            const extension = file.name.split(".").pop()?.toLowerCase();
+            const isImage = file.type.startsWith("image/") || ["png", "jpg", "jpeg", "svg"].includes(extension || "");
+            const isPdf = file.type === "application/pdf" || extension === "pdf";
             const assetFile = file as AssetFile;
-            assetFile.preview = isImage ? URL.createObjectURL(file) : null;
+            assetFile.preview = isImage || isPdf ? URL.createObjectURL(file) : null;
+            assetFile.previewKind = isImage ? "image" : isPdf ? "pdf" : undefined;
             assetFile.status = onFileAdded ? "uploading" : "idle";
             assetFile.progress = 0;
             return assetFile;
         });
 
-        const updatedFiles = [...files, ...processedFiles];
+        const updatedFiles = [...retainedFiles, ...processedFiles];
         onUpdateFiles(updatedFiles);
 
         // Trigger uploads for new files
@@ -101,7 +130,7 @@ export const AssetHub = ({
             onCancelUpload(index);
         }
 
-        if (fileToRemove.preview) {
+        if (fileToRemove.preview?.startsWith("blob:")) {
             URL.revokeObjectURL(fileToRemove.preview);
         }
 
@@ -156,7 +185,7 @@ export const AssetHub = ({
                 ref={fileInputRef}
                 onChange={handleFileChange}
                 accept={acceptedTypes}
-                disabled={files.length >= maxFiles}
+                disabled={activeFileCount >= maxFiles}
             />
 
             {files.length === 0 ? (
@@ -177,12 +206,23 @@ export const AssetHub = ({
                     <div className="flex items-center gap-[10px] lg:gap-[12px] min-w-max h-full">
                         {files.map((file, idx) => (
                             <div key={idx} className="relative group w-[80px] h-[80px] lg:w-[100px] lg:h-[100px] shrink-0 rounded-[12px] overflow-hidden border border-brand-stroke bg-white shadow-sm flex flex-col items-center justify-center">
-                                {file.preview ? (
-                                    <Image
+                                {file.preview && file.previewKind === "image" ? (
+                                    <img
                                         src={file.preview}
                                         alt="Preview"
-                                        fill
-                                        className={cn("object-cover", file.status === "uploading" && "opacity-40 grayscale")}
+                                        loading="lazy"
+                                        decoding="async"
+                                        className={cn("absolute inset-0 h-full w-full object-cover", file.status === "uploading" && "opacity-40 grayscale")}
+                                        onError={(event) => {
+                                            const fallback = file.storagePath
+                                                ? `/api/banners/file?path=${encodeURIComponent(file.storagePath)}`
+                                                : null;
+                                            if (fallback && event.currentTarget.src !== new URL(fallback, window.location.origin).href) {
+                                                event.currentTarget.src = fallback;
+                                                return;
+                                            }
+                                            event.currentTarget.hidden = true;
+                                        }}
                                     />
                                 ) : (
                                     <div className={cn("flex flex-col items-center gap-2 p-3 text-center", file.status === "uploading" && "opacity-40")}>
@@ -205,25 +245,31 @@ export const AssetHub = ({
                                 )}
 
                                 {file.status === "error" && (
-                                    <div className="absolute inset-0 bg-red-50/80 flex flex-col items-center justify-center gap-1 z-20">
+                                    <div className="absolute inset-0 bg-red-50/80 flex flex-col items-center justify-center gap-1 z-20 pointer-events-none">
                                         <X size={20} className="text-red-500" />
                                         <span className="text-[10px] font-bold text-red-500 uppercase">Fail</span>
                                     </div>
                                 )}
                                 <button
+                                    type="button"
+                                    aria-label={`Remove ${file.name}`}
                                     onClick={(e) => {
                                         e.stopPropagation();
                                         removeFile(idx);
                                     }}
-                                    className="absolute top-1.5 right-1.5 w-6 h-6 bg-red-500 rounded-full flex items-center justify-center text-white opacity-0 group-hover:opacity-100 transition-opacity shadow-md cursor-pointer hover:bg-red-600 z-10"
+                                    className={cn(
+                                        "absolute top-1.5 right-1.5 w-6 h-6 bg-red-500 rounded-full flex items-center justify-center text-white transition-opacity shadow-md cursor-pointer hover:bg-red-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white focus-visible:ring-offset-2 focus-visible:ring-offset-red-500",
+                                        file.status === "error" ? "opacity-100 z-30" : "opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 z-30"
+                                    )}
                                 >
                                     <X size={14} />
                                 </button>
                             </div>
                         ))}
 
-                        {files.length < maxFiles && (
+                        {activeFileCount < maxFiles && (
                             <button
+                                type="button"
                                 onClick={() => fileInputRef.current?.click()}
                                 className="w-[80px] h-[80px] lg:w-[100px] lg:h-[100px] shrink-0 rounded-[12px] border-2 border-dashed border-brand-stroke hover:border-brand-blue/50 hover:bg-brand-blue/5 transition-all flex flex-col items-center justify-center gap-1.5 cursor-pointer group"
                             >

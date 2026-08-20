@@ -1,0 +1,19 @@
+name: Daily report
+
+# End-of-day platform report to the super-admin + CEO. Runs at 23:59 WAT
+# (Africa/Lagos, UTC+1) which is 22:59 UTC.
+
+on:
+  schedule:
+    - cron: "59 22 * * *"
+  workflow_dispatch: {}
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Send daily report
+        run: |
+          curl -fsS -X GET "https://cdsspace.pro/api/cron/daily-report" \
+            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
+            -w "\nHTTP %{http_code}\n"

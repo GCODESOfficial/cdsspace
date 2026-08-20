@@ -1,11 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
-import { requireFinanceAdmin } from "@/lib/finance/api-auth";
+import { requireFinanceAdminAsync } from "@/lib/finance/api-auth";
 import { getSupabaseAdmin } from "@/lib/supabase";
 import { generateInvoiceNumber, randomToken } from "@/lib/finance/types";
 import {
     isMissingInvoiceExtensionColumn,
     stripInvoiceExtensionFields,
 } from "@/lib/finance/invoice-schema-fallback";
+import { resolveClientBillingCurrency } from "@/lib/client-billing-server";
 
 /**
  * Create a draft invoice from a brand brief.
@@ -16,7 +17,7 @@ import {
  * populated from `assets_needed` at qty 1 / price 0 for the admin to cost.
  */
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-    const denied = requireFinanceAdmin(req);
+    const denied = await requireFinanceAdminAsync(req, "brand_briefs");
     if (denied) return denied;
 
     const { id } = await params;
@@ -37,6 +38,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
         brief.contact_phone?.trim() ? `Phone: ${brief.contact_phone.trim()}` : null,
     ].filter(Boolean);
     const clientAddress = clientAddressParts.length ? clientAddressParts.join(" · ") : null;
+    const currency = await resolveClientBillingCurrency(sb, clientEmail, "NGN");
 
     const invoicePayload = {
         invoice_number: generateInvoiceNumber(),
@@ -45,7 +47,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
         client_name: clientName,
         client_email: clientEmail,
         client_address: clientAddress,
-        currency: "NGN",
+        currency,
         subtotal: 0,
         tax_rate: 0,
         tax_amount: 0,

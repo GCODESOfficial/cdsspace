@@ -227,12 +227,13 @@ const LayoutSection = ({ block }: { block: LayoutBlock }) => {
     switch (block.type) {
         case 'FULL':
             return (
-                <div className="w-full relative rounded-[24px] overflow-hidden group">
+                <div data-cds-work-preview className="w-full relative rounded-[24px] overflow-hidden group">
                     <div className="aspect-[16/9] md:aspect-[2.5/1] relative w-full h-full">
                         <Image
                             src={block.src}
                             alt="Project showcase image"
                             fill
+                            draggable={false}
                             className="object-contain p-4 md:p-0"
                             sizes="100vw"
                         />
@@ -243,11 +244,12 @@ const LayoutSection = ({ block }: { block: LayoutBlock }) => {
             return (
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4 w-full">
                     {block.srcs.map((src, i) => (
-                        <div key={i} className="aspect-696/540 relative rounded-[24px] overflow-hidden group">
+                        <div key={i} data-cds-work-preview className="aspect-696/540 relative rounded-[24px] overflow-hidden group">
                             <Image
                                 src={src}
                                 alt={`Project detail image ${i + 1}`}
                                 fill
+                                draggable={false}
                                 className="object-contain transition-transform duration-700 group-hover:scale-105"
                                 sizes="(max-width: 768px) 100vw, 50vw"
                             />
@@ -259,11 +261,12 @@ const LayoutSection = ({ block }: { block: LayoutBlock }) => {
             return (
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4 w-full">
                     {block.srcs.map((src, i) => (
-                        <div key={i} className="aspect-[458.67/539.71] relative rounded-[24px] overflow-hidden group">
+                        <div key={i} data-cds-work-preview className="aspect-[458.67/539.71] relative rounded-[24px] overflow-hidden group">
                             <Image
                                 src={src}
                                 alt={`Project detail image ${i + 1}`}
                                 fill
+                                draggable={false}
                                 className="object-contain transition-transform duration-700 group-hover:scale-105"
                                 sizes="(max-width: 768px) 100vw, 33vw"
                             />

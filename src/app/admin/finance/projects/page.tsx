@@ -14,6 +14,8 @@ import FinanceShell, { glassCard } from "@/components/finance/FinanceShell";
 import StatCard from "@/components/finance/StatCard";
 import ModalHeader from "@/components/finance/ModalHeader";
 import { appAlert, appConfirm, appPrompt } from "@/lib/app-notify";
+import { useFinanceDisplayCurrency } from "@/components/finance/FinanceCurrencySelector";
+import { convertFinanceAmount } from "@/lib/finance/currency-display";
 
 interface ProjectRow {
   id: string;
@@ -43,8 +45,9 @@ export default function ProjectsPage() {
   const [projects, setProjects] = useState<ProjectRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [open, setOpen] = useState(false);
-  const [form, setForm] = useState({ name: "", client: "", currency: "NGN" as Currency, duration_start: "", duration_end: "", notes: "" });
+  const [form, setForm] = useState({ name: "", client: "", client_email: "", currency: "NGN" as Currency, duration_start: "", duration_end: "", notes: "" });
   const [saving, setSaving] = useState(false);
+  const { currency: displayCurrency, rates } = useFinanceDisplayCurrency();
 
   const load = async () => {
     setLoading(true);
@@ -69,7 +72,7 @@ export default function ProjectsPage() {
     setSaving(false);
     if (r.ok) {
       setOpen(false);
-      setForm({ name: "", client: "", currency: "NGN", duration_start: "", duration_end: "", notes: "" });
+      setForm({ name: "", client: "", client_email: "", currency: "NGN", duration_start: "", duration_end: "", notes: "" });
       load();
     } else {
       const d = await r.json();
@@ -79,8 +82,8 @@ export default function ProjectsPage() {
 
   const totals = projects.reduce(
     (acc, p) => {
-      acc.budget += Number(p.total_budget || 0);
-      acc.paid += Number(p.total_paid || 0);
+      acc.budget += convertFinanceAmount(p.total_budget, p.currency, displayCurrency, rates);
+      acc.paid += convertFinanceAmount(p.total_paid, p.currency, displayCurrency, rates);
       return acc;
     },
     { budget: 0, paid: 0 }
@@ -93,7 +96,7 @@ export default function ProjectsPage() {
       actions={
         <Dialog open={open} onOpenChange={setOpen}>
           <DialogTrigger asChild>
-            <Button className="h-11 px-5 rounded-xl bg-gradient-to-b from-blue-600 to-blue-700 hover:from-blue-600 hover:to-blue-800 shadow-lg shadow-blue-600/30">
+            <Button className="h-11 px-5 rounded-xl bg-[#0A4FE8] hover:bg-[#083FC2] shadow-lg shadow-blue-600/30">
               <Plus className="w-4 h-4 mr-1.5" /> New Project
             </Button>
           </DialogTrigger>
@@ -107,6 +110,10 @@ export default function ProjectsPage() {
               <div>
                 <Label className="text-xs uppercase tracking-wide text-gray-500">Client</Label>
                 <Input className="h-11 rounded-xl mt-1.5" value={form.client} onChange={(e) => setForm({ ...form, client: e.target.value })} placeholder="Client name" />
+              </div>
+              <div>
+                <Label className="text-xs uppercase tracking-wide text-gray-500">Client account email</Label>
+                <Input type="email" className="h-11 rounded-xl mt-1.5" value={form.client_email} onChange={(e) => setForm({ ...form, client_email: e.target.value })} placeholder="client@example.com" />
               </div>
               <div>
                 <Label className="text-xs uppercase tracking-wide text-gray-500">Currency</Label>
@@ -135,7 +142,7 @@ export default function ProjectsPage() {
             </div>
             <DialogFooter className="mt-5">
               <Button variant="outline" className="h-11 px-5 rounded-xl" onClick={() => setOpen(false)}>Cancel</Button>
-              <Button onClick={create} disabled={saving} className="h-11 px-5 rounded-xl bg-gradient-to-b from-blue-600 to-blue-700 shadow-lg shadow-blue-600/30">
+              <Button onClick={create} disabled={saving} className="h-11 px-5 rounded-xl bg-[#0A4FE8] shadow-lg shadow-blue-600/30">
                 {saving ? "Creating…" : "Create Project"}
               </Button>
             </DialogFooter>
@@ -145,9 +152,9 @@ export default function ProjectsPage() {
     >
       {/* summary stat row */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-5 mb-8">
-        <StatCard icon={Briefcase} label="Total Projects" value={String(projects.length)} accent="from-blue-500 to-indigo-500" />
-        <StatCard icon={Wallet} label="Combined Budget" value={formatMoney(totals.budget)} accent="from-emerald-500 to-teal-500" />
-        <StatCard icon={Banknote} label="Combined Paid" value={formatMoney(totals.paid)} accent="from-fuchsia-500 to-pink-500" />
+        <StatCard icon={Briefcase} label="Total Projects" value={String(projects.length)} accent="bg-[#0A4FE8]" />
+        <StatCard icon={Wallet} label={`Combined Budget · ${displayCurrency}`} value={formatMoney(totals.budget, displayCurrency)} accent="from-emerald-500 to-teal-500" />
+        <StatCard icon={Banknote} label={`Combined Paid · ${displayCurrency}`} value={formatMoney(totals.paid, displayCurrency)} accent="from-fuchsia-500 to-pink-500" />
       </div>
 
       {loading ? (
@@ -169,7 +176,7 @@ export default function ProjectsPage() {
                 <div className={`${glassCard} p-6 h-full transition hover:-translate-y-0.5 hover:shadow-[0_20px_50px_rgba(15,40,90,0.10)]`}>
                   <div className="flex items-start justify-between mb-4">
                     <div className="flex items-center gap-3">
-                      <div className="w-11 h-11 rounded-xl bg-gradient-to-br from-blue-500 to-indigo-500 grid place-items-center text-white font-semibold shadow-lg shadow-blue-600/20">
+                      <div className="w-11 h-11 rounded-xl bg-[#0A4FE8] grid place-items-center text-white font-semibold shadow-lg shadow-blue-600/20">
                         {p.name.charAt(0).toUpperCase()}
                       </div>
                       <div>
@@ -183,11 +190,13 @@ export default function ProjectsPage() {
                   <div className="grid grid-cols-2 gap-3 mb-4">
                     <div className="rounded-xl bg-gray-50/80 px-3 py-2.5">
                       <div className="text-[10px] uppercase tracking-wider text-gray-500">Budget</div>
-                      <div className="font-semibold text-gray-900">{formatMoney(p.total_budget, p.currency)}</div>
+                      <div className="font-semibold text-gray-900">{formatMoney(convertFinanceAmount(p.total_budget, p.currency, displayCurrency, rates), displayCurrency)}</div>
+                      {p.currency !== displayCurrency && <div className="truncate text-[9px] text-gray-400">Original: {formatMoney(p.total_budget, p.currency)}</div>}
                     </div>
                     <div className="rounded-xl bg-emerald-50/80 px-3 py-2.5">
                       <div className="text-[10px] uppercase tracking-wider text-emerald-700">Paid</div>
-                      <div className="font-semibold text-emerald-800">{formatMoney(p.total_paid, p.currency)}</div>
+                      <div className="font-semibold text-emerald-800">{formatMoney(convertFinanceAmount(p.total_paid, p.currency, displayCurrency, rates), displayCurrency)}</div>
+                      {p.currency !== displayCurrency && <div className="truncate text-[9px] text-emerald-600/70">Original: {formatMoney(p.total_paid, p.currency)}</div>}
                     </div>
                   </div>
 
@@ -196,7 +205,7 @@ export default function ProjectsPage() {
                       <span>Progress</span><span>{progress}%</span>
                     </div>
                     <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden">
-                      <div className="h-full bg-gradient-to-r from-blue-500 to-indigo-500 rounded-full transition-all" style={{ width: `${progress}%` }} />
+                      <div className="h-full bg-[#0A4FE8] rounded-full transition-all" style={{ width: `${progress}%` }} />
                     </div>
                   </div>
 
@@ -218,4 +227,3 @@ export default function ProjectsPage() {
     </FinanceShell>
   );
 }
-

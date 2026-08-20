@@ -1,4 +1,5 @@
 import { getSupabaseAdmin } from "@/lib/supabase";
+import { ADMIN_FEATURE_PERMISSION_KEYS, notifyAdminFeatureEvent } from "@/lib/admin-feature-notifications";
 import { roomIdFor, type MetaPlatform } from "./config";
 
 export interface InboundMetaMessage {
@@ -77,20 +78,15 @@ export async function ingestMetaMessage(msg: InboundMetaMessage) {
   // Only notify the super-admin on real-time inbounds; skip notifications during historical backfill.
   const isBackfillRow = Date.now() - new Date(msg.createdAtIso).getTime() > 24 * 60 * 60 * 1000;
   if (!msg.fromPage && !isBackfillRow) {
-    const { data: adminProfile } = await supabase
-      .from("profiles")
-      .select("id")
-      .eq("email", "ceo@cdsspace.pro")
-      .maybeSingle();
-    if (adminProfile?.id) {
-      await supabase.from("notifications").insert({
-        user_id: adminProfile.id,
-        type: "new_message",
-        title: `${msg.platform === "facebook" ? "Facebook" : "Instagram"} · ${msg.displayName || msg.externalUserId}`,
-        message: msg.body.length > 100 ? msg.body.slice(0, 100) + "..." : msg.body,
-        link: `/admin/messages?room=${encodeURIComponent(roomId)}`,
-      });
-    }
+    const channel = msg.platform === "facebook" ? "Facebook" : "Instagram";
+    await notifyAdminFeatureEvent({
+      permissionKeys: ADMIN_FEATURE_PERMISSION_KEYS.messages,
+      title: `New ${channel} message from ${msg.displayName || msg.username || msg.externalUserId}`,
+      body: msg.body.length > 160 ? `${msg.body.slice(0, 160)}...` : msg.body || "A client sent an attachment.",
+      link: `/admin/messages?room=${encodeURIComponent(roomId)}`,
+      eyebrow: `Chat/Meet · ${channel}`,
+      details: { Sender: msg.displayName || msg.username || msg.externalUserId, Channel: channel },
+    });
   }
 
   return { inserted: true, id: inserted?.id };

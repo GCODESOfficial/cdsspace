@@ -38,7 +38,7 @@ export default function ContractorOnboardPage({ params }: { params: Promise<{ to
 
   return (
     <>
-      <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-blue-50 py-12 px-4">
+      <div className="min-h-screen bg-[#F5F8FF] py-12 px-4">
         <div className="max-w-2xl mx-auto">
           <div className="flex items-center justify-center gap-3 mb-8">
             <Image src="/navbar/CDS Logo.svg" alt="CDS Space" width={56} height={56} />
@@ -93,7 +93,7 @@ export default function ContractorOnboardPage({ params }: { params: Promise<{ to
                 <Field label="Started Working With CDS"><Input type="date" className="h-11 rounded-xl" value={form.start_date} onChange={(e) => setForm({ ...form, start_date: e.target.value })} /></Field>
                 <div className="md:col-span-2"><Field label="Anything else?"><Textarea className="rounded-xl" value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} /></Field></div>
               </div>
-              <Button onClick={submit} disabled={state === "submitting"} className="mt-6 w-full h-12 rounded-xl bg-gradient-to-b from-blue-600 to-blue-700 shadow-lg shadow-blue-600/30">
+              <Button onClick={submit} disabled={state === "submitting"} className="mt-6 w-full h-12 rounded-xl bg-[#0A4FE8] shadow-lg shadow-blue-600/30">
                 {state === "submitting" ? "Submitting…" : "Submit Details"}
               </Button>
             </div>

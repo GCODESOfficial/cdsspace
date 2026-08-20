@@ -1,5 +1,5 @@
 -- ---------------------------------------------------------------------------
--- Team chat realtime engine — message change tracking
+-- Team chat realtime engine - message change tracking
 -- ---------------------------------------------------------------------------
 -- Adds a single `updated_at` column to team_chat_messages plus a trigger that
 -- bumps it on every INSERT or UPDATE. This is what powers incremental delta
@@ -8,11 +8,11 @@
 -- server answers with `WHERE updated_at > cursor`.
 --
 -- Because the trigger fires on UPDATE too, this transparently captures ALL
--- mutations — new messages, edits, soft-deletes, reactions, pins, stars,
--- bookmarks, schedule/translate — since every one of those is an UPDATE on the
+-- mutations - new messages, edits, soft-deletes, reactions, pins, stars,
+-- bookmarks, schedule/translate - since every one of those is an UPDATE on the
 -- message row. No application write-path changes are required.
 --
--- SAFETY: The app degrades gracefully if this migration has NOT been applied —
+-- SAFETY: The app degrades gracefully if this migration has NOT been applied -
 -- the messages API falls back to a created_at cursor (new-messages-only sync),
 -- so chat keeps working; you just don't get live reactions/edits for other
 -- viewers until this runs. Apply it to light up the full engine.
@@ -52,8 +52,8 @@ CREATE TRIGGER trg_team_chat_messages_updated_at
   EXECUTE FUNCTION team_chat_messages_touch_updated_at();
 
 -- 3. Indexes for the two hot access paths:
---    (a) delta sync  — WHERE thread_id = ? AND updated_at > ?  ORDER BY updated_at
---    (b) history page — WHERE thread_id = ? AND created_at < ?  ORDER BY created_at DESC
+--    (a) delta sync  - WHERE thread_id = ? AND updated_at > ?  ORDER BY updated_at
+--    (b) history page - WHERE thread_id = ? AND created_at < ?  ORDER BY created_at DESC
 CREATE INDEX IF NOT EXISTS idx_tcm_thread_updated_at
   ON team_chat_messages (thread_id, updated_at);
 

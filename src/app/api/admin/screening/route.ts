@@ -75,7 +75,7 @@ export async function GET() {
     try {
       rows = await glashQuery(listSelect("and coalesce(ra.is_archived, false) = false"));
     } catch (e) {
-      // role_applications.is_archived not migrated yet — filter the rest.
+      // role_applications.is_archived not migrated yet - filter the rest.
       if (e instanceof Error && /is_archived/.test(e.message)) {
         rows = await glashQuery(listSelect(""));
       } else {

@@ -68,9 +68,12 @@ export async function PATCH(req: Request) {
   }
   const db = supabaseAdmin as any;
   const value = action === "archive" ? new Date().toISOString() : null;
-  const { error } = await db.from("team_meetings").update({ archived_at: value }).in("id", ids);
+  // Team members may only touch meetings they created; admins act on any.
+  let q = db.from("team_meetings").update({ archived_at: value }).in("id", ids);
+  if (actor.kind !== "admin") q = q.eq("created_by", actor.id);
+  const { data, error } = await q.select("id");
   if (error) return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
-  return NextResponse.json({ ok: true, count: ids.length });
+  return NextResponse.json({ ok: true, count: (data || []).length });
 }
 
 /** Bulk delete - body: { ids: string[] }. */
@@ -82,9 +85,12 @@ export async function DELETE(req: Request) {
     return NextResponse.json({ ok: false, error: "ids required" }, { status: 400 });
   }
   const db = supabaseAdmin as any;
-  const { error } = await db.from("team_meetings").delete().in("id", ids);
+  // Team members may only delete meetings they created; admins delete any.
+  let q = db.from("team_meetings").delete().in("id", ids);
+  if (actor.kind !== "admin") q = q.eq("created_by", actor.id);
+  const { data, error } = await q.select("id");
   if (error) return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
-  return NextResponse.json({ ok: true, count: ids.length });
+  return NextResponse.json({ ok: true, count: (data || []).length });
 }
 
 export async function POST(req: Request) {

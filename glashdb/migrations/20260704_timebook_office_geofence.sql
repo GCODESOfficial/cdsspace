@@ -4,7 +4,7 @@
 -- the clock-in geofence. When empty/absent, the app falls back to the hardcoded
 -- TIMEBOOK_OFFICE default in src/lib/timebook.ts.
 --
--- Migrations here are MANUAL (no runner) — apply this SQL by hand against
+-- Migrations here are MANUAL (no runner) - apply this SQL by hand against
 -- GlashDB. Idempotent (IF NOT EXISTS).
 -- ---------------------------------------------------------------------------
 

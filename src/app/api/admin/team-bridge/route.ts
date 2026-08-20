@@ -72,7 +72,7 @@ export async function POST(req: NextRequest) {
   }
 
   const memberId = await ensureSuperAdminTeamMember();
-  const { sessionToken, deviceType, member } = await createTeamSession(memberId, req);
+  const { sessionToken, deviceType, member } = await createTeamSession(memberId, req, { source: "admin_bridge" });
   const res = NextResponse.json({ ok: true, member, device_type: deviceType });
   res.cookies.set(TEAM_SESSION_COOKIE, sessionToken, sessionCookieOptions());
   return res;

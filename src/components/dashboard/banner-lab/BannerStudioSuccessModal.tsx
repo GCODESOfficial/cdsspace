@@ -1,130 +1,39 @@
 "use client";
 
-import { useEffect } from "react";
-import { motion, AnimatePresence } from "framer-motion";
-import Image from "next/image";
-import confetti from "canvas-confetti";
+import Link from "next/link";
+import { AnimatePresence, motion } from "framer-motion";
+import { CheckCircle2, ExternalLink, ReceiptText } from "lucide-react";
 
 interface BannerStudioSuccessModalProps {
-    isOpen: boolean;
-    onClose: () => void;
+  isOpen: boolean;
+  invoiceUrl: string | null;
+  quotationNumber?: string | null;
+  onClose: () => void;
 }
 
-export const BannerStudioSuccessModal = ({ isOpen, onClose }: BannerStudioSuccessModalProps) => {
-    useEffect(() => {
-        if (isOpen) {
-            // High-fidelity celebration effect
-            const duration = 3 * 1000;
-            const animationEnd = Date.now() + duration;
-            const defaults = { startVelocity: 30, spread: 360, ticks: 60, zIndex: 999 };
-
-            const randomInRange = (min: number, max: number) => Math.random() * (max - min) + min;
-
-            const interval: any = setInterval(function () {
-                const timeLeft = animationEnd - Date.now();
-
-                if (timeLeft <= 0) {
-                    return clearInterval(interval);
-                }
-
-                const particleCount = 50 * (timeLeft / duration);
-
-                // Wide burst from the sides
-                confetti({
-                    ...defaults,
-                    particleCount,
-                    origin: { x: randomInRange(0.1, 0.3), y: Math.random() - 0.2 }
-                });
-                confetti({
-                    ...defaults,
-                    particleCount,
-                    origin: { x: randomInRange(0.7, 0.9), y: Math.random() - 0.2 }
-                });
-            }, 250);
-
-            // Immediate center burst
-            confetti({
-                particleCount: 150,
-                spread: 70,
-                origin: { y: 0.6 },
-                zIndex: 999
-            });
-
-            return () => clearInterval(interval);
-        }
-    }, [isOpen]);
-
-    return (
-        <AnimatePresence>
-            {isOpen && (
-                <>
-                    {/* Backdrop */}
-                    <motion.div
-                        initial={{ opacity: 0 }}
-                        animate={{ opacity: 1 }}
-                        exit={{ opacity: 0 }}
-                        onClick={onClose}
-                        className="fixed inset-0 bg-black/10 backdrop-blur-sm z-[100] cursor-pointer"
-                    />
-
-                    {/* Modal Container */}
-                    <div className="fixed inset-0 flex items-center justify-center p-4 z-[101] pointer-events-none">
-                        <motion.div
-                            initial={{ scale: 0.9, opacity: 0, y: 20 }}
-                            animate={{ scale: 1, opacity: 1, y: 0 }}
-                            exit={{ scale: 0.9, opacity: 0, y: 20 }}
-                            transition={{ type: "spring", damping: 25, stiffness: 300 }}
-                            className="bg-white border-4 border-[#e3e8f4] rounded-[24px] max-w-[520px] w-full p-[40px] relative overflow-hidden pointer-events-auto shadow-[0_32px_64px_-16px_rgba(0,0,0,0.1)] flex flex-col items-center"
-                        >
-                            {/* Celebrate Ornament */}
-                            {/* <div className="absolute top-[24px] left-[50%] -translate-x-1/2 w-[441px] h-[124px] opacity-60 pointer-events-none">
-                                <Image
-                                    src="/dashboard/subscription/celebrate.svg"
-                                    alt="Celebrate"
-                                    fill
-                                    className="object-contain"
-                                />
-                            </div> */}
-
-                            <div className="flex flex-col items-center gap-[40px] relative z-10 text-center w-full">
-                                {/* Success Icon Container */}
-                                <div className="flex flex-col items-center gap-[24px]">
-                                    <div className="w-[64px] h-[64px] relative shrink-0">
-                                        <Image
-                                            src="/dashboard/subscription/password-validation.svg"
-                                            alt="Validation"
-                                            width={64}
-                                            height={64}
-                                        />
-                                    </div>
-
-                                    {/* Text Content */}
-                                    <div className="flex flex-col gap-[16px] items-center">
-                                        <h2 className="text-[#040B37] text-[24px] font-semibold tracking-[-0.96px] leading-[1.24]">
-                                            Roll-up Banner request submitted!
-                                        </h2>
-                                        <p className="text-[#4b5563] text-[16px] font-medium tracking-[-0.16px] leading-relaxed max-w-[340px]">
-                                            A design specialist will contact you within 24 hours
-                                        </p>
-                                    </div>
-                                </div>
-
-                                {/* "Got it" Button */}
-                                <button
-                                    onClick={onClose}
-                                    className="bg-[#f4f6fb] border border-[#648efc] rounded-full p-[2px] transition-transform hover:scale-[1.02] active:scale-[0.98] w-fit"
-                                >
-                                    <div className="bg-linear-to-br from-[#0035C1] to-[#0575FF] px-[32px] py-[15px] rounded-full">
-                                        <span className="text-[#f4f6fb] text-[18px] font-medium tracking-[-0.18px]">
-                                            Got it
-                                        </span>
-                                    </div>
-                                </button>
-                            </div>
-                        </motion.div>
-                    </div>
-                </>
-            )}
-        </AnimatePresence>
-    );
+export const BannerStudioSuccessModal = ({ isOpen, invoiceUrl, quotationNumber, onClose }: BannerStudioSuccessModalProps) => {
+  const awaitingQuote = Boolean(quotationNumber && !invoiceUrl);
+  return (
+  <AnimatePresence>
+    {isOpen && <>
+      <motion.button type="button" aria-label="Close banner confirmation" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={onClose} className="fixed inset-0 z-[100] bg-[#07133B]/35 backdrop-blur-sm" />
+      <div className="pointer-events-none fixed inset-0 z-[101] grid place-items-center p-4">
+        <motion.section initial={{ opacity: 0, y: 18, scale: 0.97 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: 18, scale: 0.97 }} className="pointer-events-auto w-full max-w-[520px] overflow-hidden rounded-[28px] border border-blue-100 bg-white shadow-[0_35px_90px_rgba(7,19,59,0.25)]">
+          <div className="bg-[#0A4FE8] px-7 py-8 text-white">
+            <span className="grid h-12 w-12 place-items-center rounded-2xl bg-white/15 ring-1 ring-white/20"><CheckCircle2 className="h-7 w-7" /></span>
+            <h2 className="mt-5 text-[25px] font-bold tracking-tight">{awaitingQuote ? "Custom banner request submitted" : "Banner invoice ready"}</h2>
+            <p className="mt-2 text-[12px] leading-5 text-blue-100">{awaitingQuote ? "Your custom dimensions and artwork instructions have been sent to CDS Space for production and logistics pricing." : "Your request is saved as awaiting payment. It will enter the pending production queue only after payment is confirmed."}</p>
+          </div>
+          <div className="space-y-4 p-6">
+            <div className="flex items-start gap-3 rounded-2xl border border-slate-200 bg-slate-50 p-4"><ReceiptText className="mt-0.5 h-5 w-5 shrink-0 text-[#0A4FE8]" /><div><p className="text-[13px] font-bold text-[#0D1B39]">{awaitingQuote ? `${quotationNumber} is awaiting pricing` : "Your invoice is ready"}</p><p className="mt-1 text-[10px] leading-4 text-slate-500">{awaitingQuote ? "No price has been charged. Once the team confirms the real production, design and delivery costs, the converted invoice will appear in My Invoices for payment." : "Standard production is 3 business days. If delivery was tentative, logistics remains excluded and will be billed separately."}</p></div></div>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <button type="button" onClick={onClose} className="h-12 rounded-2xl border border-slate-200 text-[12px] font-bold text-[#0D1B39] hover:bg-slate-50">Back to banners</button>
+              {invoiceUrl && <Link href={invoiceUrl} target="_blank" className="inline-flex h-12 items-center justify-center gap-2 rounded-2xl bg-[#0A4FE8] text-[12px] font-bold text-white shadow-lg shadow-blue-600/20 hover:bg-[#083FC0]">View invoice <ExternalLink className="h-4 w-4" /></Link>}
+            </div>
+          </div>
+        </motion.section>
+      </div>
+    </>}
+  </AnimatePresence>
+  );
 };

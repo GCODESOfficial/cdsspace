@@ -359,7 +359,7 @@ export default function EditWorkPage() {
                   <SelectTrigger className="bg-white border-gray-300">
                     <SelectValue placeholder="Select a category" />
                   </SelectTrigger>
-                  <SelectContent className="bg-gradient-to-r rounded-lg from-[#08129C] to-[#072056] cursor-pointer text-white  border-gray-300">
+                  <SelectContent className="rounded-lg bg-[#0A4FE8] cursor-pointer text-white  border-gray-300">
                     {CATEGORIES.map((cat) => (
                       <SelectItem key={cat.slug} value={cat.name}>
                         {cat.name}
@@ -432,7 +432,7 @@ export default function EditWorkPage() {
           </Card>
 
           <div className="flex justify-end">
-            <Button type="button" onClick={handlePrepareSubmit} className="bg-gradient-to-r rounded-lg from-[#08129C] to-[#072056] cursor-pointer text-white ">
+            <Button type="button" onClick={handlePrepareSubmit} className="rounded-lg bg-[#0A4FE8] cursor-pointer text-white ">
               Save Changes
             </Button>
           </div>
@@ -468,7 +468,7 @@ export default function EditWorkPage() {
               <Button variant="outline" className="hover:bg-blue-50 cursor-pointer" onClick={() => setIsModalOpen(false)} disabled={isSubmitting}>
                 Cancel
               </Button>
-              <Button onClick={handleFinalSubmit} disabled={isSubmitting} className="bg-gradient-to-r rounded-lg from-[#08129C] to-[#072056] cursor-pointer text-white ">
+              <Button onClick={handleFinalSubmit} disabled={isSubmitting} className="rounded-lg bg-[#0A4FE8] cursor-pointer text-white ">
                 {isSubmitting ? "Updating..." : "Update Work"}
               </Button>
             </DialogFooter>

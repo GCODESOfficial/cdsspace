@@ -5,16 +5,15 @@ interface Props {
   icon: LucideIcon;
   label: string;
   value: string;
-  accent: string; // tailwind gradient e.g. "from-blue-500 to-indigo-500"
+  accent?: string;
   sub?: string;
 }
 
-export default function StatCard({ icon: Icon, label, value, accent, sub }: Props) {
+export default function StatCard({ icon: Icon, label, value, sub }: Props) {
   return (
     <div className={`${glassCard} p-6 relative overflow-hidden`}>
-      <div className={`absolute -top-10 -right-10 w-32 h-32 bg-gradient-to-br ${accent} opacity-10 blur-3xl rounded-full`} />
       <div className="relative">
-        <div className={`w-12 h-12 rounded-xl bg-gradient-to-br ${accent} grid place-items-center shadow-lg shadow-blue-600/15 mb-4`}>
+        <div className="mb-4 grid h-12 w-12 place-items-center rounded-xl bg-[#0A4FE8] shadow-lg shadow-blue-600/15">
           <Icon className="w-6 h-6 text-white" strokeWidth={2.2} />
         </div>
         <div className="text-[11px] uppercase tracking-wider text-gray-500 font-medium">{label}</div>

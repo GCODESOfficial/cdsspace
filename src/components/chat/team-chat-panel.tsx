@@ -3,7 +3,7 @@
 /* eslint-disable @next/next/no-img-element */
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { appPrompt, appConfirm, appAlert } from "@/lib/app-notify";
 import {
   Send,
@@ -49,6 +49,7 @@ import {
 import { cn, initials } from "@/lib/utils";
 import { validateChatUpload } from "@/lib/chat-upload-limits";
 import { Linkified, LinkPreview, firstUrl } from "@/components/chat/message-links";
+import { ChatSidebarPreview } from "@/components/chat/chat-sidebar-preview";
 import {
   ContextMenu,
   ContextMenuContent,
@@ -161,6 +162,14 @@ interface ChatMemberOption {
   department?: string | null;
   status?: "online" | "offline" | "break" | string;
 }
+
+// Synthetic "@everyone" mention option - pings every member of the thread.
+const EVERYONE_MENTION_ID = "__everyone__";
+const EVERYONE_OPTION: ChatMemberOption = {
+  id: EVERYONE_MENTION_ID,
+  full_name: "Everyone",
+  role_title: "Notify everyone in this chat",
+};
 
 interface ChatProjectOption {
   id: string;
@@ -365,6 +374,13 @@ export function TeamChatPanel({ initialThreadId }: { initialThreadId?: string | 
   const [actionMessage, setActionMessage] = useState<Message | null>(null);
   const [chatBackground, setChatBackground] = useState<ChatBackgroundKey>("mist");
   const [swipeHint, setSwipeHint] = useState<{ id: string; offset: number } | null>(null);
+  // @-mention state: members of the current thread, the active query, and which
+  // suggestion is highlighted. `mentionAnchor` is the index of the "@" that
+  // started the token so we can replace it on select.
+  const [mentionMembers, setMentionMembers] = useState<ChatMemberOption[]>([]);
+  const [mentionQuery, setMentionQuery] = useState<string | null>(null);
+  const [mentionAnchor, setMentionAnchor] = useState<number | null>(null);
+  const [mentionIndex, setMentionIndex] = useState(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const composerRef = useRef<HTMLTextAreaElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -423,6 +439,10 @@ export function TeamChatPanel({ initialThreadId }: { initialThreadId?: string | 
   }, []);
 
   const currentThread = threads.find((thread) => thread.id === selectedThread) || null;
+  // Files/media are allowed in group spaces (department & project group chats)
+  // and admin DMs, but blocked in 1-on-1 member chats. The server enforces the
+  // same rule; this just hides the affordance.
+  const attachmentsAllowed = !!currentThread && !(currentThread.kind === "direct" && !currentThread.includes_admin);
   const currentTheme = CHAT_BACKGROUNDS[chatBackground];
   // Announcement channels are read-only for everyone except management.
   const composerLocked = !!currentThread?.is_announcement_only && !viewer?.isManagement;
@@ -616,7 +636,7 @@ export function TeamChatPanel({ initialThreadId }: { initialThreadId?: string | 
     markThreadRead(selectedThread);
 
     // Fast incremental sync loop. Only new/changed rows come down each tick, so
-    // this is cheap enough to run frequently — ~1.8s feels near-live.
+    // this is cheap enough to run frequently - ~1.8s feels near-live.
     const interval = setInterval(() => {
       if (document.hidden) return; // pause when the tab is backgrounded
       syncDelta();
@@ -640,6 +660,93 @@ export function TeamChatPanel({ initialThreadId }: { initialThreadId?: string | 
     composerRef.current.style.height = "0px";
     composerRef.current.style.height = `${Math.min(composerRef.current.scrollHeight, 156)}px`;
   }, [input, editingMessageId]);
+
+  // Load the members of the selected thread so "@" can suggest them. Scoped to
+  // the thread's participants server-side.
+  useEffect(() => {
+    if (!selectedThread) {
+      setMentionMembers([]);
+      return;
+    }
+    let cancelled = false;
+    fetch(`/api/team/chat/members?threadId=${encodeURIComponent(selectedThread)}`, { credentials: "include" })
+      .then((res) => res.json())
+      .then((json) => { if (!cancelled && json.ok) setMentionMembers(json.members || []); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [selectedThread]);
+
+  // Close the mention menu whenever the composer is cleared (e.g. after send).
+  useEffect(() => {
+    if (!input) {
+      setMentionQuery(null);
+      setMentionAnchor(null);
+    }
+  }, [input]);
+
+  // Members matching the active "@" token (or all when the token is empty).
+  const mentionMatches = useMemo(() => {
+    if (mentionQuery == null) return [];
+    const q = mentionQuery.toLowerCase();
+    const members = mentionMembers
+      .filter((m) => {
+        if (!q) return true;
+        return [m.full_name, m.username].some((v) => (v || "").toLowerCase().includes(q));
+      })
+      .slice(0, 8);
+    // Offer @everyone when the query is empty or looks like "everyone"/"all".
+    const showEveryone = !q || "everyone".startsWith(q) || "all".startsWith(q);
+    return showEveryone ? [EVERYONE_OPTION, ...members] : members;
+  }, [mentionQuery, mentionMembers]);
+
+  const mentionActive = mentionQuery != null && mentionMatches.length > 0;
+
+  // Re-derive the @-token from the caret position after every edit.
+  const detectMention = (value: string, caret: number) => {
+    const upto = value.slice(0, caret);
+    const at = upto.lastIndexOf("@");
+    // Valid trigger: "@" at start or right after whitespace, with no space/
+    // newline between it and the caret.
+    if (at === -1 || (at > 0 && !/\s/.test(value[at - 1]))) {
+      setMentionQuery(null);
+      setMentionAnchor(null);
+      return;
+    }
+    const token = upto.slice(at + 1);
+    if (/\s/.test(token)) {
+      setMentionQuery(null);
+      setMentionAnchor(null);
+      return;
+    }
+    setMentionAnchor(at);
+    setMentionQuery(token);
+    setMentionIndex(0);
+  };
+
+  const onComposerChange = (value: string, caret: number) => {
+    setInput(value);
+    detectMention(value, caret);
+  };
+
+  // Replace the "@token" with "@Full Name " and drop the menu.
+  const insertMention = (member: ChatMemberOption) => {
+    if (mentionAnchor == null) return;
+    const el = composerRef.current;
+    const caret = el ? el.selectionStart : input.length;
+    const label = member.id === EVERYONE_MENTION_ID ? "everyone" : (member.full_name || member.username || "member").trim();
+    const before = input.slice(0, mentionAnchor);
+    const after = input.slice(caret);
+    const next = `${before}@${label} ${after}`;
+    setInput(next);
+    setMentionQuery(null);
+    setMentionAnchor(null);
+    const pos = before.length + label.length + 2; // "@" + label + trailing space
+    requestAnimationFrame(() => {
+      if (!el) return;
+      el.focus();
+      el.setSelectionRange(pos, pos);
+    });
+  };
 
   useEffect(() => {
     if (!selectedThread || !input.trim()) return;
@@ -867,6 +974,15 @@ export function TeamChatPanel({ initialThreadId }: { initialThreadId?: string | 
       return;
     }
 
+    // Files/media are only allowed in group spaces (department & project group
+    // chats) and admin DMs. The server enforces this too - this is a friendly
+    // early message for direct member chats.
+    if (!attachmentsAllowed) {
+      appAlert("Sharing files, images and videos isn't allowed in direct chats. Use your department or project group chat.");
+      if (fileInputRef.current) fileInputRef.current.value = "";
+      return;
+    }
+
     const isImage = file.type.startsWith("image/");
     const isVideo = file.type.startsWith("video/");
     const isPdf = file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf");
@@ -904,6 +1020,7 @@ export function TeamChatPanel({ initialThreadId }: { initialThreadId?: string | 
     try {
       const formData = new FormData();
       formData.append("file", file);
+      formData.append("threadId", selectedThread);
 
       const res = await fetch("/api/team/chat/upload", {
         method: "POST",
@@ -1161,9 +1278,10 @@ export function TeamChatPanel({ initialThreadId }: { initialThreadId?: string | 
                           </span>
                         )}
                       </div>
-                      <p className={cn("text-[12px] truncate mt-0.5", currentTheme.dark ? "text-slate-400" : "text-gray-400")}>
-                        {thread.last_message_preview || (thread.last_message ? describeMessage(thread.last_message) : "No messages yet")}
-                      </p>
+                      <ChatSidebarPreview
+                        text={thread.last_message_preview || (thread.last_message ? describeMessage(thread.last_message) : null)}
+                        className={cn("mt-0.5 h-4 text-[12px]", currentTheme.dark ? "text-slate-400" : "text-gray-400")}
+                      />
                     </div>
                     {selectedThread === thread.id && (
                       <div className="absolute left-0 top-1/2 -translate-y-1/2 w-1 h-8 rounded-r-lg" style={{ background: currentTheme.accent }} />
@@ -1296,7 +1414,7 @@ export function TeamChatPanel({ initialThreadId }: { initialThreadId?: string | 
                   setToolkitOpen(false);
                 }}
                 onStartCall={startCall}
-                onUpload={() => fileInputRef.current?.click()}
+                onUpload={attachmentsAllowed ? () => fileInputRef.current?.click() : undefined}
                 viewer={viewer}
                 onNewChat={() => setShowingNewChat(true)}
                 onThreadUpdated={fetchThreads}
@@ -1916,7 +2034,10 @@ export function TeamChatPanel({ initialThreadId }: { initialThreadId?: string | 
               <div className="flex items-end gap-2 sm:gap-3">
                 <input type="file" ref={fileInputRef} onChange={handleFileChange} className="hidden" accept="image/*,video/*,.pdf,.doc,.docx,.ppt,.pptx,.xls,.xlsx,.txt,.csv" />
 
-                {(viewer?.kind === "admin" || currentThread?.includes_admin) && (
+                {/* Files/media are allowed in group spaces (department & project
+                    group chats) and admin DMs, but blocked in 1-on-1 member
+                    chats. Server enforces this too. */}
+                {attachmentsAllowed && (
                   <button
                     onClick={() => fileInputRef.current?.click()}
                     disabled={uploading}
@@ -1972,12 +2093,90 @@ export function TeamChatPanel({ initialThreadId }: { initialThreadId?: string | 
                     </div>
 
                     <div className="flex-1 relative flex items-end">
+                      {mentionActive && (
+                        <div
+                          className={cn(
+                            "absolute bottom-full left-0 mb-2 w-72 max-h-64 overflow-y-auto rounded-2xl border shadow-xl z-30 py-1",
+                            currentTheme.dark ? "bg-slate-900 border-slate-700" : "bg-white border-slate-200",
+                          )}
+                        >
+                          <p className={cn("px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider", currentTheme.dark ? "text-slate-500" : "text-slate-400")}>
+                            Mention a member
+                          </p>
+                          {mentionMatches.map((member, i) => (
+                            <button
+                              key={member.id}
+                              type="button"
+                              // Use onMouseDown so the textarea doesn't lose focus/selection first.
+                              onMouseDown={(e) => { e.preventDefault(); insertMention(member); }}
+                              onMouseEnter={() => setMentionIndex(i)}
+                              className={cn(
+                                "w-full flex items-center gap-2.5 px-3 py-2 text-left transition",
+                                i === mentionIndex
+                                  ? currentTheme.dark ? "bg-slate-800" : "bg-blue-50"
+                                  : currentTheme.dark ? "hover:bg-slate-800/60" : "hover:bg-slate-50",
+                              )}
+                            >
+                              <span className={cn(
+                                "w-8 h-8 rounded-full grid place-items-center text-[11px] font-bold shrink-0 overflow-hidden",
+                                currentTheme.dark ? "bg-slate-700 text-slate-100" : "bg-blue-100 text-blue-700",
+                              )}>
+                                {member.id === EVERYONE_MENTION_ID
+                                  ? "@"
+                                  : member.avatar_url
+                                    ? <img src={member.avatar_url} alt="" className="w-full h-full object-cover" />
+                                    : initials(member.full_name || member.username || "?")}
+                              </span>
+                              <span className="min-w-0 flex-1">
+                                <span className={cn("block text-[13px] font-semibold truncate", currentTheme.dark ? "text-white" : "text-[#0D1B39]")}>
+                                  {member.full_name || member.username}
+                                </span>
+                                {member.role_title && (
+                                  <span className={cn("block text-[11px] truncate", currentTheme.dark ? "text-slate-400" : "text-slate-400")}>
+                                    {member.role_title}
+                                  </span>
+                                )}
+                              </span>
+                              {member.status === "online" && <span className="w-2 h-2 rounded-full bg-emerald-500 shrink-0" />}
+                            </button>
+                          ))}
+                        </div>
+                      )}
                       <textarea
                         ref={composerRef}
                         rows={1}
                         value={input}
-                        onChange={(event) => setInput(event.target.value)}
+                        onChange={(event) => onComposerChange(event.target.value, event.target.selectionStart)}
+                        onKeyUp={(event) => {
+                          // Keep the token in sync when moving the caret with arrows/click.
+                          if (["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) {
+                            detectMention(event.currentTarget.value, event.currentTarget.selectionStart);
+                          }
+                        }}
                         onKeyDown={(event) => {
+                          if (mentionActive) {
+                            if (event.key === "ArrowDown") {
+                              event.preventDefault();
+                              setMentionIndex((i) => (i + 1) % mentionMatches.length);
+                              return;
+                            }
+                            if (event.key === "ArrowUp") {
+                              event.preventDefault();
+                              setMentionIndex((i) => (i - 1 + mentionMatches.length) % mentionMatches.length);
+                              return;
+                            }
+                            if (event.key === "Enter" || event.key === "Tab") {
+                              event.preventDefault();
+                              insertMention(mentionMatches[mentionIndex]);
+                              return;
+                            }
+                            if (event.key === "Escape") {
+                              event.preventDefault();
+                              setMentionQuery(null);
+                              setMentionAnchor(null);
+                              return;
+                            }
+                          }
                           if (event.key === "Enter" && !event.shiftKey) {
                             event.preventDefault();
                             sendMessage();
@@ -2103,7 +2302,7 @@ function AdvancedChatToolkit({
   onSearch: () => void;
   onJump: (messageId: string) => void;
   onStartCall: (kind: "voice" | "video") => void;
-  onUpload: () => void;
+  onUpload?: () => void;
   viewer: ViewerInfo | null;
   onNewChat: () => void;
   onThreadUpdated: () => void;
@@ -2150,7 +2349,7 @@ function AdvancedChatToolkit({
       await navigator.clipboard?.writeText(thread.invite_code);
       appAlert({ title: "Invite", message: "Invite code copied to clipboard.", kind: "success" });
     } catch {
-      /* clipboard blocked — no-op */
+      /* clipboard blocked - no-op */
     }
   }
 
@@ -2222,9 +2421,11 @@ function AdvancedChatToolkit({
             <button onClick={() => onStartCall("video")} className="rounded-2xl bg-[#0A4FE8]/10 px-3 py-3 text-[#0A4FE8] text-[11px] font-bold flex flex-col items-center gap-1">
               <Video className="w-4 h-4" /> Video
             </button>
-            <button onClick={onUpload} className="rounded-2xl bg-[#0A4FE8]/10 px-3 py-3 text-[#0A4FE8] text-[11px] font-bold flex flex-col items-center gap-1">
-              <Paperclip className="w-4 h-4" /> Files
-            </button>
+            {onUpload && (
+              <button onClick={onUpload} className="rounded-2xl bg-[#0A4FE8]/10 px-3 py-3 text-[#0A4FE8] text-[11px] font-bold flex flex-col items-center gap-1">
+                <Paperclip className="w-4 h-4" /> Files
+              </button>
+            )}
           </div>
           <div className="mt-3 grid grid-cols-2 gap-2 text-[11px]">
             <div className={cn("rounded-2xl px-3 py-2", theme.dark ? "bg-slate-950/60 text-slate-300" : "bg-slate-50 text-slate-600")}>
@@ -2377,7 +2578,7 @@ function CollabToolPanel({
   savingThread: boolean;
   onClose: () => void;
   onStartCall: (kind: "voice" | "video") => void;
-  onUpload: () => void;
+  onUpload?: () => void;
   onNewChat: () => void;
   patchThread: (payload: Record<string, unknown>) => Promise<boolean>;
 }) {
@@ -2521,7 +2722,7 @@ function CollabToolPanel({
               {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />} Add
             </button>
           </div>
-          <button onClick={onUpload} className={cn("text-[12px] font-semibold text-[#0A4FE8]")}>Or upload from device →</button>
+          {onUpload && <button onClick={onUpload} className={cn("text-[12px] font-semibold text-[#0A4FE8]")}>Or upload from device →</button>}
         </div>
         <div className="mt-2 space-y-1.5">
           {data.files.length === 0 ? (
@@ -3069,7 +3270,7 @@ function NewChatRoomDialog({
   const filtered = members.filter((member) =>
     (member.full_name || member.username || "").toLowerCase().includes(search.toLowerCase()),
   );
-  const departments = Array.from(new Set(members.map((member) => member.department).filter(Boolean))).sort();
+  const departments = Array.from(new Set(members.map((member) => member.department).filter((d): d is string => !!d))).sort();
 
   async function create() {
     if (kind === "group" && !name.trim()) {

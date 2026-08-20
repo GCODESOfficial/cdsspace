@@ -5,11 +5,12 @@ import { motion, AnimatePresence } from "framer-motion";
 import Image from "next/image";
 import { supabase } from "@/lib/supabase";
 import FormattedRoleText from "@/components/hrm/FormattedRoleText";
+import { UniversalShareButton } from "@/components/share/UniversalShareButton";
 import { cn } from "@/lib/utils";
 import {
     Briefcase, MapPin, Clock, ArrowRight, Calendar,
     Coffee, GraduationCap, Award, Loader2, ExternalLink, X, Check, Plus,
-    Search, Copy, CheckCircle2, FileSearch, Globe2, ShieldCheck, Share2,
+    Search, Copy, CheckCircle2, FileSearch, Globe2, ShieldCheck,
 } from "lucide-react";
 
 interface OpenRole {
@@ -159,26 +160,6 @@ export default function CareerClient({ initialRoleId }: { initialRoleId?: string
         await writeToClipboard(roleLink(role.id));
         setCopiedRoleId(role.id);
         window.setTimeout(() => setCopiedRoleId(current => current === role.id ? null : current), 2000);
-    }
-
-    async function shareRoleLink(role: OpenRole) {
-        const url = roleLink(role.id);
-        const typeLabel = ROLE_TYPE_LABELS[role.role_type] || role.role_type;
-        const where = role.location ? ` · ${role.location}` : "";
-        if (navigator.share) {
-            try {
-                await navigator.share({
-                    title: `${role.title} - CDS Space`,
-                    text: `${role.title} (${typeLabel})${where} at CDS Space.`,
-                    url,
-                });
-                return;
-            } catch (error) {
-                if (error instanceof DOMException && error.name === "AbortError") return;
-            }
-        }
-
-        await copyRoleLink(role);
     }
 
     function openRole(role: OpenRole) {
@@ -494,15 +475,13 @@ export default function CareerClient({ initialRoleId }: { initialRoleId?: string
                                                 >
                                                     {isCopied ? <CheckCircle2 className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
                                                 </button>
-                                                <button
-                                                    type="button"
-                                                    onClick={() => shareRoleLink(role)}
-                                                    title="Share role"
-                                                    aria-label={`Share ${role.title}`}
-                                                    className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-brand-stroke bg-white text-brand-body transition hover:border-brand-blue/50 hover:text-brand-blue"
-                                                >
-                                                    <Share2 className="h-4 w-4" />
-                                                </button>
+                                                <UniversalShareButton
+                                                    title={`${role.title} - CDS Space`}
+                                                    text={`${role.title} (${ROLE_TYPE_LABELS[role.role_type] || role.role_type})${role.location ? `, ${role.location}` : ""} at CDS Space.`}
+                                                    url={roleLink(role.id)}
+                                                    label=""
+                                                    className="h-11 min-h-11 w-11 shrink-0 rounded-full border-brand-stroke p-0 text-brand-body shadow-none hover:border-brand-blue/50 hover:text-brand-blue"
+                                                />
                                                 <button
                                                     type="button"
                                                     onClick={() => openRole(role)}

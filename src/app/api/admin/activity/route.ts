@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase";
 import { getAdminSession } from "@/lib/admin-session";
 import { getPermissionForRoute, hasPermission, PERMISSION_GROUPS } from "@/lib/admin-permissions";
+import { insertActivityLog } from "@/lib/activity-log";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -60,4 +61,43 @@ export async function GET(req: NextRequest) {
         return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
     }
     return NextResponse.json({ ok: true, activities: data || [] });
+}
+
+/** Record authorised sub-admin page access from the shared admin shell. */
+export async function POST(req: NextRequest) {
+    const admin = await getAdminSession();
+    if (!admin) return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
+    if (admin.role !== "sub_admin") return NextResponse.json({ ok: true, logged: false });
+
+    const body = await req.json().catch(() => ({}));
+    const pathname = typeof body.pathname === "string" ? body.pathname.trim().split("?")[0] : "";
+    if (!pathname.startsWith("/admin") || pathname === "/admin/login") {
+        return NextResponse.json({ ok: false, error: "Invalid admin page." }, { status: 400 });
+    }
+
+    const permissionKey = getPermissionForRoute(pathname);
+    const canManageSubAdmins = pathname === "/admin/sub-admins"
+        && (admin.permissions.includes("all") || admin.permissions.includes("team_members.promote"));
+    if (permissionKey && !hasPermission(admin.permissions, permissionKey) && !canManageSubAdmins) {
+        return NextResponse.json({ ok: false, error: "Forbidden" }, { status: 403 });
+    }
+
+    const page = pathname.replace(/^\/admin\/?/, "") || "dashboard";
+    await insertActivityLog({
+        actor_kind: "admin",
+        actor_id: admin.memberId || admin.email,
+        actor_name: admin.name || admin.email,
+        actor_is_admin: true,
+        action: "page.access",
+        page,
+        resource_type: "admin_page",
+        resource_label: pathname,
+        metadata: {
+            permission: permissionKey,
+            source: admin.source || null,
+            role_title: admin.teamRoleTitle || null,
+            admin_role: admin.adminRoleName || null,
+        },
+    });
+    return NextResponse.json({ ok: true, logged: true });
 }

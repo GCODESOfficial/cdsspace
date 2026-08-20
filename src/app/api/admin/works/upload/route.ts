@@ -4,6 +4,7 @@ import { optimize } from "svgo";
 import { getGlashDbAdmin } from "@/lib/glashdb";
 import { getAdminSession } from "@/lib/admin-session";
 import { hasPermission } from "@/lib/admin-permissions";
+import { assertCleanBuffer } from "@/lib/upload-security";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -68,6 +69,8 @@ export async function POST(req: NextRequest) {
     if (ext === "pdf") contentType = "application/pdf";
   }
 
+  // Reject executables / EICAR before writing to storage.
+  assertCleanBuffer(body);
   const { error } = await storage.storage.from("media").upload(path, body, { contentType, upsert: false });
   if (error) {
     return NextResponse.json({ ok: false, error: error.message || "Upload failed." }, { status: 500 });

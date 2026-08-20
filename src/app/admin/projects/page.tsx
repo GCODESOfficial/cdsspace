@@ -23,7 +23,7 @@ interface ProjectSummary {
 }
 
 const SECTIONS = [
-  { href: "/admin/projects/list", label: "Projects", desc: "Create & manage projects with milestones", icon: Briefcase, tint: "from-blue-500 to-indigo-500" },
+  { href: "/admin/projects/list", label: "Projects", desc: "Create & manage projects with milestones", icon: Briefcase, tint: "bg-[#0A4FE8]" },
   { href: "/admin/projects/contractors", label: "Sub-contractors", desc: "Manage sub-contractors & assignments", icon: UserCog, tint: "from-violet-500 to-purple-500" },
   { href: "/admin/projects/subscriptions", label: "Inflow", desc: "Record positive funds received", icon: ArrowDownToLine, tint: "from-emerald-500 to-teal-500" },
 ];
@@ -89,7 +89,7 @@ export default function ProjectsOverview() {
           <Link key={s.href} href={s.href} className="group">
             <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-6 h-full hover:shadow-lg hover:-translate-y-0.5 transition-all">
               <div className="flex items-start justify-between mb-5">
-                <div className={`w-12 h-12 rounded-xl bg-gradient-to-br ${s.tint} grid place-items-center shadow-lg shadow-blue-600/10`}>
+                <div className={`w-12 h-12 rounded-xl bg-[#0A4FE8] grid place-items-center shadow-lg shadow-blue-600/10`}>
                   <s.icon className="w-6 h-6 text-white" />
                 </div>
                 <ArrowUpRight className="w-5 h-5 text-gray-300 group-hover:text-[#0A4FE8] transition" />

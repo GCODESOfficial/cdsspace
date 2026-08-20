@@ -12,8 +12,10 @@ export default function AdminNotificationBell() {
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [open, setOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
-  const prevUnreadCount = useRef<number>(0);
+  const previousUnreadIds = useRef<Set<string>>(new Set());
   const isFirstLoad = useRef<boolean>(true);
+  const requestActive = useRef(false);
+  const notificationsSnapshot = useRef("");
 
   // ---------- Play Sound ----------
   const playNotificationSound = useCallback(() => {
@@ -24,6 +26,8 @@ export default function AdminNotificationBell() {
 
   // ---------- Fetch ----------
   const fetchNotifications = useCallback(async () => {
+    if (requestActive.current) return;
+    requestActive.current = true;
     try {
       const res = await fetch(
         `/api/notifications?unreadOnly=true&limit=${MAX_DISPLAY}`
@@ -32,24 +36,40 @@ export default function AdminNotificationBell() {
       const data = await res.json();
       const newNotifications = data.notifications || [];
       
-      const newUnreadCount = newNotifications.filter((n: Notification) => !n.is_read).length;
-      
-      if (!isFirstLoad.current && newUnreadCount > prevUnreadCount.current) {
+      const unreadNotifications = newNotifications.filter((n: Notification) => !n.is_read);
+      // Client-message audio is handled globally by AdminSidebar so it also
+      // works away from the dashboard. Excluding it here prevents a double tone.
+      const hasNewAudibleNotification = unreadNotifications.some(
+        (notification: Notification) => notification.type !== "new_message" && !previousUnreadIds.current.has(notification.id),
+      );
+
+      if (!isFirstLoad.current && hasNewAudibleNotification) {
         playNotificationSound();
       }
-      
-      prevUnreadCount.current = newUnreadCount;
+
+      previousUnreadIds.current = new Set(unreadNotifications.map((notification: Notification) => notification.id));
       isFirstLoad.current = false;
-      setNotifications(newNotifications);
+      const snapshot = JSON.stringify(newNotifications);
+      if (snapshot !== notificationsSnapshot.current) {
+        notificationsSnapshot.current = snapshot;
+        setNotifications(newNotifications);
+      }
     } catch {
       // silently ignore network errors
+    } finally {
+      requestActive.current = false;
     }
   }, [playNotificationSound]);
 
   useEffect(() => {
     fetchNotifications();
     const id = setInterval(() => { if (!document.hidden) fetchNotifications(); }, POLL_INTERVAL);
-    return () => clearInterval(id);
+    const onVisibilityChange = () => { if (!document.hidden) fetchNotifications(); };
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    return () => {
+      clearInterval(id);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+    };
   }, [fetchNotifications]);
 
   // ---------- Close on outside click ----------
@@ -103,10 +123,10 @@ export default function AdminNotificationBell() {
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
-        className="relative p-2 rounded-lg hover:bg-white/10 transition-colors"
+        className="relative rounded-lg p-2 transition-colors hover:bg-gray-100"
         aria-label="Notifications"
       >
-        <Bell className="h-5 w-5 text-gray-300" />
+        <Bell className="h-5 w-5 text-gray-700" />
         {unreadCount > 0 && (
           <span className="absolute -top-0.5 -right-0.5 flex items-center justify-center min-w-[18px] h-[18px] px-1 text-[10px] font-bold text-white bg-red-500 rounded-full leading-none">
             {unreadCount > 99 ? "99+" : unreadCount}
@@ -132,18 +152,18 @@ export default function AdminNotificationBell() {
               animate={{ opacity: 1, y: 0, scale: 1 }}
               exit={{ opacity: 0, y: -8, scale: 0.96 }}
               transition={{ duration: 0.15 }}
-              className="fixed left-3 right-3 top-[4.5rem] bg-[#1a2255] rounded-2xl shadow-xl border border-white/10 z-50 overflow-hidden max-h-[min(70vh,calc(100dvh-6rem))] md:absolute md:left-auto md:right-0 md:top-auto md:mt-2 md:w-[360px] md:max-h-none md:rounded-xl"
+              className="fixed left-3 right-3 top-[4.5rem] z-50 max-h-[min(70vh,calc(100dvh-6rem))] overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-xl md:absolute md:left-auto md:right-0 md:top-auto md:mt-2 md:w-[360px] md:max-h-none md:rounded-xl"
             >
               {/* Header */}
-              <div className="flex items-center justify-between px-4 py-3 border-b border-white/10">
-                <h3 className="text-sm font-semibold text-white">
+              <div className="flex items-center justify-between border-b border-gray-100 px-4 py-3">
+                <h3 className="text-sm font-semibold text-gray-900">
                   Notifications
                 </h3>
                 {unreadCount > 0 && (
                   <button
                     type="button"
                     onClick={markAllAsRead}
-                    className="text-xs text-blue-400 hover:text-blue-300 font-medium transition-colors"
+                    className="text-xs font-medium text-blue-600 transition-colors hover:text-blue-700"
                   >
                     Mark all as read
                   </button>
@@ -151,9 +171,9 @@ export default function AdminNotificationBell() {
               </div>
 
               {/* List */}
-              <div className="max-h-[min(70vh,calc(100dvh-9.5rem))] overflow-y-auto divide-y divide-white/5 md:max-h-[400px]">
+              <div className="max-h-[min(70vh,calc(100dvh-9.5rem))] divide-y divide-gray-100 overflow-y-auto md:max-h-[400px]">
                 {notifications.length === 0 ? (
-                  <div className="px-4 py-10 text-center text-sm text-gray-500">
+                  <div className="px-4 py-10 text-center text-sm text-gray-400">
                     No notifications
                   </div>
                 ) : (
@@ -165,7 +185,6 @@ export default function AdminNotificationBell() {
                         notification={n}
                         onRead={markAsRead}
                         onNavigate={() => setOpen(false)}
-                        dark
                       />
                     ))
                 )}

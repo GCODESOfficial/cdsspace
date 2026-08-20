@@ -3,7 +3,7 @@
 import { useCallback, useMemo, useState } from "react";
 import Link from "next/link";
 import { motion } from "framer-motion";
-import { Check, Sparkles, Link2, Mail, ArrowRight, Table2 } from "lucide-react";
+import { Check, BadgeCheck, Link2, Mail, ArrowRight, Table2 } from "lucide-react";
 import {
     CURRENCIES,
     formatCell,
@@ -96,7 +96,7 @@ export function PricingMatrixClient({
                     <div className="mt-6 flex flex-wrap items-center gap-x-5 gap-y-2 text-[13px] font-medium text-brand-mute md:text-[14px]">
                         {list.tagline && (
                             <span className="inline-flex items-center gap-1.5 font-semibold text-brand-blue">
-                                <Sparkles className="h-4 w-4" /> {list.tagline}
+                                <BadgeCheck className="h-4 w-4" /> {list.tagline}
                             </span>
                         )}
                         {list.effectiveDate && (

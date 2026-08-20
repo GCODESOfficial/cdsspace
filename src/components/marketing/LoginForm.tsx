@@ -1,15 +1,16 @@
 "use client";
 
-import { useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { motion } from "framer-motion";
 import NextLink from "next/link";
-import { useRouter, useSearchParams } from "next/navigation";
-import Image from "next/image";
-import { Eye, EyeOff, Loader2 } from "lucide-react";
+import { useSearchParams } from "next/navigation";
+import { Clock3, Eye, EyeOff, History, Loader2, MailCheck, RefreshCw } from "lucide-react";
 import { loginSchema, type LoginInput } from "@/lib/validations/auth";
-import { login, oauthLogin } from "@/lib/actions/auth";
+import { login, resendClientLoginOtp, verifyClientLoginOtp } from "@/lib/actions/auth";
+import { BotCheck } from "@/components/security/BotCheck";
+import { GoogleAuthButton } from "@/components/marketing/GoogleAuthButton";
+import { LinkedInAuthButton } from "@/components/marketing/LinkedInAuthButton";
 
 /** Human-friendly copy for the ?error= codes our OAuth routes redirect back with. */
 function oauthErrorMessage(code: string): string {
@@ -18,8 +19,12 @@ function oauthErrorMessage(code: string): string {
             return "Google sign-in isn't enabled for this project yet. Use email and password, or try again shortly.";
         case "google_start_failed":
             return "We couldn't start Google sign-in. Please try again.";
+        case "linkedin_disabled":
+            return "LinkedIn sign-in isn't enabled for this project yet. Use email and password, or try again shortly.";
+        case "linkedin_start_failed":
+            return "We couldn't start LinkedIn sign-in. Please try again.";
         case "auth_code_exchange_failed":
-            return "Google sign-in didn't complete. Please try again.";
+            return "Sign-in didn't complete. Please try again.";
         default:
             return decodeURIComponent(code).replace(/\+/g, " ");
     }
@@ -33,47 +38,143 @@ export const LoginForm = () => {
     const [isLoading, setIsLoading] = useState(false);
     const searchParams = useSearchParams();
     const oauthErrorParam = searchParams.get('error');
+    const accountClosed = searchParams.get('account') === 'closed';
     const [error, setError] = useState<string | null>(oauthErrorParam ? oauthErrorMessage(oauthErrorParam) : null);
-    const router = useRouter();
     const nextPath = searchParams.get('next') || '/dashboard';
+    const [lastAccess, setLastAccess] = useState<{ email: string; method: string; at: string } | null>(null);
+    const [botToken, setBotToken] = useState("");
+    const [botResetSignal, setBotResetSignal] = useState(0);
+    const [loginEmail, setLoginEmail] = useState("");
+    const [otp, setOtp] = useState("");
+    const [now, setNow] = useState(() => Date.now());
+    const [challenge, setChallenge] = useState<{
+        id: string;
+        maskedEmail: string;
+        expiresAt: number;
+        resendAt: number;
+    } | null>(null);
+    const onBotTokenChange = useCallback((token: string) => setBotToken(token), []);
 
     const {
         register,
         handleSubmit,
+        setValue,
         formState: { errors },
     } = useForm<LoginInput>({
         resolver: zodResolver(loginSchema),
     });
 
+    useEffect(() => {
+        try {
+            const stored = window.localStorage.getItem('cds.client.lastAccess');
+            if (!stored) return;
+            const parsed = JSON.parse(stored) as { email?: string; method?: string; at?: string };
+            if (!parsed.email || !parsed.at) return;
+            setLastAccess({ email: parsed.email, method: parsed.method || 'Password sign-in', at: parsed.at });
+        } catch {
+            window.localStorage.removeItem('cds.client.lastAccess');
+        }
+    }, []);
+
+    useEffect(() => {
+        if (!challenge) return;
+        const timer = window.setInterval(() => setNow(Date.now()), 1000);
+        return () => window.clearInterval(timer);
+    }, [challenge]);
+
+    const expiresIn = useMemo(() => challenge ? Math.max(0, Math.ceil((challenge.expiresAt - now) / 1000)) : 0, [challenge, now]);
+    const resendIn = useMemo(() => challenge ? Math.max(0, Math.ceil((challenge.resendAt - now) / 1000)) : 0, [challenge, now]);
+
+    function resetBotCheck() {
+        setBotToken("");
+        setBotResetSignal((value) => value + 1);
+    }
+
     const onSubmit = async (data: LoginInput) => {
+        if (!botToken) {
+            setError("Complete the security verification before signing in.");
+            return;
+        }
         setIsLoading(true);
         setError(null);
+        setLoginEmail(data.email.trim().toLowerCase());
         try {
-            const result = await login(data);
+            const result = await login({ ...data, next: nextPath, botToken });
             if (result?.error) {
                 setError(result.error);
-            } else if (result?.success) {
-                router.push(nextPath);
+                resetBotCheck();
+            } else if (result?.requiresOtp && result.challengeId) {
+                const current = Date.now();
+                setNow(current);
+                setChallenge({
+                    id: result.challengeId,
+                    maskedEmail: result.maskedEmail || "your email address",
+                    expiresAt: current + Number(result.expiresInSeconds || 900) * 1000,
+                    resendAt: current + Number(result.resendInSeconds || 60) * 1000,
+                });
+                setOtp("");
+                resetBotCheck();
             }
         } catch (e) {
             setError("Something went wrong. Please try again.");
+            resetBotCheck();
         } finally {
             setIsLoading(false);
         }
     };
 
-    const handleSocialLogin = async (provider: 'google' | 'twitter' | 'facebook') => {
+    const verifyOtp = async () => {
+        if (!challenge || otp.length !== 6 || expiresIn <= 0) return;
+        setIsLoading(true);
+        setError(null);
         try {
-            const result = await oauthLogin(provider, nextPath);
+            const result = await verifyClientLoginOtp({ challengeId: challenge.id, otp });
             if (result?.error) {
                 setError(result.error);
-            } else if (result?.url) {
-                window.location.href = result.url;
+                if (result.expired) setChallenge(null);
+                return;
             }
-        } catch (e) {
-            setError("Social login failed. Please try again.");
+            if (result?.success) {
+                const access = { email: loginEmail, method: 'Password and email code', at: new Date().toISOString() };
+                window.localStorage.setItem('cds.client.lastAccess', JSON.stringify(access));
+                window.location.replace(result.next || nextPath);
+            }
+        } catch {
+            setError("Verification could not be completed. Please try again.");
+        } finally {
+            setIsLoading(false);
         }
     };
+
+    const resendOtp = async () => {
+        if (!challenge || resendIn > 0) return;
+        setIsLoading(true);
+        setError(null);
+        try {
+            const result = await resendClientLoginOtp({ challengeId: challenge.id });
+            if (result?.error) {
+                setError(result.error);
+                if (result.expired) setChallenge(null);
+                return;
+            }
+            const current = Date.now();
+            setNow(current);
+            setOtp("");
+            setChallenge({
+                ...challenge,
+                expiresAt: current + Number(result.expiresInSeconds || 900) * 1000,
+                resendAt: current + Number(result.resendInSeconds || 60) * 1000,
+            });
+        } catch {
+            setError("A new code could not be sent. Please try again.");
+        } finally {
+            setIsLoading(false);
+        }
+    };
+
+    function formatCountdown(totalSeconds: number) {
+        return `${Math.floor(totalSeconds / 60)}:${String(totalSeconds % 60).padStart(2, "0")}`;
+    }
 
     return (
         <div className="w-full flex flex-col gap-6 lg:gap-8 xl:gap-[32px] 2xl:gap-[40px]">
@@ -88,20 +189,96 @@ export const LoginForm = () => {
                 </p>
             </div>
 
+            {accountClosed && (
+                <div className="rounded-2xl border border-blue-100 bg-blue-50/70 px-4 py-3 text-[13px] leading-5 text-brand-body">
+                    Your CDS Space business account has been closed and all active sessions were signed out. Previous business records remain retained for accounting and transaction-history purposes.
+                </div>
+            )}
+
+            {lastAccess && !challenge && (
+                <div className="relative mt-2 flex items-center gap-3 rounded-2xl border border-blue-100 bg-blue-50/60 p-3.5 pt-5">
+                    <span className="absolute -top-3 left-4 rounded-full border border-blue-200 bg-brand-blue px-3 py-1 text-[10px] font-semibold text-white shadow-sm">
+                        Last used access
+                    </span>
+                    <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-white text-brand-blue shadow-sm">
+                        <History className="h-4 w-4" aria-hidden="true" />
+                    </span>
+                    <div className="min-w-0 flex-1">
+                        <p className="truncate text-[13px] font-semibold text-brand-navy">{lastAccess.email}</p>
+                        <p className="text-[11px] text-brand-mute">{lastAccess.method} · {new Date(lastAccess.at).toLocaleDateString()}</p>
+                    </div>
+                    <button type="button" onClick={() => setValue('email', lastAccess.email, { shouldValidate: true })}
+                        className="shrink-0 rounded-lg border border-blue-200 bg-white px-3 py-2 text-[11px] font-bold text-brand-blue hover:bg-blue-50">
+                        Use email
+                    </button>
+                </div>
+            )}
+
             {/* Form Fields */}
-            <form onSubmit={handleSubmit(onSubmit)} className="flex flex-col gap-4 lg:gap-5 2xl:gap-6">
+            <form
+                onSubmit={challenge
+                    ? (event) => { event.preventDefault(); void verifyOtp(); }
+                    : handleSubmit(onSubmit)}
+                className="flex flex-col gap-4 lg:gap-5 2xl:gap-6"
+            >
+
+                {challenge ? (
+                    <div className="space-y-4 rounded-2xl border border-blue-100 bg-blue-50/60 p-4 sm:p-5">
+                        <div className="flex items-start gap-3">
+                            <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-white text-[#0A4FE8] shadow-sm">
+                                <MailCheck className="h-5 w-5" aria-hidden="true" />
+                            </span>
+                            <div>
+                                <h2 className="text-[15px] font-semibold text-brand-navy">Check your email</h2>
+                                <p className="mt-1 text-[12px] leading-5 text-brand-body">
+                                    Enter the six-digit code sent to {challenge.maskedEmail}. Your dashboard remains locked until it is verified.
+                                </p>
+                            </div>
+                        </div>
+                        <input
+                            name="client_login_otp"
+                            value={otp}
+                            onChange={(event) => setOtp(event.target.value.replace(/\D/g, "").slice(0, 6))}
+                            inputMode="numeric"
+                            autoComplete="one-time-code"
+                            maxLength={6}
+                            aria-label="Six-digit email code"
+                            placeholder="6-digit code"
+                            disabled={isLoading || expiresIn <= 0}
+                            className="min-h-14 w-full rounded-xl border border-blue-200 bg-white px-4 text-center text-[22px] font-semibold tracking-[0.22em] text-brand-navy outline-none focus:border-[#0A4FE8] focus:ring-4 focus:ring-blue-100 disabled:opacity-60"
+                        />
+                        <div className="flex flex-wrap items-center justify-between gap-3 text-[11px]">
+                            <span className={expiresIn > 0 ? "inline-flex items-center gap-1.5 text-brand-mute" : "inline-flex items-center gap-1.5 text-rose-600"}>
+                                <Clock3 className="h-3.5 w-3.5" aria-hidden="true" />
+                                {expiresIn > 0 ? `Expires in ${formatCountdown(expiresIn)}` : "Code expired. Start again."}
+                            </span>
+                            <button
+                                type="button"
+                                onClick={() => void resendOtp()}
+                                disabled={isLoading || resendIn > 0 || expiresIn <= 0}
+                                className="inline-flex items-center gap-1.5 font-semibold text-[#0A4FE8] disabled:text-brand-mute"
+                            >
+                                <RefreshCw className="h-3.5 w-3.5" aria-hidden="true" />
+                                {resendIn > 0 ? `Resend in ${resendIn}s` : "Resend code"}
+                            </button>
+                        </div>
+                    </div>
+                ) : (
+                    <>
 
                 {/* Email address */}
                 <div className="flex flex-col gap-1.5 2xl:gap-2">
                     <label className="text-brand-body text-[13px] lg:text-[14px] 2xl:text-[15px] font-medium">Email address</label>
-                    <div className={`bg-brand-bg border rounded-[10px] lg:rounded-[12px] 2xl:rounded-[16px] px-3 lg:px-4 py-3 lg:py-3.5 2xl:py-4 flex items-center transition-colors ${errors.email ? 'border-red-500' : 'border-brand-stroke'}`}>
-                        <input
-                            {...register("email")}
-                            type="email"
-                            placeholder="Enter your email"
-                            disabled={isLoading}
-                            className="w-full bg-transparent outline-none text-brand-navy text-[13px] lg:text-[14px] 2xl:text-[15px] font-medium placeholder:text-brand-mute disabled:opacity-50"
-                        />
+                    <div className={`rounded-[16px] border bg-brand-bg p-[5px] transition-[border-color,box-shadow] focus-within:border-brand-blue/40 focus-within:shadow-[0_0_0_4px_rgba(219,234,254,0.8)] ${errors.email ? 'border-red-500' : 'border-brand-stroke'}`}>
+                        <div className="flex min-h-11 items-center rounded-[12px] bg-white px-3.5 shadow-[0_1px_2px_rgba(4,11,55,0.04)] lg:min-h-12 lg:px-4 2xl:min-h-14">
+                            <input
+                                {...register("email")}
+                                type="email"
+                                placeholder="Enter your email"
+                                disabled={isLoading}
+                                className="w-full !min-h-0 !rounded-none !border-0 !bg-transparent !p-0 !shadow-none !ring-0 outline-none text-brand-navy text-[16px] font-medium placeholder:text-brand-mute disabled:opacity-50 lg:text-[14px] 2xl:text-[15px]"
+                            />
+                        </div>
                     </div>
                     {errors.email && <span className="text-red-500 text-[11px] lg:text-[12px] 2xl:text-[13px]">{errors.email.message}</span>}
                 </div>
@@ -114,24 +291,31 @@ export const LoginForm = () => {
                             Forgot Password?
                         </NextLink>
                     </div>
-                    <div className={`bg-brand-bg border rounded-[10px] lg:rounded-[12px] 2xl:rounded-[16px] px-3 lg:px-4 py-3 lg:py-3.5 2xl:py-4 flex items-center relative group/input transition-colors ${errors.password ? 'border-red-500' : 'border-brand-stroke'}`}>
-                        <input
-                            {...register("password")}
-                            type={showPassword ? "text" : "password"}
-                            placeholder="Enter your password"
-                            disabled={isLoading}
-                            className="w-full bg-transparent outline-none text-brand-navy text-[13px] lg:text-[14px] 2xl:text-[15px] font-medium placeholder:text-brand-mute disabled:opacity-50"
-                        />
-                        <button
-                            type="button"
-                            onClick={() => setShowPassword(!showPassword)}
-                            className="text-brand-mute hover:text-brand-body transition-colors"
-                        >
-                            {showPassword ? <EyeOff className="w-4 h-4 2xl:w-5 2xl:h-5" /> : <Eye className="w-4 h-4 2xl:w-5 2xl:h-5" />}
-                        </button>
+                    <div className={`rounded-[16px] border bg-brand-bg p-[5px] transition-[border-color,box-shadow] focus-within:border-brand-blue/40 focus-within:shadow-[0_0_0_4px_rgba(219,234,254,0.8)] ${errors.password ? 'border-red-500' : 'border-brand-stroke'}`}>
+                        <div className="flex min-h-11 items-center gap-3 rounded-[12px] bg-white px-3.5 shadow-[0_1px_2px_rgba(4,11,55,0.04)] lg:min-h-12 lg:px-4 2xl:min-h-14">
+                            <input
+                                {...register("password")}
+                                type={showPassword ? "text" : "password"}
+                                placeholder="Enter your password"
+                                disabled={isLoading}
+                                className="w-full !min-h-0 !rounded-none !border-0 !bg-transparent !p-0 !shadow-none !ring-0 outline-none text-brand-navy text-[16px] font-medium placeholder:text-brand-mute disabled:opacity-50 lg:text-[14px] 2xl:text-[15px]"
+                            />
+                            <button
+                                type="button"
+                                onClick={() => setShowPassword(!showPassword)}
+                                aria-label={showPassword ? "Hide password" : "Show password"}
+                                className="grid size-10 shrink-0 place-items-center !rounded-[8px] text-brand-mute transition-colors hover:bg-brand-bg hover:text-brand-body"
+                            >
+                                {showPassword ? <EyeOff className="h-5 w-5" aria-hidden="true" /> : <Eye className="h-5 w-5" aria-hidden="true" />}
+                            </button>
+                        </div>
                     </div>
                     {errors.password && <span className="text-red-500 text-[11px] lg:text-[12px] 2xl:text-[13px]">{errors.password.message}</span>}
                 </div>
+
+                    <BotCheck action="client_login" onTokenChange={onBotTokenChange} resetSignal={botResetSignal} />
+                    </>
+                )}
 
                 {error && (
                     <div className="bg-red-50 border border-red-200 text-red-600 px-3 lg:px-4 py-2.5 lg:py-3 rounded-lg text-xs lg:text-sm font-medium">
@@ -142,22 +326,34 @@ export const LoginForm = () => {
                 {/* CTA Button */}
                 <button
                     type="submit"
-                    disabled={isLoading}
-                    className="w-full h-[40px] lg:h-[48px] 2xl:h-[56px] rounded-full p-[2px] bg-brand-bg border border-[#648EFC] shadow-[0_4px_8px_rgba(0,0,0,0.04)] group overflow-hidden disabled:opacity-70 disabled:cursor-not-allowed"
+                    disabled={isLoading || (challenge ? otp.length !== 6 || expiresIn <= 0 : !botToken)}
+                    className="w-full h-[40px] lg:h-[48px] 2xl:h-[56px] rounded-[10px] lg:rounded-[12px] 2xl:rounded-[16px] p-[2px] bg-brand-bg border border-[#648EFC] shadow-[0_4px_8px_rgba(0,0,0,0.04)] group overflow-hidden disabled:opacity-70 disabled:cursor-not-allowed"
                 >
-                    <div className="w-full h-full rounded-full flex items-center justify-center transition-opacity group-hover:opacity-90 bg-linear-to-r from-[#0035C1] to-[#0575FF]"
+                    <div className="w-full h-full rounded-[8px] lg:rounded-[10px] 2xl:rounded-[14px] flex items-center justify-center transition-opacity group-hover:opacity-90 bg-[#0A4FE8]"
                     >
                         {isLoading ? (
                             <Loader2 className="w-4 h-4 lg:w-5 lg:h-5 2xl:w-6 2xl:h-6 animate-spin text-white" />
                         ) : (
-                            <span className="text-brand-bg text-[14px] lg:text-[15px] 2xl:text-[18px] font-medium">Sign In</span>
+                            <span className="text-brand-bg text-[14px] lg:text-[15px] 2xl:text-[18px] font-medium">
+                                {challenge ? "Verify and sign in" : "Sign in"}
+                            </span>
                         )}
                     </div>
                 </button>
             </form>
 
+            {challenge && (
+                <button
+                    type="button"
+                    onClick={() => { setChallenge(null); setOtp(""); setError(null); resetBotCheck(); }}
+                    className="self-center text-[12px] font-semibold text-brand-blue hover:underline"
+                >
+                    Use a different email
+                </button>
+            )}
+
             {/* Bottom Actions */}
-            <div className="flex flex-col gap-5 lg:gap-6 2xl:gap-[32px] items-center">
+            {!challenge && <div className="flex flex-col gap-5 lg:gap-6 2xl:gap-[32px] items-center">
 
                 {/* Divider */}
                 <div className="w-full flex items-center">
@@ -168,56 +364,17 @@ export const LoginForm = () => {
 
                 {/* Social Login */}
                 <div className="w-full flex flex-col gap-2.5 lg:gap-3">
-                    <button
-                        type="button"
-                        onClick={() => handleSocialLogin('google')}
-                        className="w-full flex items-center justify-center gap-3 py-3 lg:py-3.5 2xl:py-4 bg-white border border-brand-stroke rounded-[10px] lg:rounded-[12px] 2xl:rounded-[16px] shadow-[0_4px_8px_rgba(0,0,0,0.04)] hover:shadow-md transition-all cursor-pointer group"
-                    >
-                        <Image
-                            src="/auth/Signup/flat-color-icons_google.svg"
-                            alt="Google"
-                            width={24}
-                            height={24}
-                            className="2xl:w-7 2xl:h-7"
-                        />
-                        <span className="text-brand-navy text-[14px] lg:text-[15px] 2xl:text-[16px] font-semibold group-hover:text-brand-blue transition-colors">
-                            Continue with Google
+                    <div className="relative w-full" data-social-provider="google">
+                        <GoogleAuthButton label="Continue with Google" next={nextPath} />
+                        <span className="absolute -top-3 right-3 inline-flex min-h-6 items-center rounded-full border border-blue-200 bg-blue-50 px-3 py-1 text-[10px] font-semibold leading-none text-brand-blue shadow-sm sm:right-4">
+                            Recommended
                         </span>
-                    </button>
+                    </div>
 
-                    <button
-                        type="button"
-                        onClick={() => handleSocialLogin('twitter')}
-                        className="w-full flex items-center justify-center gap-3 py-3 lg:py-3.5 2xl:py-4 bg-white border border-brand-stroke rounded-[10px] lg:rounded-[12px] 2xl:rounded-[16px] shadow-[0_4px_8px_rgba(0,0,0,0.04)] hover:shadow-md transition-all cursor-pointer group"
-                    >
-                        <Image
-                            src="/auth/Signup/x-icon.svg"
-                            alt="X"
-                            width={22}
-                            height={22}
-                            className="2xl:w-6 2xl:h-6"
-                        />
-                        <span className="text-brand-navy text-[14px] lg:text-[15px] 2xl:text-[16px] font-semibold group-hover:text-brand-blue transition-colors">
-                            Continue with X
-                        </span>
-                    </button>
 
-                    <button
-                        type="button"
-                        onClick={() => handleSocialLogin('facebook')}
-                        className="w-full flex items-center justify-center gap-3 py-3 lg:py-3.5 2xl:py-4 bg-white border border-brand-stroke rounded-[10px] lg:rounded-[12px] 2xl:rounded-[16px] shadow-[0_4px_8px_rgba(0,0,0,0.04)] hover:shadow-md transition-all cursor-pointer group"
-                    >
-                        <Image
-                            src="/auth/Signup/logos_facebook.svg"
-                            alt="Facebook"
-                            width={24}
-                            height={24}
-                            className="2xl:w-7 2xl:h-7"
-                        />
-                        <span className="text-brand-navy text-[14px] lg:text-[15px] 2xl:text-[16px] font-semibold group-hover:text-brand-blue transition-colors">
-                            Continue with Facebook
-                        </span>
-                    </button>
+                    <div className="relative w-full" data-social-provider="linkedin">
+                        <LinkedInAuthButton label="Continue with LinkedIn" next={nextPath} />
+                    </div>
                 </div>
 
                 {/* Signup Link */}
@@ -227,7 +384,7 @@ export const LoginForm = () => {
                         Create account
                     </NextLink>
                 </div>
-            </div>
+            </div>}
 
         </div>
     );

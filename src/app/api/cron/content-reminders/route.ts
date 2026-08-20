@@ -22,6 +22,7 @@ import { emailFrom, createEmailTransport, EMAIL_MODE } from "@/lib/email-from";
 import { brandedEmailHtml } from "@/lib/email-template";
 import { glashQuery } from "@/lib/glashdb/postgres";
 import { notifyTeamMember } from "@/lib/notify-team";
+import { processClientChatEscalations } from "@/lib/client-chat-escalation";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -123,5 +124,13 @@ export async function GET(req: NextRequest) {
     await glashQuery(`update public.content_reminders set sent_at = now() where id = $1`, [r.reminder_id]);
   }
 
-  return NextResponse.json({ ok: true, processed: due.length, dashboard, emails });
+  // Reuse this established five-minute scheduler as a safety net for Sales Hub
+  // response alerts. The dedicated chat cron route can also be scheduled;
+  // database claims make overlapping calls idempotent.
+  const clientChat = await processClientChatEscalations().catch((error) => {
+    console.error("[content-reminders] client chat escalation failed", error);
+    return null;
+  });
+
+  return NextResponse.json({ ok: true, processed: due.length, dashboard, emails, clientChat });
 }

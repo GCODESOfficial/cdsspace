@@ -3,19 +3,30 @@
 import { motion, AnimatePresence } from "framer-motion";
 import { CheckCircle2, X } from "lucide-react";
 import Image from "next/image";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 
 interface EmailConfirmationModalProps {
     isOpen: boolean;
     onClose: () => void;
     email?: string;
+    initialResendSeconds?: number;
+    onResend?: () => Promise<{ error?: string; message?: string; resendInSeconds?: number }>;
 }
 
 /**
  * EmailConfirmationModal - 1:1 Figma Implementation (Node 6258:19938)
  * Displays a confirmation message after successful registration.
  */
-export const EmailConfirmationModal = ({ isOpen, onClose, email }: EmailConfirmationModalProps) => {
+export const EmailConfirmationModal = ({
+    isOpen,
+    onClose,
+    email,
+    initialResendSeconds = 60,
+    onResend,
+}: EmailConfirmationModalProps) => {
+    const [resendIn, setResendIn] = useState(initialResendSeconds);
+    const [resending, setResending] = useState(false);
+    const [notice, setNotice] = useState<string | null>(null);
 
     // Lock body scroll when modal is open
     useEffect(() => {
@@ -26,6 +37,33 @@ export const EmailConfirmationModal = ({ isOpen, onClose, email }: EmailConfirma
         }
         return () => { document.body.style.overflow = "unset"; };
     }, [isOpen]);
+
+    useEffect(() => {
+        if (!isOpen) return;
+        setResendIn(initialResendSeconds);
+        setNotice(null);
+    }, [initialResendSeconds, isOpen]);
+
+    useEffect(() => {
+        if (!isOpen || resendIn <= 0) return;
+        const timer = window.setInterval(() => setResendIn((value) => Math.max(0, value - 1)), 1_000);
+        return () => window.clearInterval(timer);
+    }, [isOpen, resendIn]);
+
+    async function resend() {
+        if (!onResend || resending || resendIn > 0) return;
+        setResending(true);
+        setNotice(null);
+        const result: { error?: string; message?: string; resendInSeconds?: number } = await onResend()
+            .catch(() => ({ error: "The verification email could not be resent." }));
+        setResending(false);
+        if (result.error) {
+            setNotice(result.error);
+            return;
+        }
+        setNotice(result.message || "A new verification link has been sent.");
+        setResendIn(result.resendInSeconds || initialResendSeconds);
+    }
 
     return (
         <AnimatePresence>
@@ -76,8 +114,19 @@ export const EmailConfirmationModal = ({ isOpen, onClose, email }: EmailConfirma
                                             Check Your Email
                                         </h2>
                                         <p className="text-brand-body text-[15px] sm:text-[16px] font-medium tracking-[-0.16px] leading-normal max-w-[360px]">
-                                            A one-time sign-in link has been sent to your email{email ? `: ${email}` : ''}. Check your inbox and click the link to continue to CDS Space
+                                            A one-time verification link has been sent to your email{email ? `: ${email}` : ''}. Your client account will be activated only after you open it.
                                         </p>
+                                        {notice && <p className="text-[13px] font-medium text-brand-body">{notice}</p>}
+                                        {onResend && (
+                                            <button
+                                                type="button"
+                                                onClick={resend}
+                                                disabled={resending || resendIn > 0}
+                                                className="text-[13px] font-semibold text-[#0A4FE8] hover:underline disabled:cursor-wait disabled:text-brand-mute disabled:no-underline"
+                                            >
+                                                {resending ? "Sending…" : resendIn > 0 ? `Resend available in ${resendIn}s` : "Resend verification email"}
+                                            </button>
+                                        )}
                                     </div>
                                 </div>
 
@@ -86,7 +135,7 @@ export const EmailConfirmationModal = ({ isOpen, onClose, email }: EmailConfirma
                                     onClick={onClose}
                                     className="w-full h-[56px] rounded-full p-[2px] bg-brand-bg border border-[#648EFC] shadow-[0_4px_8px_rgba(0,0,0,0.04)] group overflow-hidden cursor-pointer"
                                 >
-                                    <div className="w-full h-full rounded-full flex items-center justify-center transition-opacity group-hover:opacity-90 bg-gradient-to-r from-[#0035C1] to-[#0575FF]"
+                                    <div className="w-full h-full rounded-full flex items-center justify-center transition-opacity group-hover:opacity-90 bg-[#0A4FE8]"
                                     >
                                         <span className="text-brand-bg text-[18px] font-medium tracking-[-0.18px]">Got it</span>
                                     </div>

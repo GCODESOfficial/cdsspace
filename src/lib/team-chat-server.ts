@@ -16,6 +16,7 @@ export interface TeamChatMessageRecord {
   id: string;
   thread_id: string;
   sender_id: string | null;
+  client_user_id: string | null;
   sender_is_admin: boolean;
   body: string | null;
   attachment_url: string | null;
@@ -51,7 +52,7 @@ export interface TeamChatMessageRecord {
 }
 
 export const TEAM_CHAT_MESSAGE_COLUMNS =
-  "id, thread_id, sender_id, sender_is_admin, body, attachment_url, forwarded, reply_to_message_id, sticker_key, reactions, message_type, delivery_status, pinned_at, pinned_by, starred_by, bookmarked_by, scheduled_for, sent_at, thread_root_id, translated, metadata, audio_url, audio_duration_seconds, voice_transcript, file_name, file_size_bytes, mime_type, edited_at, deleted_at, created_at";
+  "id, thread_id, sender_id, client_user_id, sender_is_admin, body, attachment_url, forwarded, reply_to_message_id, sticker_key, reactions, message_type, delivery_status, pinned_at, pinned_by, starred_by, bookmarked_by, scheduled_for, sent_at, thread_root_id, translated, metadata, audio_url, audio_duration_seconds, voice_transcript, file_name, file_size_bytes, mime_type, edited_at, deleted_at, created_at";
 
 export function getTeamChatDb() {
   return supabaseAdmin as any;
@@ -89,6 +90,25 @@ export async function canViewTeamThread(viewer: ChatViewer, threadId: string) {
   if (!thread) return false;
   if (part) return true;
   return thread.kind === "department" || thread.kind === "admin_broadcast" || thread.visibility === "public";
+}
+
+/**
+ * File/media sharing is restricted to group spaces: department chats, project
+ * group chats and any group/broadcast thread. It is blocked in 1-on-1 direct
+ * chats between team members - EXCEPT when an admin/manager is in the thread
+ * (includes_admin), where attachments stay allowed. Returns true when the
+ * thread may NOT receive attachments.
+ */
+export async function isAttachmentRestrictedThread(threadId: string): Promise<boolean> {
+  const db = getTeamChatDb();
+  if (!db) return false;
+  const { data: thread } = await db
+    .from("team_chat_threads")
+    .select("kind, includes_admin")
+    .eq("id", threadId)
+    .maybeSingle();
+  if (!thread) return false;
+  return thread.kind === "direct" && !thread.includes_admin;
 }
 
 export function canEditTeamMessage(viewer: ChatViewer, message: TeamChatMessageRecord) {
@@ -137,6 +157,9 @@ export async function hydrateTeamMessages(messages: TeamChatMessageRecord[]) {
   const ids = Array.from(
     new Set(relatedMessages.map((message) => message.sender_id).filter(Boolean)),
   ) as string[];
+  const clientIds = Array.from(
+    new Set(relatedMessages.map((message) => message.client_user_id).filter(Boolean)),
+  ) as string[];
 
   const nameById: Record<string, { name: string; avatar: string | null }> = {};
   if (ids.length) {
@@ -146,13 +169,35 @@ export async function hydrateTeamMessages(messages: TeamChatMessageRecord[]) {
     });
   }
 
+  const clientById: Record<string, { name: string; avatar: string | null }> = {};
+  if (clientIds.length) {
+    const { data: clients } = await db
+      .from("profiles")
+      .select("id, full_name, company_name, email, avatar_url")
+      .in("id", clientIds);
+    (clients || []).forEach((client: any) => {
+      clientById[client.id] = {
+        name: client.full_name || client.company_name || client.email || "Client",
+        avatar: client.avatar_url || null,
+      };
+    });
+  }
+
   const relatedById = new Map(
     relatedMessages.map((message) => [
       message.id,
       {
         ...message,
-        sender_name: message.sender_is_admin ? "Admin" : nameById[message.sender_id || ""]?.name || "Member",
-        sender_avatar: message.sender_is_admin ? null : nameById[message.sender_id || ""]?.avatar || null,
+        sender_name: message.sender_is_admin
+          ? "Admin"
+          : message.client_user_id
+            ? clientById[message.client_user_id]?.name || "Client"
+            : nameById[message.sender_id || ""]?.name || "Member",
+        sender_avatar: message.sender_is_admin
+          ? null
+          : message.client_user_id
+            ? clientById[message.client_user_id]?.avatar || null
+            : nameById[message.sender_id || ""]?.avatar || null,
       },
     ]),
   );

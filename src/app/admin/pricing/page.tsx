@@ -1,190 +1,216 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { supabase } from "@/lib/supabase";
+import { Layers3, Loader2, Rocket, Save, TrendingUp } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { INDUSTRY_CATEGORIES } from "@/lib/industry-categories";
-import { Loader2, Save, DollarSign } from "lucide-react";
-
-const PLANS = ["startup", "scaleup", "supreme"] as const;
-const PLAN_LABELS: Record<string, string> = { startup: "Startup", scaleup: "Scaleup", supreme: "Supreme" };
-const CURRENCIES = ["usd", "ngn", "rwf"] as const;
-const CURRENCY_SYMBOLS: Record<string, string> = { usd: "$", ngn: "₦", rwf: "RF" };
+import {
+  CLIENT_BILLING_CURRENCIES,
+  CLIENT_BILLING_CURRENCY_OPTIONS,
+  type ClientBillingCurrency,
+} from "@/lib/client-billing";
+import {
+  SUBSCRIPTION_PLANS,
+  SUBSCRIPTION_PRICE_COLUMNS,
+  type SubscriptionPlanId,
+} from "@/lib/subscription-plans";
 
 interface PricingRow {
   id?: string;
-  plan: string;
+  plan: SubscriptionPlanId;
   industry: string;
   price_usd: number;
   price_ngn: number;
+  price_gbp: number;
+  price_eur: number;
   price_rwf: number;
+  price_cny: number;
+  price_aed: number;
 }
+
+const EMPTY_PRICES = {
+  price_usd: 0,
+  price_ngn: 0,
+  price_gbp: 0,
+  price_eur: 0,
+  price_rwf: 0,
+  price_cny: 0,
+  price_aed: 0,
+};
+
+const PLAN_ICONS = {
+  startup: Rocket,
+  scaleup: TrendingUp,
+  supreme: Layers3,
+} as const;
+
+const SYMBOLS = Object.fromEntries(
+  CLIENT_BILLING_CURRENCY_OPTIONS.map((currency) => [currency.code, currency.symbol]),
+) as Record<ClientBillingCurrency, string>;
 
 export default function PricingPage() {
   const [pricing, setPricing] = useState<PricingRow[]>([]);
   const [isFetching, setIsFetching] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
-  const [selectedIndustry, setSelectedIndustry] = useState(INDUSTRY_CATEGORIES[0]);
+  const [selectedIndustry, setSelectedIndustry] = useState<string>(INDUSTRY_CATEGORIES[0]);
   const [dirty, setDirty] = useState(false);
   const { toast } = useToast();
 
-  useEffect(() => { fetchPricing(); }, []);
-
   async function fetchPricing() {
     setIsFetching(true);
-    const { data } = await supabase.from("plan_pricing").select("*");
-    setPricing(data || []);
-    setIsFetching(false);
+    try {
+      const response = await fetch("/api/admin/pricing", { cache: "no-store" });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error || "Could not load subscription pricing.");
+      setPricing(data.pricing || []);
+    } catch (reason) {
+      toast({
+        title: "Could not load pricing",
+        description: reason instanceof Error ? reason.message : "Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsFetching(false);
+    }
   }
 
-  function getPrice(plan: string, industry: string): PricingRow {
-    const existing = pricing.find(p => p.plan === plan && p.industry === industry);
-    return existing || { plan, industry, price_usd: 0, price_ngn: 0, price_rwf: 0 };
+  useEffect(() => { void fetchPricing(); }, []);
+
+  function getPrice(plan: SubscriptionPlanId, industry: string): PricingRow {
+    const existing = pricing.find((row) => row.plan === plan && row.industry === industry);
+    return existing || { plan, industry, ...EMPTY_PRICES };
   }
 
-  function updatePrice(plan: string, industry: string, currency: string, value: number) {
+  function updatePrice(plan: SubscriptionPlanId, industry: string, currency: ClientBillingCurrency, value: number) {
+    const column = SUBSCRIPTION_PRICE_COLUMNS[currency] as keyof PricingRow;
     setDirty(true);
-    setPricing(prev => {
-      const idx = prev.findIndex(p => p.plan === plan && p.industry === industry);
-      const key = `price_${currency}` as keyof PricingRow;
-      if (idx >= 0) {
-        const updated = [...prev];
-        updated[idx] = { ...updated[idx], [key]: value };
+    setPricing((previous) => {
+      const index = previous.findIndex((row) => row.plan === plan && row.industry === industry);
+      if (index >= 0) {
+        const updated = [...previous];
+        updated[index] = { ...updated[index], [column]: value };
         return updated;
       }
-      return [...prev, { plan, industry, price_usd: 0, price_ngn: 0, price_rwf: 0, [key]: value }];
+      return [...previous, { plan, industry, ...EMPTY_PRICES, [column]: value }];
     });
   }
 
   async function handleSave() {
     setIsSaving(true);
-    const rows = PLANS.flatMap(plan =>
-      INDUSTRY_CATEGORIES.map(industry => {
-        const p = getPrice(plan, industry);
-        return { plan, industry, price_usd: p.price_usd, price_ngn: p.price_ngn, price_rwf: p.price_rwf };
-      })
+    const rows = SUBSCRIPTION_PLANS.flatMap((plan) =>
+      INDUSTRY_CATEGORIES.map((industry) => getPrice(plan.id, industry)),
     );
-
-    const { error } = await supabase.from("plan_pricing").upsert(rows, { onConflict: "plan,industry" });
-
-    if (error) {
-      toast({ title: "Error", description: error.message, variant: "destructive" });
-    } else {
-      toast({ title: "Saved", description: "All pricing updated" });
+    try {
+      const response = await fetch("/api/admin/pricing", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ rows }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error || "Could not save subscription pricing.");
+      setPricing(data.pricing || rows);
       setDirty(false);
-      fetchPricing();
+      toast({ title: "Pricing saved", description: "Client subscription prices are now up to date." });
+    } catch (reason) {
+      toast({
+        title: "Could not save pricing",
+        description: reason instanceof Error ? reason.message : "Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsSaving(false);
     }
-    setIsSaving(false);
   }
 
   if (isFetching) {
-    return <div className="p-8 flex justify-center py-20"><Loader2 className="w-6 h-6 animate-spin text-blue-400" /></div>;
+    return <div className="grid min-h-[420px] place-items-center"><Loader2 className="h-6 w-6 animate-spin text-[#0A4FE8]" /></div>;
   }
 
   return (
-    <div className="p-8 max-w-[1100px]">
-      {/* Header */}
-      <div className="flex items-center justify-between mb-8">
+    <div className="mx-auto max-w-[1240px] p-5 sm:p-7 lg:p-8">
+      <div className="mb-8 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
         <div>
-          <p className="text-[#0A4FE8] text-sm font-semibold">Management</p>
-          <h1 className="text-[28px] font-bold text-[#0D1B39] tracking-tight">Plan Pricing</h1>
-          <p className="text-gray-400 text-[13px] mt-1">Set subscription prices per industry in USD, NGN, and RWF</p>
+          <p className="text-sm font-semibold text-[#0A4FE8]">Subscription management</p>
+          <h1 className="mt-1 text-[28px] font-semibold tracking-[-0.02em] text-[#0D1B39]">Plan pricing</h1>
+          <p className="mt-2 max-w-[680px] text-[13px] leading-relaxed text-gray-500">
+            Set prices by industry and account currency. Startup and Scaleup are monthly prices; Supreme is the price for one design unit.
+          </p>
         </div>
-        <button onClick={handleSave} disabled={isSaving || !dirty}
-          className="flex items-center gap-2 px-5 py-2.5 bg-[#0A4FE8] text-white text-sm font-medium rounded-xl hover:bg-[#083EC0] transition disabled:opacity-40">
-          {isSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
-          {isSaving ? "Saving..." : "Save All"}
+        <button type="button" onClick={() => void handleSave()} disabled={isSaving || !dirty} className="inline-flex h-11 items-center justify-center gap-2 rounded-[12px] bg-[#0A4FE8] px-5 text-sm font-semibold text-white transition hover:bg-[#083EC0] disabled:cursor-not-allowed disabled:opacity-40">
+          {isSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+          {isSaving ? "Saving" : "Save pricing"}
         </button>
       </div>
 
-      {/* Industry Tabs */}
-      <div className="flex gap-2 mb-8 flex-wrap">
-        {INDUSTRY_CATEGORIES.map(ind => (
-          <button key={ind} onClick={() => setSelectedIndustry(ind)}
-            className={`px-4 py-2 rounded-xl text-[13px] font-medium transition ${
-              selectedIndustry === ind
-                ? "bg-[#0A4FE8] text-white shadow-md"
-                : "bg-white text-gray-500 border border-gray-200 hover:border-blue-200 hover:text-[#0A4FE8]"
-            }`}>
-            {ind}
+      <div className="mb-8 flex flex-wrap gap-2">
+        {INDUSTRY_CATEGORIES.map((industry) => (
+          <button key={industry} type="button" onClick={() => setSelectedIndustry(industry)} className={`rounded-[10px] border px-4 py-2 text-[13px] font-medium transition ${selectedIndustry === industry ? "border-[#0A4FE8] bg-[#0A4FE8] text-white" : "border-gray-200 bg-white text-gray-600 hover:border-blue-200 hover:text-[#0A4FE8]"}`}>
+            {industry}
           </button>
         ))}
       </div>
 
-      {/* Pricing Cards */}
-      <div className="grid grid-cols-3 gap-6">
-        {PLANS.map(plan => {
-          const row = getPrice(plan, selectedIndustry);
+      <div className="grid grid-cols-1 gap-5 lg:grid-cols-3">
+        {SUBSCRIPTION_PLANS.map((plan) => {
+          const row = getPrice(plan.id, selectedIndustry);
+          const Icon = PLAN_ICONS[plan.id];
           return (
-            <div key={plan} className="bg-white rounded-2xl border border-gray-100 shadow-sm p-6">
-              <div className="flex items-center gap-3 mb-6">
-                <div className={`w-10 h-10 rounded-xl flex items-center justify-center text-lg ${
-                  plan === "startup" ? "bg-blue-50" : plan === "scaleup" ? "bg-[#0A4FE8] text-white" : "bg-amber-50"
-                }`}>
-                  {plan === "startup" ? "⚡" : plan === "scaleup" ? "🚀" : "👑"}
-                </div>
+            <section key={plan.id} className="rounded-[18px] border border-gray-200 bg-white p-5 shadow-[0_10px_32px_rgba(15,40,90,0.05)] sm:p-6">
+              <div className="mb-6 flex items-center gap-3">
+                <span className={`grid h-10 w-10 place-items-center rounded-[10px] ${plan.popular ? "bg-[#0A4FE8] text-white" : "bg-blue-50 text-[#0A4FE8]"}`}><Icon className="h-5 w-5" /></span>
                 <div>
-                  <h3 className="text-[16px] font-bold text-[#0D1B39]">{PLAN_LABELS[plan]}</h3>
-                  <p className="text-[11px] text-gray-400">{selectedIndustry}</p>
+                  <h2 className="text-[16px] font-semibold text-[#0D1B39]">{plan.name}</h2>
+                  <p className="text-[11px] text-gray-500">{selectedIndustry} · per {plan.billingUnit}</p>
                 </div>
               </div>
 
-              <div className="space-y-4">
-                {CURRENCIES.map(currency => (
-                  <div key={currency}>
-                    <label className="flex items-center gap-1.5 text-xs font-medium text-gray-500 mb-1.5">
-                      <span className="w-6 h-6 rounded-md bg-gray-100 flex items-center justify-center text-[10px] font-bold text-gray-600">
-                        {CURRENCY_SYMBOLS[currency]}
-                      </span>
-                      {currency.toUpperCase()} / month
-                    </label>
-                    <input
-                      type="number"
-                      min="0"
-                      step="0.01"
-                      value={row[`price_${currency}` as keyof PricingRow] || ""}
-                      onChange={(e) => updatePrice(plan, selectedIndustry, currency, parseFloat(e.target.value) || 0)}
-                      placeholder="0.00"
-                      className="w-full px-4 py-2.5 rounded-xl bg-gray-50 border border-gray-200 text-sm text-gray-800 font-mono placeholder:text-gray-300 focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-300 transition"
-                    />
-                  </div>
-                ))}
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-1 xl:grid-cols-2">
+                {CLIENT_BILLING_CURRENCIES.map((currency) => {
+                  const column = SUBSCRIPTION_PRICE_COLUMNS[currency] as keyof PricingRow;
+                  return (
+                    <div key={currency}>
+                      <label htmlFor={`${plan.id}-${currency}`} className="mb-1.5 flex items-center gap-2 text-xs font-medium text-gray-600">
+                        <span className="grid h-6 min-w-6 place-items-center rounded-[6px] bg-gray-100 px-1 text-[10px] font-semibold text-gray-600">{SYMBOLS[currency]}</span>
+                        {currency}
+                      </label>
+                      <input
+                        id={`${plan.id}-${currency}`}
+                        type="number"
+                        min="0"
+                        max="999999999"
+                        step="0.01"
+                        value={Number(row[column] || 0) || ""}
+                        onChange={(event) => updatePrice(plan.id, selectedIndustry, currency, Number(event.target.value) || 0)}
+                        placeholder="0.00"
+                        className="h-11 w-full rounded-[10px] border border-gray-200 bg-gray-50 px-3 text-sm text-gray-800 outline-none transition focus:border-[#0A4FE8] focus:bg-white focus:ring-4 focus:ring-blue-100"
+                      />
+                    </div>
+                  );
+                })}
               </div>
-            </div>
+            </section>
           );
         })}
       </div>
 
-      {/* Quick Overview */}
-      <div className="mt-10 bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
-        <div className="px-6 py-4 border-b border-gray-100">
-          <h2 className="text-[15px] font-semibold text-[#0D1B39]">All Industries Overview (USD)</h2>
-        </div>
-        <table className="w-full">
-          <thead>
-            <tr className="border-b border-gray-100">
-              <th className="text-left py-2.5 px-6 text-[11px] font-semibold text-gray-400 uppercase tracking-wider">Industry</th>
-              {PLANS.map(p => (
-                <th key={p} className="text-right py-2.5 px-6 text-[11px] font-semibold text-gray-400 uppercase tracking-wider">{PLAN_LABELS[p]}</th>
+      <div className="mt-9 overflow-hidden rounded-[18px] border border-gray-200 bg-white shadow-[0_10px_32px_rgba(15,40,90,0.05)]">
+        <div className="border-b border-gray-100 px-5 py-4 sm:px-6"><h2 className="text-[15px] font-semibold text-[#0D1B39]">All industries in USD</h2></div>
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[640px]">
+            <thead><tr className="border-b border-gray-100 bg-gray-50"><th className="px-6 py-3 text-left text-[11px] font-semibold text-gray-500">Industry</th>{SUBSCRIPTION_PLANS.map((plan) => <th key={plan.id} className="px-6 py-3 text-right text-[11px] font-semibold text-gray-500">{plan.name}{plan.id === "supreme" ? " / design" : " / month"}</th>)}</tr></thead>
+            <tbody>
+              {INDUSTRY_CATEGORIES.map((industry) => (
+                <tr key={industry} className={`border-b border-gray-50 transition hover:bg-blue-50/30 ${industry === selectedIndustry ? "bg-blue-50/40" : ""}`}>
+                  <td className="px-6 py-3 text-[13px] font-medium text-[#0D1B39]">{industry}</td>
+                  {SUBSCRIPTION_PLANS.map((plan) => {
+                    const value = getPrice(plan.id, industry).price_usd;
+                    return <td key={plan.id} className="px-6 py-3 text-right text-[13px] text-gray-600">{value > 0 ? `$${value.toLocaleString()}` : <span className="text-gray-300">Not set</span>}</td>;
+                  })}
+                </tr>
               ))}
-            </tr>
-          </thead>
-          <tbody>
-            {INDUSTRY_CATEGORIES.map(ind => (
-              <tr key={ind} className={`border-b border-gray-50 hover:bg-blue-50/30 transition ${ind === selectedIndustry ? "bg-blue-50/40" : ""}`}>
-                <td className="py-3 px-6 text-[13px] font-medium text-[#0D1B39]">{ind}</td>
-                {PLANS.map(plan => {
-                  const val = getPrice(plan, ind).price_usd;
-                  return (
-                    <td key={plan} className="py-3 px-6 text-right text-[13px] font-mono text-gray-600">
-                      {val > 0 ? `$${val.toLocaleString()}` : <span className="text-gray-300">-</span>}
-                    </td>
-                  );
-                })}
-              </tr>
-            ))}
-          </tbody>
-        </table>
+            </tbody>
+          </table>
+        </div>
       </div>
     </div>
   );

@@ -7,15 +7,15 @@ import { motion, AnimatePresence } from "framer-motion";
 import Image from "next/image";
 import NextLink from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { X, Loader2, Maximize2, Share2, Check, Link as LinkIcon, Mail } from "lucide-react";
+import { X, Loader2, Maximize2 } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { slugifyTitle } from "@/lib/work-slug";
 import { isPdfUrl } from "@/lib/work-asset";
 import WorkAsset from "@/components/marketing/WorkAsset";
-import { appPrompt } from "@/lib/app-notify";
+import { UniversalShareButton } from "@/components/share/UniversalShareButton";
 
 interface WorkRow {
-    id: number;
+    id: string;
     title: string;
     description: string | null;
     category: string | null;
@@ -28,14 +28,14 @@ interface WorkRow {
 }
 
 interface WorkImageRow {
-    id: number;
-    work_id: number;
+    id: string;
+    work_id: string;
     image_url: string;
     position: number | null;
 }
 
 interface WorkDetailOverlayProps {
-    workId: number | null;
+    workId: string | null;
     onClose: () => void;
 }
 
@@ -55,7 +55,6 @@ export function WorkDetailOverlay({ workId, onClose }: WorkDetailOverlayProps) {
     const [images, setImages] = useState<WorkImageRow[]>([]);
     const [heroUrl, setHeroUrl] = useState<string | null>(null);
     const [loading, setLoading] = useState(false);
-    const [copied, setCopied] = useState(false);
     const [failedImages, setFailedImages] = useState<Set<string>>(() => new Set());
 
     const router = useRouter();
@@ -85,75 +84,14 @@ export function WorkDetailOverlay({ workId, onClose }: WorkDetailOverlayProps) {
             ? `${window.location.origin}${detailHref}`
             : "";
 
-    const [shareOpen, setShareOpen] = useState(false);
-
-    const handleCopyLink = async () => {
-        if (!shareUrl) return;
-        try {
-            await navigator.clipboard.writeText(shareUrl);
-            setCopied(true);
-            setTimeout(() => setCopied(false), 1800);
-        } catch {
-            appPrompt({ title: "Copy this link", message: "Select and copy the link below:", defaultValue: shareUrl, confirmLabel: "Done" });
-        }
-    };
-
-    // Close the share menu when workId changes (another card opened)
+    // Reset any failed image state when another work card opens.
     useEffect(() => {
-        setShareOpen(false);
         setFailedImages(new Set());
     }, [workId]);
 
     const shareText = work?.title
         ? `${work.title} - by CDS Space`
         : "Check out this project by CDS Space.";
-    const encodedUrl = encodeURIComponent(shareUrl);
-    const encodedText = encodeURIComponent(shareText);
-
-    const socialTargets: { label: string; href: string; icon: React.ReactNode }[] = [
-        {
-            label: "X (Twitter)",
-            href: `https://twitter.com/intent/tweet?url=${encodedUrl}&text=${encodedText}`,
-            icon: (
-                <svg viewBox="0 0 24 24" className="w-4 h-4" aria-hidden="true">
-                    <path fill="currentColor" d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z" />
-                </svg>
-            ),
-        },
-        {
-            label: "Facebook",
-            href: `https://www.facebook.com/sharer/sharer.php?u=${encodedUrl}`,
-            icon: (
-                <svg viewBox="0 0 24 24" className="w-4 h-4" aria-hidden="true">
-                    <path fill="currentColor" d="M22 12a10 10 0 1 0-11.56 9.88v-6.99H7.9V12h2.54V9.8c0-2.51 1.49-3.9 3.77-3.9 1.1 0 2.24.2 2.24.2v2.47h-1.26c-1.24 0-1.63.77-1.63 1.56V12h2.77l-.44 2.89h-2.33v6.99A10 10 0 0 0 22 12z" />
-                </svg>
-            ),
-        },
-        {
-            label: "LinkedIn",
-            href: `https://www.linkedin.com/sharing/share-offsite/?url=${encodedUrl}`,
-            icon: (
-                <svg viewBox="0 0 24 24" className="w-4 h-4" aria-hidden="true">
-                    <path fill="currentColor" d="M20.45 20.45h-3.55v-5.57c0-1.33-.02-3.05-1.86-3.05-1.86 0-2.14 1.45-2.14 2.95v5.67H9.35V9h3.41v1.56h.05c.48-.9 1.64-1.86 3.37-1.86 3.6 0 4.27 2.37 4.27 5.45v6.3zM5.34 7.43a2.06 2.06 0 1 1 0-4.12 2.06 2.06 0 0 1 0 4.12zM7.12 20.45H3.56V9h3.56v11.45zM22.23 0H1.77C.79 0 0 .77 0 1.72v20.56C0 23.23.79 24 1.77 24h20.45C23.2 24 24 23.23 24 22.28V1.72C24 .77 23.2 0 22.23 0z" />
-                </svg>
-            ),
-        },
-        {
-            label: "WhatsApp",
-            href: `https://wa.me/?text=${encodedText}%20${encodedUrl}`,
-            icon: (
-                <svg viewBox="0 0 24 24" className="w-4 h-4" aria-hidden="true">
-                    <path fill="currentColor" d="M20.52 3.48A11.93 11.93 0 0 0 12 0C5.37 0 0 5.37 0 12c0 2.11.55 4.17 1.6 5.98L0 24l6.2-1.62A11.92 11.92 0 0 0 12 24c6.63 0 12-5.37 12-12 0-3.2-1.25-6.21-3.48-8.52zM12 22a9.96 9.96 0 0 1-5.08-1.39l-.36-.21-3.68.97.98-3.58-.23-.37A9.95 9.95 0 0 1 2 12c0-5.52 4.48-10 10-10 2.67 0 5.18 1.04 7.07 2.93A9.93 9.93 0 0 1 22 12c0 5.52-4.48 10-10 10zm5.47-7.44c-.3-.15-1.77-.87-2.05-.97-.28-.1-.48-.15-.68.15-.2.3-.78.97-.96 1.17-.18.2-.35.22-.65.07-.3-.15-1.27-.47-2.42-1.49-.9-.8-1.5-1.79-1.67-2.09-.17-.3-.02-.46.13-.61.13-.13.3-.35.45-.52.15-.17.2-.3.3-.5.1-.2.05-.37-.02-.52-.07-.15-.68-1.63-.93-2.23-.24-.58-.49-.5-.68-.5h-.58c-.2 0-.52.07-.8.37-.27.3-1.05 1.03-1.05 2.5s1.07 2.9 1.22 3.1c.15.2 2.1 3.2 5.1 4.5 2.23.96 2.62.77 3.1.72.47-.05 1.52-.62 1.73-1.22.2-.6.2-1.1.15-1.22-.05-.1-.27-.17-.57-.32z" />
-                </svg>
-            ),
-        },
-        {
-            label: "Email",
-            href: `mailto:?subject=${encodedText}&body=${encodedText}%0A%0A${encodedUrl}`,
-            icon: <Mail className="w-4 h-4" />,
-        },
-    ];
-
     // Fetch work + images whenever a new workId is set.
     useEffect(() => {
         if (workId == null) {
@@ -304,69 +242,12 @@ export function WorkDetailOverlay({ workId, onClose }: WorkDetailOverlayProps) {
                                             <Maximize2 className="w-4 h-4" />
                                             <span className="hidden sm:inline">Expand</span>
                                         </NextLink>
-                                        <div className="relative">
-                                            <button
-                                                type="button"
-                                                onClick={() => setShareOpen((o) => !o)}
-                                                aria-label="Share project"
-                                                aria-haspopup="menu"
-                                                aria-expanded={shareOpen}
-                                                title="Share project"
-                                                className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border border-gray-200 text-gray-600 text-sm font-medium hover:bg-gray-50 hover:text-[#040B37] transition"
-                                            >
-                                                {copied ? <Check className="w-4 h-4 text-emerald-600" /> : <Share2 className="w-4 h-4" />}
-                                                <span className="hidden sm:inline">{copied ? "Copied" : "Share"}</span>
-                                            </button>
-                                            {shareOpen && (
-                                                <>
-                                                    {/* Backdrop to dismiss */}
-                                                    <button
-                                                        type="button"
-                                                        aria-label="Close share menu"
-                                                        onClick={() => setShareOpen(false)}
-                                                        className="fixed inset-0 z-30 cursor-default"
-                                                    />
-                                                    <div
-                                                        role="menu"
-                                                        className="absolute right-0 mt-2 z-40 w-56 rounded-xl border border-gray-200 bg-white shadow-xl overflow-hidden"
-                                                    >
-                                                        <button
-                                                            type="button"
-                                                            role="menuitem"
-                                                            onClick={() => {
-                                                                handleCopyLink();
-                                                                setShareOpen(false);
-                                                            }}
-                                                            className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-[#040B37] hover:bg-gray-50 transition"
-                                                        >
-                                                            {copied ? (
-                                                                <Check className="w-4 h-4 text-emerald-600" />
-                                                            ) : (
-                                                                <LinkIcon className="w-4 h-4 text-gray-500" />
-                                                            )}
-                                                            <span className="font-medium">
-                                                                {copied ? "Link copied" : "Copy link"}
-                                                            </span>
-                                                        </button>
-                                                        <div className="h-px bg-gray-100" />
-                                                        {socialTargets.map((t) => (
-                                                            <a
-                                                                key={t.label}
-                                                                role="menuitem"
-                                                                href={t.href}
-                                                                target="_blank"
-                                                                rel="noopener noreferrer"
-                                                                onClick={() => setShareOpen(false)}
-                                                                className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-[#040B37] hover:bg-gray-50 transition"
-                                                            >
-                                                                <span className="text-gray-500">{t.icon}</span>
-                                                                <span className="font-medium">{t.label}</span>
-                                                            </a>
-                                                        ))}
-                                                    </div>
-                                                </>
-                                            )}
-                                        </div>
+                                        <UniversalShareButton
+                                            title={work?.title || "CDS Space project"}
+                                            text={shareText}
+                                            url={shareUrl}
+                                            className="min-h-0 rounded-xl border-gray-200 px-3 py-2 text-sm font-medium text-gray-600 shadow-none hover:bg-gray-50 hover:text-[#040B37]"
+                                        />
                                     </>
                                 )}
                                 <button
@@ -389,15 +270,16 @@ export function WorkDetailOverlay({ workId, onClose }: WorkDetailOverlayProps) {
                             <>
                                 {/* Hero image */}
                                 {heroUrl && (
-                                    <div className="relative w-full aspect-video bg-gray-100">
+                                    <div data-cds-work-preview className="relative w-full aspect-video bg-gray-100">
                                         <Image
                                             src={heroUrl}
                                             alt={work?.title ?? ""}
                                             fill
                                             priority
-                                            quality={92}
+                                            unoptimized
                                             sizes="(min-width: 960px) 960px, 100vw"
                                             onError={() => setHeroUrl(null)}
+                                            draggable={false}
                                             className="object-cover"
                                         />
                                     </div>
@@ -437,6 +319,7 @@ export function WorkDetailOverlay({ workId, onClose }: WorkDetailOverlayProps) {
                                                 {gallery.map((img) => (
                                                     <div
                                                         key={img.id}
+                                                        data-cds-work-preview
                                                         className="relative w-full rounded-xl md:rounded-2xl overflow-hidden bg-gray-100"
                                                     >
                                                         {isPdfUrl(img.image_url) ? (
@@ -451,6 +334,7 @@ export function WorkDetailOverlay({ workId, onClose }: WorkDetailOverlayProps) {
                                                                 alt=""
                                                                 loading="lazy"
                                                                 decoding="async"
+                                                                draggable={false}
                                                                 onError={() =>
                                                                     setFailedImages((prev) => new Set(prev).add(img.image_url))
                                                                 }

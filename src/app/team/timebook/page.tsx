@@ -34,6 +34,19 @@ function fmtDate(value?: string | null) {
     if (!Number.isFinite(d.getTime())) return String(value);
     return d.toLocaleDateString("en-US", { day: "numeric", month: "short", year: "numeric", timeZone: "Africa/Lagos" });
 }
+function lagosMinutesClient(date = new Date()) {
+    const parts = new Intl.DateTimeFormat("en-GB", {
+        timeZone: "Africa/Lagos",
+        hour: "2-digit",
+        minute: "2-digit",
+        hour12: false,
+    }).formatToParts(date);
+    const get = (type: string) => Number(parts.find((part) => part.type === type)?.value || 0);
+    return get("hour") * 60 + get("minute");
+}
+function isNightWorkWindow() {
+    return lagosMinutesClient() >= 18 * 60 + 15;
+}
 
 export default function TimebookPage() {
     const [data, setData] = useState<any>(null);
@@ -53,19 +66,24 @@ export default function TimebookPage() {
     }, []);
     useEffect(() => { load(); }, [load]);
 
-    const geo = useCallback(async (): Promise<{ latitude?: number; longitude?: number; accuracy?: number }> => {
+    const geo = useCallback(async (fresh = false): Promise<{ latitude?: number; longitude?: number; accuracy?: number; captured_at?: string }> => {
         if (!navigator.geolocation) {
-            toast.error("This browser has no location support — ask an admin for a bypass code.");
+            toast.error("This browser has no location support - ask an admin for a bypass code.");
             return {};
         }
         const result = await new Promise<{ pos?: GeolocationPosition; code?: number }>((res) =>
             navigator.geolocation.getCurrentPosition(
                 (p) => res({ pos: p }),
                 (err) => res({ code: err.code }),
-                { enableHighAccuracy: true, timeout: 12000, maximumAge: 30000 },
+                { enableHighAccuracy: true, timeout: 12000, maximumAge: fresh ? 0 : 30000 },
             ));
         if (result.pos) {
-            return { latitude: result.pos.coords.latitude, longitude: result.pos.coords.longitude, accuracy: result.pos.coords.accuracy };
+            return {
+                latitude: result.pos.coords.latitude,
+                longitude: result.pos.coords.longitude,
+                accuracy: result.pos.coords.accuracy,
+                captured_at: new Date(result.pos.timestamp || Date.now()).toISOString(),
+            };
         }
         if (result.code === 1) toast.error("Location permission is blocked. Allow location access for this site in your browser settings, then try again.");
         else toast.error("Could not get a GPS fix. Move near a window, turn off any VPN, and try again.");
@@ -75,8 +93,9 @@ export default function TimebookPage() {
     const act = useCallback(async (action: string, extra: any = {}) => {
         setBusy(action);
         try {
-            const withGeo = ["clock_in", "clock_out", "break_start", "break_end", "status_update", "location_ping"].includes(action);
-            const body = { action, ...(withGeo ? await geo() : {}), ...extra };
+            const withGeo = ["clock_in", "break_start", "break_end", "status_update", "location_ping"].includes(action) && !extra.skip_location;
+            const body = { action, ...(withGeo ? await geo(action === "clock_in") : {}), ...extra };
+            delete body.skip_location;
             const r = await fetch("/api/team/timebook", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
             const j = await r.json();
             if (!j.ok) {
@@ -84,11 +103,24 @@ export default function TimebookPage() {
                 throw new Error(j.error || "Action failed");
             }
             setBypass({ show: false, code: "" });
-            if (action === "clock_in") toast.success("Clocked in");
-            else if (action === "clock_out") toast.success("Clocked out");
+            if (j.entry) {
+                // Reflect the server-confirmed attendance immediately. This
+                // prevents a stale render from briefly reverting the control.
+                setData((current: any) => current ? { ...current, today: j.entry } : current);
+            }
+            if (action === "clock_in") {
+                toast.success(j.message || "Clocked in");
+                window.dispatchEvent(new CustomEvent("cds:clocked-in"));
+                localStorage.setItem("cds:attendance-sync", JSON.stringify({ action: "clocked-in", at: Date.now() }));
+            }
+            else if (action === "clock_out") {
+                toast.success(j.message || "Checked out. Your attendance has been recorded.");
+                window.dispatchEvent(new CustomEvent("cds:clocked-out"));
+                localStorage.setItem("cds:attendance-sync", JSON.stringify({ action: "clocked-out", at: Date.now() }));
+            }
             else if (action === "request_leave") toast.success("Leave requested");
             else toast.success("Updated");
-            load();
+            await load();
         } catch (e) { toast.error(e instanceof Error ? e.message : "Failed"); }
         finally { setBusy(""); }
     }, [geo, load]);
@@ -99,24 +131,26 @@ export default function TimebookPage() {
     const today = data.today;
     const clockedIn = !!today?.clock_in_at && !today?.clock_out_at;
     const clockedOut = !!today?.clock_out_at;
+    const automaticallyCheckedOut = clockedOut && Array.isArray(today?.flags) && today.flags.includes("auto_clock_out");
     const onBreak = today?.current_status === "on_break";
     const profile = data.profile || {};
     const maxSessions = data.max_sessions || 3;
     const sessionsUsed = data.sessions_used ?? (clockedIn || clockedOut ? 1 : 0);
     // After a checkout you can check back in until the daily session limit.
     const canCheckInAgain = clockedOut && sessionsUsed < maxSessions;
+    const canNightCheckInAgain = canCheckInAgain && isNightWorkWindow();
 
     return (
         <div className="max-w-[1100px] space-y-5">
             {/* Hero status */}
-            <div className="relative overflow-hidden rounded-[24px] bg-gradient-to-br from-blue-600 to-blue-800 p-5 text-white sm:p-7">
+            <div className="relative overflow-hidden rounded-[24px] bg-[#0A4FE8] p-5 text-white sm:p-7">
                 <div className="absolute -right-16 -top-16 h-56 w-56 rounded-full bg-white/10 blur-3xl" />
                 <div className="relative flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
                     <div>
                         <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-white/70">Attendance · {new Date(data.work_date).toDateString()}</p>
                         <div className="mt-2 flex flex-wrap items-center gap-2">
                             <span className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-[13px] font-bold ${clockedIn ? "bg-green-400/25 text-green-50" : "bg-white/15 text-white/80"}`}>
-                                <Clock className="h-4 w-4" /> {clockedIn ? (onBreak ? "On break" : "Working") : clockedOut ? "Checked out" : "Not checked in"}
+                                <Clock className="h-4 w-4" /> {clockedIn ? (onBreak ? "On break" : "Working") : automaticallyCheckedOut ? "Automatically checked out" : clockedOut ? "Checked out" : "Not checked in"}
                             </span>
                             {today?.attendance_status && (
                                 <span className="rounded-full bg-white/15 px-3 py-1.5 text-[12px] font-semibold capitalize">{String(today.attendance_status).replace(/_/g, " ")}</span>
@@ -132,7 +166,7 @@ export default function TimebookPage() {
                     </div>
                     <div className="flex flex-col items-stretch gap-2 sm:flex-row sm:items-center lg:flex-col lg:items-end">
                         {((!clockedIn && !clockedOut) || canCheckInAgain) && (
-                            <button disabled={!!busy} onClick={() => act("clock_in", bypass.code ? { geofence_bypass_code: bypass.code } : {})}
+                            <button disabled={!!busy} onClick={() => act("clock_in", { ...(bypass.code ? { geofence_bypass_code: bypass.code } : {}), ...(canNightCheckInAgain ? { skip_location: true } : {}) })}
                                 className="inline-flex items-center justify-center gap-2 rounded-full bg-white px-6 py-3 text-[14px] font-bold text-brand-navy disabled:opacity-60">
                                 {busy === "clock_in" ? <Loader2 className="h-5 w-5 animate-spin" /> : <LogIn className="h-5 w-5" />} {canCheckInAgain ? "Check in again" : "Check in"}
                             </button>
@@ -158,13 +192,23 @@ export default function TimebookPage() {
                 </div>
             </div>
 
+            {automaticallyCheckedOut && (
+                <div className="flex items-start gap-3 rounded-2xl border border-blue-200 bg-blue-50 p-4 text-[13px] text-blue-900">
+                    <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-[#0A4FE8]" />
+                    <div>
+                        <p className="font-semibold">Your attendance is recorded.</p>
+                        <p className="mt-0.5 text-blue-800/80">The safety checkout closed this session at {fmtTime(today.clock_out_at)}. Your original check-in and worked time were preserved.</p>
+                    </div>
+                </div>
+            )}
+
             {/* Geofence bypass banner */}
             {bypass.show && (
                 <div className="rounded-2xl border border-red-200 bg-red-50 p-4">
                     <div className="flex items-center gap-2 text-[13px] font-semibold text-red-700"><MapPin className="h-4 w-4" /> You appear to be outside the office{bypass.distance != null ? ` (~${Math.round(bypass.distance)}m away)` : ""}.</div>
                     <div className="mt-2 flex gap-2">
                         <input value={bypass.code} onChange={(e) => setBypass({ ...bypass, code: e.target.value })} placeholder="Admin bypass code" className="flex-1 rounded-lg border border-red-200 bg-white px-3 py-2 text-[13px] outline-none" />
-                        <button disabled={!bypass.code || !!busy} onClick={() => act("clock_in", { geofence_bypass_code: bypass.code })} className="rounded-lg bg-red-600 px-4 py-2 text-[13px] font-semibold text-white disabled:opacity-60">Clock in with code</button>
+                        <button disabled={!bypass.code || !!busy} onClick={() => act("clock_in", { geofence_bypass_code: bypass.code, ...(canNightCheckInAgain ? { skip_location: true } : {}) })} className="rounded-lg bg-red-600 px-4 py-2 text-[13px] font-semibold text-white disabled:opacity-60">Clock in with code</button>
                     </div>
                 </div>
             )}
@@ -187,7 +231,7 @@ export default function TimebookPage() {
                         </Card>
                     )}
 
-                    <Card icon={<History className="h-4 w-4" />} title="Recent attendance" subtitle="Last 30 days">
+                    <Card icon={<History className="h-4 w-4" />} title="Recent attendance" subtitle="This month">
                         <div className="overflow-x-auto">
                             <table className="w-full text-left text-[13px]">
                                 <thead className="bg-brand-bg text-[11px] uppercase tracking-wide text-brand-body/50">

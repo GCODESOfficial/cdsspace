@@ -58,6 +58,7 @@ export const RESERVED_USERNAMES = new Set<string>([
   "help",
   "docs",
   "blog",
+  "intelligence",
   "pricing",
   "privacy-policy",
   "terms-of-service",

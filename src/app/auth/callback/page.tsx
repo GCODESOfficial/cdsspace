@@ -10,8 +10,7 @@ import { createClient } from "@/lib/glashdb/client";
  * to this URL with the session in the URL *fragment* (`#access_token=…&refresh_token=…`).
  * A fragment is never sent to the server, so this MUST run in the browser. We
  * read the tokens, hand them to the GlashDB client via `setSession` (which writes
- * the session cookies), then finalize on the server (`/api/auth/after-login`
- * ensures the profile row and resolves the post-login destination), and redirect.
+ * the session cookies), then finalize on the server and redirect.
  *
  * A `?code=…` (PKCE) response is handled as a fallback for completeness.
  */
@@ -35,30 +34,43 @@ export default function AuthCallbackPage() {
         const refreshToken = hash.get("refresh_token");
         const code = search.get("code");
 
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const glash = createClient() as any;
+        let nextPath: string;
 
         if (accessToken && refreshToken) {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const glash = createClient() as any;
           const { error } = await glash.auth.setSession({
             access_token: accessToken,
             refresh_token: refreshToken,
           });
           if (error) throw error;
+
+          const res = await fetch("/api/auth/after-login", {
+            method: "POST",
+            credentials: "include",
+          });
+          const json = await res.json().catch(() => null);
+          if (!res.ok || json?.ok !== true || typeof json?.next !== "string") {
+            throw new Error("oauth_finalization_failed");
+          }
+          nextPath = json.next;
         } else if (code) {
-          const { error } = await glash.auth.exchangeCodeForSession(code);
-          if (error) throw error;
+          const exchange = await fetch("/api/auth/oauth/exchange", {
+            method: "POST",
+            credentials: "include",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ code }),
+          });
+          const json = await exchange.json().catch(() => null);
+          if (!exchange.ok || json?.ok !== true || typeof json?.next !== "string") {
+            throw new Error("oauth_exchange_failed");
+          }
+          nextPath = json.next;
         } else {
           throw new Error("missing_credentials");
         }
 
-        // Finalize server-side: ensure the profile row exists and read the
-        // intended destination from the httpOnly cookie set at login start.
-        const res = await fetch("/api/auth/after-login", {
-          method: "POST",
-          credentials: "include",
-        });
-        const json = await res.json().catch(() => ({}));
-        window.location.replace(json?.next && typeof json.next === "string" ? json.next : "/dashboard");
+        window.location.replace(nextPath);
       } catch {
         setMessage("Sign-in could not be completed. Redirecting…");
         window.location.replace("/login?error=auth_code_exchange_failed");

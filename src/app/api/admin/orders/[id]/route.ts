@@ -42,16 +42,49 @@ export async function GET(
         throw bannerError;
       }
 
-      if (!bannerRequest) {
-        return NextResponse.json(
-          { error: "Order not found" },
-          { status: 404 }
-        );
+      if (bannerRequest) {
+        order = bannerRequest;
+        orderType = "banner_request";
+      } else {
+        const { data: merchOrder, error: merchError } = await supabaseAdmin
+          .from("merch_orders")
+          .select("*, profiles!user_id(id, email, full_name, company_name, avatar_url)")
+          .eq("id", id)
+          .maybeSingle();
+        if (merchError) throw merchError;
+        if (!merchOrder) return NextResponse.json({ error: "Order not found" }, { status: 404 });
+        order = merchOrder;
+        orderType = "merch_order";
       }
-
-      order = bannerRequest;
-      orderType = "banner_request";
     }
+
+    const embeddedProfile = Array.isArray(order.profiles) ? order.profiles[0] : order.profiles;
+    let resolvedProfile = embeddedProfile || null;
+    if (!resolvedProfile && order.user_id) {
+      const { data: profile } = await supabaseAdmin
+        .from("profiles")
+        .select("id, email, full_name, company_name, avatar_url")
+        .eq("id", order.user_id)
+        .maybeSingle();
+      resolvedProfile = profile || null;
+    }
+    if (!resolvedProfile && (orderType === "banner_request" || orderType === "merch_order") && order.invoice_id) {
+      const { data: invoice } = await supabaseAdmin
+        .from("finance_invoices")
+        .select("client_name, client_email")
+        .eq("id", order.invoice_id)
+        .maybeSingle();
+      if (invoice?.client_name || invoice?.client_email) {
+        resolvedProfile = {
+          id: order.user_id || null,
+          full_name: invoice.client_name || invoice.client_email,
+          company_name: invoice.client_name || null,
+          email: invoice.client_email || "",
+          avatar_url: null,
+        };
+      }
+    }
+    order = { ...order, profiles: resolvedProfile };
 
     // Fetch status_updates history for this order
     const { data: statusUpdates, error: statusError } = await supabaseAdmin
@@ -64,8 +97,18 @@ export async function GET(
       throw statusError;
     }
 
+    const clientProfile = resolvedProfile ? {
+      ...resolvedProfile,
+      company: resolvedProfile.company_name || undefined,
+    } : null;
     return NextResponse.json({
-      order,
+      order: {
+        ...order,
+        displayId: order.display_id || `${orderType === "merch_order" ? "MR" : orderType === "banner_request" ? "BN" : "DS"}-${String(order.id).slice(0, 6).toUpperCase()}`,
+        type: orderType === "merch_order" ? "merch" : orderType === "banner_request" ? "banner" : "design",
+        profile: clientProfile,
+        status_updates: statusUpdates ?? [],
+      },
       order_type: orderType,
       status_updates: statusUpdates ?? [],
     });
@@ -91,6 +134,7 @@ export async function PATCH(
     const { id } = await params;
     const body = await request.json();
     const { status, admin_notes } = body;
+    const statusNote = typeof body.note === "string" ? body.note.trim() : "";
 
     // Determine which table the order belongs to
     const { data: designCheck } = await supabaseAdmin
@@ -99,10 +143,11 @@ export async function PATCH(
       .eq("id", id)
       .maybeSingle();
 
-    let table: "design_requests" | "banner_requests";
+    let table: "design_requests" | "banner_requests" | "merch_orders";
     let entityType: string;
     let previousStatus: string | null = null;
     let userId: string | null = null;
+    let linkedInvoiceId: string | null = null;
 
     if (designCheck) {
       table = "design_requests";
@@ -112,21 +157,40 @@ export async function PATCH(
     } else {
       const { data: bannerCheck } = await supabaseAdmin
         .from("banner_requests")
-        .select("id, status, user_id")
+        .select("id, status, user_id, invoice_id")
         .eq("id", id)
         .maybeSingle();
 
-      if (!bannerCheck) {
-        return NextResponse.json(
-          { error: "Order not found" },
-          { status: 404 }
-        );
+      if (bannerCheck) {
+        table = "banner_requests";
+        entityType = "banner_request";
+        previousStatus = bannerCheck.status;
+        userId = bannerCheck.user_id;
+        linkedInvoiceId = bannerCheck.invoice_id;
+      } else {
+        const { data: merchCheck } = await supabaseAdmin.from("merch_orders").select("id,status,user_id,invoice_id").eq("id", id).maybeSingle();
+        if (!merchCheck) return NextResponse.json({ error: "Order not found" }, { status: 404 });
+        table = "merch_orders";
+        entityType = "merch_order";
+        previousStatus = merchCheck.status;
+        userId = merchCheck.user_id;
+        linkedInvoiceId = merchCheck.invoice_id;
       }
+    }
 
-      table = "banner_requests";
-      entityType = "banner_request";
-      previousStatus = bannerCheck.status;
-      userId = bannerCheck.user_id;
+    const productionStatuses = new Set(["PENDING", "ACTIVE", "SCHEDULED", "COMPLETED"]);
+    if ((table === "banner_requests" || table === "merch_orders") && status && productionStatuses.has(status)) {
+      if (!linkedInvoiceId) {
+        return NextResponse.json({ error: "This order cannot enter production until its quotation is priced and converted to an invoice." }, { status: 409 });
+      }
+      const { data: linkedInvoice } = await supabaseAdmin
+        .from("finance_invoices")
+        .select("status")
+        .eq("id", linkedInvoiceId)
+        .maybeSingle();
+      if (linkedInvoice?.status !== "paid") {
+        return NextResponse.json({ error: "This order cannot enter production until its invoice is paid." }, { status: 409 });
+      }
     }
 
     // Build update payload
@@ -139,6 +203,8 @@ export async function PATCH(
     if (admin_notes !== undefined) {
       updateData.admin_notes = admin_notes;
     }
+    if (table === "merch_orders" && status === "ACTIVE") updateData.activated_at = new Date().toISOString();
+    if (table === "merch_orders" && status === "COMPLETED") updateData.completed_at = new Date().toISOString();
 
     // Update the order
     const { data: updatedOrder, error: updateError } = await supabaseAdmin
@@ -165,7 +231,7 @@ export async function PATCH(
           entity_id: id,
           previous_status: previousStatus,
           new_status: status,
-          note: admin_notes ?? null,
+          note: statusNote || admin_notes || null,
           updated_by: adminEmail,
         });
 
@@ -180,9 +246,9 @@ export async function PATCH(
           .insert({
             user_id: userId,
             type: "status_change",
-            title: "Order Status Updated",
-            message: `Your order status has been updated from ${previousStatus} to ${status}.`,
-            link: `/orders/${id}`,
+            title: status === "COMPLETED" ? "Your order is complete" : status === "ACTIVE" ? "Your order is now active" : "Order status updated",
+            message: status === "COMPLETED" ? "Your order has been completed and delivered." : status === "ACTIVE" ? "Payment is confirmed and your order is now being processed." : `Your order status has been updated from ${previousStatus} to ${status}.`,
+            link: table === "merch_orders" ? "/dashboard/merch" : "/dashboard/orders",
             is_read: false,
           });
 

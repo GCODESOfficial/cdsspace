@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { getAdminSession } from "@/lib/admin-session";
 import { hasPermission } from "@/lib/admin-permissions";
 import { supabaseAdmin } from "@/lib/supabase";
+import { assertCleanBuffer, UploadSecurityError } from "@/lib/upload-security";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -90,9 +91,16 @@ export async function POST(req: Request) {
 
     const safeName = file.name.replace(/[^a-zA-Z0-9._-]+/g, "_");
     filePath = `knowledge/${Date.now()}-${safeName}`;
+    const docBuffer = Buffer.from(await file.arrayBuffer());
+    try {
+      assertCleanBuffer(docBuffer);
+    } catch (e) {
+      if (e instanceof UploadSecurityError) return NextResponse.json({ ok: false, error: e.message }, { status: e.status });
+      throw e;
+    }
     const { error: uploadError } = await (supabaseAdmin as any).storage
       .from(BUCKET)
-      .upload(filePath, new Uint8Array(await file.arrayBuffer()), {
+      .upload(filePath, docBuffer, {
         contentType: file.type || "application/octet-stream",
         upsert: false,
       });

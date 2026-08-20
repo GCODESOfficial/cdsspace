@@ -8,7 +8,7 @@ import { initials } from "@/lib/utils";
 import { AnimatePresence, motion } from "framer-motion";
 import {
   LayoutDashboard,
-  CalendarCheck,
+  KanbanSquare,
   Clock,
   Briefcase,
   MessageSquare,
@@ -21,6 +21,7 @@ import {
   LogOut,
   ExternalLink,
   GraduationCap,
+  Wand2,
   X,
 } from "lucide-react";
 
@@ -43,16 +44,17 @@ export function TeamSidebar({ member, onLogout, mobileOpen = false, onClose }: T
 
   const mainItems = [
     { label: t("nav.overview"), href: "/team", icon: LayoutDashboard, exact: true },
-    { label: "My Day", href: "/team/my-day", icon: CalendarCheck },
+    { label: "Taskboard", href: "/team/taskboard", icon: KanbanSquare },
     { label: "Attendance", href: "/team/timebook", icon: Clock },
-    { label: t("nav.work"), href: "/team/work", icon: Briefcase },
-    { label: "Weekly Report", href: "/team/work-tracking", icon: FileText },
+    { label: "Projects", href: "/team/work", icon: Briefcase },
+    { label: "Work Reports", href: "/team/work-tracking", icon: FileText },
     { label: t("nav.chat"), href: "/team/chat", icon: MessageSquare },
     { label: t("nav.protectDocs"), href: "/team/protect-docs", icon: ShieldCheck },
     { label: t("nav.cmeet"), href: "/team/cmeet", icon: Video },
     { label: t("nav.cdocs"), href: "/team/cdocs", icon: FileText },
     { label: t("nav.csign"), href: "/team/csign", icon: PenLine },
     { label: t("nav.cresume"), href: "/team/cresume", icon: UserRound },
+    { label: "CREATE Studio", href: "/create", icon: Wand2 },
   ];
 
   const SidebarInner = ({ mobile = false }: { mobile?: boolean }) => (
@@ -90,7 +92,7 @@ export function TeamSidebar({ member, onLogout, mobileOpen = false, onClose }: T
               key={item.href}
               href={item.href}
               onClick={onClose}
-              className={`flex items-center gap-3 px-3 py-2.5 rounded-xl text-[13.5px] transition ${
+              className={`flex min-h-11 items-center gap-3 px-3 py-2.5 rounded-xl text-[13.5px] transition ${
                 active
                   ? "bg-brand-blue text-white font-semibold shadow-[0_6px_18px_rgba(28,78,209,0.25)]"
                   : "text-brand-body hover:bg-brand-bg/70 hover:text-brand-navy"
@@ -106,7 +108,7 @@ export function TeamSidebar({ member, onLogout, mobileOpen = false, onClose }: T
           <Link
             href="/team/screening"
             onClick={onClose}
-            className={`flex items-center gap-3 px-3 py-2.5 rounded-xl text-[13.5px] transition ${
+            className={`flex min-h-11 items-center gap-3 px-3 py-2.5 rounded-xl text-[13.5px] transition ${
               pathname === "/team/screening" || pathname?.startsWith("/team/screening/")
                 ? "bg-brand-blue text-white font-semibold shadow-[0_6px_18px_rgba(28,78,209,0.25)]"
                 : "text-brand-body hover:bg-brand-bg/70 hover:text-brand-navy"
@@ -127,7 +129,7 @@ export function TeamSidebar({ member, onLogout, mobileOpen = false, onClose }: T
             <Link
               href="/admin"
               onClick={onClose}
-              className="flex items-center justify-between gap-3 px-3 py-2.5 rounded-xl text-[13.5px] text-brand-body hover:bg-brand-bg/70 hover:text-brand-navy transition"
+              className="flex min-h-11 items-center justify-between gap-3 px-3 py-2.5 rounded-xl text-[13.5px] text-brand-body hover:bg-brand-bg/70 hover:text-brand-navy transition"
             >
               <span className="inline-flex items-center gap-3">
                 <ShieldCheck className="w-[18px] h-[18px]" />
@@ -140,33 +142,31 @@ export function TeamSidebar({ member, onLogout, mobileOpen = false, onClose }: T
       </nav>
 
       <div className="p-3 border-t border-brand-stroke/20 space-y-1">
+        {/* Account element doubles as the entry to Settings, so the standalone
+            Settings nav item is retired in favour of this single account link. */}
         <Link
           href="/team/settings"
           onClick={onClose}
-          className={`flex items-center gap-3 px-3 py-2.5 rounded-xl text-[13.5px] transition ${
+          title={t("nav.settings")}
+          aria-label={t("nav.settings")}
+          className={`group flex items-center gap-3 rounded-xl px-3 py-2.5 transition ${
             pathname?.startsWith("/team/settings")
-              ? "bg-brand-bg text-brand-navy font-semibold"
-              : "text-brand-body hover:bg-brand-bg/70 hover:text-brand-navy"
+              ? "bg-brand-bg ring-1 ring-brand-stroke/40"
+              : "hover:bg-brand-bg/70"
           }`}
         >
-          <Settings className="w-[18px] h-[18px]" />
-          {t("nav.settings")}
-        </Link>
-        <button
-          onClick={() => {
-            onClose?.();
-            onLogout();
-          }}
-          className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-[13.5px] text-rose-600 hover:bg-rose-50 transition"
-        >
-          <LogOut className="w-[18px] h-[18px]" />
-          {t("nav.logout")}
-        </button>
-
-        <div className="mt-2 px-3 py-3 rounded-xl bg-brand-bg/60 flex items-center gap-3">
-          <div className="w-9 h-9 rounded-full bg-brand-blue text-white text-[13px] font-bold flex items-center justify-center">
-            {initials(member.full_name)}
-          </div>
+          {member.avatar_url ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={member.avatar_url}
+              alt={member.full_name}
+              className="w-9 h-9 rounded-full object-cover shrink-0"
+            />
+          ) : (
+            <div className="w-9 h-9 rounded-full bg-brand-blue text-white text-[13px] font-bold flex items-center justify-center shrink-0">
+              {initials(member.full_name)}
+            </div>
+          )}
           <div className="min-w-0 flex-1">
             <p className="text-[13px] font-semibold text-brand-navy truncate">
               {member.full_name}
@@ -175,14 +175,25 @@ export function TeamSidebar({ member, onLogout, mobileOpen = false, onClose }: T
               <p className="text-[11px] text-brand-body/60 truncate">{member.role_title}</p>
             )}
           </div>
-        </div>
+          <Settings className="w-4 h-4 shrink-0 text-brand-body/40 transition group-hover:text-brand-body/70" />
+        </Link>
+        <button
+          onClick={() => {
+            onClose?.();
+            onLogout();
+          }}
+          className="flex min-h-11 w-full items-center gap-3 rounded-xl px-3 py-2.5 text-[13.5px] text-rose-600 transition hover:bg-rose-50"
+        >
+          <LogOut className="w-[18px] h-[18px]" />
+          {t("nav.logout")}
+        </button>
       </div>
     </div>
   );
 
   return (
     <>
-      <aside className="hidden lg:flex w-[260px] shrink-0 h-screen sticky top-0 bg-white border-r border-brand-stroke/30 flex-col">
+      <aside className="sticky top-0 hidden h-screen w-[260px] shrink-0 flex-col border-e border-brand-stroke/30 bg-white lg:flex">
         <SidebarInner />
       </aside>
 
@@ -199,11 +210,11 @@ export function TeamSidebar({ member, onLogout, mobileOpen = false, onClose }: T
               aria-label="Close navigation overlay"
             />
             <motion.aside
-              initial={{ x: "-100%" }}
+              initial={{ x: "var(--drawer-offset)" }}
               animate={{ x: 0 }}
-              exit={{ x: "-100%" }}
+              exit={{ x: "var(--drawer-offset)" }}
               transition={{ type: "spring", damping: 28, stiffness: 260 }}
-              className="fixed inset-y-0 left-0 z-50 w-[86vw] max-w-[320px] border-r border-brand-stroke/30 bg-white shadow-2xl lg:hidden"
+              className="fixed inset-y-0 start-0 z-50 w-[86vw] max-w-[320px] border-e border-brand-stroke/30 bg-white shadow-2xl [--drawer-offset:-100%] rtl:[--drawer-offset:100%] lg:hidden"
             >
               <SidebarInner mobile />
             </motion.aside>

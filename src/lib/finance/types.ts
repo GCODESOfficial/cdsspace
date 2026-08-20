@@ -1,11 +1,23 @@
-export type Currency = "NGN" | "RWF" | "USD";
+import { CLIENT_BILLING_CURRENCIES, CLIENT_BILLING_CURRENCY_OPTIONS, type ClientBillingCurrency } from "@/lib/client-billing";
 
-export const CURRENCIES: Currency[] = ["NGN", "RWF", "USD"];
+export type Currency = ClientBillingCurrency;
+
+// Finance and client onboarding intentionally share one currency source so an
+// account currency can always be selected before an invoice is created.
+export const CURRENCIES: Currency[] = [...CLIENT_BILLING_CURRENCIES];
+
+export const CURRENCY_NAMES = Object.fromEntries(
+  CLIENT_BILLING_CURRENCY_OPTIONS.map((currency) => [currency.code, currency.name]),
+) as Record<Currency, string>;
 
 export const CURRENCY_SYMBOLS: Record<Currency, string> = {
   NGN: "₦",
   RWF: "FRw ",
   USD: "$",
+  GBP: "£",
+  EUR: "€",
+  CNY: "¥",
+  AED: "AED ",
 };
 
 export function formatMoney(amount: number | string | null | undefined, currency: Currency = "NGN") {
@@ -35,6 +47,8 @@ export interface FinanceProject {
   id: string;
   name: string;
   client: string;
+  client_email?: string | null;
+  user_id?: string | null;
   currency: Currency;
   duration_start: string | null;
   duration_end: string | null;
@@ -86,6 +100,9 @@ export interface FinanceInvoice {
   due_date: string | null;
   notes: string | null;
   public_token: string;
+  marketer_code?: string | null;
+  marketer_user_id?: string | null;
+  marketer_attributed_at?: string | null;
   created_at: string;
   items?: FinanceInvoiceItem[];
   payment_terms?: string | null;
@@ -93,6 +110,62 @@ export interface FinanceInvoice {
   working_hours?: string | null;
   delivery_speed?: "standard" | "express" | "super_express" | "flash" | null;
   delivery_period?: string | null;
+}
+
+export interface InvoicePaymentSubmission {
+  id: string;
+  invoice_id: string;
+  method: "bank_transfer" | "paystack";
+  status: "pending" | "confirmed" | "rejected" | "cancelled";
+  amount: number;
+  currency: Currency;
+  payer_name: string | null;
+  payer_email: string | null;
+  transfer_reference: string | null;
+  proof_file_name: string | null;
+  proof_mime_type: string | null;
+  proof_size_bytes: number | null;
+  proof_url?: string | null;
+  submitted_at: string;
+  reviewed_at: string | null;
+  reviewed_by: string | null;
+  admin_note: string | null;
+}
+
+export interface FinanceReceipt {
+  id: string;
+  receipt_number: string;
+  invoice_id: string;
+  public_token: string;
+  client_name: string;
+  client_email: string | null;
+  amount: number;
+  currency: Currency;
+  payment_method: "bank_transfer" | "paystack" | string;
+  payment_reference: string | null;
+  paid_at: string;
+  emailed_at: string | null;
+  created_at: string;
+  invoice_number?: string;
+  invoice?: FinanceInvoice;
+  items?: FinanceInvoiceItem[];
+}
+
+export interface FinanceBankAccount {
+  id?: string;
+  currency: Currency;
+  country_code?: string | null;
+  bank_name: string;
+  account_name: string;
+  account_number: string | null;
+  iban?: string | null;
+  swift_bic?: string | null;
+  routing_number?: string | null;
+  bank_address?: string | null;
+  instructions?: string | null;
+  logo_url?: string | null;
+  active?: boolean;
+  sort_order?: number;
 }
 
 export interface FinanceQuotationItem {
@@ -118,6 +191,7 @@ export interface FinanceQuotationSample {
 export interface FinanceQuotation {
   id: string;
   quotation_number: string;
+  user_id?: string | null;
   project_id: string | null;
   milestone_id: string | null;
   converted_invoice_id: string | null;
@@ -170,6 +244,7 @@ export const DEFAULT_REVISIONS_NOTE = "Designs are subject to Free 2 Revisions";
 export const DEFAULT_WORKING_HOURS = "9am–5:30pm Monday–Friday  UTC+1";
 export const DEFAULT_QUOTATION_ESTIMATE_NOTE = "This quotation is a rough estimate for the project delivery. Final scope, timeline, and cost may change after confirmation.";
 export const QUOTATION_DELIVERY_PERIODS = [
+  "3 business days",
   "5-7 days",
   "2-3 weeks",
   "4-6 weeks",
@@ -178,7 +253,9 @@ export const QUOTATION_DELIVERY_PERIODS = [
   "12-18 months",
 ] as const;
 
-// Bank accounts shown on every invoice
+// Legacy Nigerian account data. New invoices receive currency-matched account
+// records from Sales settings; this remains a safe NGN fallback while older
+// deployments are upgraded.
 export const CDS_BANK_ACCOUNTS = [
   {
     bank: "Kuda Bank",

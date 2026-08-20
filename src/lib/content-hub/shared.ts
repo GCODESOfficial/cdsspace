@@ -16,6 +16,8 @@ export type ContentStatus =
   | "archived"
   | "deleted";
 export type MediaKind = "image" | "video" | "pdf" | "document" | "clip";
+export type VisualAssetKind = "image" | "video";
+export type VisualAssetStatus = "available" | "used" | "archived";
 
 export interface ContentMedia {
   id: string;
@@ -29,6 +31,28 @@ export interface ContentMedia {
   position: number;
   meta: Record<string, unknown>;
   created_at: string;
+}
+
+export interface VisualAsset {
+  id: string;
+  url: string;
+  kind: VisualAssetKind;
+  file_name: string | null;
+  mime_type: string | null;
+  size_bytes: number | null;
+  thumbnail_url: string | null;
+  title: string | null;
+  notes: string | null;
+  tags: string[];
+  status: VisualAssetStatus;
+  used_at: string | null;
+  archived_at: string | null;
+  used_in_content_id: string | null;
+  created_by: string | null;
+  created_by_id: string | null;
+  meta: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
 }
 
 export interface ContentItem {

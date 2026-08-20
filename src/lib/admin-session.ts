@@ -1,6 +1,7 @@
 import { cookies } from "next/headers";
 import { glashMaybeOne } from "@/lib/glashdb/postgres";
 import { getTeamSessionFromToken } from "@/lib/team-auth";
+import { verifyAdminCookie } from "@/lib/admin-session-cookie";
 
 export interface AdminSession {
   role: "super_admin" | "sub_admin";
@@ -18,23 +19,9 @@ export interface AdminSession {
 export async function getAdminSession(): Promise<AdminSession | null> {
   const store = await cookies();
   const raw = store.get("admin_session")?.value;
-  if (raw) {
-    try {
-      const parsed = JSON.parse(raw) as AdminSession;
-      if (parsed.role === "super_admin" || parsed.role === "sub_admin") {
-        return { ...parsed, source: parsed.source ?? "admin_cookie" };
-      }
-    } catch {
-      if (raw === "authenticated") {
-        return {
-          role: "super_admin",
-          email: "ceo@cdsspace.pro",
-          name: "Admin",
-          permissions: ["all"],
-          source: "admin_cookie",
-        };
-      }
-    }
+  const parsed = verifyAdminCookie<AdminSession>(raw);
+  if (parsed && (parsed.role === "super_admin" || parsed.role === "sub_admin")) {
+    return { ...parsed, source: parsed.source ?? "admin_cookie" };
   }
 
   const teamToken = store.get("team_session")?.value;

@@ -98,7 +98,7 @@ export async function GET() {
 
     const threadParts = partsRes.data || [];
 
-    // Resolve member names via a separate lookup — the GlashDB shim does not
+    // Resolve member names via a separate lookup - the GlashDB shim does not
     // support PostgREST embedded joins (team_members(full_name)), so we fetch
     // names by id, the same way hydrateTeamMessages does.
     const memberIds = Array.from(

@@ -25,7 +25,7 @@ async function maybeEnhanceDailyReport(aggregate: any, member: any, date: string
       [
         {
           role: "system",
-          content: "You create concise internal productivity summaries. Return JSON only and do not include sensitive personal content.",
+          content: "You create concise internal productivity summaries from member-confirmed task context. Return JSON only. Never infer idleness, inactivity or low effort from missing browser events; the member may be reading, studying or working in another tool. Do not include sensitive personal content.",
         },
         {
           role: "user",
@@ -154,12 +154,6 @@ export async function generateDailyReport(memberId: string, date: string) {
   );
 }
 
-function riskLabel(value: number) {
-  if (value >= 75) return "high";
-  if (value >= 45) return "medium";
-  return "low";
-}
-
 export async function generateWeeklyReport(memberId: string, weekStart: string) {
   const range = weekRange(weekStart);
   const reports = await glashQuery<any>(
@@ -171,7 +165,6 @@ export async function generateWeeklyReport(memberId: string, weekStart: string) 
   const totals = reports.reduce(
     (acc: any, report: any) => {
       acc.active += Number(report.active_minutes || 0);
-      acc.idle += Number(report.idle_minutes || 0);
       acc.overall += Number(report.overall_score || 0);
       acc.productivity += Number(report.productivity_score || 0);
       acc.focus += Number(report.focus_score || 0);
@@ -184,10 +177,9 @@ export async function generateWeeklyReport(memberId: string, weekStart: string) 
       acc.deliverables.push(...(report.deliverables || []));
       return acc;
     },
-    { active: 0, idle: 0, overall: 0, productivity: 0, focus: 0, projects: {}, apps: {}, deliverables: [] },
+    { active: 0, overall: 0, productivity: 0, focus: 0, projects: {}, apps: {}, deliverables: [] },
   );
   const days = Math.max(1, reports.length);
-  const idlePct = totals.active ? Math.round((totals.idle / totals.active) * 100) : 0;
   const avgOverall = Math.round(totals.overall / days);
   const avgProductivity = Math.round(totals.productivity / days);
   const avgFocus = Math.round(totals.focus / days);
@@ -230,14 +222,13 @@ export async function generateWeeklyReport(memberId: string, weekStart: string) 
       range.week_start,
       range.week_end,
       reports.length
-        ? `Weekly tracking captured ${Math.round(totals.active / 60 * 10) / 10} active hours with an average score of ${avgOverall}%.`
+        ? `Member-confirmed focus evidence covered ${Math.round(totals.active / 60 * 10) / 10} hours, with an average score of ${avgOverall}%.`
         : "No daily work tracking reports were generated for this week yet.",
       JSON.stringify(totals.projects),
       JSON.stringify({
         tracked_days: reports.length,
-        active_minutes: totals.active,
-        idle_minutes: totals.idle,
-        idle_percentage: idlePct,
+        confirmed_focus_minutes: totals.active,
+        automated_idle_inference: false,
       }),
       JSON.stringify(Object.entries(totals.apps)
         .sort((a: any, b: any) => b[1] - a[1])
@@ -250,11 +241,15 @@ export async function generateWeeklyReport(memberId: string, weekStart: string) 
       }),
       reports.flatMap((report: any) => report.strengths || []).slice(0, 8),
       reports.flatMap((report: any) => report.concerns || []).slice(0, 8),
-      riskLabel(Math.max(0, (totals.active / 60) - 45) * 4),
-      riskLabel(reports.length ? Math.max(0, 30 - totals.active / 60) * 4 : 90),
+      "low",
+      "low",
       avgOverall,
       JSON.stringify(scorecard),
-      JSON.stringify({ source: "daily_report_rollup", daily_report_count: reports.length }),
+      JSON.stringify({
+        source: "member_confirmed_focus_rollup",
+        daily_report_count: reports.length,
+        automated_utilization_inference: false,
+      }),
     ],
   );
 }

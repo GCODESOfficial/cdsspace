@@ -1,34 +1,13 @@
 import type { Metadata, Viewport } from "next";
-import localFont from "next/font/local";
 import "./globals.css";
-
-// Neue Campton — the CDS Space brand typeface. Exposed as `--font-sans`, so
-// every surface that uses `font-sans` / var(--font-sans) (marketing site,
-// client/team/admin dashboards) picks it up automatically.
-const neueCampton = localFont({
-  variable: "--font-sans",
-  display: "swap",
-  src: [
-    { path: "../../public/font/neue-campton-font-family/NeueCamptonTest-Light-BF67089b6e958ed.otf", weight: "300", style: "normal" },
-    { path: "../../public/font/neue-campton-font-family/NeueCamptonTest-LightItalic-BF67089b6e98b40.otf", weight: "300", style: "italic" },
-    { path: "../../public/font/neue-campton-font-family/NeueCamptonTest-Regular-BF67089b6ea9633.otf", weight: "400", style: "normal" },
-    { path: "../../public/font/neue-campton-font-family/NeueCamptonTest-RegularItalic-BF67089b6eb3766.otf", weight: "400", style: "italic" },
-    { path: "../../public/font/neue-campton-font-family/NeueCamptonTest-Medium-BF67089b6e9f912.otf", weight: "500", style: "normal" },
-    { path: "../../public/font/neue-campton-font-family/NeueCamptonTest-MediumItalic-BF67089b6ea6ef3.otf", weight: "500", style: "italic" },
-    { path: "../../public/font/neue-campton-font-family/NeueCamptonTest-SemiBold-BF67089b6eb62b9.otf", weight: "600", style: "normal" },
-    { path: "../../public/font/neue-campton-font-family/NeueCamptonTest-SemiBoldItalic-BF67089b6ebdc29.otf", weight: "600", style: "italic" },
-    { path: "../../public/font/neue-campton-font-family/NeueCamptonTest-Bold-BF67089b65d3e98.otf", weight: "700", style: "normal" },
-    { path: "../../public/font/neue-campton-font-family/NeueCamptonTest-BoldItalic-BF67089b6e61f5b.otf", weight: "700", style: "italic" },
-    { path: "../../public/font/neue-campton-font-family/NeueCamptonTest-ExtraBold-BF67089b6e6381f.otf", weight: "800", style: "normal" },
-    { path: "../../public/font/neue-campton-font-family/NeueCamptonTest-ExtraBoldItalic-BF67089b6e69f0f.otf", weight: "800", style: "italic" },
-    { path: "../../public/font/neue-campton-font-family/NeueCamptonTest-Black-BF67089b6e2d5e5.otf", weight: "900", style: "normal" },
-    { path: "../../public/font/neue-campton-font-family/NeueCamptonTest-BlackItalic-BF67089b6e3364d.otf", weight: "900", style: "italic" },
-  ],
-});
+import "./mobile.css";
+import "./workspace.css";
+import "./a11y.css";
 
 export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
+  viewportFit: "cover",
   themeColor: "#040b37",
 };
 
@@ -102,6 +81,8 @@ export const metadata: Metadata = {
 
 import { AuthProvider } from "@/contexts/auth-context";
 import { AppNotifyRoot } from "@/lib/app-notify";
+import { AccessibilityWidget } from "@/components/a11y/AccessibilityWidget";
+import { TranslationEngine } from "@/components/a11y/TranslationEngine";
 
 export default function RootLayout({
   children,
@@ -109,8 +90,8 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en">
-      <body className={`${neueCampton.variable} font-sans antialiased`}>
+    <html lang="en" dir="ltr">
+      <body className="font-sans antialiased">
         <script
           type="application/ld+json"
           dangerouslySetInnerHTML={{
@@ -149,6 +130,8 @@ export default function RootLayout({
         <AuthProvider>
           {children}
           <AppNotifyRoot />
+          <AccessibilityWidget />
+          <TranslationEngine />
         </AuthProvider>
       </body>
     </html>

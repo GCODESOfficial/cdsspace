@@ -12,6 +12,7 @@ export type BrandBriefStatus = "pending" | "submitted" | "archived";
 export interface BrandBrief {
     id: string;
     public_token: string;
+    client_user_id?: string | null;
 
     invite_label: string | null;
     invite_note: string | null;
@@ -49,7 +50,7 @@ export interface BrandBrief {
     updated_at: string;
 }
 
-export const BUDGET_RANGES = [
+export const NGN_BUDGET_RANGES = [
     "Under ₦500k",
     "₦500k – ₦1M",
     "₦1M – ₦3M",
@@ -57,6 +58,36 @@ export const BUDGET_RANGES = [
     "Above ₦10M",
     "Let's discuss",
 ] as const;
+
+export const USD_BUDGET_RANGES = [
+    "Under $500",
+    "$500 – $1,000",
+    "$1,000 – $3,000",
+    "$3,000 – $10,000",
+    "Above $10,000",
+    "Let's discuss",
+] as const;
+
+export const GBP_BUDGET_RANGES = ["Under £500", "£500 – £1,000", "£1,000 – £3,000", "£3,000 – £10,000", "Above £10,000", "Let's discuss"] as const;
+export const EUR_BUDGET_RANGES = ["Under €500", "€500 – €1,000", "€1,000 – €3,000", "€3,000 – €10,000", "Above €10,000", "Let's discuss"] as const;
+export const RWF_BUDGET_RANGES = ["Under FRw 500k", "FRw 500k – FRw 1M", "FRw 1M – FRw 3M", "FRw 3M – FRw 10M", "Above FRw 10M", "Let's discuss"] as const;
+export const CNY_BUDGET_RANGES = ["Under ¥3,500", "¥3,500 – ¥7,000", "¥7,000 – ¥21,000", "¥21,000 – ¥70,000", "Above ¥70,000", "Let's discuss"] as const;
+export const AED_BUDGET_RANGES = ["Under AED 2,000", "AED 2,000 – AED 4,000", "AED 4,000 – AED 12,000", "AED 12,000 – AED 40,000", "Above AED 40,000", "Let's discuss"] as const;
+
+/** Backwards-compatible default for public and admin brief surfaces. */
+export const BUDGET_RANGES = NGN_BUDGET_RANGES;
+
+export function budgetRangesForCurrency(currency: string | null | undefined): readonly string[] {
+    switch (currency?.toUpperCase()) {
+        case "USD": return USD_BUDGET_RANGES;
+        case "GBP": return GBP_BUDGET_RANGES;
+        case "EUR": return EUR_BUDGET_RANGES;
+        case "RWF": return RWF_BUDGET_RANGES;
+        case "CNY": return CNY_BUDGET_RANGES;
+        case "AED": return AED_BUDGET_RANGES;
+        default: return NGN_BUDGET_RANGES;
+    }
+}
 
 export const TIMELINE_OPTIONS = [
     "Less than 2 weeks",

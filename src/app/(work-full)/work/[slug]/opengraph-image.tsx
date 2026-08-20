@@ -13,7 +13,7 @@ export const contentType = OG_CONTENT_TYPE;
 type Params = Promise<{ slug: string }>;
 
 interface WorkRow {
-  id: number;
+  id: string;
   title: string;
   description: string | null;
   category: string | null;

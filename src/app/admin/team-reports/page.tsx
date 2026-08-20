@@ -6,14 +6,14 @@
  * Team Reports (super-admin only)
  *
  * Side-by-side view of what each member SAYS they did (manual daily report +
- * weekly self-report) against what the tracking system OBSERVED (automated
- * daily report from screenshots/activity), with the weekly comparison verdict.
+ * weekly self-report) against the attendance-linked task and focus evidence,
+ * with the weekly comparison verdict.
  */
 
 import { useCallback, useEffect, useState } from "react";
 import {
   Loader2, RefreshCw, Users, FileText, Bot, GitCompareArrows, CircleDot,
-  ChevronDown, ChevronUp, Sparkles, CalendarRange, CheckCircle2, XCircle,
+  ChevronDown, ChevronUp, CalendarRange, CheckCircle2, XCircle, Paperclip, ExternalLink,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -36,20 +36,23 @@ function fmtSecs(secs?: number | null) {
   return fmtMins(Math.round(Number(secs || 0) / 60));
 }
 function score(v?: number | null) {
-  return v == null ? "—" : `${Math.round(Number(v))}%`;
+  return v == null ? "-" : `${Math.round(Number(v))}%`;
+}
+function evidenceCount(session: any) {
+  return Number(session?.metadata?.checkpoint_count ?? session?.screenshot_count ?? 0);
 }
 
-// A member has "submitted their report" if they filed a manual daily report
-// and/or a weekly self-report.
+// A member has "submitted their report" if they filed a weekly self-report.
+// (Daily report surfaces were retired; weekly is the only member-facing report.)
 function hasSubmittedReport(row: Row) {
-  return !!row.manual_daily || !!row.self_report;
+  return !!row.self_report;
 }
 
-// A member has "active tracking data" if a session captured activity (live or
-// with screenshots) or the system generated a tracking report for the day.
+// A member has work evidence if a focus session recorded activity or the
+// system generated an attendance-linked summary for the day.
 function hasTrackingData(row: Row) {
   const sess = row.tracking_session;
-  const tracked = !!sess && (sess.status === "active" || Number(sess.screenshot_count || 0) > 0);
+  const tracked = !!sess && (sess.status === "active" || evidenceCount(sess) > 0 || Number(sess.active_seconds || 0) > 0);
   return tracked || !!row.auto_daily;
 }
 
@@ -110,8 +113,9 @@ export default function TeamReportsPage() {
   }, [date, load]);
 
   const rows: Row[] = data?.rows ?? [];
-  // Only show members who BOTH submitted a report AND have active tracking data.
-  const visibleRows = rows.filter((row) => hasSubmittedReport(row) && hasTrackingData(row));
+  // Show members who submitted a daily or weekly report, OR who have tracking
+  // data - so reports are always visible even before any tracking is captured.
+  const visibleRows = rows.filter((row) => hasSubmittedReport(row) || hasTrackingData(row));
 
   return (
     <div className="min-h-screen bg-[#F0F5FF] px-4 py-6 md:px-8">
@@ -121,7 +125,7 @@ export default function TeamReportsPage() {
             <p className="text-sm font-semibold text-[#0A4FE8]">HRM Intelligence</p>
             <h1 className="mt-1 text-4xl font-bold tracking-tight text-[#0D1B39]">Team Reports</h1>
             <p className="mt-2 text-sm text-gray-500">
-              What each member reported vs what the tracking system observed. Super admin only.
+              What each member reported compared with attendance-linked task and focus evidence.
             </p>
             {data?.week && (
               <p className="mt-1 inline-flex items-center gap-1.5 text-xs font-semibold text-gray-400">
@@ -153,7 +157,7 @@ export default function TeamReportsPage() {
           <>
             <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-6">
               <Stat icon={Users} label="Team" value={String(data.summary.total)} />
-              <Stat icon={CircleDot} label="Tracking Now" value={String(data.summary.tracking_now)} />
+              <Stat icon={CircleDot} label="Active Focus" value={String(data.summary.tracking_now)} />
               <Stat icon={FileText} label="Manual Reports (Day)" value={`${data.summary.manual_submitted}/${data.summary.total}`} />
               <Stat icon={Bot} label="System Reports (Day)" value={String(data.summary.auto_generated)} />
               <Stat icon={FileText} label="Weekly Self-Reports" value={String(data.summary.self_reports)} />
@@ -163,8 +167,8 @@ export default function TeamReportsPage() {
             <div className="overflow-hidden rounded-2xl bg-white">
               <div className="flex items-center justify-between gap-3 border-b border-gray-100 px-5 py-4">
                 <div>
-                  <p className="text-sm font-bold text-[#0D1B39]">Reported &amp; tracked members</p>
-                  <p className="text-xs text-gray-400">Showing members who submitted a report and have active tracking data.</p>
+                  <p className="text-sm font-bold text-[#0D1B39]">Reports &amp; activity evidence</p>
+                  <p className="text-xs text-gray-400">Members who submitted a report or recorded work focus. Click a row for the full daily and weekly comparison.</p>
                 </div>
                 <span className="rounded-full bg-[#EAF1FF] px-3 py-1 text-xs font-bold text-[#0A4FE8]">
                   {visibleRows.length} of {rows.length}
@@ -173,9 +177,9 @@ export default function TeamReportsPage() {
               {visibleRows.length === 0 ? (
                 <div className="flex flex-col items-center justify-center gap-2 px-6 py-16 text-center">
                   <Users className="h-8 w-8 text-gray-300" />
-                  <p className="text-sm font-semibold text-[#0D1B39]">No members to show for this date</p>
+                  <p className="text-sm font-semibold text-[#0D1B39]">No reports for this date yet</p>
                   <p className="max-w-md text-xs text-gray-400">
-                    Only members who both submitted a report and have active tracking data appear here. Pick another date or wait for reports and tracking to come in.
+                    Members appear here once they submit a report or record work focus. Pick another date to review earlier reports.
                   </p>
                 </div>
               ) : (
@@ -185,8 +189,8 @@ export default function TeamReportsPage() {
                       <tr className="border-b border-gray-100 text-[11px] font-bold uppercase tracking-wide text-gray-400">
                         <th className="px-5 py-4">Member</th>
                         <th className="px-4 py-4">Attendance</th>
-                        <th className="px-4 py-4">Tracking</th>
-                        <th className="px-4 py-4">Manual Report</th>
+                        <th className="px-4 py-4">Activity</th>
+                        <th className="px-4 py-4">Weekly report</th>
                         <th className="px-4 py-4">System Report</th>
                         <th className="px-4 py-4">Comparison</th>
                         <th className="px-4 py-4 text-right">Actions</th>
@@ -235,7 +239,7 @@ function FragmentRow({ row, open, onToggle, acting, runAction }: {
       <tr className="cursor-pointer border-b border-gray-50 transition hover:bg-[#F7FAFF]" onClick={onToggle}>
         <td className="px-5 py-4">
           <p className="font-semibold text-[#0D1B39]">{m.full_name}</p>
-          <p className="text-xs text-gray-400">{m.role_title || "—"}{m.department ? ` · ${m.department}` : ""}</p>
+          <p className="text-xs text-gray-400">{m.role_title || "-"}{m.department ? ` · ${m.department}` : ""}</p>
         </td>
         <td className="px-4 py-4">
           {att?.clock_in_at ? (
@@ -250,18 +254,21 @@ function FragmentRow({ row, open, onToggle, acting, runAction }: {
           {sess ? (
             <div className="text-xs text-gray-500">
               <span className={`mr-1.5 inline-block h-2 w-2 rounded-full ${sess.status === "active" ? "bg-emerald-500" : "bg-gray-300"}`} />
-              {sess.screenshot_count || 0} captures · {fmtSecs(sess.active_seconds)} active
+              {evidenceCount(sess)} updates · {fmtSecs(sess.active_seconds)} active
             </div>
           ) : (
             <span className="text-xs text-gray-300">No session</span>
           )}
         </td>
         <td className="px-4 py-4">
-          {row.manual_daily ? (
-            <span className="inline-flex items-center gap-1 text-xs font-semibold text-emerald-600"><CheckCircle2 className="h-3.5 w-3.5" /> Submitted</span>
-          ) : (
-            <span className="inline-flex items-center gap-1 text-xs text-gray-300"><XCircle className="h-3.5 w-3.5" /> None</span>
-          )}
+          <div className="flex flex-wrap gap-1.5">
+            <span
+              title={row.self_report ? "Weekly report submitted" : "No weekly report"}
+              className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-bold ${row.self_report ? "bg-emerald-50 text-emerald-600" : "bg-gray-100 text-gray-400"}`}
+            >
+              {row.self_report ? <CheckCircle2 className="h-3 w-3" /> : <XCircle className="h-3 w-3" />} Weekly
+            </span>
+          </div>
         </td>
         <td className="px-4 py-4">
           {row.auto_daily ? (
@@ -276,7 +283,7 @@ function FragmentRow({ row, open, onToggle, acting, runAction }: {
               {Math.round(Number(comparison.confidence_score || 0))}% aligned
             </span>
           ) : (
-            <span className="text-xs text-gray-300">—</span>
+            <span className="text-xs text-gray-300">-</span>
           )}
         </td>
         <td className="px-4 py-4 text-right">
@@ -290,30 +297,34 @@ function FragmentRow({ row, open, onToggle, acting, runAction }: {
               {/* Manual */}
               <div className="rounded-xl bg-white p-4 ring-1 ring-gray-100">
                 <p className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wide text-gray-400"><FileText className="h-3.5 w-3.5" /> Member&apos;s own report</p>
-                {row.manual_daily ? (
+                {row.self_report ? (
                   <div className="mt-2 space-y-2 text-[13px] text-gray-600">
-                    {row.manual_daily.completed && <p><b className="text-[#0D1B39]">Done:</b> {row.manual_daily.completed}</p>}
-                    {row.manual_daily.pending && <p><b className="text-[#0D1B39]">Pending:</b> {row.manual_daily.pending}</p>}
-                    {row.manual_daily.blockers && <p><b className="text-red-600">Blockers:</b> {row.manual_daily.blockers}</p>}
-                  </div>
-                ) : <p className="mt-2 text-[13px] text-gray-300">No daily report submitted for this date.</p>}
-                {row.self_report && (
-                  <div className="mt-3 border-t border-gray-100 pt-3 text-[13px] text-gray-600">
-                    <p className="text-[11px] font-bold uppercase tracking-wide text-gray-400">Weekly self-report</p>
-                    {row.self_report.tasks_completed && <p className="mt-1"><b className="text-[#0D1B39]">Completed:</b> {row.self_report.tasks_completed}</p>}
+                    {row.self_report.tasks_completed && <p><b className="text-[#0D1B39]">Completed:</b> {row.self_report.tasks_completed}</p>}
                     {row.self_report.wins && <p><b className="text-emerald-600">Wins:</b> {row.self_report.wins}</p>}
                     {row.self_report.challenges && <p><b className="text-amber-600">Challenges:</b> {row.self_report.challenges}</p>}
+                    {Array.isArray(row.self_report.attachments) && row.self_report.attachments.length > 0 && (
+                      <div className="pt-1">
+                        <p className="mb-1.5 flex items-center gap-1.5 text-[11px] font-semibold text-gray-500"><Paperclip className="h-3.5 w-3.5" /> Supporting documents</p>
+                        <div className="flex flex-wrap gap-1.5">
+                          {row.self_report.attachments.map((attachment: any) => (
+                            <a key={attachment.id} href={`/api/team/work-tracking/attachments/${attachment.id}`} target="_blank" rel="noreferrer" className="inline-flex max-w-full items-center gap-1 rounded-lg border border-blue-100 bg-blue-50 px-2.5 py-1 text-[11px] font-semibold text-[#0A4FE8] hover:bg-blue-100">
+                              <span className="truncate">{attachment.title}</span><ExternalLink className="h-3 w-3 shrink-0" />
+                            </a>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                   </div>
-                )}
+                ) : <p className="mt-2 text-[13px] text-gray-300">No weekly report submitted for this period.</p>}
               </div>
 
               {/* System */}
               <div className="rounded-xl bg-white p-4 ring-1 ring-gray-100">
-                <p className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wide text-gray-400"><Bot className="h-3.5 w-3.5" /> System tracking report</p>
+                <p className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wide text-gray-400"><Bot className="h-3.5 w-3.5" /> System activity summary</p>
                 {row.auto_daily ? (
                   <div className="mt-2 space-y-2 text-[13px] text-gray-600">
                     <p><b className="text-[#0D1B39]">Productivity:</b> {score(row.auto_daily.productivity_score)} · <b className="text-[#0D1B39]">Focus:</b> {score(row.auto_daily.focus_score)}</p>
-                    <p><b className="text-[#0D1B39]">Active:</b> {fmtMins(row.auto_daily.active_minutes)} · <b className="text-[#0D1B39]">Idle:</b> {fmtMins(row.auto_daily.idle_minutes)}</p>
+                    <p><b className="text-[#0D1B39]">Recorded focus:</b> {fmtMins(row.auto_daily.active_minutes)}</p>
                     {row.auto_daily.summary && <p className="rounded-lg bg-[#F7FAFF] p-2.5 leading-relaxed">{row.auto_daily.summary}</p>}
                   </div>
                 ) : (
@@ -321,14 +332,14 @@ function FragmentRow({ row, open, onToggle, acting, runAction }: {
                 )}
                 {att && (
                   <p className="mt-3 border-t border-gray-100 pt-3 text-[12px] text-gray-400">
-                    Worked {fmtMins(att.total_work_minutes)} on the timebook this day.
+                    Attendance recorded {fmtMins(att.total_work_minutes)} for this day.
                   </p>
                 )}
               </div>
 
               {/* Comparison */}
               <div className="rounded-xl bg-white p-4 ring-1 ring-gray-100">
-                <p className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wide text-gray-400"><GitCompareArrows className="h-3.5 w-3.5" /> Manual vs tracked (week)</p>
+                <p className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wide text-gray-400"><GitCompareArrows className="h-3.5 w-3.5" /> Report vs recorded evidence</p>
                 {comparison ? (
                   <div className="mt-2 space-y-2 text-[13px] text-gray-600">
                     {comparison.ai_summary && <p className="leading-relaxed">{comparison.ai_summary}</p>}
@@ -336,10 +347,10 @@ function FragmentRow({ row, open, onToggle, acting, runAction }: {
                       <p><b className="text-emerald-600">Matches:</b> {comparison.matches.join(", ")}</p>
                     )}
                     {Array.isArray(comparison.omissions) && comparison.omissions.length > 0 && (
-                      <p><b className="text-amber-600">Claimed but not observed:</b> {comparison.omissions.join(", ")}</p>
+                      <p><b className="text-amber-600">Reported without matching evidence:</b> {comparison.omissions.join(", ")}</p>
                     )}
                     {Array.isArray(comparison.additional_detected_work) && comparison.additional_detected_work.length > 0 && (
-                      <p><b className="text-[#0A4FE8]">Observed but not claimed:</b> {comparison.additional_detected_work.join(", ")}</p>
+                      <p><b className="text-[#0A4FE8]">Recorded but not reported:</b> {comparison.additional_detected_work.join(", ")}</p>
                     )}
                   </div>
                 ) : (
@@ -354,7 +365,7 @@ function FragmentRow({ row, open, onToggle, acting, runAction }: {
               <ActionButton
                 busy={acting === `generate_daily_report:${m.id}`}
                 onClick={() => runAction("generate_daily_report", m.id, "Daily report")}
-                icon={Sparkles}
+                icon={Bot}
                 label="Generate day report"
               />
               <ActionButton
@@ -367,7 +378,7 @@ function FragmentRow({ row, open, onToggle, acting, runAction }: {
                 busy={acting === `compare_weekly_report:${m.id}`}
                 onClick={() => runAction("compare_weekly_report", m.id, "Comparison")}
                 icon={GitCompareArrows}
-                label="Compare manual vs tracked"
+                label="Compare report vs evidence"
               />
             </div>
           </td>

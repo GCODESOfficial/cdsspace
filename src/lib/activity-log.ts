@@ -7,6 +7,7 @@
 import { getAdminSession } from "@/lib/admin-session";
 import { getTeamSession } from "@/lib/team-auth";
 import { glashQuery } from "@/lib/glashdb/postgres";
+import { criticalActivityNotification, notifyAdminFeatureEvent } from "@/lib/admin-feature-notifications";
 
 export interface LogActivityInput {
     /** Verb like "team_member.suspend", "invoice.create", "project.assign". */
@@ -80,6 +81,8 @@ export async function logActivity(input: LogActivityInput): Promise<void> {
             actor_name,
             actor_is_admin,
         });
+        const notification = criticalActivityNotification(input);
+        if (notification) await notifyAdminFeatureEvent(notification);
     } catch (err) {
         // Activity logging is best-effort. Never let it break the caller.
         console.error("[activity-log] insert failed:", err);

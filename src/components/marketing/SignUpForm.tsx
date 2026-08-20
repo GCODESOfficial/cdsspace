@@ -1,18 +1,18 @@
 "use client";
 
-import { useState } from "react";
+import { useCallback, useState } from "react";
 import { useForm, Controller } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useRouter, useSearchParams } from "next/navigation";
 import NextLink from "next/link";
-import Image from "next/image";
 import { Eye, EyeOff, Loader2, CheckCircle2, Circle } from "lucide-react";
 import { signupSchema, type SignupInput } from "@/lib/validations/auth";
-import { signup } from "@/lib/actions/auth";
+import { resendClientSignupVerification, signup } from "@/lib/actions/auth";
 import { EmailConfirmationModal } from "./EmailConfirmationModal";
-import { LockedSocialButton } from "./LockedSocialButton";
 import { GoogleAuthButton } from "./GoogleAuthButton";
+import { LinkedInAuthButton } from "./LinkedInAuthButton";
 import { PhoneInput } from "@/components/shared/PhoneInput";
+import { BotCheck } from "@/components/security/BotCheck";
 
 /**
  * SignUpForm - 1:1 Figma Implementation with real Supabase logic.
@@ -23,9 +23,15 @@ export const SignUpForm = () => {
     const [error, setError] = useState<string | null>(null);
     const [isSuccess, setIsSuccess] = useState(false);
     const [userEmail, setUserEmail] = useState("");
+    const [botToken, setBotToken] = useState("");
+    const [botResetSignal, setBotResetSignal] = useState(0);
+    const [resendInSeconds, setResendInSeconds] = useState(60);
+    const onBotTokenChange = useCallback((token: string) => setBotToken(token), []);
     const router = useRouter();
     const searchParams = useSearchParams();
     const requestedNextPath = searchParams.get('next');
+    const invitedEmail = searchParams.get('email') || '';
+    const clientInvite = searchParams.get('client_invite');
     const nextPath = requestedNextPath?.startsWith("/") && !requestedNextPath.startsWith("//")
         ? requestedNextPath
         : "/dashboard";
@@ -39,23 +45,33 @@ export const SignUpForm = () => {
         formState: { errors },
     } = useForm<SignupInput>({
         resolver: zodResolver(signupSchema),
+        defaultValues: { email: invitedEmail },
     });
 
     const passwordValue = watch("password") || "";
 
     const onSubmit = async (data: SignupInput) => {
+        if (!botToken) {
+            setError("Complete the security verification before creating your account.");
+            return;
+        }
         setIsLoading(true);
         setError(null);
         setUserEmail(data.email);
         try {
-            const result = await signup({ ...data, next: nextPath });
+            const result = await signup({ ...data, next: nextPath, clientInvite, botToken });
             if (result?.error) {
                 setError(result.error);
+                setBotToken("");
+                setBotResetSignal((value) => value + 1);
             } else {
+                setResendInSeconds(result.resendInSeconds || 60);
                 setIsSuccess(true);
             }
         } catch (e) {
             setError("Something went wrong. Please try again.");
+            setBotToken("");
+            setBotResetSignal((value) => value + 1);
         } finally {
             setIsLoading(false);
         }
@@ -70,6 +86,8 @@ export const SignUpForm = () => {
                     router.push(loginHref);
                 }}
                 email={userEmail}
+                initialResendSeconds={resendInSeconds}
+                onResend={() => resendClientSignupVerification({ email: userEmail, next: nextPath })}
             />
 
             {/* Header: Node 6229:11975 */}
@@ -108,11 +126,13 @@ export const SignUpForm = () => {
                             {...register("email")}
                             type="email"
                             placeholder="Enter your email"
+                            readOnly={Boolean(clientInvite && invitedEmail)}
                             disabled={isLoading}
                             className="w-full bg-transparent outline-none text-brand-navy text-[13px] lg:text-[14px] 2xl:text-[15px] font-medium placeholder:text-brand-mute disabled:opacity-50"
                         />
                     </div>
                     {errors.email && <span className="text-red-500 text-[11px] lg:text-[12px] 2xl:text-[13px]">{errors.email.message}</span>}
+                    {clientInvite && invitedEmail && <span className="text-[11px] font-medium text-brand-blue">Invitation email confirmed. This account will be linked to your client record.</span>}
                 </div>
 
                 {/* Company name: Node 6809:22612 */}
@@ -187,13 +207,15 @@ export const SignUpForm = () => {
                     </div>
                 )}
 
+                <BotCheck action="client_signup" onTokenChange={onBotTokenChange} resetSignal={botResetSignal} />
+
                 {/* CTA Button */}
                 <button
                     type="submit"
-                    disabled={isLoading}
+                    disabled={isLoading || !botToken}
                     className="w-full h-[40px] lg:h-[48px] 2xl:h-[56px] rounded-full p-[2px] bg-brand-bg border border-[#648EFC] shadow-[0_4px_8px_rgba(0,0,0,0.04)] group overflow-hidden disabled:opacity-70 disabled:cursor-not-allowed"
                 >
-                    <div className="w-full h-full rounded-full flex items-center justify-center transition-opacity group-hover:opacity-90 bg-linear-to-r from-[#0035C1] to-[#0575FF]">
+                    <div className="w-full h-full rounded-full flex items-center justify-center transition-opacity group-hover:opacity-90 bg-[#0A4FE8]">
                         {isLoading ? (
                             <Loader2 className="w-4 h-4 lg:w-5 lg:h-5 2xl:w-6 2xl:h-6 animate-spin text-white" />
                         ) : (
@@ -214,17 +236,16 @@ export const SignUpForm = () => {
                 </div>
 
                 {/* Social Login - Google live; others coming soon */}
-                <div className="w-full flex flex-col gap-2.5 lg:gap-3">
-                    <GoogleAuthButton label="Sign up with Google" />
-                    <LockedSocialButton
-                        label="Sign up with X"
-                        icon={<Image src="/auth/Signup/x-icon.svg" alt="X" width={22} height={22} className="2xl:w-6 2xl:h-6" />}
-                    />
-                    <LockedSocialButton
-                        label="Sign up with Facebook"
-                        icon={<Image src="/auth/Signup/logos_facebook.svg" alt="Facebook" width={24} height={24} className="2xl:w-7 2xl:h-7" />}
-                    />
-                </div>
+                {clientInvite ? (
+                    <p className="rounded-xl border border-blue-100 bg-blue-50 px-4 py-3 text-center text-xs font-medium text-brand-blue">
+                        Complete this invitation with the confirmed email form above so your project files attach to the correct client record.
+                    </p>
+                ) : (
+                    <div className="w-full flex flex-col gap-2.5 lg:gap-3">
+                        <GoogleAuthButton label="Sign up with Google" />
+                        <LinkedInAuthButton label="Sign up with LinkedIn" />
+                    </div>
+                )}
 
                 {/* Login Link */}
                 <div className="flex items-center gap-1.5 lg:gap-2 text-[13px] lg:text-[14px] 2xl:text-[15px]">

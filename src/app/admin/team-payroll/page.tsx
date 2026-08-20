@@ -271,7 +271,7 @@ export default function AdminTeamPayrollPage() {
                     </Button>
                     <Button
                         onClick={() => setShowCreate(true)}
-                        className="h-11 px-5 rounded-xl bg-gradient-to-b from-blue-600 to-blue-700 shadow-lg shadow-blue-600/30"
+                        className="h-11 px-5 rounded-xl bg-[#0A4FE8] shadow-lg shadow-blue-600/30"
                     >
                         <Plus className="w-4 h-4 mr-1.5" /> New Payroll
                     </Button>
@@ -279,8 +279,8 @@ export default function AdminTeamPayrollPage() {
             }
         >
             <div className="grid grid-cols-1 md:grid-cols-4 gap-5 mb-8">
-                <StatCard icon={Wallet} label="Entries" value={String(entries.length)} accent="from-blue-500 to-indigo-500" />
-                <StatCard icon={Users} label="Team Members" value={String(members.length)} accent="from-indigo-500 to-purple-500" />
+                <StatCard icon={Wallet} label="Entries" value={String(entries.length)} accent="bg-[#0A4FE8]" />
+                <StatCard icon={Users} label="Team Members" value={String(members.length)} accent="bg-[#0A4FE8]" />
                 <StatCard icon={Clock} label="Outstanding" value={fmtMoney(totals.outstanding)} accent="from-amber-500 to-orange-500" />
                 <StatCard icon={Check} label="Paid" value={fmtMoney(totals.paid)} accent="from-emerald-500 to-teal-500" />
             </div>

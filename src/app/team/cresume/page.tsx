@@ -2,8 +2,8 @@
 
 /* eslint-disable @next/next/no-img-element */
 
-import { useEffect, useState } from "react";
-import { Save, Link2, Eye, Loader2, Plus, X as XIcon, Check, Brain } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { Save, Link2, Eye, Loader2, Plus, X as XIcon, Check, Brain, RefreshCw, AlertCircle } from "lucide-react";
 import { initials } from "@/lib/utils";
 import { SKILL_TABS } from "@/lib/cresume-skills";
 
@@ -43,14 +43,22 @@ export default function CResumeEditor() {
   const [headlineOptions, setHeadlineOptions] = useState<string[]>([]);
   const [aboutSuggestion, setAboutSuggestion] = useState<string>("");
   const [skillSuggestions, setSkillSuggestions] = useState<string[]>([]);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const savedSnapshot = useRef("");
 
-  useEffect(() => {
-    (async () => {
+  const loadResume = useCallback(async () => {
+    setLoadError(null);
+    try {
       const [a, b] = await Promise.all([
-        fetch("/api/team/resume").then((r) => r.json()),
+        fetch("/api/team/resume").then(async (r) => {
+          const payload = await r.json().catch(() => ({}));
+          if (!r.ok || !payload.ok) throw new Error(payload.error || "Could not load cResume.");
+          return payload;
+        }),
         fetch("/api/team/session").then((r) => r.ok ? r.json() : null).catch(() => null),
       ]);
-      if (a.ok) setResume({
+      const nextResume: Resume = {
         team_member_id: a.resume.team_member_id,
         headline: a.resume.headline || "",
         about: a.resume.about || "",
@@ -64,27 +72,64 @@ export default function CResumeEditor() {
         projects: a.resume.projects || [],
         education: a.resume.education || [],
         is_public: !!a.resume.is_public,
-      });
+      };
+      savedSnapshot.current = JSON.stringify(nextResume);
+      setResume(nextResume);
       if (b?.member?.username) setUsername(b.member.username);
       if (b?.member?.full_name) setMemberName(b.member.full_name);
       if (b?.member?.role_title) setMemberRole(b.member.role_title);
-    })();
+    } catch (error) {
+      setLoadError(getErrorMessage(error, "Could not load cResume."));
+    }
   }, []);
+
+  useEffect(() => { void loadResume(); }, [loadResume]);
+
+  useEffect(() => {
+    if (!resume || saving) return;
+    const snapshot = JSON.stringify(resume);
+    if (snapshot === savedSnapshot.current) return;
+    const timer = window.setTimeout(async () => {
+      setSaving(true);
+      setSaveError(null);
+      try {
+        const response = await fetch("/api/team/resume", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: snapshot,
+        });
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok || !payload.ok) throw new Error(payload.error || "Could not autosave cResume.");
+        savedSnapshot.current = snapshot;
+        setSavedAt(new Date().toISOString());
+      } catch (error) {
+        setSaveError(getErrorMessage(error, "Could not autosave cResume."));
+      } finally {
+        setSaving(false);
+      }
+    }, 900);
+    return () => window.clearTimeout(timer);
+  }, [resume, saving]);
 
   async function save() {
     if (!resume) return;
     setSaving(true);
-    const r = await fetch("/api/team/resume", {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(resume),
-    });
-    const j = await r.json();
-    setSaving(false);
-    if (j.ok) {
+    setSaveError(null);
+    try {
+      const r = await fetch("/api/team/resume", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(resume),
+      });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok || !j.ok) throw new Error(j.error || "Could not save cResume.");
+      savedSnapshot.current = JSON.stringify(resume);
       setSavedAt(new Date().toISOString());
-      // Refresh the sidebar & main layout session info
       window.dispatchEvent(new CustomEvent("refresh-team-session"));
+    } catch (error) {
+      setSaveError(getErrorMessage(error, "Could not save cResume."));
+    } finally {
+      setSaving(false);
     }
   }
 
@@ -163,6 +208,14 @@ export default function CResumeEditor() {
     }
   }
 
+  if (!resume && loadError) return (
+    <div className="mx-auto max-w-xl rounded-2xl border border-red-100 bg-white p-6 text-center shadow-sm">
+      <AlertCircle className="mx-auto h-7 w-7 text-red-500" />
+      <h1 className="mt-3 text-lg font-semibold text-[#0D1B39]">cResume could not load</h1>
+      <p className="mt-2 text-[13px] leading-6 text-gray-500">{loadError}</p>
+      <button type="button" onClick={() => void loadResume()} className="mt-4 inline-flex h-10 items-center gap-2 rounded-xl bg-[#0A4FE8] px-4 text-[12px] font-semibold text-white"><RefreshCw className="h-4 w-4" /> Try again</button>
+    </div>
+  );
   if (!resume) return <div className="p-8 flex justify-center"><Loader2 className="w-5 h-5 animate-spin text-[#0A4FE8]" /></div>;
 
   const publicUrl = `${typeof window !== "undefined" ? window.location.origin : ""}/${username}`;
@@ -200,9 +253,11 @@ export default function CResumeEditor() {
         </div>
       )}
 
+      {saveError && <p className="mb-5 rounded-xl border border-red-100 bg-red-50 px-4 py-3 text-[12px] text-red-700">{saveError}</p>}
+
       {/* Basics */}
       <Section title="Basics">
-        <div className="mb-4 rounded-2xl border border-[#0A4FE8]/10 bg-gradient-to-r from-blue-50 via-white to-blue-50 px-4 py-4">
+        <div className="mb-4 rounded-2xl border border-[#0A4FE8]/10 bg-[#F5F8FF] px-4 py-4">
           <div className="flex items-start justify-between gap-3 flex-wrap">
             <div>
               <p className="text-[12px] font-semibold text-[#0A4FE8] inline-flex items-center gap-1.5">
@@ -358,7 +413,7 @@ export default function CResumeEditor() {
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <section className="mb-5 bg-white rounded-2xl border border-gray-100 shadow-sm p-4 sm:p-5">
-      <h2 className="text-[13px] font-bold uppercase tracking-wider text-gray-500 mb-3">{title}</h2>
+      <h2 className="mb-3 text-[13px] font-semibold text-gray-600">{title}</h2>
       {children}
     </section>
   );

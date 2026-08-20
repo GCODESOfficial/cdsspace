@@ -4,21 +4,23 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import FinanceShell, { glassCard } from "@/components/finance/FinanceShell";
 import { supabase } from "@/lib/supabase";
-import { formatFinanceDate } from "@/lib/finance/types";
+import { formatFinanceDate, formatMoney, type Currency } from "@/lib/finance/types";
+import { useFinanceDisplayCurrency } from "@/components/finance/FinanceCurrencySelector";
+import { convertFinanceAmount } from "@/lib/finance/currency-display";
 import {
   ArrowDownToLine, Briefcase, Tag, FileText, Users, Receipt, Wallet, BarChart3, ArrowUpRight,
   TrendingUp, TrendingDown, DollarSign, AlertCircle, Clock, Loader2, ScrollText,
 } from "lucide-react";
 
 const SECTIONS = [
-  { href: "/admin/finance/projects",      label: "Projects",      desc: "Create & manage projects and milestones",    icon: Briefcase, tint: "from-blue-500 to-indigo-500" },
+  { href: "/admin/finance/projects",      label: "Projects",      desc: "Create & manage projects and milestones",    icon: Briefcase, tint: "bg-[#0A4FE8]" },
   { href: "/admin/finance/price-list",    label: "Price List",    desc: "Products & services with unit prices",       icon: Tag,       tint: "from-fuchsia-500 to-pink-500" },
   { href: "/admin/finance/invoices",      label: "Invoices",      desc: "Generate, send & track invoices",             icon: FileText,  tint: "from-emerald-500 to-teal-500" },
-  { href: "/admin/finance/quotations",    label: "Quotations",    desc: "Rough estimates before invoicing",             icon: ScrollText, tint: "from-blue-500 to-cyan-500" },
+  { href: "/admin/finance/quotations",    label: "Quotations",    desc: "Rough estimates before invoicing",             icon: ScrollText, tint: "bg-[#0A4FE8]" },
   { href: "/admin/finance/subscriptions", label: "Inflow",        desc: "Record positive money received",              icon: ArrowDownToLine, tint: "from-emerald-500 to-teal-500" },
   { href: "/admin/finance/contractors",   label: "Contractors",   desc: "Team & contractor payments",                  icon: Users,     tint: "from-violet-500 to-purple-500" },
   { href: "/admin/finance/expenditures",  label: "Expenditures",  desc: "Track all outgoing spend",                    icon: Receipt,   tint: "from-rose-500 to-red-500" },
-  { href: "/admin/finance/payroll",       label: "Payroll",       desc: "Employees & bank payroll exports",            icon: Wallet,    tint: "from-cyan-500 to-sky-500" },
+  { href: "/admin/finance/payroll",       label: "Payroll",       desc: "Employees & bank payroll exports",            icon: Wallet,    tint: "bg-[#0A4FE8]" },
   { href: "/admin/finance/audit",       label: "Detailed",      desc: "Full financial summary",                      icon: BarChart3, tint: "from-slate-700 to-slate-900" },
 ];
 
@@ -28,6 +30,7 @@ interface RecentInvoice {
   issue_date: string;
   total: number | string;
   status: string;
+  currency: Currency;
 }
 
 interface RecentExpense {
@@ -35,7 +38,14 @@ interface RecentExpense {
   title: string;
   spent_on: string;
   amount: number | string;
+  currency: Currency;
 }
+
+type FinanceInvoiceRow = RecentInvoice & { due_date?: string | null };
+type FinanceExpenseRow = RecentExpense;
+type FinanceProjectRow = { id: string; status: string };
+type CurrencyAmountRow = { amount: number | string; currency: Currency };
+type FinanceEmployeeRow = { id: string; base_salary: number | string | null; currency: Currency };
 
 interface Stats {
   totalRevenue: number;
@@ -56,11 +66,12 @@ interface Stats {
   recentExpenses: RecentExpense[];
 }
 
-const formatCurrency = (n: number) => `₦${n.toLocaleString("en", { maximumFractionDigits: 0 })}`;
-
 export default function FinanceHome() {
   const [stats, setStats] = useState<Stats | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const { currency: displayCurrency, rates } = useFinanceDisplayCurrency();
+  const display = (amount: number | string | null | undefined, source: Currency | string | null | undefined) =>
+    convertFinanceAmount(amount, source, displayCurrency, rates);
 
   useEffect(() => {
     async function loadStats() {
@@ -78,30 +89,30 @@ export default function FinanceHome() {
           supabase.from("finance_invoices").select("id, total, status, currency, client_name, issue_date, due_date").order("created_at", { ascending: false }),
           supabase.from("finance_expenditures").select("id, amount, currency, title, spent_on").order("spent_on", { ascending: false }),
           supabase.from("finance_contractors").select("id"),
-          supabase.from("finance_employees").select("id, base_salary").eq("active", true),
+          supabase.from("finance_employees").select("id, base_salary, currency").eq("active", true),
           supabase.from("finance_inflows").select("id, title, source, amount, currency, received_on").order("received_on", { ascending: false }),
-          supabase.from("finance_contractor_payments").select("amount"),
+          supabase.from("finance_contractor_payments").select("amount, currency"),
         ]);
 
-        const projects = projectsRes.data || [];
-        const invoices = invoicesRes.data || [];
-        const expenditures = expendituresRes.data || [];
+        const projects = (projectsRes.data || []) as FinanceProjectRow[];
+        const invoices = (invoicesRes.data || []) as FinanceInvoiceRow[];
+        const expenditures = (expendituresRes.data || []) as FinanceExpenseRow[];
         const contractors = contractorsRes.data || [];
-        const employees = employeesRes.data || [];
-        const inflows = inflowsRes.data || [];
-        const contractorPayments = contractorPaymentsRes.data || [];
+        const employees = (employeesRes.data || []) as FinanceEmployeeRow[];
+        const inflows = (inflowsRes.data || []) as CurrencyAmountRow[];
+        const contractorPayments = (contractorPaymentsRes.data || []) as CurrencyAmountRow[];
 
-        const invoiceRevenue = invoices.filter(i => i.status === "paid").reduce((sum, i) => sum + Number(i.total || 0), 0);
-        const totalInflow = inflows.reduce((sum, entry) => sum + Number(entry.amount || 0), 0);
+        const invoiceRevenue = invoices.filter(i => i.status === "paid").reduce((sum, i) => sum + display(i.total, i.currency), 0);
+        const totalInflow = inflows.reduce((sum, entry) => sum + display(entry.amount, entry.currency), 0);
         const totalRevenue = invoiceRevenue + totalInflow;
         const totalExpenses =
-          expenditures.reduce((sum, e) => sum + Number(e.amount || 0), 0) +
-          contractorPayments.reduce((sum, c) => sum + Number(c.amount || 0), 0) +
-          employees.reduce((sum, e) => sum + Number(e.base_salary || 0), 0);
+          expenditures.reduce((sum, e) => sum + display(e.amount, e.currency), 0) +
+          contractorPayments.reduce((sum, c) => sum + display(c.amount, c.currency), 0) +
+          employees.reduce((sum, e) => sum + display(e.base_salary, e.currency), 0);
 
         const outstandingPayables = invoices
           .filter(i => i.status === "sent" || i.status === "overdue")
-          .reduce((sum, i) => sum + Number(i.total || 0), 0);
+          .reduce((sum, i) => sum + display(i.total, i.currency), 0);
 
         setStats({
           totalRevenue,
@@ -128,7 +139,7 @@ export default function FinanceHome() {
       }
     }
     loadStats();
-  }, []);
+  }, [displayCurrency, rates]);
 
   return (
     <FinanceShell title="Finance" subtitle="Manage every financial moving part of CDS Space.">
@@ -151,7 +162,7 @@ export default function FinanceHome() {
                   </div>
                   <span className="text-[11px] font-semibold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-md">REVENUE</span>
                 </div>
-                <p className="text-3xl font-bold text-gray-900 tabular-nums">{formatCurrency(stats.totalRevenue)}</p>
+                <p className="text-3xl font-bold text-gray-900 tabular-nums">{formatMoney(stats.totalRevenue, displayCurrency)}</p>
                 <p className="text-sm text-gray-500 mt-1">Paid invoices plus recorded inflow</p>
               </div>
             </div>
@@ -166,17 +177,16 @@ export default function FinanceHome() {
                   </div>
                   <span className="text-[11px] font-semibold text-red-600 bg-red-50 px-2 py-0.5 rounded-md">EXPENSES</span>
                 </div>
-                <p className="text-3xl font-bold text-gray-900 tabular-nums">{formatCurrency(stats.totalExpenses)}</p>
+                <p className="text-3xl font-bold text-gray-900 tabular-nums">{formatMoney(stats.totalExpenses, displayCurrency)}</p>
                 <p className="text-sm text-gray-500 mt-1">Spend, contractors & payroll</p>
               </div>
             </div>
 
             {/* Net Profit / Loss */}
             <div className={`${glassCard} p-6 relative overflow-hidden`}>
-              <div className={`absolute top-0 right-0 w-32 h-32 rounded-full blur-2xl ${stats.netProfit >= 0 ? "bg-gradient-to-br from-blue-200/50 to-transparent" : "bg-gradient-to-br from-amber-200/50 to-transparent"}`} />
               <div className="relative">
                 <div className="flex items-center justify-between mb-4">
-                  <div className={`w-11 h-11 rounded-xl bg-gradient-to-br grid place-items-center shadow-lg ${stats.netProfit >= 0 ? "from-blue-500 to-indigo-600 shadow-blue-500/20" : "from-amber-500 to-orange-600 shadow-amber-500/20"}`}>
+                  <div className={`w-11 h-11 rounded-xl grid place-items-center shadow-lg ${stats.netProfit >= 0 ? "bg-[#0A4FE8] shadow-blue-500/20" : "bg-amber-500 shadow-amber-500/20"}`}>
                     <DollarSign className="w-5 h-5 text-white" />
                   </div>
                   <span className={`text-[11px] font-semibold px-2 py-0.5 rounded-md ${stats.netProfit >= 0 ? "text-blue-600 bg-blue-50" : "text-amber-600 bg-amber-50"}`}>
@@ -184,7 +194,7 @@ export default function FinanceHome() {
                   </span>
                 </div>
                 <p className={`text-3xl font-bold tabular-nums ${stats.netProfit >= 0 ? "text-gray-900" : "text-amber-600"}`}>
-                  {stats.netProfit >= 0 ? "" : "-"}{formatCurrency(Math.abs(stats.netProfit))}
+                  {stats.netProfit >= 0 ? "" : "-"}{formatMoney(Math.abs(stats.netProfit), displayCurrency)}
                 </p>
                 <p className="text-sm text-gray-500 mt-1">Revenue minus expenses</p>
               </div>
@@ -196,7 +206,7 @@ export default function FinanceHome() {
             <MiniMetric icon={<Briefcase className="w-4 h-4 text-blue-600" />} label="Total Projects" value={stats.totalProjects} sub={`${stats.activeProjects} active · ${stats.completedProjects} done`} bg="bg-blue-50" />
             <MiniMetric icon={<FileText className="w-4 h-4 text-emerald-600" />} label="Invoices" value={stats.totalInvoices} sub={`${stats.paidInvoices} paid · ${stats.pendingInvoices} pending`} bg="bg-emerald-50" />
             <MiniMetric icon={<Users className="w-4 h-4 text-violet-600" />} label="Contractors" value={stats.totalContractors} sub={`${stats.totalEmployees} employees`} bg="bg-violet-50" />
-            <MiniMetric icon={<ArrowDownToLine className="w-4 h-4 text-emerald-600" />} label="Inflow" value={formatCurrency(stats.totalInflow)} sub="Positive funds" bg="bg-emerald-50" valueIsString />
+            <MiniMetric icon={<ArrowDownToLine className="w-4 h-4 text-emerald-600" />} label="Inflow" value={formatMoney(stats.totalInflow, displayCurrency)} sub="Positive funds" bg="bg-emerald-50" valueIsString />
           </div>
 
           {/* Alerts Row */}
@@ -219,7 +229,7 @@ export default function FinanceHome() {
                     <Clock className="w-4 h-4 text-amber-600" />
                   </div>
                   <div>
-                    <p className="text-[13px] font-semibold text-amber-900">{formatCurrency(stats.outstandingPayables)} outstanding</p>
+                    <p className="text-[13px] font-semibold text-amber-900">{formatMoney(stats.outstandingPayables, displayCurrency)} outstanding</p>
                     <p className="text-xs text-amber-700/80 mt-0.5">Total of unpaid sent invoices</p>
                   </div>
                 </div>
@@ -248,7 +258,10 @@ export default function FinanceHome() {
                         <p className="text-[11px] text-gray-400">{formatFinanceDate(inv.issue_date)}</p>
                       </div>
                       <div className="flex items-center gap-2">
-                        <span className="text-[13px] font-semibold tabular-nums text-gray-700">{formatCurrency(Number(inv.total))}</span>
+                        <span className="text-right text-[13px] font-semibold tabular-nums text-gray-700">
+                          {formatMoney(display(inv.total, inv.currency), displayCurrency)}
+                          {inv.currency !== displayCurrency && <small className="block text-[9px] font-medium text-slate-400">Original: {formatMoney(inv.total, inv.currency)}</small>}
+                        </span>
                         <span className={`text-[10px] font-semibold px-2 py-0.5 rounded ${
                           inv.status === "paid" ? "bg-emerald-50 text-emerald-600"
                             : inv.status === "overdue" ? "bg-red-50 text-red-600"
@@ -279,7 +292,9 @@ export default function FinanceHome() {
                         <p className="text-[13px] font-medium text-gray-900 truncate">{exp.title}</p>
                         <p className="text-[11px] text-gray-400">{new Date(exp.spent_on).toLocaleDateString()}</p>
                       </div>
-                      <span className="text-[13px] font-semibold tabular-nums text-rose-600">-{formatCurrency(Number(exp.amount))}</span>
+                      <span className="text-right text-[13px] font-semibold tabular-nums text-rose-600">-{formatMoney(display(exp.amount, exp.currency), displayCurrency)}
+                        {exp.currency !== displayCurrency && <small className="block text-[9px] font-medium text-slate-400">Original: {formatMoney(exp.amount, exp.currency)}</small>}
+                      </span>
                     </div>
                   ))}
                 </div>
@@ -296,7 +311,7 @@ export default function FinanceHome() {
           <Link key={s.href} href={s.href} className="group">
             <div className={`${glassCard} p-6 h-full transition hover:-translate-y-0.5 hover:shadow-[0_20px_50px_rgba(15,40,90,0.10)]`}>
               <div className="flex items-start justify-between mb-5">
-                <div className={`w-12 h-12 rounded-xl bg-gradient-to-br ${s.tint} grid place-items-center shadow-lg shadow-blue-600/10`}>
+                <div className={`w-12 h-12 rounded-xl bg-[#0A4FE8] grid place-items-center shadow-lg shadow-blue-600/10`}>
                   <s.icon className="w-6 h-6 text-white" />
                 </div>
                 <ArrowUpRight className="w-5 h-5 text-gray-300 group-hover:text-blue-600 transition" />

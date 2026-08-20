@@ -57,6 +57,20 @@ export function createResendHttpTransport(apiKey: string) {
       if (typeof d.html === "string") payload.html = d.html;
       if (typeof d.text === "string") payload.text = d.text;
 
+      // Forward attachments (incl. inline logo). Resend expects base64 `content`
+      // and uses `content_id` to render an attachment inline via a cid: img src.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const atts = (Array.isArray(d.attachments) ? d.attachments : []) as any[];
+      const mapped = atts
+        .map((a) => ({
+          filename: a.filename,
+          content: Buffer.isBuffer(a.content) ? a.content.toString("base64") : a.content,
+          content_type: a.contentType,
+          content_id: a.cid,
+        }))
+        .filter((a) => a.filename && typeof a.content === "string");
+      if (mapped.length) payload.attachments = mapped;
+
       fetch("https://api.resend.com/emails", {
         method: "POST",
         headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },

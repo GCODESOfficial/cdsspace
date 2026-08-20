@@ -5,10 +5,10 @@
  * Raw screenshots auto-destroy after their retention window (7 days by
  * default). This cron guarantees that BEFORE a member's screenshots are
  * purged, the system has generated the daily + weekly automatic reports that
- * summarise them — so the aggregated report survives as the durable record
+ * summarise them - so the aggregated report survives as the durable record
  * backing the member's own report once the images are gone.
  *
- * Driven by an EXTERNAL scheduler (glashdb.com cron) — point a job at
+ * Driven by an EXTERNAL scheduler (glashdb.com cron) - point a job at
  *   GET https://<your-domain>/api/cron/work-tracking-retention
  * once a day is plenty (screenshots expire on a 7-day boundary), sending
  *   Authorization: Bearer <CRON_SECRET>
@@ -27,7 +27,7 @@ export const dynamic = "force-dynamic";
 
 function authorized(req: NextRequest) {
   const secret = process.env.CRON_SECRET;
-  if (!secret) return true; // no secret configured (dev) — allow
+  if (!secret) return true; // no secret configured (dev) - allow
   return (req.headers.get("authorization") || "") === `Bearer ${secret}`;
 }
 

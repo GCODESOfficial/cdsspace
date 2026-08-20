@@ -1,27 +1,64 @@
 "use client";
 
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname } from "next/navigation";
+import { useEffect, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { cn } from "@/lib/utils";
 import { motion, AnimatePresence } from "framer-motion";
-import { LogOut, LayoutDashboard, Newspaper, FileText, Image as ImageIcon, Package, MessageSquare, ShoppingBag, Handshake, Settings } from "lucide-react";
-import { useEffect, useState } from "react";
-import { createClient } from "@/lib/supabase/client";
+import { LogOut, LayoutDashboard, Newspaper, FileText, Image as ImageIcon, Package, MessageSquare, ShoppingBag, Settings, ReceiptText, FolderOpen, Palette, CalendarRange, ChevronDown } from "lucide-react";
+import { useClientAccount } from "@/components/dashboard/ClientAccountProvider";
 
-const mainNavItems = [
-    { name: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
-    { name: "Blog", href: "/dashboard/blog", icon: Newspaper },
-    { name: "Brand Brief", href: "/brand-brief", icon: FileText },
-    { name: "Banners", href: "/dashboard/banners", icon: ImageIcon, comingSoon: true },
-    { name: "Merch", href: "/dashboard/merch", icon: Package, comingSoon: true },
-    { name: "Secured Chat", href: "/dashboard/messages", icon: MessageSquare },
-    { name: "Orders", href: "/dashboard/orders", icon: ShoppingBag },
-    { name: "Best Partner", href: "/partnership", icon: Handshake },
-];
+type NavigationItem = {
+    name: string;
+    href: string;
+    icon: typeof LayoutDashboard;
+    comingSoon?: boolean;
+};
 
-const controlCenterItems = [
-    { name: "Settings", href: "/settings", icon: Settings },
+const navigationSections: { name: string; items: NavigationItem[] }[] = [
+    {
+        name: "Overview",
+        items: [
+            { name: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
+            { name: "Intelligence", href: "/dashboard/intelligence", icon: Newspaper },
+        ],
+    },
+    {
+        name: "Brand strategy",
+        items: [
+            { name: "Brand Brief", href: "/dashboard/brand-brief", icon: FileText },
+            { name: "Brand Identity", href: "/dashboard/brand-identity", icon: Palette },
+        ],
+    },
+    {
+        name: "Creative services",
+        items: [
+            { name: "Banners", href: "/dashboard/banners", icon: ImageIcon },
+            { name: "Merch", href: "/dashboard/merch", icon: Package },
+            { name: "Subscription", href: "/dashboard/subscription", icon: CalendarRange },
+        ],
+    },
+    {
+        name: "Communication & files",
+        items: [
+            { name: "Chat/Meet", href: "/dashboard/messages", icon: MessageSquare },
+            { name: "Documents", href: "/dashboard/documents", icon: FolderOpen },
+        ],
+    },
+    {
+        name: "Orders & billing",
+        items: [
+            { name: "Orders", href: "/dashboard/orders", icon: ShoppingBag },
+            { name: "Invoices", href: "/dashboard/invoices", icon: ReceiptText },
+        ],
+    },
+    {
+        name: "Account",
+        items: [
+            { name: "Account Config", href: "/dashboard/settings", icon: Settings },
+        ],
+    },
 ];
 
 interface SidebarProps {
@@ -31,41 +68,43 @@ interface SidebarProps {
 
 export const Sidebar = ({ isOpen = false, onClose }: SidebarProps) => {
     const pathname = usePathname();
-    const router = useRouter();
-
-    const [userName, setUserName] = useState("Loading...");
-    const [userInitials, setUserInitials] = useState("");
-    const [userCompany, setUserCompany] = useState("");
-    const [userAvatar, setUserAvatar] = useState<string | null>(null);
+    const [collapsedSections, setCollapsedSections] = useState<Record<string, boolean>>({});
+    const { account, dashboardPath } = useClientAccount();
+    const userName = account.fullName || account.email.split("@")[0] || "User";
+    const userCompany = account.companyName || "Client";
+    const parts = userName.trim().split(/\s+/).filter(Boolean);
+    const userInitials = parts.length > 1
+        ? `${parts[0][0]}${parts[1][0]}`.toUpperCase()
+        : userName.substring(0, 2).toUpperCase();
 
     useEffect(() => {
-        const fetchUser = async () => {
-            const supabase = createClient();
-            const { data: { user } } = await supabase.auth.getUser();
-            if (user) {
-                const name = user.user_metadata?.full_name || user.email?.split("@")[0] || "User";
-                const company = user.user_metadata?.company_name;
-                setUserName(name);
-                setUserCompany(company || "Client");
-                setUserAvatar(user.user_metadata?.avatar_url || user.user_metadata?.picture || null);
-                const parts = name.trim().split(" ");
-                setUserInitials(parts.length > 1 ? (parts[0][0] + parts[1][0]).toUpperCase() : name.substring(0, 2).toUpperCase());
-            }
-        };
-        fetchUser();
-    }, []);
+        const activeSection = navigationSections.find((section) =>
+            section.items.some((item) => {
+                const href = dashboardPath(item.href);
+                return pathname === href || (href !== dashboardPath("/dashboard") && pathname.startsWith(`${href}/`));
+            }),
+        );
+        if (!activeSection) return;
+        setCollapsedSections((current) => current[activeSection.name]
+            ? { ...current, [activeSection.name]: false }
+            : current);
+    }, [dashboardPath, pathname]);
+
+    const toggleSection = (name: string) => {
+        setCollapsedSections((current) => ({ ...current, [name]: !current[name] }));
+    };
 
     const handleLogout = async () => {
-        const supabase = createClient();
-        await supabase.auth.signOut();
-        router.push("/login");
+        await fetch("/api/auth/logout", { method: "POST", credentials: "include" }).catch(() => null);
+        window.location.replace("/login");
         if (onClose) onClose();
     };
 
-    const NavItem = ({ item, isMobile }: { item: typeof mainNavItems[0]; isMobile?: boolean }) => {
-        const isActive = pathname === item.href || (item.href === "/dashboard" && (pathname === "/" || pathname === "/dashboard"));
+    const NavItem = ({ item, isMobile }: { item: NavigationItem; isMobile?: boolean }) => {
+        const itemHref = dashboardPath(item.href);
+        const isActive = pathname === itemHref;
         const Icon = item.icon;
-        const isLocked = (item as any).comingSoon;
+        const isLocked = item.comingSoon;
 
         if (isLocked) {
             return (
@@ -92,13 +131,14 @@ export const Sidebar = ({ isOpen = false, onClose }: SidebarProps) => {
 
         return (
             <Link
-                href={item.href}
+                href={itemHref}
                 onClick={onClose}
+                data-onboarding-module={item.href}
                 className={cn(
                     "flex items-center rounded-xl transition-all duration-300 group",
                     isMobile ? "p-[10px] gap-[10px]" : "px-3 py-2.5 gap-3 2xl:px-4 2xl:py-3",
                     isActive
-                        ? "bg-gradient-to-r from-[#0035C1] to-[#0575FF] shadow-[0_4px_16px_rgba(0,53,193,0.25)]"
+                        ? "bg-[#0A4FE8] shadow-[0_4px_16px_rgba(0,53,193,0.25)]"
                         : "hover:bg-[#F4F6FB]"
                 )}
             >
@@ -125,7 +165,7 @@ export const Sidebar = ({ isOpen = false, onClose }: SidebarProps) => {
     const SidebarContent = ({ isMobile = false }) => (
         <div className={cn(
             "h-full flex flex-col bg-white transition-all duration-300",
-            isMobile ? "w-full" : "w-[220px] 2xl:w-[260px] border-r border-[#E3E8F4]/60 premium-scrollbar"
+            isMobile ? "w-full" : "w-[220px] 2xl:w-[260px] border-e border-[#E3E8F4]/60 premium-scrollbar"
         )}>
             {/* Logo */}
             <div className={cn(
@@ -149,28 +189,50 @@ export const Sidebar = ({ isOpen = false, onClose }: SidebarProps) => {
                 "flex-1 overflow-y-auto flex flex-col scrollbar-hide",
                 isMobile ? "px-4 py-6" : "px-3 py-4 2xl:px-4 2xl:py-5"
             )}>
-                {/* Main Nav */}
-                <div className="space-y-0.5">
-                    <div className="h-7 px-3 flex items-center">
-                        <span className="text-[10px] 2xl:text-[11px] font-bold text-[#B0B9D1] uppercase tracking-[0.12em]">Main</span>
-                    </div>
-                    {mainNavItems.map((item) => (
-                        <NavItem key={item.name} item={item} isMobile={isMobile} />
+                <nav aria-label="Client dashboard" className="space-y-4">
+                    {/* CREATE Studio is locked for clients until the tools are perfected.
+                        Re-enable this button and set CREATE_CLIENT_ACCESS=true to open it. */}
+                    {navigationSections.map((section) => (
+                        <section key={section.name} aria-labelledby={`sidebar-${section.name.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`}>
+                            <button
+                                type="button"
+                                onClick={() => toggleSection(section.name)}
+                                aria-expanded={!collapsedSections[section.name]}
+                                aria-controls={`sidebar-items-${section.name.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`}
+                                className="flex h-8 w-full items-center justify-between rounded-lg px-3 text-left transition hover:bg-[#F4F6FB]"
+                            >
+                                <h2
+                                    id={`sidebar-${section.name.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`}
+                                    className="text-[10px] font-semibold tracking-normal text-[#9DA8C3] 2xl:text-[11px]"
+                                >
+                                    {section.name}
+                                </h2>
+                                <ChevronDown
+                                    className={cn(
+                                        "h-3.5 w-3.5 text-[#9DA8C3] transition-transform duration-200",
+                                        collapsedSections[section.name] && "-rotate-90",
+                                    )}
+                                />
+                            </button>
+                            <AnimatePresence initial={false}>
+                                {!collapsedSections[section.name] && (
+                                    <motion.div
+                                        id={`sidebar-items-${section.name.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`}
+                                        initial={{ height: 0, opacity: 0 }}
+                                        animate={{ height: "auto", opacity: 1 }}
+                                        exit={{ height: 0, opacity: 0 }}
+                                        transition={{ duration: 0.18, ease: "easeOut" }}
+                                        className="space-y-0.5 overflow-hidden"
+                                    >
+                                        {section.items.map((item) => (
+                                            <NavItem key={item.name} item={item} isMobile={isMobile} />
+                                        ))}
+                                    </motion.div>
+                                )}
+                            </AnimatePresence>
+                        </section>
                     ))}
-                </div>
-
-                {/* Divider */}
-                <div className="h-px bg-[#E3E8F4]/40 mx-3 my-4" />
-
-                {/* Control Center */}
-                <div className="space-y-0.5">
-                    <div className="h-7 px-3 flex items-center">
-                        <span className="text-[10px] 2xl:text-[11px] font-bold text-[#B0B9D1] uppercase tracking-[0.12em]">Control Center</span>
-                    </div>
-                    {controlCenterItems.map((item) => (
-                        <NavItem key={item.name} item={item} isMobile={isMobile} />
-                    ))}
-                </div>
+                </nav>
 
                 {/* Logout */}
                 <div className="mt-auto pt-4">
@@ -199,7 +261,11 @@ export const Sidebar = ({ isOpen = false, onClose }: SidebarProps) => {
             {isMobile && (
                 <div className="p-4 border-t border-[#E3E8F4]/40 flex items-center gap-3">
                     <div className="w-10 h-10 bg-brand-blue rounded-full flex items-center justify-center shadow-sm overflow-hidden relative shrink-0">
-                        <span className="text-white text-sm font-semibold">{userInitials}</span>
+                        {account.avatarUrl ? (
+                            <Image src={account.avatarUrl} alt={`${userName} profile photo`} fill sizes="40px" className="object-cover" />
+                        ) : (
+                            <span className="text-white text-sm font-semibold">{userInitials}</span>
+                        )}
                     </div>
                     <div className="flex flex-col min-w-0">
                         <span className="text-brand-navy text-sm font-semibold truncate">{userName}</span>
@@ -223,9 +289,9 @@ export const Sidebar = ({ isOpen = false, onClose }: SidebarProps) => {
                     <>
                         <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={onClose}
                             className="fixed inset-0 bg-black/20 backdrop-blur-xs z-[100] lg:hidden" />
-                        <motion.div initial={{ x: "-100%" }} animate={{ x: 0 }} exit={{ x: "-100%" }}
+                        <motion.div initial={{ x: "var(--drawer-offset)" }} animate={{ x: 0 }} exit={{ x: "var(--drawer-offset)" }}
                             transition={{ type: "spring", damping: 25, stiffness: 200 }}
-                            className="fixed inset-y-0 left-0 w-[86vw] max-w-[320px] bg-white z-[101] lg:hidden shadow-2xl">
+                            className="fixed inset-y-0 start-0 z-[101] w-[86vw] max-w-[320px] border-e border-[#E3E8F4]/60 bg-white shadow-2xl [--drawer-offset:-100%] rtl:[--drawer-offset:100%] lg:hidden">
                             <SidebarContent isMobile />
                         </motion.div>
                     </>

@@ -6,7 +6,7 @@ jsPDF can only embed TTF (glyf) fonts, so this converts the Neue Campton OTFs
 (CFF) to TTF, base64-encodes them, and records which code points the font
 actually contains (used for the Helvetica fallback in src/lib/pdf/pdf-fonts.ts).
 
-Run after dropping in the FULL licensed font (with complete glyph coverage) —
+Run after dropping in the FULL licensed font (with complete glyph coverage) -
 update the paths below if the filenames change:
 
     pip install fonttools otf2ttf

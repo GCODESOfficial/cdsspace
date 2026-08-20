@@ -21,7 +21,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   if (denied) return denied;
   const { id } = await params;
   const body = await req.json();
-  const allowed = ["name", "client", "currency", "duration_start", "duration_end", "status", "notes"];
+  const allowed = ["name", "client", "client_email", "currency", "duration_start", "duration_end", "status", "notes"];
   const patch: Record<string, unknown> = { updated_at: new Date().toISOString() };
   for (const k of allowed) if (k in body) patch[k] = body[k];
   const sb = financeDb();

@@ -4,7 +4,7 @@
 -- Supports the HRM interactivity pass:
 --   1. Check-in / geofence / work-tracking notifications to the super admin
 --      need new `type` values on the legacy notifications table.
---   2. Duplicate project assignments were possible via double-click races —
+--   2. Duplicate project assignments were possible via double-click races -
 --      dedupe existing rows and add unique indexes so the DB enforces it.
 
 -- ---------------------------------------------------------------------------

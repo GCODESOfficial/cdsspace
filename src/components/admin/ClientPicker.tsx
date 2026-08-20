@@ -2,7 +2,9 @@
 
 import { useEffect, useRef, useState } from "react";
 import { supabase } from "@/lib/supabase";
+import { sanitizeOrFilterTerm } from "@/lib/search-filter";
 import { Search, Plus, Building2, Loader2, X, Check } from "lucide-react";
+import { INDUSTRY_CATEGORIES } from "@/lib/industry-categories";
 
 export interface Client {
   id: string;
@@ -10,6 +12,7 @@ export interface Client {
   brand_name: string | null;
   email: string | null;
   industry: string | null;
+  industries?: string[];
 }
 
 interface ClientPickerProps {
@@ -36,7 +39,7 @@ export default function ClientPicker({ value = "", onSelect, placeholder = "Sear
   const [newName, setNewName] = useState("");
   const [newBrand, setNewBrand] = useState("");
   const [newEmail, setNewEmail] = useState("");
-  const [newIndustry, setNewIndustry] = useState("");
+  const [newIndustries, setNewIndustries] = useState<string[]>([]);
 
   const wrapperRef = useRef<HTMLDivElement>(null);
 
@@ -51,11 +54,12 @@ export default function ClientPicker({ value = "", onSelect, placeholder = "Sear
       setIsLoading(true);
       let q = supabase
         .from("clients")
-        .select("id, name, brand_name, email, industry")
+        .select("id, name, brand_name, email, industry, industries")
         .order("created_at", { ascending: false })
         .limit(15);
-      if (query.trim()) {
-        q = q.or(`name.ilike.%${query}%,brand_name.ilike.%${query}%`);
+      const safeQuery = sanitizeOrFilterTerm(query);
+      if (safeQuery) {
+        q = q.or(`name.ilike.%${safeQuery}%,brand_name.ilike.%${safeQuery}%`);
       }
       const { data } = await q;
       setResults(data || []);
@@ -87,7 +91,7 @@ export default function ClientPicker({ value = "", onSelect, placeholder = "Sear
     setNewName(query);
     setNewBrand("");
     setNewEmail("");
-    setNewIndustry("");
+    setNewIndustries([]);
   }
 
   async function handleCreateClient(e: React.FormEvent) {
@@ -101,7 +105,8 @@ export default function ClientPicker({ value = "", onSelect, placeholder = "Sear
         name: newName.trim(),
         brand_name: newBrand.trim() || null,
         email: newEmail.trim() || null,
-        industry: newIndustry.trim() || null,
+        industry: newIndustries[0] || null,
+        industries: newIndustries,
       })
       .select()
       .single();
@@ -161,16 +166,33 @@ export default function ClientPicker({ value = "", onSelect, placeholder = "Sear
                 <input value={newBrand} onChange={(e) => setNewBrand(e.target.value)} placeholder="(Optional)"
                   className="w-full px-3 py-2 rounded-lg bg-gray-50 border border-gray-200 text-[13px] focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-300" />
               </div>
-              <div className="grid grid-cols-2 gap-2">
-                <div>
+              <div>
                   <label className="block text-[10px] font-medium text-gray-500 uppercase tracking-wider mb-1">Email</label>
                   <input type="email" value={newEmail} onChange={(e) => setNewEmail(e.target.value)} placeholder="email@..."
                     className="w-full px-3 py-2 rounded-lg bg-gray-50 border border-gray-200 text-[13px] focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-300" />
-                </div>
-                <div>
-                  <label className="block text-[10px] font-medium text-gray-500 uppercase tracking-wider mb-1">Industry</label>
-                  <input value={newIndustry} onChange={(e) => setNewIndustry(e.target.value)} placeholder="e.g. Tech"
-                    className="w-full px-3 py-2 rounded-lg bg-gray-50 border border-gray-200 text-[13px] focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-300" />
+              </div>
+              <div role="group" aria-labelledby="new-client-industries">
+                <p id="new-client-industries" className="mb-1.5 text-[11px] font-medium text-gray-500">Industries</p>
+                <div className="flex flex-wrap gap-1.5">
+                  {INDUSTRY_CATEGORIES.map((industry) => {
+                    const selected = newIndustries.includes(industry);
+                    return (
+                      <button
+                        key={industry}
+                        type="button"
+                        aria-pressed={selected}
+                        onClick={() => setNewIndustries((current) => current.includes(industry)
+                          ? current.filter((entry) => entry !== industry)
+                          : [...current, industry])}
+                        className={`rounded-md border px-2 py-1 text-[10px] font-medium transition ${selected
+                          ? "border-[#0A4FE8] bg-[#0A4FE8] text-white"
+                          : "border-gray-200 bg-gray-50 text-gray-600 hover:border-blue-300"
+                        }`}
+                      >
+                        {industry}
+                      </button>
+                    );
+                  })}
                 </div>
               </div>
               <button type="submit" disabled={isCreating || !newName.trim()}
@@ -210,9 +232,9 @@ export default function ClientPicker({ value = "", onSelect, placeholder = "Sear
                             <p className="text-[11px] text-gray-400 truncate">{c.name}</p>
                           )}
                         </div>
-                        {c.industry && (
-                          <span className="px-2 py-0.5 rounded-md bg-gray-100 text-gray-500 text-[10px] font-medium">
-                            {c.industry}
+                        {(c.industries?.length || c.industry) && (
+                          <span className="max-w-[140px] truncate rounded-md bg-gray-100 px-2 py-0.5 text-[10px] font-medium text-gray-500">
+                            {(c.industries?.length ? c.industries : [c.industry as string]).join(" · ")}
                           </span>
                         )}
                       </button>

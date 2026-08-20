@@ -52,7 +52,7 @@ export function ChatSuggestions({
       <button
         onClick={run}
         disabled={!lastMessage.trim()}
-        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-gradient-to-r from-[#0A4FE8] to-[#7B3AED] text-white text-[11px] font-semibold hover:shadow-md transition disabled:opacity-40"
+        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-[#0A4FE8] text-white text-[11px] font-semibold hover:shadow-md transition disabled:opacity-40"
       >
         <MessageCircleReply className="w-3 h-3" />
         Suggest replies

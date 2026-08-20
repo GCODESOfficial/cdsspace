@@ -24,7 +24,7 @@ function allSupported(text: string): boolean {
  * make it the default font. Because the current trial font is a 66-glyph subset
  * (no ₦/$/%/apostrophes/…), this also wraps `text()` and `getTextWidth()` so any
  * string containing an unsupported glyph is drawn/measured with the built-in
- * Helvetica instead — so nothing ever prints as a blank ☐ box. Callers keep
+ * Helvetica instead - so nothing ever prints as a blank ☐ box. Callers keep
  * setting fonts with `doc.setFont("NeueCampton", style)`.
  *
  * With the FULL licensed font (complete glyph coverage) the fallback simply

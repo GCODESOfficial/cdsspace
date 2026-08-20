@@ -8,14 +8,14 @@ import { UploadedWorksTable } from "@/components/uploaded-works-table";
 import { FeaturedWorksList } from "@/components/featured-brands-list";
 import { supabase } from "@/lib/supabase";
 
-// Modals only render on interaction — lazy-load them so they stay out of the
+// Modals only render on interaction - lazy-load them so they stay out of the
 // initial dashboard bundle.
 const CarrierLinkModal = dynamic(() => import("@/components/carrier-link-modal").then((m) => m.CarrierLinkModal), { ssr: false });
 const AdvertisementModal = dynamic(() => import("@/components/advertisement-modal").then((m) => m.AdvertisementModal), { ssr: false });
 const FeaturedWorksModal = dynamic(() => import("@/components/featured-brands-modal").then((m) => m.FeaturedWorksModal), { ssr: false });
-import { Search, Star, Megaphone, Link2, TrendingUp, Globe, FolderOpen, BarChart3, ShieldCheck, Mail, BriefcaseBusiness, Building2, KeyRound, CheckCircle2, ArrowRight, ArrowRightLeft } from "lucide-react";
+import { Search, Star, Megaphone, Link2, TrendingUp, Globe, FolderOpen, BarChart3, ShieldCheck, Mail, BriefcaseBusiness, Building2, KeyRound, CheckCircle2, ArrowRight, ArrowRightLeft, MessageSquare, MessagesSquare, CalendarClock, Plane, ShoppingBag, FileText } from "lucide-react";
 import { logVisit } from "@/utils/logVisit";
-import AdminNotificationBell from "@/components/notifications/admin-notification-bell";
+import { BirthdayReminder } from "@/components/admin/BirthdayCelebrate";
 import { useAdminSession, type AdminSession } from "@/hooks/use-admin-session";
 import { ALL_PERMISSIONS, PERMISSION_GROUPS, hasPermission } from "@/lib/admin-permissions";
 
@@ -35,6 +35,22 @@ export default function AdminDashboard() {
 	const [visits, setVisits] = useState(0);
 	const [countryList, setCountryList] = useState<{ name: string; count: number }[]>([]);
 	const [last7days, setLast7days] = useState<{ date: string; count: number }[]>([]);
+	const [actionCounts, setActionCounts] = useState<Record<string, number>>({});
+
+	useEffect(() => {
+		if (!hasDashboardAccess) return;
+		const fetchCounts = async () => {
+			try {
+				const res = await fetch("/api/admin/dashboard-actions");
+				if (!res.ok) return;
+				const data = await res.json();
+				if (data.ok) setActionCounts(data.counts || {});
+			} catch { /* ignore */ }
+		};
+		fetchCounts();
+		const interval = setInterval(() => { if (!document.hidden) fetchCounts(); }, 30000);
+		return () => clearInterval(interval);
+	}, [hasDashboardAccess]);
 
 	useEffect(() => {
 		if (!hasDashboardAccess) return;
@@ -60,7 +76,7 @@ export default function AdminDashboard() {
 		const fetchWorkCount = async () => {
 			try {
 				setIsLoading(true);
-				// Count only — don't fetch every work row just to read .length.
+				// Count only - don't fetch every work row just to read .length.
 				const { count } = await supabase.from("works").select("id", { count: "exact", head: true });
 				setWorkCount(count ?? 0);
 			} catch (error) {
@@ -87,7 +103,8 @@ export default function AdminDashboard() {
 	}
 
 	return (
-		<div className="p-4 sm:p-6 lg:p-8 max-w-[1400px]">
+		<div className="max-w-[1680px] p-4 sm:p-6 lg:p-8">
+			<BirthdayReminder />
 			{/* Top Bar */}
 			<div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between mb-8">
 				<div className="min-w-0">
@@ -105,7 +122,6 @@ export default function AdminDashboard() {
 							className="pl-9 pr-4 py-2 w-full sm:w-56 rounded-xl bg-white border border-gray-200 text-sm text-gray-700 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-300 transition"
 						/>
 					</div>
-					<AdminNotificationBell />
 					<div className="w-9 h-9 rounded-full bg-[#0A4FE8] flex items-center justify-center text-white text-sm font-bold">
 						A
 					</div>
@@ -113,7 +129,7 @@ export default function AdminDashboard() {
 			</div>
 
 			{/* Stats */}
-			<div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-5 mb-8">
+			<div className="mb-8 grid grid-cols-2 gap-3 sm:gap-5 xl:grid-cols-4">
 				<StatCard
 					icon={<FolderOpen className="w-5 h-5 text-[#0A4FE8]" />}
 					label="Total Works"
@@ -156,10 +172,18 @@ export default function AdminDashboard() {
 			{/* Quick Actions */}
 			<div className="mb-8">
 				<h2 className="text-sm font-semibold text-gray-400 uppercase tracking-wider mb-4">Quick Actions</h2>
-				<div className="flex gap-3 flex-wrap">
+				<div className="grid grid-cols-2 gap-2.5 sm:flex sm:flex-wrap sm:gap-3">
 					{can("dashboard.quick_actions") && <ActionPill icon={<Star className="w-4 h-4" />} label="Feature Brands" onClick={() => setIsBrandsModalOpen(true)} />}
 					{can("dashboard.quick_actions") && <ActionPill icon={<Megaphone className="w-4 h-4" />} label="Manage Ads" onClick={() => setIsAdModalOpen(true)} />}
 					{can("dashboard.quick_actions") && <ActionPill icon={<Link2 className="w-4 h-4" />} label="Career Link" onClick={() => setIsCarrierModalOpen(true)} />}
+
+					{can("messages") && <ActionPill icon={<MessageSquare className="w-4 h-4" />} label="Chat/Meet" badge={actionCounts.client_messages} onClick={() => router.push("/admin/messages")} />}
+					{can("team_chat") && <ActionPill icon={<MessagesSquare className="w-4 h-4" />} label="Team Chat" badge={actionCounts.team_chat} onClick={() => router.push("/admin/chat")} />}
+					{can("applicants") && <ActionPill icon={<BriefcaseBusiness className="w-4 h-4" />} label="Applications" badge={actionCounts.applications} onClick={() => router.push("/admin/applications")} />}
+					{can("consultations") && <ActionPill icon={<CalendarClock className="w-4 h-4" />} label="Consultations" badge={actionCounts.consultations} onClick={() => router.push("/admin/consultations")} />}
+					{(can("timebook") || can("team_members")) && <ActionPill icon={<Plane className="w-4 h-4" />} label="Leave Requests" badge={actionCounts.leave} onClick={() => router.push("/admin/hrm")} />}
+					{can("orders") && <ActionPill icon={<ShoppingBag className="w-4 h-4" />} label="Orders" badge={actionCounts.orders} onClick={() => router.push("/admin/orders")} />}
+					{can("brand_briefs") && <ActionPill icon={<FileText className="w-4 h-4" />} label="Brand Briefs" badge={actionCounts.briefs} onClick={() => router.push("/admin/brand-briefs")} />}
 				</div>
 			</div>
 
@@ -179,7 +203,7 @@ export default function AdminDashboard() {
 				</div>
 			</div>
 
-			{/* Modals — mounted only when open so their code loads on demand. */}
+			{/* Modals - mounted only when open so their code loads on demand. */}
 			{isCarrierModalOpen && <CarrierLinkModal isOpen={isCarrierModalOpen} onClose={() => setIsCarrierModalOpen(false)} />}
 			{isAdModalOpen && <AdvertisementModal isOpen={isAdModalOpen} onClose={() => setIsAdModalOpen(false)} />}
 			{isBrandsModalOpen && <FeaturedWorksModal isOpen={isBrandsModalOpen} onClose={() => setIsBrandsModalOpen(false)} />}
@@ -211,7 +235,7 @@ function SubAdminAccessOverview({ session }: { session: AdminSession }) {
 	const department = session.department || "Not assigned";
 
 	return (
-		<div className="p-4 sm:p-6 lg:p-8 max-w-[1400px]">
+		<div className="max-w-[1680px] p-4 sm:p-6 lg:p-8">
 			<div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between mb-8">
 				<div>
 					<div className="inline-flex items-center gap-2 rounded-full bg-blue-50 px-3 py-1 text-xs font-semibold text-[#0A4FE8] ring-1 ring-blue-100">
@@ -401,13 +425,13 @@ function StatCard({
 
 	return (
 		<div className="relative group">
-			<div className={`${bgMap[color]} rounded-2xl p-5 transition hover:shadow-md`}>
+			<div className={`${bgMap[color]} min-h-[150px] rounded-2xl p-4 transition hover:-translate-y-0.5 hover:shadow-md sm:min-h-[176px] sm:p-5`}>
 				<div className="flex items-center justify-between mb-4">
 					<div className={`${iconBgMap[color]} w-10 h-10 rounded-xl flex items-center justify-center`}>
 						{icon}
 					</div>
 				</div>
-				<p className="text-[28px] font-bold text-[#0D1B39] leading-none">{value}</p>
+				<p className="text-[24px] font-bold text-[#0D1B39] leading-none sm:text-[28px]">{value}</p>
 				<p className="text-[13px] text-gray-500 mt-1.5 font-medium">{label}</p>
 				{subtitle && (
 					<p className="text-[11px] text-gray-400 mt-1">{subtitle}</p>
@@ -427,18 +451,26 @@ function ActionPill({
 	icon,
 	label,
 	onClick,
+	badge,
 }: {
 	icon: React.ReactNode;
 	label: string;
 	onClick: () => void;
+	badge?: number;
 }) {
+	const showBadge = typeof badge === "number" && badge > 0;
 	return (
 		<button
 			onClick={onClick}
-			className="flex items-center gap-2 px-4 py-2.5 bg-white border border-gray-200 rounded-xl text-sm font-medium text-gray-600 hover:border-blue-300 hover:text-[#0A4FE8] hover:bg-blue-50/50 transition-all cursor-pointer shadow-sm"
+			className="relative flex min-h-11 min-w-0 items-center justify-start gap-2 rounded-xl border border-gray-200 bg-white px-3 py-2.5 text-left text-[12px] font-semibold text-gray-600 shadow-sm transition-all hover:border-blue-300 hover:bg-blue-50/50 hover:text-[#0A4FE8] sm:px-4 sm:text-sm"
 		>
 			{icon}
 			{label}
+			{showBadge && (
+				<span className="ml-0.5 inline-flex min-w-[20px] h-5 items-center justify-center rounded-full bg-rose-500 px-1.5 text-[11px] font-bold text-white leading-none">
+					{badge > 99 ? "99+" : badge}
+				</span>
+			)}
 		</button>
 	);
 }

@@ -9,7 +9,7 @@ import { isPdfUrl } from "@/lib/work-asset";
 import WorkAsset from "@/components/marketing/WorkAsset";
 
 interface WorkRow {
-    id: number;
+    id: string;
     title: string;
     description: string | null;
     category: string | null;
@@ -22,8 +22,8 @@ interface WorkRow {
 }
 
 interface WorkImageRow {
-    id: number;
-    work_id: number;
+    id: string;
+    work_id: string;
     image_url: string;
     position: number | null;
 }
@@ -46,7 +46,7 @@ async function resolveWorkBySlug(slug: string): Promise<WorkRow | null> {
     return rows.find((w) => slugifyTitle(w.title) === target) ?? null;
 }
 
-async function fetchImages(workId: number): Promise<WorkImageRow[]> {
+async function fetchImages(workId: string): Promise<WorkImageRow[]> {
     const { data } = await supabase
         .from("work_images")
         .select("id, work_id, image_url, position")
@@ -174,13 +174,15 @@ export default async function WorkDetailPage({ params }: { params: Params }) {
                 </header>
 
                 {hero && (
-                    <div className="relative w-full aspect-video bg-gray-100">
+                    <div data-cds-work-preview className="relative w-full aspect-video bg-gray-100">
                         <Image
                             src={hero}
                             alt={work.title}
                             fill
                             priority
+                            unoptimized
                             sizes="(min-width: 960px) 960px, 100vw"
+                            draggable={false}
                             className="object-cover"
                         />
                     </div>

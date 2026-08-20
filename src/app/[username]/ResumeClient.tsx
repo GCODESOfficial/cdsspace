@@ -145,7 +145,7 @@ export default function PublicResumePage() {
         )}
 
         <footer className="mt-12 pt-6 border-t border-gray-100 text-center text-[11px] text-gray-400">
-          Made with ✨ on <Link href="/" className="text-[#0A4FE8] hover:underline">CDS Space</Link> · cResume
+          Built on <Link href="/" className="text-[#0A4FE8] hover:underline">CDS Space</Link> · cResume
         </footer>
       </div>
     </div>

@@ -1,10 +1,18 @@
 "use client";
 
 import React, { useState } from "react";
+import dynamic from "next/dynamic";
 import { DashboardEmptyState } from "@/components/shared/DashboardEmptyState";
 import { AnimatePresence, motion } from "framer-motion";
-import { BannersDashboard } from "@/components/dashboard/BannersDashboard";
-import { BannerLab } from "@/components/dashboard/BannerLab";
+
+const BannersDashboard = dynamic(
+    () => import("@/components/dashboard/BannersDashboard").then((module) => module.BannersDashboard),
+    { loading: () => <div className="min-h-[360px] animate-pulse rounded-3xl bg-white/70" /> },
+);
+const BannerLab = dynamic(
+    () => import("@/components/dashboard/BannerLab").then((module) => module.BannerLab),
+    { ssr: false, loading: () => <div className="min-h-[65vh] animate-pulse rounded-3xl bg-white/70" /> },
+);
 
 /**
  * BannersPage - Orchestrates between the Empty State and the Banners Dashboard.
@@ -13,12 +21,12 @@ import { BannerLab } from "@/components/dashboard/BannerLab";
 export default function BannersPage() {
     const [view, setView] = useState<"empty" | "dashboard" | "lab" | "loading">("loading");
     const [banners, setBanners] = useState<any[]>([]);
+    const [draftId, setDraftId] = useState<string | null>(null);
 
     const fetchBanners = async () => {
         try {
             const res = await fetch("/api/banners");
             const data = await res.json();
-            console.log("🚀 ~ fetchBanners ~ data:", data)
             if (data.banners) {
                 setBanners(data.banners);
                 setView(data.banners.length > 0 ? "dashboard" : "empty");
@@ -78,7 +86,14 @@ export default function BannersPage() {
                         <BannersDashboard
                             banners={banners}
                             onUpdate={fetchBanners}
-                            onCreateNew={() => setView("lab")}
+                            onCreateNew={() => {
+                                setDraftId(null);
+                                setView("lab");
+                            }}
+                            onContinueDraft={(id) => {
+                                setDraftId(id);
+                                setView("lab");
+                            }}
                         />
                     </motion.div>
                 ) : (
@@ -90,7 +105,8 @@ export default function BannersPage() {
                         transition={{ duration: 0.6, ease: [0.16, 1, 0.3, 1] }}
                         className="w-full h-full"
                     >
-                        <BannerLab onBack={() => {
+                        <BannerLab draftId={draftId} onBack={() => {
+                            setDraftId(null);
                             fetchBanners();
                             setView("dashboard");
                         }} />

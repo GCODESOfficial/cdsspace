@@ -48,7 +48,7 @@ export function DashStat({
   icon: Icon,
   label,
   value,
-  accent = "from-blue-500 to-indigo-500",
+  accent = "bg-[#0A4FE8]",
   sub,
 }: {
   icon: LucideIcon;
@@ -59,9 +59,9 @@ export function DashStat({
 }) {
   return (
     <div className={`${dashCard} p-5 relative overflow-hidden`}>
-      <div className={`absolute -top-8 -right-8 w-28 h-28 bg-gradient-to-br ${accent} opacity-10 blur-3xl rounded-full`} />
+      <div className={`absolute -top-8 -right-8 w-28 h-28 bg-[#0A4FE8] opacity-10 blur-3xl rounded-full`} />
       <div className="relative">
-        <div className={`w-11 h-11 rounded-xl bg-gradient-to-br ${accent} grid place-items-center shadow-lg shadow-blue-600/10 mb-4`}>
+        <div className={`w-11 h-11 rounded-xl bg-[#0A4FE8] grid place-items-center shadow-lg shadow-blue-600/10 mb-4`}>
           <Icon className="w-5 h-5 text-white" strokeWidth={2.2} />
         </div>
         <div className="text-[10px] uppercase tracking-wider text-gray-500 font-medium">{label}</div>

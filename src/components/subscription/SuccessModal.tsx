@@ -104,7 +104,7 @@ export const SuccessModal = ({ isOpen, onClose }: SuccessModalProps) => {
                                     className="group relative cursor-pointer"
                                 >
                                     <div className="absolute inset-[-2px] border border-[#648efc] rounded-full p-[2px]" />
-                                    <div className="bg-linear-to-br from-[#0035C1] to-[#0575FF] px-8 lg:px-[48px] py-[15px] rounded-full transition-all group-hover:scale-[1.02] group-active:scale-[0.98]">
+                                    <div className="bg-[#0A4FE8] px-8 lg:px-[48px] py-[15px] rounded-full transition-all group-hover:scale-[1.02] group-active:scale-[0.98]">
                                         <span className="text-white text-[18px] font-medium tracking-[-0.18px]">
                                             Got it
                                         </span>

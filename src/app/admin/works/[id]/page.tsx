@@ -10,6 +10,7 @@ import { toast } from "sonner";
 import { supabase } from "@/lib/supabase";
 import { CATEGORIES } from "@/lib/constants";
 import Link from "next/link";
+import { Loader2 } from "lucide-react";
 
 interface WorkImage {
   id: number;
@@ -170,15 +171,8 @@ export default function ViewWorkPage() {
 		return (
 		  <div className="min-h-screen bg-white text-black p-6 flex items-center justify-center">
 			<div className="text-center">
-			  <div className="mx-auto mb-4 w-28 h-28  rounded-full overflow-hidden">
-				<video
-				  src="/loader.mp4"  // replace with your video path
-				  autoPlay
-				  loop
-				  muted
-				  playsInline
-				  className="rounded-full object-fill h-24 w-24"
-				/>
+			  <div className="mx-auto mb-4 grid h-20 w-20 place-items-center rounded-full bg-blue-50 text-[#0A4FE8]">
+				<Loader2 className="h-8 w-8 animate-spin" aria-hidden="true" />
 			  </div>
 			  <p>Loading project details...</p>
 			</div>

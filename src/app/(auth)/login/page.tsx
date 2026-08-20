@@ -7,7 +7,7 @@ import { Suspense } from "react";
  */
 export default function LoginPage() {
     return (
-        <Suspense fallback={<div>Loading...</div>}>
+        <Suspense fallback={<div className="grid min-h-[420px] w-full place-items-center"><span className="h-6 w-6 animate-spin rounded-full border-2 border-brand-blue/30 border-t-brand-blue" /></div>}>
             <LoginForm />
         </Suspense>
     );

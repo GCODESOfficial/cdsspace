@@ -6,14 +6,11 @@ import {
   Copy,
   X,
   Link2,
-  Share2,
-  Facebook,
-  Linkedin,
-  MessageCircle,
   User,
   AtSign,
   KeyRound,
 } from "lucide-react";
+import { UniversalShareButton } from "@/components/share/UniversalShareButton";
 
 export interface InviteSharePayload {
   full_name: string;
@@ -42,6 +39,8 @@ export function InviteShareModal({
   if (!open || !payload) return null;
 
   const inviteUrl = `${payload.origin}/team/invite/${payload.invite_token}`;
+  // In-chat share posts only the invite link (never the password).
+  const chatShareText = `Team invite for ${payload.full_name}: ${inviteUrl}`;
   return (
     <div
       className="fixed inset-0 z-50 bg-black/55 backdrop-blur-sm flex items-center justify-center p-4"
@@ -88,54 +87,23 @@ export function InviteShareModal({
           <CredentialRow icon={Link2} label="Invite link" value={inviteUrl} copyable mono dense />
         </div>
 
-        {/* Share buttons */}
         <div className="px-6 pb-6">
-          <p className="text-[11px] font-bold uppercase tracking-wider text-gray-400 mb-2.5">
-            Share via
-          </p>
-          <div className="grid grid-cols-4 gap-2">
-            <ShareButton
-              label="WhatsApp"
-              color="bg-[#25D366] hover:bg-[#20bf5a] text-white"
-              icon={MessageCircle}
-              href={whatsappUrl(payload, inviteUrl)}
-            />
-            <ShareButton
-              label="LinkedIn"
-              color="bg-[#0A66C2] hover:bg-[#084d93] text-white"
-              icon={Linkedin}
-              href={linkedinUrl(inviteUrl)}
-            />
-            <ShareButton
-              label="Facebook"
-              color="bg-[#1877F2] hover:bg-[#145ec1] text-white"
-              icon={Facebook}
-              href={facebookUrl(inviteUrl)}
-            />
-            <ShareButton
-              label="More"
-              color="bg-gray-100 hover:bg-gray-200 text-[#0D1B39]"
-              icon={Share2}
-              onClick={() => {
-                if (navigator.share) {
-                  navigator
-                    .share({
-                      title: `Welcome to CDS Space, ${payload.full_name}`,
-                      text: composeShareText(payload, inviteUrl),
-                    })
-                    .catch(() => {});
-                }
-              }}
-            />
-          </div>
+          <UniversalShareButton
+            title={`Team invite for ${payload.full_name}`}
+            text={composeShareText(payload, inviteUrl)}
+            chatText={chatShareText}
+            url={inviteUrl}
+            className="w-full border-transparent bg-[#0A4FE8] py-3.5 text-sm text-white shadow-lg shadow-blue-600/20 hover:bg-blue-700"
+          />
         </div>
 
         {/* Footer */}
         <div className="px-6 py-4 bg-gray-50 border-t border-gray-100 text-[11px] text-gray-500 leading-relaxed">
-          The invite link takes the teammate to a setup form to fill their details and set a password. 
+          The invite link takes the teammate to a setup form to fill their details and set a password.
           It becomes single-use the moment they complete the setup.
         </div>
       </div>
+
     </div>
   );
 }
@@ -189,36 +157,6 @@ function CredentialRow({
   );
 }
 
-function ShareButton({
-  label,
-  color,
-  icon: Icon,
-  href,
-  onClick,
-}: {
-  label: string;
-  color: string;
-  icon: React.ElementType;
-  href?: string;
-  onClick?: () => void;
-}) {
-  const cls = `flex flex-col items-center justify-center gap-1 py-3 rounded-xl text-[11px] font-semibold transition ${color}`;
-  if (href) {
-    return (
-      <a href={href} target="_blank" rel="noopener noreferrer" className={cls}>
-        <Icon className="w-4 h-4" />
-        {label}
-      </a>
-    );
-  }
-  return (
-    <button type="button" onClick={onClick} className={cls}>
-      <Icon className="w-4 h-4" />
-      {label}
-    </button>
-  );
-}
-
 function composeShareText(p: InviteSharePayload, url: string) {
   const lines = [
     `Welcome to CDS Space, ${p.full_name}!`,
@@ -228,14 +166,4 @@ function composeShareText(p: InviteSharePayload, url: string) {
   if (p.password) lines.push(`• Password: ${p.password}`);
   lines.push(`Click here to sign in - we've pre-filled everything for you: ${url}`);
   return lines.join("\n");
-}
-
-function whatsappUrl(p: InviteSharePayload, inviteUrl: string) {
-  return `https://wa.me/?text=${encodeURIComponent(composeShareText(p, inviteUrl))}`;
-}
-function linkedinUrl(url: string) {
-  return `https://www.linkedin.com/sharing/share-offsite/?url=${encodeURIComponent(url)}`;
-}
-function facebookUrl(url: string) {
-  return `https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(url)}`;
 }

@@ -1,21 +1,24 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
-  PenLine, Sparkles, Image as ImageIcon, Video, Wand2, Loader2, Check, X, Upload,
+  PenLine, Image as ImageIcon, Video, Wand2, Loader2, Check, X, Upload,
   ChevronLeft, ChevronRight, Megaphone, CalendarClock, ShieldCheck, FileText, Hash,
+  Images, RefreshCw,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { appAlert } from "@/lib/app-notify";
 import ContentHubShell from "@/components/content-hub/ContentHubShell";
 import {
   PLATFORMS, CONTENT_TYPES, CATEGORIES, TONES, ENHANCE_ACTIONS, CTA_PRESETS,
-  REMINDER_OFFSETS, REMINDER_CHANNELS, mediaKindFromMime, type MediaKind, type ContentSource,
+  REMINDER_OFFSETS, REMINDER_CHANNELS, mediaKindFromMime, type MediaKind, type ContentSource, type VisualAsset,
 } from "@/lib/content-hub/shared";
+import { validateContentHubUpload } from "@/lib/content-hub/upload-limits";
 
 interface Publisher { id: string; full_name: string; role_title: string | null; department: string | null }
-interface Attachment { url: string; kind: MediaKind; file_name: string | null; mime_type: string | null; size_bytes: number | null }
+interface Attachment { url: string; kind: MediaKind; file_name: string | null; mime_type: string | null; size_bytes: number | null; thumbnail_url?: string | null; meta?: Record<string, unknown> }
 
 const STEPS = ["Source", "Details", "AI Enhance", "CTA", "Media", "Schedule", "Approval"];
 
@@ -30,7 +33,10 @@ export default function CreateContentPage() {
   const [source, setSource] = useState<ContentSource>("manual");
   const [brief, setBrief] = useState({ topic: "", audience: "", platform: "", tone: "cdsspace", objective: "" });
   const [sourceMedia, setSourceMedia] = useState<Attachment | null>(null);
+  const [sourceVisualAssetId, setSourceVisualAssetId] = useState("");
   const [sourceNote, setSourceNote] = useState("");
+  const [visualAssets, setVisualAssets] = useState<VisualAsset[]>([]);
+  const [visualLoading, setVisualLoading] = useState(false);
 
   const [title, setTitle] = useState("");
   const [bodyText, setBodyText] = useState("");
@@ -48,7 +54,6 @@ export default function CreateContentPage() {
   const [reminderChannels, setReminderChannels] = useState<string[]>(["dashboard", "email"]);
 
   const fileRef = useRef<HTMLInputElement>(null);
-  const sourceFileRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     fetch("/api/admin/content-hub/meta", { cache: "no-store" })
@@ -62,6 +67,26 @@ export default function CreateContentPage() {
       })
       .catch(() => {});
   }, []);
+
+  const loadVisualAssets = useCallback(async (kind: "image" | "video") => {
+    setVisualLoading(true);
+    try {
+      const qs = new URLSearchParams({ kind, status: "available", limit: "60" });
+      const res = await fetch(`/api/admin/content-hub/visual-library?${qs.toString()}`, { cache: "no-store" });
+      const json = await res.json();
+      if (json.ok) setVisualAssets(json.items || []);
+    } catch {
+      setVisualAssets([]);
+    } finally {
+      setVisualLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (source === "image" || source === "video") {
+      loadVisualAssets(source);
+    }
+  }, [source, loadVisualAssets]);
 
   const publisherName = useMemo(
     () => publishers.find((p) => p.id === schedule.publisherId)?.full_name || "",
@@ -92,15 +117,47 @@ export default function CreateContentPage() {
   }
 
   async function uploadFile(file: File): Promise<Attachment | null> {
+    const validation = validateContentHubUpload(file.size, file.type || "", file.name);
+    if (!validation.ok) {
+      await appAlert({ title: "Upload", message: validation.error, kind: "error" });
+      return null;
+    }
     const fd = new FormData();
     fd.append("file", file);
     const res = await fetch("/api/admin/content-hub/upload", { method: "POST", body: fd });
-    const json = await res.json();
+    const json = await res.json().catch(() => ({
+      ok: false,
+      error: res.status === 413
+        ? "Upload is too large. Videos can be up to 100MB each."
+        : "Upload failed before the server returned details.",
+    }));
     if (!res.ok || !json.ok) {
       await appAlert({ title: "Upload", message: json.error || "Upload failed.", kind: "error" });
       return null;
     }
     return { url: json.url, kind: json.kind || mediaKindFromMime(file.type), file_name: json.file_name, mime_type: json.mime_type, size_bytes: json.size_bytes };
+  }
+
+  function pickSource(next: ContentSource) {
+    setSource(next);
+    if (next !== source) {
+      setSourceMedia(null);
+      setSourceVisualAssetId("");
+      setSourceNote("");
+    }
+  }
+
+  function selectVisualAsset(asset: VisualAsset) {
+    setSourceVisualAssetId(asset.id);
+    setSourceMedia({
+      url: asset.url,
+      kind: asset.kind,
+      file_name: asset.file_name,
+      mime_type: asset.mime_type,
+      size_bytes: asset.size_bytes,
+      thumbnail_url: asset.thumbnail_url,
+      meta: { visual_asset_id: asset.id },
+    });
   }
 
   // ── Step 1 generators ──
@@ -109,14 +166,14 @@ export default function CreateContentPage() {
     if (text) { setBodyText(text); if (!title) setTitle(brief.topic.slice(0, 80)); setStep(1); }
   }
   async function runFromImage() {
-    if (!sourceMedia) return appAlert({ title: "Image", message: "Upload an image first.", kind: "error" });
+    if (!sourceMedia) return appAlert({ title: "Image", message: "Choose an image from Visual Library first.", kind: "error" });
     const text = await callAI("from_image", { imageUrl: sourceMedia.url, note: sourceNote, platform: brief.platform });
-    if (text) { setBodyText(text); setMedia((m) => [...m, sourceMedia]); setStep(1); }
+    if (text) { setBodyText(text); setMedia((m) => m.some((item) => item.url === sourceMedia.url) ? m : [...m, sourceMedia]); setStep(1); }
   }
   async function runFromVideo() {
-    if (!sourceMedia) return appAlert({ title: "Video", message: "Upload a video first.", kind: "error" });
+    if (!sourceMedia) return appAlert({ title: "Video", message: "Choose a video from Visual Library first.", kind: "error" });
     const text = await callAI("from_video", { videoUrl: sourceMedia.url, note: sourceNote, platform: brief.platform });
-    if (text) { setBodyText(text); setMedia((m) => [...m, sourceMedia]); setStep(1); }
+    if (text) { setBodyText(text); setMedia((m) => m.some((item) => item.url === sourceMedia.url) ? m : [...m, sourceMedia]); setStep(1); }
   }
 
   // ── Step 3 AI enhancement ──
@@ -159,6 +216,7 @@ export default function CreateContentPage() {
           status, scheduled_at: scheduledAt, scheduled_platform: schedule.platform,
           assigned_publisher_id: schedule.publisherId || null, assigned_publisher_name: publisherName || null,
           media, reminder_offsets: reminderOffsets, reminder_channels: reminderChannels,
+          source_visual_asset_id: sourceVisualAssetId || null,
           ai_meta: { variations },
         }),
       });
@@ -204,10 +262,10 @@ export default function CreateContentPage() {
           {step === 0 && (
             <Step title="How do you want to create this content?">
               <div className="grid gap-3 sm:grid-cols-2">
-                <SourceCard active={source === "manual"} icon={PenLine} label="Create Manually" desc="Write the content yourself." onClick={() => setSource("manual")} />
-                <SourceCard active={source === "ai"} icon={Sparkles} label="Generate with AI" desc="Topic, audience, platform, tone." onClick={() => setSource("ai")} />
-                <SourceCard active={source === "image"} icon={ImageIcon} label="Generate From Image" desc="Upload a design / flyer." onClick={() => setSource("image")} />
-                <SourceCard active={source === "video"} icon={Video} label="Generate From Video" desc="Upload a reel / event footage." onClick={() => setSource("video")} />
+                <SourceCard active={source === "manual"} icon={PenLine} label="Create Manually" desc="Write the content yourself." onClick={() => pickSource("manual")} />
+                <SourceCard active={source === "ai"} icon={Wand2} label="Generate with AI" desc="Topic, audience, platform, tone." onClick={() => pickSource("ai")} />
+                <SourceCard active={source === "image"} icon={ImageIcon} label="Generate From Image" desc="Choose a design / flyer." onClick={() => pickSource("image")} />
+                <SourceCard active={source === "video"} icon={Video} label="Generate From Video" desc="Choose a reel / footage." onClick={() => pickSource("video")} />
               </div>
 
               {source === "manual" && (
@@ -231,22 +289,14 @@ export default function CreateContentPage() {
 
               {(source === "image" || source === "video") && (
                 <div className="mt-5 space-y-3">
-                  <input
-                    ref={sourceFileRef}
-                    type="file"
-                    accept={source === "image" ? "image/*" : "video/*"}
-                    className="hidden"
-                    onChange={async (e) => {
-                      const f = e.target.files?.[0]; if (!f) return;
-                      setAiBusy("upload");
-                      const att = await uploadFile(f); setAiBusy(null);
-                      if (att) setSourceMedia(att);
-                    }}
+                  <VisualLibraryPicker
+                    kind={source}
+                    assets={visualAssets}
+                    loading={visualLoading}
+                    selectedId={sourceVisualAssetId}
+                    onSelect={selectVisualAsset}
+                    onRefresh={() => loadVisualAssets(source)}
                   />
-                  <button type="button" onClick={() => sourceFileRef.current?.click()} className="flex h-32 w-full items-center justify-center gap-2 rounded-xl border-2 border-dashed border-gray-200 bg-gray-50 text-[13px] font-semibold text-gray-500 transition hover:border-blue-300 hover:bg-blue-50/40">
-                    {aiBusy === "upload" ? <Loader2 className="h-5 w-5 animate-spin" /> : <Upload className="h-5 w-5" />}
-                    {sourceMedia ? "Replace file" : `Upload ${source}`}
-                  </button>
                   {sourceMedia && (
                     <div className="flex items-center gap-3 rounded-xl border border-gray-100 p-2">
                       {sourceMedia.kind === "image" ? (
@@ -343,7 +393,7 @@ export default function CreateContentPage() {
                 <Input label="CTA text" value={cta.cta_label} onChange={(v) => setCta({ ...cta, cta_label: v })} placeholder="Book a Consultation" full />
                 <Input label="CTA link (optional)" value={cta.cta_url} onChange={(v) => setCta({ ...cta, cta_url: v })} placeholder="https://cdsspace.pro/Contact" full />
               </div>
-              <div className="mt-3"><AiChip busy={aiBusy === "cta"} onClick={() => genCta(cta.cta_type)}><Sparkles className="h-3.5 w-3.5" /> Suggest a CTA with AI</AiChip></div>
+              <div className="mt-3"><AiChip busy={aiBusy === "cta"} onClick={() => genCta(cta.cta_type)}><Wand2 className="h-3.5 w-3.5" /> Suggest a CTA with AI</AiChip></div>
             </Step>
           )}
 
@@ -451,9 +501,9 @@ export default function CreateContentPage() {
           <p className="text-[12px] text-gray-500">How the caption reads when packaged.</p>
           <div className="mt-3 rounded-xl border border-gray-100 bg-gray-50 p-3">
             <p className="text-[12px] font-bold text-[#0D1B39]">{title || "Untitled"}</p>
-            <pre className="mt-2 max-h-72 overflow-y-auto whitespace-pre-wrap text-[12.5px] leading-6 text-[#0D1B39]">
+            <div className="mt-2 max-h-72 overflow-y-auto whitespace-pre-wrap break-words text-[13px] leading-6 text-[#0D1B39]">
               {[bodyText, cta.cta_label, hashtags.join(" ")].filter(Boolean).join("\n\n") || "Nothing yet."}
-            </pre>
+            </div>
           </div>
           {media.length > 0 && (
             <div className="mt-3 grid grid-cols-3 gap-1.5">
@@ -532,8 +582,86 @@ function AiButton({ onClick, busy, label }: { onClick: () => void; busy: boolean
   return (
     <button type="button" onClick={onClick} disabled={busy}
       className="inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-[#0A4FE8] px-5 text-[13.5px] font-bold text-white transition hover:bg-[#083EC0] disabled:opacity-60">
-      {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}{label}
+      {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Wand2 className="h-4 w-4" />}{label}
     </button>
+  );
+}
+function VisualLibraryPicker({
+  kind,
+  assets,
+  loading,
+  selectedId,
+  onSelect,
+  onRefresh,
+}: {
+  kind: "image" | "video";
+  assets: VisualAsset[];
+  loading: boolean;
+  selectedId: string;
+  onSelect: (asset: VisualAsset) => void;
+  onRefresh: () => void;
+}) {
+  return (
+    <div className="rounded-2xl border border-gray-100 bg-white p-3">
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+        <div className="flex items-center gap-2">
+          <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-blue-50 text-[#0A4FE8]"><Images className="h-4 w-4" /></span>
+          <div>
+            <p className="text-[13px] font-bold text-[#0D1B39]">Choose from Visual Library</p>
+            <p className="text-[11.5px] text-gray-500">{kind === "image" ? "Available photos and designs" : "Available videos and footage"}</p>
+          </div>
+        </div>
+        <div className="flex gap-2">
+          <button type="button" title="Refresh library" aria-label="Refresh library" onClick={onRefresh} className="inline-flex h-9 items-center justify-center rounded-lg border border-gray-200 px-3 text-[12px] font-bold text-gray-600 transition hover:bg-gray-50">
+            <RefreshCw className="h-3.5 w-3.5" />
+          </button>
+          <Link href="/admin/content-hub/visual-library" className="inline-flex h-9 items-center justify-center rounded-lg bg-[#0A4FE8] px-3 text-[12px] font-bold text-white transition hover:bg-[#083EC0]">
+            Visual Library
+          </Link>
+        </div>
+      </div>
+
+      {loading ? (
+        <div className="flex h-32 items-center justify-center rounded-xl border border-dashed border-gray-200 bg-gray-50">
+          <Loader2 className="h-5 w-5 animate-spin text-[#0A4FE8]" />
+        </div>
+      ) : assets.length === 0 ? (
+        <div className="flex h-32 flex-col items-center justify-center gap-2 rounded-xl border border-dashed border-gray-200 bg-gray-50 text-center">
+          {kind === "image" ? <ImageIcon className="h-6 w-6 text-gray-300" /> : <Video className="h-6 w-6 text-gray-300" />}
+          <p className="text-[12.5px] font-semibold text-gray-400">No available {kind === "image" ? "images" : "videos"}.</p>
+        </div>
+      ) : (
+        <div className="grid max-h-[360px] gap-2 overflow-y-auto pr-1 sm:grid-cols-2 lg:grid-cols-3">
+          {assets.map((asset) => {
+            const selected = selectedId === asset.id;
+            return (
+              <button
+                key={asset.id}
+                type="button"
+                onClick={() => onSelect(asset)}
+                className={`overflow-hidden rounded-xl border bg-white text-left transition ${selected ? "border-[#0A4FE8] ring-2 ring-blue-100" : "border-gray-100 hover:border-blue-200 hover:bg-blue-50/30"}`}
+              >
+                <div className="relative flex aspect-video items-center justify-center bg-gray-50">
+                  {asset.kind === "image" ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={asset.url} alt="" className="h-full w-full object-cover" />
+                  ) : (
+                    <div className="flex h-full w-full items-center justify-center bg-slate-50 text-slate-400">
+                      <Video className="h-7 w-7" />
+                    </div>
+                  )}
+                  {selected && <span className="absolute right-2 top-2 rounded-full bg-[#0A4FE8] p-1 text-white"><Check className="h-3 w-3" /></span>}
+                </div>
+                <div className="p-2">
+                  <p className="truncate text-[12.5px] font-bold text-[#0D1B39]">{asset.title || asset.file_name || "Untitled asset"}</p>
+                  <p className="mt-0.5 text-[10.5px] text-gray-400">{asset.kind.toUpperCase()} · {new Date(asset.created_at).toLocaleDateString()}</p>
+                </div>
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </div>
   );
 }
 function SourceCard({ active, icon: Icon, label, desc, onClick }: { active: boolean; icon: LucideIcon; label: string; desc: string; onClick: () => void }) {

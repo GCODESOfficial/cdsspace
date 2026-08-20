@@ -1,6 +1,8 @@
 import { cookies } from "next/headers";
 import { createClient } from "@/lib/supabase/server";
 import { supabaseAdmin } from "@/lib/supabase";
+import { readClientDashboardSessionUser } from "@/lib/client-dashboard-session";
+import { verifyAdminCookie } from "@/lib/admin-session-cookie";
 
 /**
  * Read the cookie-based admin session set by POST /api/admin-login.
@@ -12,9 +14,9 @@ async function readAdminSessionCookie(): Promise<
 > {
   try {
     const cookieStore = await cookies();
-    const raw = cookieStore.get("admin_session")?.value;
-    if (!raw) return null;
-    const session = JSON.parse(raw);
+    const session = verifyAdminCookie<{ role: "super_admin" | "sub_admin"; email: string; name?: string; permissions?: string[] }>(
+      cookieStore.get("admin_session")?.value,
+    );
     if (session?.role === "super_admin" || session?.role === "sub_admin") return session;
     return null;
   } catch {
@@ -73,9 +75,20 @@ export async function verifyAdmin() {
  */
 export async function verifyUser() {
   const supabase = await createClient();
-  const { data: { user }, error } = await supabase.auth.getUser();
+  // A provider session on its own is not enough for client APIs. The signed
+  // dashboard gate is issued only after the direct-login email OTP succeeds
+  // (or after the trusted OAuth finalisation route completes).
+  const user = await readClientDashboardSessionUser(supabase.auth);
+  if (!user) return null;
 
-  if (error || !user) return null;
+  if (supabaseAdmin) {
+    const { data: profile, error } = await supabaseAdmin
+      .from("profiles")
+      .select("account_status")
+      .eq("id", user.id)
+      .maybeSingle();
+    if (error || (profile?.account_status && profile.account_status !== "active")) return null;
+  }
 
   return { user, supabase };
 }

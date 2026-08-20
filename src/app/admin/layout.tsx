@@ -7,6 +7,9 @@ import Image from 'next/image';
 import AdminSidebar from '@/components/admin/AdminSidebar';
 import { getPermissionForRoute, hasPermission } from '@/lib/admin-permissions';
 import { Menu } from 'lucide-react';
+import AdminActivityLayer from '@/components/admin/AdminActivityLayer';
+import { DashboardAutoSave } from '@/components/autosave/DashboardAutoSave';
+import AdminNotificationBell from '@/components/notifications/admin-notification-bell';
 
 interface SessionData {
   authenticated: boolean;
@@ -21,8 +24,23 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
   const [isAuthed, setIsAuthed] = useState(false);
   const [denied, setDenied] = useState(false);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  // Desktop rail starts collapsed by default; the user's choice is remembered.
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(true);
 
   const isLoginPage = pathname === '/admin/login';
+
+  useEffect(() => {
+    const stored = window.localStorage.getItem('cds.admin.sidebar.collapsed');
+    if (stored !== null) setSidebarCollapsed(stored === 'true');
+  }, []);
+
+  const toggleSidebarCollapsed = () => {
+    setSidebarCollapsed((prev) => {
+      const next = !prev;
+      window.localStorage.setItem('cds.admin.sidebar.collapsed', String(next));
+      return next;
+    });
+  };
 
   useEffect(() => {
     if (isLoginPage) {
@@ -84,23 +102,33 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
   if (isLoginPage) return <>{children}</>;
 
   return (
-    <div className="min-h-screen bg-[#F0F5FF]">
-      <AdminSidebar mobileOpen={isSidebarOpen} onMobileClose={() => setIsSidebarOpen(false)} />
-      <div className="min-h-screen lg:pl-[230px]">
-        <header className="sticky top-0 z-30 flex items-center justify-between border-b border-white/60 bg-[#F0F5FF]/95 px-4 py-3 backdrop-blur-lg lg:hidden">
+    <div data-app-shell="admin" className="min-h-[100dvh] overflow-x-clip bg-[#F0F5FF]">
+      <DashboardAutoSave scope="admin" />
+      <AdminSidebar
+        mobileOpen={isSidebarOpen}
+        onMobileClose={() => setIsSidebarOpen(false)}
+        collapsed={sidebarCollapsed}
+        onToggleCollapse={toggleSidebarCollapsed}
+      />
+      <div className={`min-h-screen transition-[padding] duration-200 ${sidebarCollapsed ? "lg:ps-[76px]" : "lg:ps-[230px]"}`}>
+        <header className="sticky top-0 z-30 flex min-h-16 items-center justify-between border-b border-[#E4EAF5] bg-white/95 px-4 py-3 backdrop-blur-lg lg:hidden">
           <button
             type="button"
             onClick={() => setIsSidebarOpen(true)}
-            className="flex h-10 w-10 items-center justify-center rounded-full bg-white text-[#0D1B39] shadow-sm transition hover:bg-blue-50"
+            className="flex h-10 w-10 items-center justify-center rounded-xl border border-[#E4EAF5] bg-white text-[#0D1B39] shadow-sm transition hover:border-blue-200 hover:bg-blue-50 hover:text-[#0A4FE8]"
             aria-label="Open navigation"
           >
             <Menu className="h-5 w-5" />
           </button>
           <Image src="/images/cds-logo.svg" alt="CDS Space" width={92} height={32} className="brightness-0" />
-          <div className="w-10" aria-hidden="true" />
+          <span className="h-10 w-10" aria-hidden="true" />
         </header>
 
-        <main className="min-h-[calc(100dvh-64px)]">
+        <div className="fixed end-4 top-3 z-40 rounded-xl border border-gray-100 bg-white shadow-sm">
+          <AdminNotificationBell />
+        </div>
+
+        <main data-app-content className="min-h-[calc(100dvh-64px)] min-w-0 overflow-x-clip lg:min-h-screen">
           {denied ? (
             <div className="flex items-center justify-center min-h-[calc(100dvh-64px)] px-4">
             <div className="text-center">
@@ -121,6 +149,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
             </div>
           ) : children}
         </main>
+        {!denied && <AdminActivityLayer />}
       </div>
     </div>
   );

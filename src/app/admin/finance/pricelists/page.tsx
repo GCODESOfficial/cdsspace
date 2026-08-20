@@ -277,7 +277,7 @@ export default function PricelistsPage() {
                             {creating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />} Start blank
                         </button>
                         <button type="button" disabled={uploading || creating} onClick={() => fileRef.current?.click()}
-                            className="inline-flex flex-1 items-center justify-center gap-2 rounded-full bg-gradient-to-b from-blue-600 to-blue-700 px-5 py-2.5 text-sm font-semibold text-white shadow-lg shadow-blue-600/30 transition-all hover:from-blue-700 hover:to-blue-800 active:scale-95 disabled:opacity-60 xl:flex-none">
+                            className="inline-flex flex-1 items-center justify-center gap-2 rounded-full bg-[#0A4FE8] px-5 py-2.5 text-sm font-semibold text-white shadow-lg shadow-blue-600/30 transition-all hover:bg-[#083FC2] active:scale-95 disabled:opacity-60 xl:flex-none">
                             {uploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />} {uploading ? "Extracting…" : "Upload PDF"}
                         </button>
                     </div>

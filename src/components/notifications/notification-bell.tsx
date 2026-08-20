@@ -14,6 +14,8 @@ export default function NotificationBell() {
   const containerRef = useRef<HTMLDivElement>(null);
   const prevUnreadCount = useRef<number>(0);
   const isFirstLoad = useRef<boolean>(true);
+  const requestActive = useRef(false);
+  const notificationsSnapshot = useRef("");
 
   // ---------- Play Sound ----------
   const playNotificationSound = useCallback(() => {
@@ -24,9 +26,11 @@ export default function NotificationBell() {
 
   // ---------- Fetch ----------
   const fetchNotifications = useCallback(async () => {
+    if (requestActive.current) return;
+    requestActive.current = true;
     try {
       const res = await fetch(
-        `/api/notifications?unreadOnly=true&limit=${MAX_DISPLAY}`
+        `/api/notifications?unreadOnly=true&limit=${MAX_DISPLAY}&actor=client`
       );
       if (!res.ok) return;
       const data = await res.json();
@@ -40,16 +44,27 @@ export default function NotificationBell() {
       
       prevUnreadCount.current = newUnreadCount;
       isFirstLoad.current = false;
-      setNotifications(newNotifications);
+      const snapshot = JSON.stringify(newNotifications);
+      if (snapshot !== notificationsSnapshot.current) {
+        notificationsSnapshot.current = snapshot;
+        setNotifications(newNotifications);
+      }
     } catch {
       // silently ignore network errors
+    } finally {
+      requestActive.current = false;
     }
   }, [playNotificationSound]);
 
   useEffect(() => {
     fetchNotifications();
     const id = setInterval(() => { if (!document.hidden) fetchNotifications(); }, POLL_INTERVAL);
-    return () => clearInterval(id);
+    const onVisibilityChange = () => { if (!document.hidden) fetchNotifications(); };
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    return () => {
+      clearInterval(id);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+    };
   }, [fetchNotifications]);
 
   // ---------- Close on outside click ----------
@@ -75,7 +90,7 @@ export default function NotificationBell() {
       await fetch("/api/notifications", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ids: [id] }),
+        body: JSON.stringify({ ids: [id], actor: "client" }),
       });
     } catch {
       // ignore
@@ -88,7 +103,7 @@ export default function NotificationBell() {
       await fetch("/api/notifications", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ markAll: true }),
+        body: JSON.stringify({ markAll: true, actor: "client" }),
       });
     } catch {
       // ignore

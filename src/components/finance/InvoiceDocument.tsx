@@ -1,11 +1,12 @@
 'use client';
 
-import Image from "next/image";
 import {
   Currency, formatFinanceDate, formatMoney,
   CDS_BANK_ACCOUNTS,
   DEFAULT_PAYMENT_TERMS, DEFAULT_REVISIONS_NOTE, DEFAULT_WORKING_HOURS,
   deliverySpeedLabel, type DeliverySpeed,
+  type FinanceBankAccount,
+  type FinanceReceipt,
 } from "@/lib/finance/types";
 
 interface Item { name: string; description: string | null; quantity: number; unit_price: number; total: number; }
@@ -22,12 +23,21 @@ interface Invoice {
   delivery_period?: string | null;
 }
 
-export default function InvoiceDocument({ invoice, items }: { invoice: Invoice; items: Item[] }) {
+export default function InvoiceDocument({ invoice, items, bankAccounts, receipt }: { invoice: Invoice; items: Item[]; bankAccounts?: FinanceBankAccount[]; receipt?: FinanceReceipt }) {
   const terms = invoice.payment_terms || DEFAULT_PAYMENT_TERMS;
   const revisions = invoice.revisions_note || DEFAULT_REVISIONS_NOTE;
   const hours = invoice.working_hours || DEFAULT_WORKING_HOURS;
   const deliverySpeed = deliverySpeedLabel(invoice.delivery_speed || "standard");
   const deliveryPeriod = invoice.delivery_period || "-";
+  const paymentAccounts: FinanceBankAccount[] = bankAccounts ?? (invoice.currency === "NGN" ? CDS_BANK_ACCOUNTS.map((account) => ({
+    currency: "NGN" as const,
+    bank_name: account.bank,
+    account_name: account.account_name,
+    account_number: account.account_number,
+    logo_url: account.logo,
+  })) : []);
+  const isReceipt = Boolean(receipt);
+  const paymentMethod = receipt?.payment_method === "bank_transfer" ? "Bank transfer" : receipt?.payment_method === "paystack" ? "Paystack" : receipt?.payment_method || "Confirmed payment";
 
   return (
     <div className="bg-white text-gray-900 max-w-[820px] mx-auto p-5 sm:p-12 print:p-4 shadow-[0_30px_80px_rgba(15,40,90,0.10)] print:shadow-none rounded-2xl print:rounded-none print:max-w-none print:w-full">
@@ -42,8 +52,8 @@ export default function InvoiceDocument({ invoice, items }: { invoice: Invoice; 
         </div>
         <div className="flex items-center justify-between sm:block sm:text-right">
           <div>
-            <div className="text-[11px] uppercase tracking-wider text-gray-400">Invoice</div>
-            <div className="text-lg sm:text-2xl font-bold break-all">{invoice.invoice_number}</div>
+            <div className="text-[11px] uppercase tracking-wider text-gray-400">{isReceipt ? "Receipt" : "Invoice"}</div>
+            <div className="text-lg sm:text-2xl font-bold break-all">{receipt?.receipt_number || invoice.invoice_number}</div>
           </div>
           <div className="sm:mt-2 text-xs">
             <span className={`inline-block px-2.5 py-1 rounded-full font-semibold uppercase tracking-wider ${
@@ -51,7 +61,7 @@ export default function InvoiceDocument({ invoice, items }: { invoice: Invoice; 
               invoice.status === "sent" ? "bg-blue-50 text-blue-700" :
               invoice.status === "overdue" ? "bg-red-50 text-red-700" :
               "bg-gray-100 text-gray-600"
-            }`}>{invoice.status}</span>
+            }`}>{isReceipt ? "paid" : invoice.status}</span>
           </div>
         </div>
       </div>
@@ -59,15 +69,15 @@ export default function InvoiceDocument({ invoice, items }: { invoice: Invoice; 
       {/* Bill to / dates */}
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-5 sm:gap-8 py-6 sm:py-8">
         <div>
-          <div className="text-[10px] uppercase tracking-wider text-gray-400 mb-2">Billed To</div>
+          <div className="text-[10px] uppercase tracking-wider text-gray-400 mb-2">{isReceipt ? "Received from" : "Billed To"}</div>
           <div className="font-semibold text-gray-900">{invoice.client_name}</div>
           {invoice.client_email && <div className="text-sm text-gray-600 break-words">{invoice.client_email}</div>}
           {invoice.client_address && <div className="text-sm text-gray-600 whitespace-pre-line">{invoice.client_address}</div>}
         </div>
         <div className="sm:text-right">
-          <div className="text-[10px] uppercase tracking-wider text-gray-400 mb-2">Issued / Due</div>
-          <div className="text-sm">{formatFinanceDate(invoice.issue_date)}</div>
-          {invoice.due_date && <div className="text-sm text-gray-600">Due {formatFinanceDate(invoice.due_date)}</div>}
+          <div className="text-[10px] uppercase tracking-wider text-gray-400 mb-2">{isReceipt ? "Paid / issued" : "Issued / Due"}</div>
+          <div className="text-sm">{isReceipt ? formatFinanceDate(receipt?.paid_at, { day: "numeric", month: "long", year: "numeric", hour: "2-digit", minute: "2-digit", timeZoneName: "short" }) : formatFinanceDate(invoice.issue_date)}</div>
+          {isReceipt ? <div className="text-sm text-gray-600">Invoice issued {formatFinanceDate(invoice.issue_date)}</div> : invoice.due_date && <div className="text-sm text-gray-600">Due {formatFinanceDate(invoice.due_date)}</div>}
         </div>
       </div>
 
@@ -144,52 +154,61 @@ export default function InvoiceDocument({ invoice, items }: { invoice: Invoice; 
         </div>
       </div>
 
-      {invoice.notes && (
+      {!isReceipt && invoice.notes && (
         <div className="mt-10 p-4 rounded-xl bg-blue-50 border border-blue-100">
           <div className="text-[10px] uppercase tracking-wider text-gray-400 mb-1">Notes</div>
           <div className="text-sm text-gray-700 whitespace-pre-line">{invoice.notes}</div>
         </div>
       )}
 
-      {/* Payment Details - brand panel */}
+      {/* Payment Details - invoice instructions or confirmed receipt transaction */}
       <section 
         className="mt-10 rounded-2xl overflow-hidden bg-[#06103A] text-white print:break-inside-avoid"
         style={{ WebkitPrintColorAdjust: 'exact', printColorAdjust: 'exact' } as any}
       >
         <div className="px-6 py-5">
           <span className="inline-block px-3 py-1 rounded-lg bg-[#0A4FE8] text-white text-[12px] font-semibold" style={{ WebkitPrintColorAdjust: 'exact', printColorAdjust: 'exact' } as any}>
-            Payment Details
+            {isReceipt ? "Payment confirmation" : "Payment Details"}
           </span>
 
-          <div className="mt-5 grid grid-cols-1 md:grid-cols-2 gap-5">
-            {CDS_BANK_ACCOUNTS.map((b) => (
-              <div key={b.bank} className="flex items-start gap-3">
-                {b.logo ? (
+          {isReceipt ? (
+            <div className="mt-5 grid grid-cols-1 gap-3 text-[12px] md:grid-cols-2">
+              <div className="rounded-xl border border-white/10 bg-white/5 p-4"><p className="text-white/55">Amount received</p><p className="mt-1 text-[20px] font-bold text-white">{formatMoney(receipt?.amount, receipt?.currency)}</p></div>
+              <div className="rounded-xl border border-white/10 bg-white/5 p-4"><p className="text-white/55">Invoice paid</p><p className="mt-1 font-bold text-white">{invoice.invoice_number}</p></div>
+              <div className="rounded-xl border border-white/10 bg-white/5 p-4"><p className="text-white/55">Payment method</p><p className="mt-1 font-bold text-white">{paymentMethod}</p></div>
+              <div className="rounded-xl border border-white/10 bg-white/5 p-4"><p className="text-white/55">Payment reference</p><p className="mt-1 break-all font-mono font-bold text-white">{receipt?.payment_reference || "Confirmed by CDS Space Finance"}</p></div>
+              <div className="rounded-xl border border-white/10 bg-white/5 p-4 md:col-span-2"><p className="text-white/55">Confirmed at</p><p className="mt-1 font-bold text-white">{formatFinanceDate(receipt?.paid_at, { weekday: "short", day: "numeric", month: "long", year: "numeric", hour: "2-digit", minute: "2-digit", second: "2-digit", timeZoneName: "short" })}</p></div>
+            </div>
+          ) : <div className="mt-5 grid grid-cols-1 md:grid-cols-2 gap-5">
+            {paymentAccounts.length ? paymentAccounts.map((b) => (
+              <div key={b.id || `${b.currency}-${b.bank_name}-${b.account_number || b.iban}`} className="flex items-start gap-3">
+                {b.logo_url ? (
                   <div className="shrink-0 w-14 h-14 rounded-xl bg-white border border-white/20 p-2 flex items-center justify-center overflow-hidden" style={{ WebkitPrintColorAdjust: 'exact', printColorAdjust: 'exact' } as any}>
-                    <img src={b.logo} alt={b.bank} width={48} height={48} className="object-contain" />
+                    <img src={b.logo_url} alt={b.bank_name} width={48} height={48} className="object-contain" />
                   </div>
                 ) : (
                   <div
                     className="shrink-0 w-14 h-14 rounded-md flex items-center justify-center text-white text-[26px] font-extrabold italic"
-                    style={{ background: b.color, WebkitPrintColorAdjust: 'exact', printColorAdjust: 'exact' } as any}
+                    style={{ background: "#0A4FE8", WebkitPrintColorAdjust: 'exact', printColorAdjust: 'exact' } as any}
                     aria-hidden
                   >
-                    {b.initial}
+                    {b.bank_name.slice(0, 1).toUpperCase()}
                   </div>
                 )}
                 <div className="min-w-0">
-                  <div className="text-[13px] text-white/80 print:text-white/80">{b.bank}</div>
-                  <div className="font-mono text-[22px] md:text-[26px] font-bold leading-tight tracking-wide text-white print:text-white">
-                    {b.account_number}
-                  </div>
+                  <div className="text-[13px] text-white/80 print:text-white/80">{b.bank_name} · {b.currency}</div>
+                  {b.account_number && <div className="font-mono text-[22px] md:text-[26px] font-bold leading-tight tracking-wide text-white print:text-white">{b.account_number}</div>}
+                  {b.iban && <div className="break-all font-mono text-[13px] font-bold leading-tight tracking-wide text-white print:text-white">IBAN {b.iban}</div>}
                   <div className="text-[12px] text-white/80 print:text-white/80">{b.account_name}</div>
+                  {b.swift_bic && <div className="mt-1 text-[10px] text-white/65">SWIFT/BIC {b.swift_bic}</div>}
+                  {b.routing_number && <div className="text-[10px] text-white/65">Routing {b.routing_number}</div>}
                 </div>
               </div>
-            ))}
-          </div>
+            )) : <div className="md:col-span-2 rounded-xl border border-white/10 bg-white/5 px-4 py-4 text-[12px] leading-5 text-white/75">No corporate bank account is listed for {invoice.currency}. Use the secure Paystack option on the invoice payment screen.</div>}
+          </div>}
         </div>
 
-        <div className="border-t border-white/10 px-6 py-5 space-y-1.5 text-[13px] leading-relaxed text-white/90 print:text-white/90">
+        {!isReceipt && <div className="border-t border-white/10 px-6 py-5 space-y-1.5 text-[13px] leading-relaxed text-white/90 print:text-white/90">
           <p><span className="text-white/70 print:text-white/70">Payment Terms:</span> <span className="font-bold">{terms}</span></p>
           <p><span className="text-white/70 print:text-white/70">No. of Revisions:</span> <span className="font-bold">{revisions}</span></p>
           <p>
@@ -200,11 +219,11 @@ export default function InvoiceDocument({ invoice, items }: { invoice: Invoice; 
             <span className="font-bold">{deliveryPeriod}</span>
           </p>
           <p><span className="text-white/70 print:text-white/70">Working Hours:</span> <span className="font-bold">{hours}</span></p>
-        </div>
+        </div>}
       </section>
 
       <div className="mt-8 text-[10px] uppercase tracking-wider text-gray-400">
-        Official CDS Space invoice
+        Official CDS Space {isReceipt ? "receipt" : "invoice"}
       </div>
 
       <div className="mt-6 pt-6 border-t border-gray-100 text-center text-xs text-gray-400">

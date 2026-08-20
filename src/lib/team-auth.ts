@@ -41,6 +41,7 @@ export interface TeamSession {
   id: string;
   full_name: string;
   email: string;
+  email_verified_at: string | null;
   username: string;
   avatar_url: string | null;
   role_title: string | null;
@@ -58,6 +59,7 @@ export async function getTeamSessionFromToken(token: string | undefined | null):
     id: string;
     full_name: string;
     email: string;
+    email_verified_at: string | null;
     username: string;
     avatar_url: string | null;
     role_title: string | null;
@@ -69,7 +71,7 @@ export async function getTeamSessionFromToken(token: string | undefined | null):
     is_active: boolean;
     device_type: TeamDeviceType | null;
   }>(
-    `select m.id, m.full_name, m.email, m.username, m.avatar_url, m.role_title, m.department,
+    `select m.id, m.full_name, m.email, m.email_verified_at, m.username, m.avatar_url, m.role_title, m.department,
       m.is_sub_admin, m.permissions, m.language, s.expires_at as session_expires_at, m.is_active,
       s.device_type
      from public.team_device_sessions s
@@ -102,6 +104,7 @@ export async function getTeamSessionFromToken(token: string | undefined | null):
     id: data.id,
     full_name: data.full_name,
     email: data.email,
+    email_verified_at: data.email_verified_at,
     username: data.username,
     avatar_url: data.avatar_url,
     role_title: data.role_title,
@@ -118,6 +121,7 @@ async function getLegacyTeamSessionFromToken(token: string): Promise<TeamSession
     id: string;
     full_name: string;
     email: string;
+    email_verified_at: string | null;
     username: string;
     avatar_url: string | null;
     role_title: string | null;
@@ -128,7 +132,7 @@ async function getLegacyTeamSessionFromToken(token: string): Promise<TeamSession
     session_expires_at: string | null;
     is_active: boolean;
   }>(
-    `select id, full_name, email, username, avatar_url, role_title, department,
+    `select id, full_name, email, email_verified_at, username, avatar_url, role_title, department,
       is_sub_admin, permissions, language, session_expires_at, is_active
      from public.team_members
      where session_token = $1
@@ -146,6 +150,7 @@ async function getLegacyTeamSessionFromToken(token: string): Promise<TeamSession
     id: data.id,
     full_name: data.full_name,
     email: data.email,
+    email_verified_at: data.email_verified_at,
     username: data.username,
     avatar_url: data.avatar_url,
     role_title: data.role_title,

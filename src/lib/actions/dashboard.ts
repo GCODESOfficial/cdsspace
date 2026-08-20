@@ -38,7 +38,7 @@ export async function fetchDashboardData(): Promise<DashboardData> {
             title: "Complete your Brand Brief",
             description: "Defining your brand identity unlocks 15% discount on all custom merch orders for 2026.",
             actionLabel: "Finalize Brief",
-            actionHref: "/brand-brief"
+            actionHref: "/dashboard/brand-brief"
         }
     };
 }

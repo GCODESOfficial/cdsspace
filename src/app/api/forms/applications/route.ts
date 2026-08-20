@@ -1,6 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase";
+import { assertCleanBuffer } from "@/lib/upload-security";
 
 export const runtime = "nodejs";
 
@@ -66,18 +67,28 @@ export async function POST(req: Request) {
       const safeName = portfolioFile.name.replace(/[^\w.\-]+/g, "_");
       const path = `portfolio/${inserted.id}-${Date.now()}-${safeName}`;
 
-      const { error: upErr } = await supabaseAdmin.storage
-        .from("applications")
-        .upload(path, portfolioFile, {
-          cacheControl: "3600",
-          upsert: false,
-          contentType: portfolioFile.type || undefined,
-        });
+      const portfolioBuffer = Buffer.from(await portfolioFile.arrayBuffer());
+      let cleanPortfolio = true;
+      try {
+        assertCleanBuffer(portfolioBuffer);
+      } catch {
+        cleanPortfolio = false; // public form: silently drop an unsafe attachment
+      }
 
-      if (!upErr) {
-        const { data: pub } = supabaseAdmin.storage.from("applications").getPublicUrl(path);
-        const merged = { ...fields, "Portfolio File URL": pub.publicUrl };
-        await supabaseAdmin.from("applications").update({ fields: merged }).eq("id", inserted.id);
+      if (cleanPortfolio) {
+        const { error: upErr } = await supabaseAdmin.storage
+          .from("applications")
+          .upload(path, portfolioBuffer, {
+            cacheControl: "3600",
+            upsert: false,
+            contentType: portfolioFile.type || undefined,
+          });
+
+        if (!upErr) {
+          const { data: pub } = supabaseAdmin.storage.from("applications").getPublicUrl(path);
+          const merged = { ...fields, "Portfolio File URL": pub.publicUrl };
+          await supabaseAdmin.from("applications").update({ fields: merged }).eq("id", inserted.id);
+        }
       }
     }
 

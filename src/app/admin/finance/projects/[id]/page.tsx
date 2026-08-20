@@ -11,6 +11,7 @@ import { Plus, Trash2, Edit2, Wallet, TrendingUp, Clock } from "lucide-react";
 import { Currency, formatMoney, FinanceProject, FinanceMilestone } from "@/lib/finance/types";
 import FinanceShell, { glassCard } from "@/components/finance/FinanceShell";
 import { ProjectCollaborationPanel } from "@/components/finance/ProjectCollaborationPanel";
+import { BrandIdentityDeliveryPanel } from "@/components/finance/BrandIdentityDeliveryPanel";
 import { appAlert, appConfirm, appPrompt } from "@/lib/app-notify";
 
 const STATUS_PILL: Record<string, string> = {
@@ -108,7 +109,7 @@ export default function ProjectDetail({ params }: { params: Promise<{ id: string
           </Button>
           <Dialog open={open} onOpenChange={setOpen}>
             <DialogTrigger asChild>
-              <Button onClick={openNew} className="h-11 px-5 rounded-xl bg-gradient-to-b from-blue-600 to-blue-700 shadow-lg shadow-blue-600/30">
+              <Button onClick={openNew} className="h-11 px-5 rounded-xl bg-[#0A4FE8] shadow-lg shadow-blue-600/30">
                 <Plus className="w-4 h-4 mr-1.5" /> Add Milestone
               </Button>
             </DialogTrigger>
@@ -153,7 +154,7 @@ export default function ProjectDetail({ params }: { params: Promise<{ id: string
               </div>
               <DialogFooter className="mt-5">
                 <Button variant="outline" className="h-11 px-5 rounded-xl" onClick={() => setOpen(false)}>Cancel</Button>
-                <Button onClick={save} className="h-11 px-5 rounded-xl bg-gradient-to-b from-blue-600 to-blue-700 shadow-lg shadow-blue-600/30">Save</Button>
+                <Button onClick={save} className="h-11 px-5 rounded-xl bg-[#0A4FE8] shadow-lg shadow-blue-600/30">Save</Button>
               </DialogFooter>
             </DialogContent>
           </Dialog>
@@ -162,7 +163,7 @@ export default function ProjectDetail({ params }: { params: Promise<{ id: string
     >
       {/* Stat row */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-5 mb-8">
-        <BigStat icon={Wallet} label="Total Budget" value={formatMoney(totalBudget, currency)} accent="from-blue-500 to-indigo-500" />
+        <BigStat icon={Wallet} label="Total Budget" value={formatMoney(totalBudget, currency)} accent="bg-[#0A4FE8]" />
         <BigStat icon={TrendingUp} label="Paid" value={formatMoney(totalPaid, currency)} accent="from-emerald-500 to-teal-500" sub={`${progress}% complete`} />
         <BigStat icon={Clock} label="Balance" value={formatMoney(balance, currency)} accent="from-amber-500 to-orange-500" />
       </div>
@@ -174,7 +175,7 @@ export default function ProjectDetail({ params }: { params: Promise<{ id: string
           <span className="text-gray-900 font-semibold">{progress}%</span>
         </div>
         <div className="h-2.5 bg-gray-100 rounded-full overflow-hidden">
-          <div className="h-full bg-gradient-to-r from-blue-500 via-indigo-500 to-blue-600 rounded-full transition-all" style={{ width: `${progress}%` }} />
+          <div className="h-full bg-[#0A4FE8] rounded-full transition-all" style={{ width: `${progress}%` }} />
         </div>
       </div>
 
@@ -196,7 +197,7 @@ export default function ProjectDetail({ params }: { params: Promise<{ id: string
             return (
               <div key={m.id} className={`${glassCard} p-5`}>
                 <div className="flex items-start gap-4">
-                  <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-blue-500 to-indigo-500 grid place-items-center text-white font-semibold flex-shrink-0 shadow-lg shadow-blue-600/20">
+                  <div className="w-10 h-10 rounded-xl bg-[#0A4FE8] grid place-items-center text-white font-semibold flex-shrink-0 shadow-lg shadow-blue-600/20">
                     {i + 1}
                   </div>
                   <div className="flex-1 min-w-0">
@@ -215,7 +216,7 @@ export default function ProjectDetail({ params }: { params: Promise<{ id: string
                       )}
                     </div>
                     <div className="mt-3 h-1.5 bg-gray-100 rounded-full overflow-hidden">
-                      <div className="h-full bg-gradient-to-r from-blue-500 to-indigo-500 rounded-full" style={{ width: `${mProgress}%` }} />
+                      <div className="h-full bg-[#0A4FE8] rounded-full" style={{ width: `${mProgress}%` }} />
                     </div>
                   </div>
                   <div className="flex gap-1 flex-shrink-0">
@@ -228,6 +229,10 @@ export default function ProjectDetail({ params }: { params: Promise<{ id: string
           })}
         </div>
       )}
+
+      <div className="mt-10">
+        <BrandIdentityDeliveryPanel projectId={id} />
+      </div>
 
       {/* Collaboration: team assignments, docs, chat, meetings */}
       <div className="mt-10">
@@ -250,7 +255,7 @@ function BigStat({ icon: Icon, label, value, accent, sub }: { icon: React.Compon
   return (
     <div className={`${glassCard} p-6`}>
       <div className="flex items-center justify-between mb-4">
-        <div className={`w-12 h-12 rounded-xl bg-gradient-to-br ${accent} grid place-items-center shadow-lg shadow-blue-600/10`}>
+        <div className={`w-12 h-12 rounded-xl bg-[#0A4FE8] grid place-items-center shadow-lg shadow-blue-600/10`}>
           <Icon className="w-6 h-6 text-white" />
         </div>
       </div>

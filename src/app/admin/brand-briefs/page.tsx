@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
@@ -20,6 +20,9 @@ import {
     MoreHorizontal,
     Files,
     RotateCcw,
+    UserRoundCheck,
+    UserMinus,
+    Loader2,
 } from "lucide-react";
 import FinanceShell, { glassCard } from "@/components/finance/FinanceShell";
 import StatCard from "@/components/finance/StatCard";
@@ -37,6 +40,7 @@ const STATUS_STYLES: Record<string, string> = {
 };
 
 type StatusFilter = "all" | "pending" | "submitted" | "archived";
+type ClientAccountOption = { id: string; email: string | null; full_name: string | null; company_name: string | null };
 
 function relativeTime(iso: string | null | undefined): string {
     if (!iso) return "-";
@@ -57,6 +61,7 @@ export default function AdminBrandBriefsPage() {
     const router = useRouter();
     const [rows, setRows] = useState<BrandBrief[]>([]);
     const [loading, setLoading] = useState(true);
+    const [loadError, setLoadError] = useState<string | null>(null);
     const [search, setSearch] = useState("");
     const [creating, setCreating] = useState(false);
     const [showCreate, setShowCreate] = useState(false);
@@ -68,18 +73,38 @@ export default function AdminBrandBriefsPage() {
     const [working, setWorking] = useState(false);
     const [menuFor, setMenuFor] = useState<string | null>(null);
     const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
+    const [attachBrief, setAttachBrief] = useState<BrandBrief | null>(null);
+    const [clientSearch, setClientSearch] = useState("");
+    const [clientOptions, setClientOptions] = useState<ClientAccountOption[]>([]);
+    const [clientsLoading, setClientsLoading] = useState(false);
+    const [attaching, setAttaching] = useState(false);
 
-    const load = () => {
-        setLoading(true);
-        fetch("/api/admin/brand-briefs")
-            .then((r) => r.json())
-            .then((d) => {
+    const load = useCallback((silent = false) => {
+        if (!silent) setLoading(true);
+        setLoadError(null);
+        fetch("/api/admin/brand-briefs", { cache: "no-store" })
+            .then(async (r) => {
+                const d = await r.json().catch(() => ({}));
+                // Surface a real failure instead of silently rendering an empty
+                // list (which reads as "no briefs" and looks like data loss).
+                if (!r.ok) throw new Error(d.error || `Couldn't load briefs (${r.status}).`);
                 setRows(d.briefs ?? []);
-                setLoading(false);
             })
-            .catch(() => setLoading(false));
-    };
-    useEffect(() => { load(); }, []);
+            .catch((e) => setLoadError(e instanceof Error ? e.message : "Couldn't load briefs."))
+            .finally(() => { if (!silent) setLoading(false); });
+    }, []);
+    useEffect(() => {
+        load();
+        const refresh = () => { if (document.visibilityState === "visible") load(true); };
+        const interval = window.setInterval(refresh, 30_000);
+        window.addEventListener("focus", refresh);
+        document.addEventListener("visibilitychange", refresh);
+        return () => {
+            window.clearInterval(interval);
+            window.removeEventListener("focus", refresh);
+            document.removeEventListener("visibilitychange", refresh);
+        };
+    }, [load]);
 
     // Close the row menu on outside click / ESC
     useEffect(() => {
@@ -88,6 +113,45 @@ export default function AdminBrandBriefsPage() {
         window.addEventListener("keydown", onKey);
         return () => window.removeEventListener("keydown", onKey);
     }, [menuFor]);
+
+    useEffect(() => {
+        if (!attachBrief) return;
+        const controller = new AbortController();
+        const timer = window.setTimeout(() => {
+            setClientsLoading(true);
+            fetch(`/api/admin/brand-briefs/clients?q=${encodeURIComponent(clientSearch.trim())}`, { cache: "no-store", signal: controller.signal })
+                .then(async (response) => {
+                    const payload = await response.json().catch(() => ({}));
+                    if (!response.ok) throw new Error(payload.error || "Could not load client accounts.");
+                    setClientOptions(payload.clients || []);
+                })
+                .catch((error) => { if (error?.name !== "AbortError") void appAlert(error.message || "Could not load client accounts."); })
+                .finally(() => setClientsLoading(false));
+        }, 200);
+        return () => { window.clearTimeout(timer); controller.abort(); };
+    }, [attachBrief, clientSearch]);
+
+    const attachToClient = async (clientUserId: string | null) => {
+        if (!attachBrief) return;
+        setAttaching(true);
+        try {
+            const response = await fetch(`/api/admin/brand-briefs/${attachBrief.id}`, {
+                method: "PATCH",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ client_user_id: clientUserId }),
+            });
+            const payload = await response.json().catch(() => ({}));
+            if (!response.ok) throw new Error(payload.error || "Could not attach this brief.");
+            setAttachBrief(null);
+            setClientSearch("");
+            load(true);
+            await appAlert(clientUserId ? "Brand brief attached to the client account." : "Brand brief detached from the client account.");
+        } catch (error) {
+            await appAlert(error instanceof Error ? error.message : "Could not attach this brief.");
+        } finally {
+            setAttaching(false);
+        }
+    };
 
     const create = async () => {
         setCreating(true);
@@ -305,19 +369,20 @@ export default function AdminBrandBriefsPage() {
 
     return (
         <FinanceShell
+            hideNav
             title="Brand Briefs"
             subtitle="Generate shareable brief links - clients fill without creating an account."
             actions={
                 <Button
                     onClick={() => setShowCreate(true)}
-                    className="h-11 px-5 rounded-xl bg-gradient-to-b from-blue-600 to-blue-700 shadow-lg shadow-blue-600/30"
+                    className="h-11 px-5 rounded-xl bg-[#0A4FE8] hover:bg-[#083FC2] shadow-lg shadow-blue-600/20"
                 >
                     <Plus className="w-4 h-4 mr-1.5" /> Request New Brand Brief
                 </Button>
             }
         >
             <div className="grid grid-cols-1 md:grid-cols-3 gap-5 mb-8">
-                <StatCard icon={FileText} label="Total Briefs" value={String(rows.length)} accent="from-blue-500 to-indigo-500" />
+                <StatCard icon={FileText} label="Total Briefs" value={String(rows.length)} accent="bg-[#0A4FE8]" />
                 <StatCard icon={FileText} label="Awaiting response" value={String(counts.pending)} accent="from-amber-500 to-orange-500" />
                 <StatCard icon={Check} label="Submitted" value={String(counts.submitted)} accent="from-emerald-500 to-teal-500" />
             </div>
@@ -366,6 +431,18 @@ export default function AdminBrandBriefsPage() {
 
             {loading ? (
                 <div className={`${glassCard} p-10 text-center text-gray-500`}>Loading…</div>
+            ) : loadError ? (
+                <div className={`${glassCard} p-10 text-center`}>
+                    <h3 className="text-lg font-semibold text-gray-900">Couldn&apos;t load briefs</h3>
+                    <p className="text-gray-500 mt-1">{loadError}</p>
+                    <button
+                        type="button"
+                        onClick={() => load()}
+                        className="mt-4 text-blue-600 text-sm font-semibold hover:underline"
+                    >
+                        Retry
+                    </button>
+                </div>
             ) : filtered.length === 0 ? (
                 <div className={`${glassCard} p-14 text-center`}>
                     <div className="w-14 h-14 rounded-2xl bg-blue-50 grid place-items-center mx-auto mb-4">
@@ -585,6 +662,11 @@ export default function AdminBrandBriefsPage() {
                                                                     label="Duplicate"
                                                                     onClick={() => duplicateBrief(r)}
                                                                 />
+                                                                <MenuItem
+                                                                    icon={UserRoundCheck}
+                                                                    label={r.client_user_id ? "Reassign client account" : "Attach to client account"}
+                                                                    onClick={() => { setMenuFor(null); setAttachBrief(r); setClientSearch(""); }}
+                                                                />
                                                                 <div className="h-px bg-gray-100" />
                                                                 {r.status === "archived" && (
                                                                     <MenuItem
@@ -678,10 +760,40 @@ export default function AdminBrandBriefsPage() {
                             <Button
                                 onClick={create}
                                 disabled={creating}
-                                className="h-10 px-5 rounded-xl bg-gradient-to-b from-blue-600 to-blue-700 shadow-lg shadow-blue-600/30"
+                                className="h-10 px-5 rounded-xl bg-[#0A4FE8] hover:bg-[#083FC2] shadow-lg shadow-blue-600/20"
                             >
                                 {creating ? "Creating…" : "Generate link"}
                             </Button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {attachBrief && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/45 p-4" onClick={() => !attaching && setAttachBrief(null)}>
+                    <div className="w-full max-w-lg overflow-hidden rounded-3xl bg-white shadow-2xl" onClick={(event) => event.stopPropagation()}>
+                        <div className="border-b border-gray-100 px-6 py-5">
+                            <h3 className="text-lg font-bold text-[#0D1B39]">Attach brief to a client</h3>
+                            <p className="mt-1 text-sm text-gray-500">The submitted brief will appear in the selected client account, so they will not need to complete it again.</p>
+                        </div>
+                        <div className="p-5">
+                            <div className="relative mb-4">
+                                <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
+                                <Input value={clientSearch} onChange={(event) => setClientSearch(event.target.value)} placeholder="Search by client, company or email" className="h-11 rounded-xl pl-9" autoFocus />
+                            </div>
+                            <div className="max-h-[340px] space-y-2 overflow-y-auto">
+                                {clientsLoading ? <div className="grid place-items-center py-12"><Loader2 className="h-5 w-5 animate-spin text-[#0A4FE8]" /></div> : clientOptions.length === 0 ? <p className="py-10 text-center text-sm text-gray-500">No client accounts found.</p> : clientOptions.map((client) => (
+                                    <button key={client.id} disabled={attaching} onClick={() => void attachToClient(client.id)} className={`flex w-full min-w-0 items-center gap-3 rounded-xl border p-3 text-left transition hover:border-blue-300 hover:bg-blue-50 ${attachBrief.client_user_id === client.id ? "border-blue-300 bg-blue-50" : "border-gray-200"}`}>
+                                        <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-[#0A4FE8] text-xs font-bold text-white">{(client.full_name || client.company_name || client.email || "C").slice(0, 1).toUpperCase()}</span>
+                                        <span className="min-w-0 flex-1"><span className="block truncate text-sm font-semibold text-[#0D1B39]">{client.full_name || client.company_name || client.email}</span><span className="block truncate text-xs text-gray-500">{[client.company_name, client.email].filter(Boolean).join(" · ")}</span></span>
+                                        {attachBrief.client_user_id === client.id && <Check className="h-4 w-4 shrink-0 text-emerald-600" />}
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
+                        <div className="flex items-center justify-between border-t border-gray-100 bg-gray-50 px-5 py-4">
+                            {attachBrief.client_user_id ? <button disabled={attaching} onClick={() => void attachToClient(null)} className="inline-flex items-center gap-2 text-sm font-semibold text-red-600"><UserMinus className="h-4 w-4" />Detach current client</button> : <span />}
+                            <Button variant="outline" disabled={attaching} onClick={() => setAttachBrief(null)} className="rounded-xl">Close</Button>
                         </div>
                     </div>
                 </div>

@@ -300,7 +300,7 @@ export default function CareerFormPage() {
         <main className="h-full mx-auto max-w-[1200px] px-4 pt-56 pb-20">
           <div className="flex items-center justify-center h-full">
             <form
-              className="w-[420px] rounded-md bg-white/95 shadow-[0_6px_24px_rgba(0,0,0,0.25)] p-4"
+              className="w-full max-w-[420px] rounded-md bg-white/95 shadow-[0_6px_24px_rgba(0,0,0,0.25)] p-4"
               onSubmit={(e) => {
                 e.preventDefault();
                 setStage('bio');
@@ -593,7 +593,7 @@ export default function CareerFormPage() {
       <img src="/images/cds-logo.svg" alt="Logo" className="absolute top-6 left-6 w-[80px] h-auto" />
 
       <div className="min-h-screen flex items-center justify-center px-4 py-16">
-        <div className="w-[420px] rounded-2xl bg-white shadow-[0_10px_30px_rgba(0,0,0,0.25)] p-5 text-center">
+        <div className="w-full max-w-[420px] rounded-2xl bg-white shadow-[0_10px_30px_rgba(0,0,0,0.25)] p-5 text-center">
           <h1 className="text-[15px] font-semibold text-[#0F1A2A]">Thank You</h1>
           <p className="mt-2 text-[12px] leading-5 text-[#5A6573]">
             Thanks for shooting your shot with CDS Space. We’ve received your application 

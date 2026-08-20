@@ -4,6 +4,7 @@ import { useState, useEffect, useMemo } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { ShoppingBag, Clock, CheckCircle, Loader2, ExternalLink, Palette, Image as ImageIcon, Repeat, Package } from "lucide-react";
 import Link from "next/link";
+import { useClientAccount } from "@/components/dashboard/ClientAccountProvider";
 
 interface Order {
   id: string;
@@ -14,6 +15,8 @@ interface Order {
 }
 
 const STATUS_STYLES: Record<string, string> = {
+  AWAITING_QUOTE: "bg-orange-50 text-orange-700",
+  AWAITING_PAYMENT: "bg-sky-50 text-sky-700",
   PENDING: "bg-amber-50 text-amber-600",
   IN_REVIEW: "bg-blue-50 text-brand-blue",
   ACTIVE: "bg-emerald-50 text-emerald-600",
@@ -30,6 +33,7 @@ const TYPE_META: Record<string, { label: string; icon: React.ReactNode; color: s
 };
 
 export default function ClientOrdersPage() {
+  const { account } = useClientAccount();
   const [orders, setOrders] = useState<Order[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [typeFilter, setTypeFilter] = useState("all");
@@ -38,21 +42,19 @@ export default function ClientOrdersPage() {
     const fetchOrders = async () => {
       setIsLoading(true);
       const supabase = createClient();
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) { setIsLoading(false); return; }
 
       // Fetch design requests
       const { data: designs } = await supabase
         .from("design_requests")
         .select("id, title, status, created_at")
-        .eq("user_id", user.id)
+        .eq("user_id", account.userId)
         .order("created_at", { ascending: false });
 
       // Fetch banner requests
       const { data: banners } = await supabase
         .from("banner_requests")
         .select("id, title, status, created_at")
-        .eq("user_id", user.id)
+        .eq("user_id", account.userId)
         .order("created_at", { ascending: false });
 
       // Fetch merch orders if table exists
@@ -60,22 +62,22 @@ export default function ClientOrdersPage() {
       const { data: merch } = await supabase
         .from("merch_orders")
         .select("id, title, status, created_at")
-        .eq("user_id", user.id)
+        .eq("user_id", account.userId)
         .order("created_at", { ascending: false });
-      if (merch) merchOrders = merch.map(m => ({ ...m, type: "merch" as const }));
+      if (merch) merchOrders = merch.map((m: Omit<Order, "type">) => ({ ...m, type: "merch" as const }));
 
       // Fetch recurring design subscriptions if table exists
       let recurringOrders: Order[] = [];
       const { data: recurring } = await supabase
         .from("recurring_designs")
         .select("id, title, status, created_at")
-        .eq("user_id", user.id)
+        .eq("user_id", account.userId)
         .order("created_at", { ascending: false });
-      if (recurring) recurringOrders = recurring.map(r => ({ ...r, type: "recurring" as const }));
+      if (recurring) recurringOrders = recurring.map((r: Omit<Order, "type">) => ({ ...r, type: "recurring" as const }));
 
       const all: Order[] = [
-        ...(designs || []).map(d => ({ ...d, type: "design" as const })),
-        ...(banners || []).map(b => ({ ...b, type: "banner" as const })),
+        ...(designs || []).map((d: Omit<Order, "type">) => ({ ...d, type: "design" as const })),
+        ...(banners || []).map((b: Omit<Order, "type">) => ({ ...b, type: "banner" as const })),
         ...merchOrders,
         ...recurringOrders,
       ].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
@@ -84,7 +86,7 @@ export default function ClientOrdersPage() {
       setIsLoading(false);
     };
     fetchOrders();
-  }, []);
+  }, [account.userId]);
 
   const filtered = useMemo(() => {
     if (typeFilter === "all") return orders;

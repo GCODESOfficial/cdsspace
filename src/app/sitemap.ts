@@ -1,7 +1,24 @@
 import type { MetadataRoute } from "next";
+import { listPublishedPosts } from "@/lib/blog/queries";
 
-export default function sitemap(): MetadataRoute.Sitemap {
+export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   const baseUrl = "https://cdsspace.pro";
+  const now = new Date();
+  const intelligenceArticles: MetadataRoute.Sitemap = [];
+
+  try {
+    const posts = await listPublishedPosts();
+    posts.forEach((post) => {
+      intelligenceArticles.push({
+        url: `${baseUrl}/intelligence/${post.slug}`,
+        lastModified: new Date(post.updated_at || post.published_at || now),
+        changeFrequency: "monthly",
+        priority: 0.7,
+      });
+    });
+  } catch {
+    // The core sitemap remains available if article storage is temporarily down.
+  }
 
   return [
     {
@@ -19,6 +36,12 @@ export default function sitemap(): MetadataRoute.Sitemap {
     {
       url: `${baseUrl}/work`,
       lastModified: new Date(),
+      changeFrequency: "weekly",
+      priority: 0.9,
+    },
+    {
+      url: `${baseUrl}/intelligence`,
+      lastModified: now,
       changeFrequency: "weekly",
       priority: 0.9,
     },
@@ -70,5 +93,6 @@ export default function sitemap(): MetadataRoute.Sitemap {
       changeFrequency: "monthly",
       priority: 0.6,
     },
+    ...intelligenceArticles,
   ];
 }

@@ -3,11 +3,13 @@
 import { useState } from "react";
 import { X, FolderPlus, Loader2 } from "lucide-react";
 import { appAlert } from "@/lib/app-notify";
+import { CURRENCIES } from "@/lib/finance/types";
 
 /** The subset of an invoice we read to seed a project. */
 export interface InvoiceForProject {
   id: string;
   invoice_number: string;
+  client_email?: string | null;
   currency: string;
   scope?: string | null;
   notes?: string | null;
@@ -38,8 +40,6 @@ function seedNotes(inv: InvoiceForProject): string {
   return lines.join("\n");
 }
 
-const CURRENCIES = ["NGN", "RWF", "USD"] as const;
-
 interface Props {
   invoice: InvoiceForProject;
   onClose: () => void;
@@ -49,6 +49,7 @@ interface Props {
 export default function CreateProjectFromInvoiceModal({ invoice, onClose, onCreated }: Props) {
   const [name, setName] = useState(invoice.scope?.trim()?.split("\n")[0]?.slice(0, 80) || `Project - ${invoice.invoice_number}`);
   const [client, setClient] = useState(""); // intentionally blank - filled by admin
+  const [clientEmail, setClientEmail] = useState(invoice.client_email || "");
   const [currency, setCurrency] = useState(CURRENCIES.includes(invoice.currency as never) ? invoice.currency : "NGN");
   const [start, setStart] = useState(dateOnly(invoice.issue_date));
   const [end, setEnd] = useState(dateOnly(invoice.due_date));
@@ -64,7 +65,7 @@ export default function CreateProjectFromInvoiceModal({ invoice, onClose, onCrea
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          name: name.trim(), client: client.trim(), currency,
+          name: name.trim(), client: client.trim(), client_email: clientEmail.trim() || null, currency,
           duration_start: start || null, duration_end: end || null, notes: notes.trim() || null,
         }),
       });
@@ -116,6 +117,10 @@ export default function CreateProjectFromInvoiceModal({ invoice, onClose, onCrea
                 {CURRENCIES.map((c) => <option key={c} value={c}>{c}</option>)}
               </select>
             </div>
+            <div className="sm:col-span-2">
+              <label className="mb-1 block text-[12px] font-semibold text-[#0D1B39]">Client account email</label>
+              <input type="email" value={clientEmail} onChange={(e) => setClientEmail(e.target.value)} placeholder="client@example.com" className={field} />
+            </div>
             <div>
               <label className="mb-1 block text-[12px] font-semibold text-[#0D1B39]">Start date</label>
               <input type="date" value={start} onChange={(e) => setStart(e.target.value)} className={field} />
@@ -133,7 +138,7 @@ export default function CreateProjectFromInvoiceModal({ invoice, onClose, onCrea
 
         <div className="px-6 py-4 border-t border-gray-100 flex justify-end gap-2">
           <button onClick={onClose} className="rounded-xl border border-gray-200 px-4 py-2.5 text-sm font-semibold text-gray-500 hover:bg-gray-50">Ignore</button>
-          <button onClick={create} disabled={saving} className="inline-flex items-center gap-2 rounded-xl bg-gradient-to-b from-blue-600 to-blue-700 px-5 py-2.5 text-sm font-semibold text-white shadow-lg shadow-blue-600/30 disabled:opacity-60">
+          <button onClick={create} disabled={saving} className="inline-flex items-center gap-2 rounded-xl bg-[#0A4FE8] px-5 py-2.5 text-sm font-semibold text-white shadow-lg shadow-blue-600/30 disabled:opacity-60">
             {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <FolderPlus className="w-4 h-4" />} Create project
           </button>
         </div>

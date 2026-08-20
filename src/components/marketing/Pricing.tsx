@@ -23,7 +23,7 @@ export const Pricing = () => {
 
     const handleGetStarted = () => {
         if (isLoggedIn) {
-            window.location.href = "/subscription";
+            window.location.href = "/dashboard/subscription";
             return;
         }
         setIsLoading(true);

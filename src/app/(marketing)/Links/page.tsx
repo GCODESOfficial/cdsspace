@@ -218,10 +218,10 @@ for (let i = activeIdx + 1; i <= activeIdx + 3; i++) {
       initial={{ y: 100, opacity: 0 }}
       animate={{ y: 0, opacity: 1, transition: { type: 'spring', stiffness: 500, damping: 30 } }}
       exit={{ y: 100, opacity: 0, transition: { duration: 0.2 } }}
-      className="fixed bottom-16 left-1/2 -translate-x-1/2 z-[101] flex px-8 w-screen md:w-auto md:px-0"
+      className="fixed inset-x-3 bottom-16 z-[101] mx-auto flex max-w-[375px] md:left-1/2 md:right-auto md:w-auto md:max-w-none md:-translate-x-1/2"
     >
       <div
-        className="flex flex-col bg-white rounded-xl overflow-hidden shadow-lg md:w-[375px] w-screen"
+        className="flex w-full flex-col overflow-hidden rounded-xl bg-white shadow-lg md:w-[375px]"
         style={{
           boxShadow: '0 4px 20px rgba(0, 0, 0, 0.15)',
         }}

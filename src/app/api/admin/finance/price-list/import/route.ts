@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { financeDb, requireFinanceAdminAsync } from "@/lib/finance/api-auth";
+import { CURRENCIES, type Currency } from "@/lib/finance/types";
 
 // CSV format: name,description,unit_price,currency,category
 function parseCsv(text: string) {
@@ -43,7 +44,7 @@ export async function POST(req: NextRequest) {
       name: r.name,
       description: r.description || null,
       unit_price: Number(r.unit_price),
-      currency: ["NGN", "RWF", "USD"].includes(r.currency) ? r.currency : "NGN",
+      currency: CURRENCIES.includes(r.currency as Currency) ? r.currency : "NGN",
       category: r.category || null,
     }));
   if (valid.length === 0) return NextResponse.json({ error: "no valid rows" }, { status: 400 });

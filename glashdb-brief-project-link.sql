@@ -8,7 +8,7 @@
 -- Set automatically when an admin uses "Create Project" from a brief, and
 -- manually via the "Attach brand brief" picker in the project workspace.
 --
--- SAFETY: The app degrades gracefully if this hasn't been applied — the
+-- SAFETY: The app degrades gracefully if this hasn't been applied - the
 -- team/work API wraps the brief queries in a fallback, so the Files panel keeps
 -- working (it just won't show a linked brief until this runs).
 --

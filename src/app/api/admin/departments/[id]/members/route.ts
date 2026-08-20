@@ -12,7 +12,7 @@ async function verifyAdmin() {
 
 /**
  * Join members to a department. Membership is many-to-many via
- * team_member_departments — adding a member here does NOT remove them from any
+ * team_member_departments - adding a member here does NOT remove them from any
  * other department. We also: (a) set the member's "primary" department if they
  * had none, and (b) add them to the department's chat channel.
  */
@@ -58,7 +58,7 @@ export async function GET(_req: Request, ctx: { params: Promise<{ id: string }> 
       [id],
     );
   } catch {
-    // Junction migration not applied yet — fall back to the single-department column.
+    // Junction migration not applied yet - fall back to the single-department column.
     members = await glashQuery<any>(
       `select id, full_name, email, username, role_title, avatar_url, is_active
          from public.team_members where department_id = $1 order by full_name`,

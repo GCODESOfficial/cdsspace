@@ -34,8 +34,8 @@ export default function AnimatedTagRows() {
         </p>
       </div>
 
-      {/* GRADIENT + TAG ROWS */}
-      <div className="space-y-4 text-center bg-gradient-to-b from-[#ffffff] to-[#5BA8FF] py-4 rounded-lg">
+      {/* Brand panel + tag rows */}
+      <div className="space-y-4 rounded-lg bg-[#0A4FE8] py-4 text-center">
         {ROWS.map((row) => {
           const style: React.CSSProperties & Record<string, string> = {
             "--scroll-duration": `${row.duration}s`,

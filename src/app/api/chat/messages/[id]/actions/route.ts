@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
-import { verifyAdmin, verifyUser } from "@/lib/admin-auth";
+import { verifyUser } from "@/lib/admin-auth";
+import { getClientChatAdminActor, type ClientChatAdminActor } from "@/lib/client-chat-admin";
 import { glashMaybeOne, glashQuery } from "@/lib/glashdb/postgres";
 import { buildMessages } from "@/lib/ai/prompts";
 import { chatComplete } from "@/lib/ai/openai";
@@ -21,7 +22,7 @@ type ChatMessage = {
   translated: Record<string, string>;
 };
 
-function keyFor(admin: Awaited<ReturnType<typeof verifyAdmin>>, user: Awaited<ReturnType<typeof verifyUser>>) {
+function keyFor(admin: ClientChatAdminActor | null, user: Awaited<ReturnType<typeof verifyUser>>) {
   if (admin) return `admin:${admin.email || admin.id}`;
   return `client:${user?.user.id}`;
 }
@@ -50,21 +51,26 @@ async function loadMessage(id: string) {
 }
 
 export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
-  const admin = await verifyAdmin();
   const user = await verifyUser();
+  const body = await req.json().catch(() => ({}));
+  const action = String(body?.action || "");
+  const admin = await getClientChatAdminActor(action === "delete" ? "messages.delete" : "messages.send");
   if (!admin && !user) return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
+  const clientActorRequested = body.actor === "client";
+  if (clientActorRequested && !user) {
+    return NextResponse.json({ ok: false, error: "Client session required" }, { status: 401 });
+  }
+  const actingAdmin = clientActorRequested ? null : admin;
 
   const { id } = await params;
   const message = await loadMessage(id);
   if (!message) return NextResponse.json({ ok: false, error: "Message not found" }, { status: 404 });
-  if (!admin && user && message.room_id !== `client_${user.user.id}`) {
+  if (!actingAdmin && user && message.room_id !== `client_${user.user.id}`) {
     return NextResponse.json({ ok: false, error: "Forbidden" }, { status: 403 });
   }
   if (message.deleted_at) return NextResponse.json({ ok: false, error: "Deleted message" }, { status: 400 });
 
-  const body = await req.json().catch(() => ({}));
-  const action = String(body?.action || "");
-  const viewerKey = keyFor(admin, user);
+  const viewerKey = keyFor(actingAdmin, user);
 
   try {
     if (action === "pin" || action === "unpin") {
@@ -117,11 +123,11 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     } else if (action === "edit") {
       const next = typeof body?.message === "string" ? body.message.trim() : "";
       if (!next) return NextResponse.json({ ok: false, error: "Message body required" }, { status: 400 });
-      const ownsMessage = admin ? message.sender_role === "admin" : message.sender_id === user?.user.id;
+      const ownsMessage = actingAdmin ? message.sender_role === "admin" : message.sender_id === user?.user.id;
       if (!ownsMessage) return NextResponse.json({ ok: false, error: "You cannot edit this message" }, { status: 403 });
       await glashQuery(`update public.chat_messages set message = $2, edited_at = now() where id = $1`, [id, next]);
     } else if (action === "delete") {
-      const ownsMessage = admin ? true : message.sender_id === user?.user.id;
+      const ownsMessage = actingAdmin ? true : message.sender_id === user?.user.id;
       if (!ownsMessage) return NextResponse.json({ ok: false, error: "You cannot delete this message" }, { status: 403 });
       await glashQuery(`update public.chat_messages set deleted_at = now(), message = '', file_url = null where id = $1`, [id]);
     } else if (action === "translate") {
@@ -144,7 +150,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
       `insert into public.team_chat_audit_logs
         (actor_key, actor_kind, action, resource_type, resource_id, room_id, metadata)
        values ($1, $2, $3, 'chat_message', $4, $5, '{}'::jsonb)`,
-      [viewerKey, admin ? "admin" : "client", `client_message.${action}`, id, message.room_id],
+      [viewerKey, actingAdmin ? "admin" : "client", `client_message.${action}`, id, message.room_id],
     );
     return NextResponse.json({ ok: true, message: updated });
   } catch (error) {

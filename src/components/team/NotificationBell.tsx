@@ -51,7 +51,6 @@ function groupNotifications(items: Notification[]): NotificationGroup[] {
 export function NotificationBell() {
   const [open, setOpen] = useState(false);
   const [items, setItems] = useState<Notification[]>([]);
-  const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
   const prevUnreadCount = useRef<number>(0);
@@ -158,7 +157,7 @@ export function NotificationBell() {
           <div className="fixed inset-0 z-40 bg-[#040B37]/10 backdrop-blur-[1px]" onClick={() => setOpen(false)} />
           <div className="fixed left-3 right-3 top-[4.75rem] z-50 flex max-h-[min(72dvh,calc(100dvh-6rem))] flex-col overflow-hidden rounded-[24px] border border-brand-stroke/40 bg-white shadow-xl md:absolute md:left-auto md:right-0 md:top-auto md:mt-2 md:w-[380px] md:max-h-[480px] md:rounded-2xl">
             <div className="flex flex-col gap-2 px-4 py-3 border-b border-brand-stroke/30 sm:flex-row sm:items-center sm:justify-between">
-              <p className="font-semibold text-brand-navy text-sm">Notifications</p>
+              <p className="font-bold text-brand-navy text-[18px] leading-tight">Notifications</p>
               {unread.length > 0 && (
                 <button
                   onClick={markAllRead}
@@ -184,15 +183,6 @@ export function NotificationBell() {
                   <NotificationGroupRow
                     key={g.key}
                     group={g}
-                    expanded={expanded.has(g.key)}
-                    onToggle={() => {
-                      setExpanded((prev) => {
-                        const next = new Set(prev);
-                        if (next.has(g.key)) next.delete(g.key);
-                        else next.add(g.key);
-                        return next;
-                      });
-                    }}
                     onMarkRead={() => markGroupRead(g)}
                     onNavigate={() => setOpen(false)}
                   />
@@ -207,47 +197,35 @@ export function NotificationBell() {
 }
 
 /**
- * One row per group. If the group has a single notification it behaves the
- * same as before: click = navigate + mark read. If the group has ≥2 items
- * (e.g. multiple "New message in #Family House" rows), clicking the header
- * toggles an expanded list below with the individual notifications.
- *
- * Clicking the header or any child ALWAYS marks the group read - the whole
- * point of the feature - so the unread dot + bell badge drop instantly.
+ * One row per group. Clicking a notification ALWAYS navigates straight to
+ * where the message lives (the newest item's link - a chat thread, project,
+ * announcement, etc.) and marks the whole group read, so the unread dot + bell
+ * badge drop instantly. A count badge still shows when several notifications
+ * share the same destination.
  */
 function NotificationGroupRow({
   group,
-  expanded,
-  onToggle,
   onMarkRead,
   onNavigate,
 }: {
   group: NotificationGroup;
-  expanded: boolean;
-  onToggle: () => void;
   onMarkRead: () => void;
   onNavigate: () => void;
 }) {
   const { primary, items, unreadCount } = group;
-  const isCollapsible = items.length > 1;
   const groupUnread = unreadCount > 0;
 
   const headerClasses = `block px-4 py-3 hover:bg-brand-bg/60 transition cursor-pointer ${
     groupUnread ? "bg-brand-blue/[0.03]" : ""
   }`;
 
-  const handleHeaderClick = (e: React.MouseEvent) => {
+  const handleClick = () => {
     void onMarkRead();
-    if (isCollapsible) {
-      e.preventDefault();
-      onToggle();
-    } else {
-      onNavigate();
-    }
+    onNavigate();
   };
 
   const header = (
-    <div className={headerClasses} onClick={handleHeaderClick}>
+    <div className={headerClasses} onClick={handleClick}>
       <div className="flex items-start gap-3">
         {groupUnread && <span className="w-1.5 h-1.5 rounded-full bg-brand-blue mt-1.5 shrink-0" />}
         <div className="min-w-0 flex-1">
@@ -255,69 +233,32 @@ function NotificationGroupRow({
             <p className="text-[13px] font-semibold leading-5 text-brand-navy break-words">
               {primary.title}
             </p>
-            {items.length > 1 && (
+            {/* Count reflects UNREAD messages in the group, so clicking the row
+                (which marks the group read) clears the tag instead of leaving a
+                stale total behind. */}
+            {unreadCount > 1 && (
               <span className="text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded-full bg-brand-blue/10 text-brand-blue">
-                {items.length}
+                {unreadCount}
               </span>
             )}
           </div>
           {primary.body && (
-            <p className="text-[12px] text-brand-body/70 line-clamp-2 mt-0.5">{primary.body}</p>
+            <p className="text-[12px] text-brand-body/70 truncate mt-0.5">{primary.body}</p>
           )}
           <p className="text-[10px] text-brand-body/50 mt-1">
             {new Date(primary.created_at).toLocaleString()}
-            {isCollapsible && (
-              <span className="ml-2 text-brand-blue">
-                {expanded ? "Hide" : "Show all"}
-              </span>
-            )}
           </p>
         </div>
       </div>
     </div>
   );
 
-  // Single-item groups: keep the existing Link-wraps-row behavior so the
-  // click navigates cleanly. The onClick above still fires to mark read.
-  const headerNode =
-    !isCollapsible && primary.link ? (
-      <Link href={primary.link} onClick={onNavigate}>
-        {header}
-      </Link>
-    ) : (
-      header
-    );
-
-  return (
-    <div>
-      {headerNode}
-      {isCollapsible && expanded && (
-        <ul className="bg-brand-bg/40 border-t border-brand-stroke/20">
-          {items.map((n) => {
-            const row = (
-              <div className="px-6 py-2.5 hover:bg-white/60 transition">
-                <p className="text-[12px] text-brand-navy leading-5 break-words">
-                  {n.body || n.title}
-                </p>
-                <p className="text-[10px] text-brand-body/50 mt-0.5">
-                  {new Date(n.created_at).toLocaleString()}
-                </p>
-              </div>
-            );
-            return (
-              <li key={n.id}>
-                {n.link ? (
-                  <Link href={n.link} onClick={onNavigate}>
-                    {row}
-                  </Link>
-                ) : (
-                  row
-                )}
-              </li>
-            );
-          })}
-        </ul>
-      )}
-    </div>
+  // Always wrap in a Link so the click opens the destination directly.
+  return primary.link ? (
+    <Link href={primary.link} onClick={onNavigate}>
+      {header}
+    </Link>
+  ) : (
+    header
   );
 }

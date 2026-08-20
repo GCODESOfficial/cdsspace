@@ -1,4 +1,5 @@
 import { getSupabaseAdmin } from "@/lib/supabase";
+import { ADMIN_FEATURE_PERMISSION_KEYS, notifyAdminFeatureEvent } from "@/lib/admin-feature-notifications";
 import { normalisePhone, waRoomIdFromPhone } from "./config";
 
 export interface InboundWhatsAppMessage {
@@ -65,21 +66,14 @@ export async function ingestInboundWhatsApp(msg: InboundWhatsAppMessage) {
 
   if (error) return { inserted: false, id: null, error: error.message };
 
-  const { data: adminProfile } = await supabase
-    .from("profiles")
-    .select("id")
-    .eq("email", "ceo@cdsspace.pro")
-    .maybeSingle();
-
-  if (adminProfile?.id) {
-    await supabase.from("notifications").insert({
-      user_id: adminProfile.id,
-      type: "new_message",
-      title: `WhatsApp · ${msg.waName || phone}`,
-      message: msg.body.length > 100 ? msg.body.slice(0, 100) + "..." : msg.body,
-      link: `/admin/messages?room=${encodeURIComponent(roomId)}`,
-    });
-  }
+  await notifyAdminFeatureEvent({
+    permissionKeys: ADMIN_FEATURE_PERMISSION_KEYS.messages,
+    title: `New WhatsApp message from ${msg.waName || phone}`,
+    body: msg.body.length > 160 ? `${msg.body.slice(0, 160)}...` : msg.body || "A client sent an attachment.",
+    link: `/admin/messages?room=${encodeURIComponent(roomId)}`,
+    eyebrow: "Chat/Meet · WhatsApp",
+    details: { Sender: msg.waName || phone, Channel: "WhatsApp" },
+  });
 
   return { inserted: true, id: inserted?.id };
 }

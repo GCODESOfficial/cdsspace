@@ -382,7 +382,7 @@ export default function ObjectiveTest({
                 {/* Per-question 60s bar */}
                 <div className="mb-4 h-1.5 w-full overflow-hidden rounded-full bg-white/15">
                   <div
-                    className="h-full rounded-full bg-gradient-to-r from-[#0575FF] to-[#7DB1FF] transition-[width] duration-200 ease-linear"
+                    className="h-full rounded-full bg-[#0A4FE8] transition-[width] duration-200 ease-linear"
                     style={{ width: `${(perQuestionRemaining / (perQuestion * 1000)) * 100}%` }}
                   />
                 </div>

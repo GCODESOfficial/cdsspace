@@ -4,8 +4,7 @@ import Image from "next/image";
 import { motion } from "framer-motion";
 import { cn } from "@/lib/utils";
 import { ArrowUpRight } from "lucide-react";
-import { useEffect, useState } from "react";
-import { supabase } from "@/lib/supabase";
+import { useState } from "react";
 import {
     getWorkCoverShape,
     type WorkCoverShape,
@@ -30,7 +29,7 @@ export const CATEGORY_FILTERS: { id: string; label: string; dbName: string | nul
 ];
 
 export interface Work {
-    id: number;
+    id: string;
     title: string;
     category: string | null;
     cover_image: string | null;
@@ -57,36 +56,14 @@ function dedupeWorks(rows: Work[]): Work[] {
 interface WorkGalleryProps {
     activeCategory: string;
     searchQuery?: string;
-    onOpen: (id: number) => void;
+    onOpen: (id: string) => void;
+    initialWorks: Work[];
+    loadError?: boolean;
 }
 
-export const WorkGallery = ({ activeCategory, searchQuery = "", onOpen }: WorkGalleryProps) => {
-    const [works, setWorks] = useState<Work[]>([]);
-    const [loading, setLoading] = useState(true);
-    const [coverShapes, setCoverShapes] = useState<Record<number, WorkCoverShape>>({});
-
-    useEffect(() => {
-        let cancelled = false;
-
-        (async () => {
-            const { data, error } = await supabase
-                .from("works")
-                .select("id, title, category, cover_image, created_at")
-                .order("created_at", { ascending: false });
-
-            if (cancelled) return;
-            if (error || !data) {
-                setWorks([]);
-            } else {
-                setWorks(dedupeWorks(data as Work[]));
-            }
-            setLoading(false);
-        })();
-
-        return () => {
-            cancelled = true;
-        };
-    }, []);
+export const WorkGallery = ({ activeCategory, searchQuery = "", onOpen, initialWorks, loadError = false }: WorkGalleryProps) => {
+    const works = dedupeWorks(initialWorks);
+    const [coverShapes, setCoverShapes] = useState<Record<string, WorkCoverShape>>({});
 
     const activeFilter = CATEGORY_FILTERS.find((c) => c.id === activeCategory);
     const normalizedQuery = searchQuery.trim().toLowerCase();
@@ -103,8 +80,8 @@ export const WorkGallery = ({ activeCategory, searchQuery = "", onOpen }: WorkGa
     return (
         <section className="bg-brand-bg">
             <div className="max-w-[1408px] mx-auto px-6">
-                {loading ? (
-                    <GallerySkeleton />
+                {loadError ? (
+                    <LoadErrorState />
                 ) : filtered.length === 0 ? (
                     <EmptyState
                         isFiltered={Boolean(activeFilter?.dbName) || normalizedQuery.length > 0}
@@ -171,6 +148,7 @@ export const ProjectCard = ({
                 type="button"
                 onClick={onClick}
                 aria-label={`Open ${work.title}`}
+                data-cds-work-preview
                 className="relative block w-full h-full text-left rounded-[10px] overflow-hidden group border border-[#E3E8F4] cursor-pointer bg-[#050713] shadow-sm transition-shadow duration-500 hover:shadow-2xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue focus-visible:ring-offset-2"
             >
                 {/* Cover image */}
@@ -179,7 +157,7 @@ export const ProjectCard = ({
                         src={work.cover_image}
                         alt={work.title}
                         fill
-                        quality={92}
+                        unoptimized
                         sizes={
                             effectiveShape?.kind === "wide"
                                 ? "(min-width: 1536px) 700px, (min-width: 768px) 66vw, 100vw"
@@ -187,6 +165,7 @@ export const ProjectCard = ({
                         }
                         onLoad={handleImageLoad}
                         onError={() => setImageFailed(true)}
+                        draggable={false}
                         className="object-cover transform transition-transform duration-700 ease-out group-hover:scale-105"
                     />
                 ) : (
@@ -222,22 +201,6 @@ export const ProjectCard = ({
 /*  States                                                             */
 /* ------------------------------------------------------------------ */
 
-function GallerySkeleton() {
-    return (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4 auto-rows-[1px] gap-4 grid-flow-dense">
-            {Array.from({ length: 9 }).map((_, i) => (
-                <div
-                    key={i}
-                    className={cn(
-                        "rounded-[10px] bg-brand-stroke/30 animate-pulse",
-                        i % 5 === 0 ? "md:col-span-2 [grid-row-end:span_17]" : "[grid-row-end:span_14]",
-                    )}
-                />
-            ))}
-        </div>
-    );
-}
-
 function EmptyState({ isFiltered, query }: { isFiltered: boolean; query: string }) {
     return (
         <div className="rounded-[24px] border border-dashed border-brand-stroke/70 bg-white/50 py-20 px-6 text-center">
@@ -253,6 +216,15 @@ function EmptyState({ isFiltered, query }: { isFiltered: boolean; query: string 
                     ? "Try a different term or filter."
                     : "Check back soon - we’re publishing new projects."}
             </p>
+        </div>
+    );
+}
+
+function LoadErrorState() {
+    return (
+        <div className="rounded-[24px] border border-blue-100 bg-white/70 px-6 py-20 text-center">
+            <p className="font-medium text-brand-body">Projects are temporarily unavailable.</p>
+            <p className="mt-1 text-sm text-brand-mute">Refresh the page to reconnect to the portfolio.</p>
         </div>
     );
 }

@@ -1,6 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { NextRequest, NextResponse } from "next/server";
 import { getAdminSession } from "@/lib/admin-session";
+import { hasPermission } from "@/lib/admin-permissions";
 import { glashQuery } from "@/lib/glashdb/postgres";
 import { normalizeDate, weekRange } from "@/lib/work-tracking";
 import { lagosDate } from "@/lib/timebook";
@@ -9,7 +10,7 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 /**
- * Team Reports — super-admin only.
+ * Team Reports - super admin, or any role granted the Team Reports permission.
  *
  * One view that puts, side by side, for each team member:
  *   - the manually submitted daily report (team_daily_reports)
@@ -20,8 +21,11 @@ export const dynamic = "force-dynamic";
 export async function GET(req: NextRequest) {
   const session = await getAdminSession();
   if (!session) return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
-  if (session.role !== "super_admin") {
-    return NextResponse.json({ ok: false, error: "Team Reports is available to the super admin only." }, { status: 403 });
+  const canView = session.role === "super_admin"
+    || hasPermission(session.permissions, "team_reports")
+    || hasPermission(session.permissions, "team_reports.view");
+  if (!canView) {
+    return NextResponse.json({ ok: false, error: "You do not have permission to view Team Reports." }, { status: 403 });
   }
 
   const url = new URL(req.url);
@@ -43,7 +47,7 @@ export async function GET(req: NextRequest) {
         [date],
       ).catch(() => []),
       glashQuery<any>(
-        `select * from public.team_work_tracking_self_reports where week_start = $1`,
+        `select * from public.team_work_tracking_self_reports where week_start = $1 and is_draft = false`,
         [range.week_start],
       ).catch(() => []),
       glashQuery<any>(
@@ -60,18 +64,38 @@ export async function GET(req: NextRequest) {
         [date],
       ).catch(() => []),
       glashQuery<any>(
-        `select team_member_id, status, screenshot_count, active_seconds, idle_seconds, started_at, last_capture_at
+        `select team_member_id, status, screenshot_count, active_seconds, started_at, last_capture_at, metadata
            from public.team_work_tracking_sessions where work_date = $1`,
         [date],
       ).catch(() => []),
     ]);
+
+    const selfReportIds = selfReports.map((report: any) => report.id);
+    const reportAttachments = selfReportIds.length
+      ? await glashQuery<any>(
+          `select * from public.team_work_tracking_self_report_attachments
+            where self_report_id = any($1::uuid[])
+            order by created_at asc`,
+          [selfReportIds],
+        ).catch(() => [])
+      : [];
+    const attachmentsByReport = new Map<string, any[]>();
+    for (const attachment of reportAttachments) {
+      const items = attachmentsByReport.get(attachment.self_report_id) || [];
+      items.push(attachment);
+      attachmentsByReport.set(attachment.self_report_id, items);
+    }
+    const selfReportsWithAttachments = selfReports.map((report: any) => ({
+      ...report,
+      attachments: attachmentsByReport.get(report.id) || [],
+    }));
 
     const byMember = <T extends { team_member_id: string }>(rows: T[]) =>
       new Map(rows.map((r) => [r.team_member_id, r]));
 
     const manualMap = byMember(manualDaily);
     const autoMap = byMember(autoDaily);
-    const selfMap = byMember(selfReports);
+    const selfMap = byMember(selfReportsWithAttachments);
     const weeklyMap = byMember(weeklyReports);
     const comparisonMap = byMember(comparisons);
     const attMap = byMember(attendance);
@@ -84,7 +108,13 @@ export async function GET(req: NextRequest) {
         ...prev,
         screenshot_count: Number(prev.screenshot_count || 0) + Number(s.screenshot_count || 0),
         active_seconds: Number(prev.active_seconds || 0) + Number(s.active_seconds || 0),
-        idle_seconds: Number(prev.idle_seconds || 0) + Number(s.idle_seconds || 0),
+        metadata: {
+          ...prev.metadata,
+          ...s.metadata,
+          checkpoint_count:
+            Number(prev.metadata?.checkpoint_count ?? prev.screenshot_count ?? 0)
+            + Number(s.metadata?.checkpoint_count ?? s.screenshot_count ?? 0),
+        },
         status: prev.status === "active" || s.status === "active" ? "active" : prev.status,
       });
     }

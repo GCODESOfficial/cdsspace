@@ -63,6 +63,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
         protected_doc_id: kind === "protected" ? body?.protected_doc_id || null : null,
         file_url: kind === "link" ? body?.file_url?.toString().trim() || null : null,
         added_by: body?.added_by?.toString().trim() || null,
+        visibility: body?.visibility === "client" ? "client" : "internal",
     };
 
     // Constraint mirror (friendlier error than raw Postgres check message).

@@ -6,13 +6,17 @@ import {
   MessageSquare,
   RefreshCw,
   ShoppingBag,
+  Palette,
+  Megaphone,
+  FolderDown,
+  UserPlus,
 } from "lucide-react";
 import { relativeTime } from "@/lib/relative-time";
 
 export interface Notification {
   id: string;
   user_id: string;
-  type: "order_update" | "new_message" | "status_change" | "new_order";
+  type: "order_update" | "new_message" | "status_change" | "new_order" | "new_delivery" | "brand_identity" | "announcement" | "new_client";
   title: string;
   message: string;
   link: string | null;
@@ -32,6 +36,10 @@ const typeIcons: Record<Notification["type"], React.ElementType> = {
   new_message: MessageSquare,
   status_change: RefreshCw,
   new_order: ShoppingBag,
+  new_delivery: FolderDown,
+  brand_identity: Palette,
+  announcement: Megaphone,
+  new_client: UserPlus,
 };
 
 const fallbackRoutes: Record<Notification["type"], string> = {
@@ -39,6 +47,10 @@ const fallbackRoutes: Record<Notification["type"], string> = {
   new_message: "/dashboard/messages",
   status_change: "/dashboard/orders",
   new_order: "/dashboard/orders",
+  new_delivery: "/dashboard/documents",
+  brand_identity: "/dashboard/brand-identity",
+  announcement: "/dashboard",
+  new_client: "/admin/clients/list",
 };
 
 export default function NotificationItem({

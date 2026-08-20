@@ -2,7 +2,12 @@ import { NextRequest, NextResponse } from "next/server";
 
 export const dynamic = "force-dynamic";
 
-type CurrencyCode = "usd" | "ngn" | "rwf";
+type CurrencyCode = "usd" | "ngn" | "rwf" | "gbp" | "eur" | "cny";
+
+const EURO_COUNTRIES = new Set([
+  "AT", "BE", "HR", "CY", "EE", "FI", "FR", "DE", "GR", "IE",
+  "IT", "LV", "LT", "LU", "MT", "NL", "PT", "SK", "SI", "ES",
+]);
 
 function getCountryFromHeaders(request: NextRequest) {
   const headerCandidates = [
@@ -26,8 +31,12 @@ function getCurrencyForCountry(country: string | null): CurrencyCode {
       return "ngn";
     case "RW":
       return "rwf";
+    case "GB":
+      return "gbp";
+    case "CN":
+      return "cny";
     default:
-      return "usd";
+      return country && EURO_COUNTRIES.has(country) ? "eur" : "usd";
   }
 }
 

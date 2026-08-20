@@ -3,10 +3,14 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Plus, Pencil, Trash2, Loader2, ArrowLeft, Eye, Search, Users2, X,
-  FileText, Send, CalendarClock, EyeOff, Archive, Sparkles,
+  FileText, Send, CalendarClock, EyeOff, Archive, Wand2, ImagePlus,
 } from "lucide-react";
 import { RichTextEditor } from "@/components/admin/RichTextEditor";
 import { AssetUrlField } from "@/components/admin/AssetUrlField";
+import {
+  BlogVisualGeneratorDialog,
+  type GeneratedBlogVisual,
+} from "@/components/admin/BlogVisualGeneratorDialog";
 import { appAlert, appConfirm, appToast } from "@/lib/app-notify";
 import { BLOG_CATEGORIES, slugify, type BlogStatus } from "@/lib/blog/constants";
 
@@ -43,7 +47,7 @@ const EMPTY = {
   status: "draft" as BlogStatus, published_at: "", sharing_enabled: true, reactions_enabled: true,
 };
 
-export default function BlogManagerPage() {
+export default function IntelligenceManagerPage() {
   const [posts, setPosts] = useState<Post[]>([]);
   const [authors, setAuthors] = useState<Author[]>([]);
   const [loading, setLoading] = useState(true);
@@ -53,6 +57,8 @@ export default function BlogManagerPage() {
   const [aiBusy, setAiBusy] = useState(false);
   const [search, setSearch] = useState("");
   const [authorsOpen, setAuthorsOpen] = useState(false);
+  const [visualDialog, setVisualDialog] = useState<"cover" | "inline" | null>(null);
+  const [inlineVisual, setInlineVisual] = useState<{ id: string; src: string; alt: string; title: string } | null>(null);
 
   const loadPosts = useCallback(async () => {
     const res = await fetch("/api/admin/blog", { credentials: "include", cache: "no-store" });
@@ -73,7 +79,12 @@ export default function BlogManagerPage() {
     return posts.filter((p) => !q || p.title.toLowerCase().includes(q) || p.category.toLowerCase().includes(q) || (p.author_name || "").toLowerCase().includes(q));
   }, [posts, search]);
 
-  function newPost() { setForm({ ...EMPTY }); setView("editor"); }
+  function newPost() {
+    setForm({ ...EMPTY });
+    setInlineVisual(null);
+    setVisualDialog(null);
+    setView("editor");
+  }
   function editPost(p: Post) {
     setForm({
       id: p.id, title: p.title, slug: p.slug, subtitle: p.subtitle || "", excerpt: p.excerpt || "",
@@ -82,7 +93,24 @@ export default function BlogManagerPage() {
       author_id: p.author_id || "", status: p.status, published_at: toLocalInput(p.published_at),
       sharing_enabled: p.sharing_enabled, reactions_enabled: p.reactions_enabled,
     });
+    setInlineVisual(null);
+    setVisualDialog(null);
     setView("editor");
+  }
+
+  function useGeneratedVisual(visual: GeneratedBlogVisual) {
+    if (visual.location === "cover") {
+      set("cover_url", visual.url);
+      appToast("Cover visual generated and added.");
+      return;
+    }
+    setInlineVisual({
+      id: `${Date.now()}-${visual.url}`,
+      src: visual.url,
+      alt: visual.alt_text,
+      title: form.title || "Intelligence visual",
+    });
+    appToast("Visual inserted at the editor cursor.");
   }
 
   async function save(statusOverride?: BlogStatus) {
@@ -177,7 +205,7 @@ export default function BlogManagerPage() {
           </button>
           <button onClick={aiFill} disabled={aiBusy} title="Generate everything except the title with AI"
             className="inline-flex items-center gap-2 rounded-xl border border-[#0A4FE8]/30 bg-blue-50 px-4 py-2 text-sm font-semibold text-[#0A4FE8] transition hover:bg-blue-100 disabled:opacity-60">
-            {aiBusy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
+            {aiBusy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Wand2 className="w-4 h-4" />}
             {aiBusy ? "Writing…" : "AI fill"}
           </button>
         </div>
@@ -199,7 +227,13 @@ export default function BlogManagerPage() {
               <textarea value={form.excerpt} onChange={(e) => set("excerpt", e.target.value)} rows={2} className={`${input} resize-none`} />
             </Field>
             <Field label="Content">
-              <RichTextEditor value={form.content} onChange={(html) => set("content", html)} placeholder="Write your article…" />
+              <RichTextEditor
+                value={form.content}
+                onChange={(html) => set("content", html)}
+                placeholder="Write your article…"
+                onGenerateVisual={() => setVisualDialog("inline")}
+                insertImage={inlineVisual}
+              />
             </Field>
             <div className="rounded-2xl border border-gray-100 bg-white p-5">
               <p className="mb-3 text-[12px] font-bold uppercase tracking-wider text-gray-400">SEO</p>
@@ -255,6 +289,13 @@ export default function BlogManagerPage() {
               <Field label="Tags" hint="Comma-separated."><input value={form.tags} onChange={(e) => set("tags", e.target.value)} placeholder="branding, startups" className={input} /></Field>
               <Field label="Cover banner" hint="1920×1080 recommended. Upload PNG/JPG or paste a URL.">
                 <AssetUrlField value={form.cover_url} onChange={(url) => set("cover_url", url)} placeholder="https://…" accept="image" folder="blog/covers" />
+                <button
+                  type="button"
+                  onClick={() => setVisualDialog("cover")}
+                  className="mt-2 inline-flex w-full items-center justify-center gap-2 rounded-xl border border-blue-200 bg-blue-50 px-3 py-2.5 text-[12px] font-semibold text-[#0A4FE8] transition hover:bg-blue-100"
+                >
+                  <ImagePlus className="h-4 w-4" /> Generate cover visual
+                </button>
               </Field>
               {form.cover_url && (
                 // eslint-disable-next-line @next/next/no-img-element
@@ -274,6 +315,15 @@ export default function BlogManagerPage() {
             </div>
           </div>
         </div>
+
+        <BlogVisualGeneratorDialog
+          open={visualDialog !== null}
+          location={visualDialog || "inline"}
+          articleTitle={form.title}
+          postId={form.id || undefined}
+          onClose={() => setVisualDialog(null)}
+          onGenerated={useGeneratedVisual}
+        />
       </div>
     );
   }
@@ -284,7 +334,8 @@ export default function BlogManagerPage() {
       <div className="mb-6 flex items-center justify-between gap-4 flex-wrap">
         <div>
           <p className="text-[#0A4FE8] text-sm font-semibold">Content</p>
-          <h1 className="text-[28px] font-bold text-[#0D1B39] tracking-tight">Blog Manager</h1>
+          <h1 className="text-[28px] font-bold text-[#0D1B39] tracking-tight">CDS Space Intelligence</h1>
+          <p className="mt-1 text-sm text-gray-500">Research, audits, and market insights for businesses building the future.</p>
         </div>
         <div className="flex items-center gap-2">
           <button onClick={() => setAuthorsOpen(true)} className="inline-flex items-center gap-2 rounded-xl border border-gray-200 bg-white px-4 py-2.5 text-sm font-semibold text-gray-600 hover:border-[#0A4FE8] hover:text-[#0A4FE8]">
@@ -329,7 +380,7 @@ export default function BlogManagerPage() {
                   <tr key={p.id} className="border-b border-gray-50 hover:bg-blue-50/30 transition">
                     <td className="py-3 px-6">
                       <p className="text-[13px] font-semibold text-[#0D1B39]">{p.title}</p>
-                      <p className="text-[11px] text-gray-400">/blog/{p.slug} · {p.reading_time} min</p>
+                      <p className="text-[11px] text-gray-400">/intelligence/{p.slug} · {p.reading_time} min</p>
                     </td>
                     <td className="px-3"><span className="rounded-md bg-blue-50 px-2 py-0.5 text-[11px] font-medium text-[#0A4FE8]">{p.category}</span></td>
                     <td className="px-3 text-[13px] text-gray-500">{p.author_name || "-"}</td>
@@ -338,7 +389,7 @@ export default function BlogManagerPage() {
                     <td className="px-6">
                       <div className="flex items-center justify-end gap-1">
                         {p.status === "published" && (
-                          <a href={`/blog/${p.slug}`} target="_blank" rel="noopener noreferrer" className="p-1.5 rounded-md text-gray-400 hover:text-[#0A4FE8] hover:bg-blue-50" title="View live"><Eye className="w-4 h-4" /></a>
+                          <a href={`/intelligence/${p.slug}`} target="_blank" rel="noopener noreferrer" className="p-1.5 rounded-md text-gray-400 hover:text-[#0A4FE8] hover:bg-blue-50" title="View live"><Eye className="w-4 h-4" /></a>
                         )}
                         <button onClick={() => editPost(p)} className="p-1.5 rounded-md text-gray-400 hover:text-[#0A4FE8] hover:bg-blue-50" title="Edit"><Pencil className="w-4 h-4" /></button>
                         <button onClick={() => remove(p)} className="p-1.5 rounded-md text-gray-400 hover:text-rose-500 hover:bg-rose-50" title="Delete"><Trash2 className="w-4 h-4" /></button>

@@ -1,5 +1,6 @@
 import { getSupabaseAdmin } from "@/lib/supabase";
 import { DEFAULT_LEGAL_DOCS, type LegalSlug } from "./default-content";
+import { sanitizeLegalHtml } from "./sanitize";
 
 export interface LegalDocumentRow {
     id: string;
@@ -31,7 +32,7 @@ export async function loadLegalDocument(slug: LegalSlug): Promise<LegalDocumentR
         console.error(`[legal] failed to load ${slug}:`, error.message);
     }
 
-    if (data) return data as LegalDocumentRow;
+    if (data) return { ...(data as LegalDocumentRow), content: sanitizeLegalHtml(data.content) };
 
     // Fall back to seed content.
     const seed = DEFAULT_LEGAL_DOCS[slug];
@@ -40,7 +41,7 @@ export async function loadLegalDocument(slug: LegalSlug): Promise<LegalDocumentR
         slug,
         title: seed.title,
         subtitle: seed.subtitle,
-        content: seed.content,
+        content: sanitizeLegalHtml(seed.content),
         effective_date: seed.effective_date,
         version: 0,
         updated_at: new Date().toISOString(),
@@ -78,7 +79,7 @@ export async function upsertLegalDocument(params: {
                 slug: params.slug,
                 title: params.title,
                 subtitle: params.subtitle,
-                content: params.content,
+                content: sanitizeLegalHtml(params.content),
                 effective_date: params.effectiveDate,
                 version: nextVersion,
                 updated_at: new Date().toISOString(),
@@ -90,5 +91,5 @@ export async function upsertLegalDocument(params: {
         .single();
 
     if (error) throw new Error(error.message);
-    return data as LegalDocumentRow;
+    return { ...(data as LegalDocumentRow), content: sanitizeLegalHtml(data.content) };
 }

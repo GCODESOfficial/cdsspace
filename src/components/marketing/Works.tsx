@@ -15,7 +15,7 @@ import {
 import { WorkMosaicItem } from "./WorkMosaicItem";
 
 interface Work {
-    id: number;
+    id: string;
     title: string;
     category: string | null;
     cover_image: string | null;
@@ -25,8 +25,8 @@ interface Work {
 export const Works = () => {
     const [works, setWorks] = useState<Work[]>([]);
     const [loading, setLoading] = useState(true);
-    const [openWorkId, setOpenWorkId] = useState<number | null>(null);
-    const [coverShapes, setCoverShapes] = useState<Record<number, WorkCoverShape>>({});
+    const [openWorkId, setOpenWorkId] = useState<string | null>(null);
+    const [coverShapes, setCoverShapes] = useState<Record<string, WorkCoverShape>>({});
 
     useEffect(() => {
         let cancelled = false;
@@ -57,7 +57,7 @@ export const Works = () => {
                 // Preserve the admin-defined featured order.
                 result = titles
                     .map((t: string) => byTitle.get(t))
-                    .filter((w): w is Work => Boolean(w));
+                    .filter((w: Work | undefined): w is Work => Boolean(w));
             }
 
             if (result.length === 0) {
@@ -129,10 +129,7 @@ export const Works = () => {
                                 whileHover={{ scale: 1.05 }}
                                 whileTap={{ scale: 0.95 }}
                                 className="px-10 py-4 md:px-12 md:py-5 rounded-full text-white font-medium text-lg relative overflow-hidden group shadow-xl cursor-pointer"
-                                style={{
-                                    backgroundImage:
-                                        "linear-gradient(146.28deg, #0035C1 8.83%, #0575FF 86.3%)",
-                                }}
+                                style={{ backgroundColor: "#0A4FE8" }}
                             >
                                 <div className="absolute inset-0 bg-white/20 translate-y-full group-hover:translate-y-0 transition-transform duration-300" />
                                 <span className="relative z-10">View all work</span>
@@ -185,6 +182,7 @@ function WorkCard({
                 type="button"
                 onClick={onOpen}
                 aria-label={`Open ${work.title}`}
+                data-cds-work-preview
                 className="relative block h-full w-full text-left overflow-hidden group bg-[#050713] cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand-blue"
             >
                 {work.cover_image && !imageFailed ? (
@@ -192,7 +190,7 @@ function WorkCard({
                         src={work.cover_image}
                         alt={work.title}
                         fill
-                        quality={92}
+                        unoptimized
                         sizes={
                             effectiveShape?.kind === "wide"
                                 ? "(min-width: 1536px) 700px, (min-width: 768px) 66vw, 100vw"
@@ -200,6 +198,7 @@ function WorkCard({
                         }
                         onLoad={handleImageLoad}
                         onError={() => setImageFailed(true)}
+                        draggable={false}
                         className="object-cover transform transition-transform duration-700 group-hover:scale-105"
                     />
                 ) : (
