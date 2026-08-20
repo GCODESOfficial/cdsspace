@@ -47,3 +47,6 @@ next-env.d.ts
 
 # Electron build artifacts
 desktop/dist/
+
+# Large build artifacts (exceed GitHub 100MB limit) - not for git
+public/downloads/*.dmg
