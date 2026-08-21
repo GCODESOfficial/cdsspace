@@ -20,16 +20,36 @@ export async function getAdminSession(): Promise<AdminSession | null> {
   const store = await cookies();
   const raw = store.get("admin_session")?.value;
   const parsed = verifyAdminCookie<AdminSession>(raw);
-  if (parsed && (parsed.role === "super_admin" || parsed.role === "sub_admin")) {
+  if (parsed?.role === "super_admin") {
     return { ...parsed, source: parsed.source ?? "admin_cookie" };
+  }
+  if (parsed?.role === "sub_admin") {
+    const activeAdmin = parsed.memberId
+      ? await glashMaybeOne<{ id: string }>(
+          `select id
+             from public.team_members
+            where id = $1
+              and is_active = true
+              and is_sub_admin = true
+            limit 1`,
+          [parsed.memberId],
+        )
+      : await glashMaybeOne<{ email: string }>(
+          `select email
+             from public.sub_admins
+            where lower(email) = lower($1)
+              and is_active = true
+            limit 1`,
+          [parsed.email],
+        );
+    if (activeAdmin) return { ...parsed, source: parsed.source ?? "admin_cookie" };
   }
 
   const teamToken = store.get("team_session")?.value;
   if (!teamToken) return null;
 
-  try {
-    const team = await getTeamSessionFromToken(teamToken);
-    if (!team || !team.is_sub_admin) return null;
+  const team = await getTeamSessionFromToken(teamToken);
+  if (!team || !team.is_sub_admin) return null;
 
     let permissions: string[] = Array.isArray(team.permissions) ? [...team.permissions] : [];
     const teamRoleTitle: string | null = team.role_title ?? null;
@@ -55,18 +75,15 @@ export async function getAdminSession(): Promise<AdminSession | null> {
       // Roles schema may not be present in older environments.
     }
 
-    return {
-      role: "sub_admin",
-      email: team.email,
-      name: team.full_name || team.username || "Team member",
-      permissions,
-      source: "team_cookie",
-      memberId: team.id,
-      teamRoleTitle,
-      department,
-      adminRoleName,
-    };
-  } catch {
-    return null;
-  }
+  return {
+    role: "sub_admin",
+    email: team.email,
+    name: team.full_name || team.username || "Team member",
+    permissions,
+    source: "team_cookie",
+    memberId: team.id,
+    teamRoleTitle,
+    department,
+    adminRoleName,
+  };
 }

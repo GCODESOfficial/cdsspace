@@ -2,19 +2,12 @@ import { NextRequest, NextResponse } from "next/server";
 import bcrypt from "bcryptjs";
 import { supabase } from "@/lib/supabase";
 import { insertActivityLog } from "@/lib/activity-log";
-import { signAdminCookie } from "@/lib/admin-session-cookie";
+import { adminSessionCookieOptions, signAdminCookie } from "@/lib/admin-session-cookie";
+import { glashMaybeOne } from "@/lib/glashdb/postgres";
 
 const SUPER_ADMIN_EMAIL = process.env.SUPER_ADMIN_EMAIL || "ceo@cdsspace.pro";
 // Never hardcode the secret in source. Set ADMIN_PASSWORD in the environment.
 const SUPER_ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "";
-
-const COOKIE_OPTS = {
-  httpOnly: true,
-  secure: process.env.NODE_ENV === "production",
-  sameSite: "lax" as const,
-  path: "/",
-  maxAge: 60 * 60 * 24,
-};
 
 export async function POST(req: NextRequest) {
   const { email, password } = await req.json();
@@ -45,7 +38,7 @@ export async function POST(req: NextRequest) {
       email: SUPER_ADMIN_EMAIL,
       name: "Admin",
       permissions: ["all"],
-    }), COOKIE_OPTS);
+    }), adminSessionCookieOptions());
     return response;
   }
 
@@ -79,6 +72,17 @@ export async function POST(req: NextRequest) {
   }
 
   if (passwordOk && subAdmin) {
+    const linkedTeamMember = await glashMaybeOne<{ id: string }>(
+      `select id
+         from public.team_members
+        where lower(email) = lower($1)
+          and is_active = true
+          and is_sub_admin = true
+        order by created_at asc
+        limit 1`,
+      [subAdmin.email],
+    ).catch(() => null);
+
     void insertActivityLog({
       actor_kind: "admin",
       actor_id: subAdmin.email,
@@ -97,7 +101,8 @@ export async function POST(req: NextRequest) {
       email: subAdmin.email,
       name: subAdmin.name,
       permissions: subAdmin.permissions || [],
-    }), COOKIE_OPTS);
+      memberId: linkedTeamMember?.id,
+    }), adminSessionCookieOptions());
     return response;
   }
 

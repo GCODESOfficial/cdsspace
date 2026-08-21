@@ -31,6 +31,41 @@ const requiredContracts = [
     text: "Dashboard authentication invariant:",
     message: "The permanent workspace authentication rule is missing.",
   },
+  {
+    file: "AGENTS.md",
+    text: "Staff portal switching invariant:",
+    message: "The permanent team/admin portal-switching rule is missing.",
+  },
+  {
+    file: "src/app/api/admin/team-bridge/route.ts",
+    text: "canReuseStaffPortalSession(admin, existingTeam, SUPER_ADMIN_EMAIL)",
+    message: "Admin-to-team switching must reuse only a same-identity team session.",
+  },
+  {
+    file: "src/app/api/admin/team-bridge/route.ts",
+    text: "resolveAdminTeamMember(admin)",
+    message: "Admin-to-team switching must resolve active team members with admin access.",
+  },
+  {
+    file: "src/app/api/admin-check/route.ts",
+    text: "response.cookies.set(\"admin_session\"",
+    message: "Team-to-admin switching must establish the compatible signed admin session.",
+  },
+  {
+    file: "src/app/api/admin-check/route.ts",
+    text: "and is_sub_admin = true",
+    message: "Bridged admin sessions must revalidate current team-member admin access.",
+  },
+  {
+    file: "src/app/team/layout.tsx",
+    text: "fetch(\"/api/admin/team-bridge\"",
+    message: "The team shell must complete the admin-to-team handoff before redirecting to login.",
+  },
+  {
+    file: "src/app/api/team/logout/route.ts",
+    text: "res.cookies.set(\"admin_session\"",
+    message: "Explicit team logout must also clear the bridged admin session.",
+  },
 ];
 
 const failures = requiredContracts.flatMap(({ file, text, message }) => {
@@ -45,4 +80,3 @@ if (failures.length > 0) {
 }
 
 console.log("Dashboard authentication contract check passed.");
-

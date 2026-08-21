@@ -6,7 +6,7 @@ import { useRouter, usePathname } from 'next/navigation';
 import Image from 'next/image';
 import AdminSidebar from '@/components/admin/AdminSidebar';
 import { getPermissionForRoute, hasPermission } from '@/lib/admin-permissions';
-import { Menu } from 'lucide-react';
+import { Loader2, Menu } from 'lucide-react';
 import AdminActivityLayer from '@/components/admin/AdminActivityLayer';
 import { DashboardAutoSave } from '@/components/autosave/DashboardAutoSave';
 import AdminNotificationBell from '@/components/notifications/admin-notification-bell';
@@ -22,6 +22,8 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
   const pathname = usePathname();
   const [isChecking, setIsChecking] = useState(true);
   const [isAuthed, setIsAuthed] = useState(false);
+  const [sessionUnavailable, setSessionUnavailable] = useState(false);
+  const [authCheckVersion, setAuthCheckVersion] = useState(0);
   const [denied, setDenied] = useState(false);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   // Desktop rail starts collapsed by default; the user's choice is remembered.
@@ -49,13 +51,23 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
       return;
     }
 
-    fetch('/api/admin-check')
+    let cancelled = false;
+    setIsChecking(true);
+    setSessionUnavailable(false);
+
+    fetch('/api/admin-check', { credentials: 'include', cache: 'no-store' })
       .then(async (res) => {
         if (!res.ok) {
-          router.replace('/admin/login');
+          if (res.status === 401 || res.status === 403) {
+            setIsAuthed(false);
+            router.replace('/admin/login');
+          } else if (!cancelled) {
+            setSessionUnavailable(true);
+          }
           return;
         }
         const data: SessionData = await res.json();
+        if (cancelled) return;
         setIsAuthed(true);
 
         // Super admin can access everything
@@ -90,14 +102,42 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
         }
       })
       .catch(() => {
-        router.replace('/admin/login');
+        if (!cancelled) setSessionUnavailable(true);
       })
       .finally(() => {
-        setIsChecking(false);
+        if (!cancelled) setIsChecking(false);
       });
-  }, [pathname, router, isLoginPage]);
+    return () => {
+      cancelled = true;
+    };
+  }, [pathname, router, isLoginPage, authCheckVersion]);
 
-  if (isChecking) return null;
+  if (isChecking) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-[#F0F5FF]">
+        <Loader2 className="h-6 w-6 animate-spin text-[#0A4FE8]" />
+      </div>
+    );
+  }
+  if (sessionUnavailable) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-[#F0F5FF] px-4">
+        <div className="w-full max-w-sm rounded-2xl border border-[#E4EAF5] bg-white p-6 text-center shadow-sm">
+          <h1 className="text-lg font-semibold text-[#0D1B39]">Admin portal temporarily unavailable</h1>
+          <p className="mt-2 text-sm leading-6 text-slate-500">
+            Your session is still active. Try the secure portal handoff again.
+          </p>
+          <button
+            type="button"
+            onClick={() => setAuthCheckVersion((value) => value + 1)}
+            className="mt-5 min-h-11 rounded-xl bg-[#0A4FE8] px-5 text-sm font-semibold text-white transition hover:bg-[#083FC0]"
+          >
+            Try again
+          </button>
+        </div>
+      </div>
+    );
+  }
   if (!isAuthed) return null;
   if (isLoginPage) return <>{children}</>;
 

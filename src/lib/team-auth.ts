@@ -55,7 +55,9 @@ export interface TeamSession {
 export async function getTeamSessionFromToken(token: string | undefined | null): Promise<TeamSession | null> {
   if (!token) return null;
 
-  const data = await glashMaybeOne<{
+  let data;
+  try {
+    data = await glashMaybeOne<{
     id: string;
     full_name: string;
     email: string;
@@ -80,7 +82,18 @@ export async function getTeamSessionFromToken(token: string | undefined | null):
        and s.revoked_at is null
      limit 1`,
     [token],
-  ).catch(() => null);
+    );
+  } catch (primaryError) {
+    // Older installations may not have the device-session table yet. Only
+    // treat this as an invalid session if the legacy lookup succeeds and
+    // genuinely finds no token; if both reads fail, surface a transient error
+    // so dashboard shells do not incorrectly send a valid user to login.
+    try {
+      return await getLegacyTeamSessionFromToken(token);
+    } catch {
+      throw primaryError;
+    }
+  }
 
   if (!data) {
     return getLegacyTeamSessionFromToken(token);
@@ -138,7 +151,7 @@ async function getLegacyTeamSessionFromToken(token: string): Promise<TeamSession
      where session_token = $1
      limit 1`,
     [token],
-  ).catch(() => null);
+  );
 
   if (!data || !data.is_active) return null;
   if (data.session_expires_at && new Date(data.session_expires_at) < new Date()) {

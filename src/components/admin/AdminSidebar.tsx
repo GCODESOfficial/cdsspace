@@ -59,6 +59,7 @@ import {
   Rocket,
   Handshake,
   Mail,
+  Loader2,
 } from "lucide-react";
 
 const topLevelItems = [
@@ -342,6 +343,8 @@ export default function AdminSidebar({ mobileOpen = false, onMobileClose, collap
   const { session } = useAdminSession();
   const desktopNavRef = useRef<HTMLElement | null>(null);
   const [clientUnreadCount, setClientUnreadCount] = useState(0);
+  const [isSwitchingPortal, setIsSwitchingPortal] = useState(false);
+  const [portalSwitchError, setPortalSwitchError] = useState(false);
   const unreadInitialLoad = useRef(true);
   const newestUnreadAt = useRef<string | null>(null);
   const unreadRequestActive = useRef(false);
@@ -427,6 +430,29 @@ export default function AdminSidebar({ mobileOpen = false, onMobileClose, collap
     await fetch("/api/admin-logout", { method: "POST" });
     router.push("/admin/login");
     onMobileClose?.();
+  };
+
+  const openTeamPortal = async () => {
+    if (isSwitchingPortal) return;
+    setIsSwitchingPortal(true);
+    setPortalSwitchError(false);
+    onMobileClose?.();
+    try {
+      const response = await fetch("/api/admin/team-bridge", {
+        method: "POST",
+        credentials: "include",
+        cache: "no-store",
+      });
+      if (!response.ok) {
+        setPortalSwitchError(true);
+        return;
+      }
+      window.location.assign("/team");
+    } catch {
+      setPortalSwitchError(true);
+    } finally {
+      setIsSwitchingPortal(false);
+    }
   };
 
   const visibleTopLevel = topLevelItems.filter(
@@ -589,30 +615,24 @@ export default function AdminSidebar({ mobileOpen = false, onMobileClose, collap
       <div className={`pb-6 pt-2 border-t border-gray-50 space-y-1 ${isCollapsed ? "px-2" : "px-3"}`}>
         <button
           type="button"
-          onClick={async () => {
-            onMobileClose?.();
-            if (isSuperAdmin) {
-              const res = await fetch("/api/admin/team-bridge", {
-                method: "POST",
-                credentials: "include",
-              });
-              if (res.ok) {
-                router.push("/team");
-                return;
-              }
-            }
-            router.push("/team");
-          }}
-          className={`group flex min-h-11 items-center rounded-xl text-[13.5px] font-semibold text-white transition-all w-full shadow-[0_8px_22px_rgba(10,79,232,0.22)] ${
+          onClick={openTeamPortal}
+          disabled={isSwitchingPortal}
+          className={`group flex min-h-11 w-full items-center rounded-xl bg-[#0A4FE8] text-[13.5px] font-semibold text-white shadow-[0_8px_22px_rgba(10,79,232,0.22)] transition hover:bg-[#083FC0] disabled:cursor-wait disabled:opacity-70 ${
             isCollapsed ? "justify-center py-2.5" : "gap-3 px-4 py-2.5"
           }`}
-          style={{ backgroundImage: "linear-gradient(146.28deg, #0035C1 8.83%, #0575FF 86.3%)" }}
           title="Switch to the Team Portal"
           aria-label="Open Team Portal"
         >
-          <ArrowRightLeft className="w-[18px] h-[18px] flex-shrink-0" />
-          {!isCollapsed && "Open Team Portal"}
+          {isSwitchingPortal
+            ? <Loader2 className="h-[18px] w-[18px] flex-shrink-0 animate-spin" />
+            : <ArrowRightLeft className="h-[18px] w-[18px] flex-shrink-0" />}
+          {!isCollapsed && (isSwitchingPortal ? "Opening team portal…" : "Open team portal")}
         </button>
+        {portalSwitchError && !isCollapsed && (
+          <p className="px-2 text-[11px] leading-4 text-rose-600" role="status">
+            Team portal is temporarily unavailable. Your admin session is still active.
+          </p>
+        )}
         <button
           onClick={signOut}
           className={`flex min-h-11 items-center rounded-xl text-[13.5px] font-medium text-gray-400 hover:text-red-500 hover:bg-red-50 transition-all w-full ${

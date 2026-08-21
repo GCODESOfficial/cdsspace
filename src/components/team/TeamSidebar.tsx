@@ -19,7 +19,7 @@ import {
   UserRound,
   Settings,
   LogOut,
-  ExternalLink,
+  ArrowRightLeft,
   GraduationCap,
   Wand2,
   X,
@@ -120,24 +120,14 @@ export function TeamSidebar({ member, onLogout, mobileOpen = false, onClose }: T
         )}
 
         {member.is_sub_admin && (
-          <>
-            <div className="pt-4 pb-1 px-3">
-              <p className="text-[10px] uppercase tracking-[0.15em] text-brand-body/40 font-semibold">
-                Staff
-              </p>
-            </div>
-            <Link
-              href="/admin"
-              onClick={onClose}
-              className="flex min-h-11 items-center justify-between gap-3 px-3 py-2.5 rounded-xl text-[13.5px] text-brand-body hover:bg-brand-bg/70 hover:text-brand-navy transition"
-            >
-              <span className="inline-flex items-center gap-3">
-                <ShieldCheck className="w-[18px] h-[18px]" />
-                {t("nav.adminDashboard")}
-              </span>
-              <ExternalLink className="w-3.5 h-3.5 opacity-50" />
-            </Link>
-          </>
+          <Link
+            href="/admin"
+            onClick={onClose}
+            className="mt-4 flex min-h-11 items-center gap-3 rounded-xl bg-[#0A4FE8] px-3 py-2.5 text-[13.5px] font-semibold text-white shadow-[0_8px_22px_rgba(10,79,232,0.2)] transition hover:bg-[#083FC0]"
+          >
+            <ArrowRightLeft className="h-[18px] w-[18px]" />
+            Open admin portal
+          </Link>
         )}
       </nav>
 

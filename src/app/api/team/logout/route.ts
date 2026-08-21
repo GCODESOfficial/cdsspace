@@ -23,5 +23,6 @@ export async function POST() {
 
   const res = NextResponse.json({ ok: true });
   res.cookies.set(TEAM_SESSION_COOKIE, "", { path: "/", maxAge: 0 });
+  res.cookies.set("admin_session", "", { path: "/", maxAge: 0 });
   return res;
 }

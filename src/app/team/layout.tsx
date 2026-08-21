@@ -38,6 +38,7 @@ function TeamLayoutInner({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const [member, setMember] = useState<Member | null>(null);
   const [checking, setChecking] = useState(true);
+  const [sessionUnavailable, setSessionUnavailable] = useState(false);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const { t } = useTranslation();
 
@@ -51,22 +52,37 @@ function TeamLayoutInner({ children }: { children: React.ReactNode }) {
       return;
     }
 
+    setChecking(true);
+    setSessionUnavailable(false);
     try {
-      const res = await fetch("/api/team/session", { credentials: "include" });
-      if (!res.ok) {
-        // Double check we haven't navigated to an invite page while the fetch was in flight
-        if (!window.location.pathname.includes("/login") && !window.location.pathname.includes("/invite")) {
-          router.replace("/team/login");
+      let res = await fetch("/api/team/session", { credentials: "include", cache: "no-store" });
+      if (res.status === 401) {
+        const bridge = await fetch("/api/admin/team-bridge", {
+          method: "POST",
+          credentials: "include",
+          cache: "no-store",
+        });
+        if (bridge.ok) {
+          res = await fetch("/api/team/session", { credentials: "include", cache: "no-store" });
+        } else if (bridge.status >= 500) {
+          setSessionUnavailable(true);
+          return;
         }
-        setChecking(false);
+      }
+      if (!res.ok) {
+        // Only an explicit invalid/missing session is allowed to send a user
+        // to login. Transient failures keep both portal sessions untouched.
+        if (res.status === 401 && !window.location.pathname.includes("/login") && !window.location.pathname.includes("/invite")) {
+          router.replace("/team/login");
+        } else {
+          setSessionUnavailable(true);
+        }
         return;
       }
       const json = await res.json();
       setMember(json.member);
     } catch {
-      if (!window.location.pathname.includes("/login") && !window.location.pathname.includes("/invite")) {
-        router.replace("/team/login");
-      }
+      setSessionUnavailable(true);
     } finally {
       setChecking(false);
     }
@@ -98,6 +114,26 @@ function TeamLayoutInner({ children }: { children: React.ReactNode }) {
     return (
       <div className="min-h-screen bg-brand-bg flex items-center justify-center">
         <Loader2 className="w-6 h-6 text-brand-blue animate-spin" />
+      </div>
+    );
+  }
+
+  if (sessionUnavailable) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-brand-bg px-4">
+        <div className="w-full max-w-sm rounded-2xl border border-brand-stroke bg-white p-6 text-center shadow-sm">
+          <h1 className="text-lg font-semibold text-brand-navy">Team portal temporarily unavailable</h1>
+          <p className="mt-2 text-sm leading-6 text-brand-body/70">
+            Your session is still active. Try the secure portal handoff again.
+          </p>
+          <button
+            type="button"
+            onClick={() => void loadSession()}
+            className="mt-5 min-h-11 rounded-xl bg-[#0A4FE8] px-5 text-sm font-semibold text-white transition hover:bg-[#083FC0]"
+          >
+            Try again
+          </button>
+        </div>
       </div>
     );
   }

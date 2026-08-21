@@ -26,6 +26,17 @@ export function signAdminCookie(payload: Record<string, unknown>): string {
   return `${b64}.${mac(b64)}`;
 }
 
+/** Shared options for every admin-session gateway and bridge. */
+export function adminSessionCookieOptions(maxAge = 60 * 60 * 24) {
+  return {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === "production",
+    sameSite: "lax" as const,
+    path: "/",
+    maxAge,
+  };
+}
+
 /**
  * Verify + decode a signed admin_session cookie. Returns null for missing,
  * malformed, unsigned (legacy), or tampered values.

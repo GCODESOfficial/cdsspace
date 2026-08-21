@@ -4,17 +4,27 @@ import { getAdminSession } from "@/lib/admin-session";
 import {
   TEAM_SESSION_COOKIE,
   generateSalt,
+  getTeamSessionFromToken,
   hashPassword,
   sessionCookieOptions,
 } from "@/lib/team-auth";
 import { createTeamSession } from "@/lib/team-login-security";
 import { glashMaybeOne, glashOne, glashQuery } from "@/lib/glashdb/postgres";
+import { canReuseStaffPortalSession } from "@/lib/staff-portal-identity.mjs";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const SUPER_ADMIN_EMAIL = "ceo@cdsspace.pro";
 const SUPER_ADMIN_USERNAME = "superadmin";
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+interface BridgeTeamMember {
+  id: string;
+  email: string;
+  is_active: boolean;
+  is_sub_admin: boolean;
+}
 
 async function ensureSuperAdminTeamMember() {
   const existing = await glashMaybeOne<{ id: string }>(
@@ -65,17 +75,83 @@ async function ensureSuperAdminTeamMember() {
   return created.id;
 }
 
-export async function POST(req: NextRequest) {
-  const admin = await getAdminSession();
-  if (!admin || admin.role !== "super_admin") {
-    return NextResponse.json({ ok: false, error: "Only super-admin can bridge to team." }, { status: 403 });
+async function resolveAdminTeamMember(
+  admin: { role: "super_admin" | "sub_admin"; memberId?: string; email: string },
+): Promise<BridgeTeamMember | null> {
+  if (admin.role === "super_admin") {
+    const id = await ensureSuperAdminTeamMember();
+    return { id, email: SUPER_ADMIN_EMAIL, is_active: true, is_sub_admin: true };
   }
 
-  const memberId = await ensureSuperAdminTeamMember();
-  const { sessionToken, deviceType, member } = await createTeamSession(memberId, req, { source: "admin_bridge" });
-  const res = NextResponse.json({ ok: true, member, device_type: deviceType });
-  res.cookies.set(TEAM_SESSION_COOKIE, sessionToken, sessionCookieOptions());
-  return res;
+  let member: BridgeTeamMember | null = null;
+  if (admin.memberId && UUID_PATTERN.test(admin.memberId)) {
+    member = await glashMaybeOne<BridgeTeamMember>(
+      `select id, email, is_active, is_sub_admin
+         from public.team_members
+        where id = $1
+        limit 1`,
+      [admin.memberId],
+    );
+  }
+
+  // Email is retained only as a compatibility fallback for older signed admin
+  // sessions created before stable team-member IDs were embedded in them.
+  if (!member && !admin.memberId) {
+    member = await glashMaybeOne<BridgeTeamMember>(
+      `select id, email, is_active, is_sub_admin
+         from public.team_members
+        where lower(email) = lower($1)
+        order by created_at asc
+        limit 1`,
+      [admin.email],
+    );
+  }
+
+  if (!member?.is_active || !member.is_sub_admin) return null;
+  return member;
+}
+
+export async function POST(req: NextRequest) {
+  try {
+    const admin = await getAdminSession();
+    if (!admin) {
+      return NextResponse.json({ ok: false, error: "Admin session required." }, { status: 401 });
+    }
+
+    const existingToken = req.cookies.get(TEAM_SESSION_COOKIE)?.value;
+    const existingTeam = existingToken
+      ? await getTeamSessionFromToken(existingToken)
+      : null;
+    if (
+      existingTeam?.is_sub_admin
+      && canReuseStaffPortalSession(admin, existingTeam, SUPER_ADMIN_EMAIL)
+    ) {
+      return NextResponse.json({
+        ok: true,
+        reused: true,
+        member: existingTeam,
+        device_type: existingTeam.device_type,
+      });
+    }
+
+    const teamMember = await resolveAdminTeamMember(admin);
+    if (!teamMember) {
+      return NextResponse.json(
+        { ok: false, error: "This admin account is not linked to an active team member." },
+        { status: 403 },
+      );
+    }
+
+    const { sessionToken, deviceType, member } = await createTeamSession(teamMember.id, req, { source: "admin_bridge" });
+    const res = NextResponse.json({ ok: true, reused: false, member, device_type: deviceType });
+    res.cookies.set(TEAM_SESSION_COOKIE, sessionToken, sessionCookieOptions());
+    return res;
+  } catch {
+    return NextResponse.json(
+      { ok: false, error: "Portal switching is temporarily unavailable." },
+      { status: 503 },
+    );
+  }
 }
 
 export async function GET(req: NextRequest) {

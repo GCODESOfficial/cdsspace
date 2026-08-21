@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import { supabaseAdmin } from "@/lib/supabase";
 import { getTeamSessionFromToken } from "@/lib/team-auth";
-import { verifyAdminCookie } from "@/lib/admin-session-cookie";
+import { adminSessionCookieOptions, signAdminCookie, verifyAdminCookie } from "@/lib/admin-session-cookie";
+import { glashMaybeOne } from "@/lib/glashdb/postgres";
 
 export interface AdminSession {
   role: "super_admin" | "sub_admin";
@@ -51,12 +51,32 @@ export function getAdminSession(req: NextRequest): AdminSession | null {
  */
 export async function getAdminSessionAsync(req: NextRequest): Promise<AdminSession | null> {
   const fromAdminCookie = getAdminSession(req);
-  if (fromAdminCookie) return fromAdminCookie;
+  if (fromAdminCookie?.role === "super_admin") return fromAdminCookie;
+  if (fromAdminCookie?.role === "sub_admin") {
+    const activeAdmin = fromAdminCookie.memberId
+      ? await glashMaybeOne<{ id: string }>(
+          `select id
+             from public.team_members
+            where id = $1
+              and is_active = true
+              and is_sub_admin = true
+            limit 1`,
+          [fromAdminCookie.memberId],
+        )
+      : await glashMaybeOne<{ email: string }>(
+          `select email
+             from public.sub_admins
+            where lower(email) = lower($1)
+              and is_active = true
+            limit 1`,
+          [fromAdminCookie.email],
+        );
+    return activeAdmin ? fromAdminCookie : null;
+  }
 
   const teamToken = req.cookies.get("team_session")?.value;
-  if (!teamToken || !supabaseAdmin) return null;
+  if (!teamToken) return null;
 
-  const db = supabaseAdmin as any;
   const team = await getTeamSessionFromToken(teamToken);
   if (!team || !team.is_sub_admin) return null;
 
@@ -65,36 +85,26 @@ export async function getAdminSessionAsync(req: NextRequest): Promise<AdminSessi
   let department: string | null = null;
   let adminRoleName: string | null = null;
 
-  // One read for role_title + department + role_id (was two separate queries).
-  let roleId: string | null = null;
-  try {
-    const { data: profile } = await db
-      .from("team_members")
-      .select("role_title, department, role_id")
-      .eq("id", team.id)
-      .maybeSingle();
-    const p = profile as { role_title: string | null; department: string | null; role_id: string | null } | null;
-    teamRoleTitle = p?.role_title ?? null;
-    department = p?.department ?? null;
-    roleId = p?.role_id ?? null;
-  } catch {
-    // Older schemas still get a valid sub-admin session.
-  }
+  teamRoleTitle = team.role_title ?? null;
+  department = team.department ?? null;
 
   // Try to layer role permissions on top, but NEVER let a missing column or
   // table break the sign-in bridge. If the roles schema isn't deployed yet
   // we just return the member's own permissions array.
   try {
-    if (roleId) {
-      const { data: role } = await db
-        .from("admin_roles")
-        .select("name, permissions")
-        .eq("id", roleId)
-        .maybeSingle();
-      adminRoleName = (role as { name: string | null; permissions: string[] | null } | null)?.name ?? null;
-      const rolePerms = (role as { name: string | null; permissions: string[] | null } | null)?.permissions;
+    const role = await glashMaybeOne<{ name: string | null; permissions: string[] | null }>(
+      `select r.name, r.permissions
+         from public.team_members m
+         join public.admin_roles r on r.id = m.role_id
+        where m.id = $1
+        limit 1`,
+      [team.id],
+    );
+    if (role) {
+      adminRoleName = role.name ?? null;
+      const rolePerms = role.permissions;
       if (rolePerms && rolePerms.length) {
-        permissions = Array.from(new Set([...(rolePerms as string[]), ...permissions]));
+        permissions = Array.from(new Set([...rolePerms, ...permissions]));
       }
     }
   } catch {
@@ -115,10 +125,18 @@ export async function getAdminSessionAsync(req: NextRequest): Promise<AdminSessi
 }
 
 export async function GET(req: NextRequest) {
-  const session = await getAdminSessionAsync(req);
+  let session: AdminSession | null;
+  try {
+    session = await getAdminSessionAsync(req);
+  } catch {
+    return NextResponse.json(
+      { authenticated: false, temporarilyUnavailable: true },
+      { status: 503 },
+    );
+  }
 
   if (session) {
-    return NextResponse.json({
+    const response = NextResponse.json({
       authenticated: true,
       role: session.role,
       name: session.name,
@@ -130,6 +148,24 @@ export async function GET(req: NextRequest) {
       department: session.department,
       adminRoleName: session.adminRoleName,
     });
+
+    // A verified team sub-admin is also given the signed admin cookie used by
+    // older admin endpoints. This is a first-party session handoff, not a
+    // second login, and remains tied to the same stable team-member ID.
+    if (session.source === "team_cookie") {
+      response.cookies.set("admin_session", signAdminCookie({
+        role: session.role,
+        email: session.email,
+        name: session.name,
+        permissions: session.permissions,
+        memberId: session.memberId,
+        teamRoleTitle: session.teamRoleTitle,
+        department: session.department,
+        adminRoleName: session.adminRoleName,
+      }), adminSessionCookieOptions());
+    }
+
+    return response;
   }
 
   return NextResponse.json({ authenticated: false }, { status: 401 });

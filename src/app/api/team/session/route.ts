@@ -5,7 +5,15 @@ import { glashMaybeOne } from "@/lib/glashdb/postgres";
 export const runtime = "nodejs";
 
 export async function GET() {
-  const session = await getTeamSession();
+  let session;
+  try {
+    session = await getTeamSession();
+  } catch {
+    return NextResponse.json(
+      { ok: false, authenticated: false, temporarilyUnavailable: true },
+      { status: 503 },
+    );
+  }
   if (!session) return NextResponse.json({ ok: false, authenticated: false }, { status: 401 });
 
   // Surface whether this member is assigned to author screening questions, so
