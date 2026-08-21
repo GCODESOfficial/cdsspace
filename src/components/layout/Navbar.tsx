@@ -36,7 +36,11 @@ export const Navbar = () => {
         return () => subscription.unsubscribe();
     }, []);
 
-    const accountHref = isLoggedIn ? "/dashboard" : "/login";
+    // The public-site account entry always begins at the client login gateway.
+    // That gateway already forwards a valid first-party client session, while
+    // signed-out and partially authenticated visitors see the login form
+    // instead of being dropped into the agreement gate.
+    const accountHref = "/login";
 
     // Prevent scrolling when mobile menu is open
     useEffect(() => {

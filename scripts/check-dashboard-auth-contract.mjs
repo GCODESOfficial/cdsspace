@@ -66,6 +66,16 @@ const requiredContracts = [
     text: "res.cookies.set(\"admin_session\"",
     message: "Explicit team logout must also clear the bridged admin session.",
   },
+  {
+    file: "src/components/marketing/Hero.tsx",
+    text: "href=\"/login\"",
+    message: "The landing-page My account action must begin at the client login gateway.",
+  },
+  {
+    file: "src/components/layout/Navbar.tsx",
+    text: "const accountHref = \"/login\";",
+    message: "The navigation My account action must begin at the client login gateway.",
+  },
 ];
 
 const failures = requiredContracts.flatMap(({ file, text, message }) => {

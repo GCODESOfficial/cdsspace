@@ -183,7 +183,7 @@ export const Hero = () => {
                             <span>Schedule a Strategy Session</span>
                         </Link>
                         <Link
-                            href="/dashboard"
+                            href="/login"
                             className="flex w-full items-center justify-center whitespace-nowrap rounded-[100px] border border-brand-blue bg-transparent px-8 py-[15px] text-[16px] font-medium tracking-[-0.18px] text-brand-blue transition-colors hover:bg-brand-blue/5 sm:w-auto md:text-[18px]"
                         >
                             <span>My Account</span>
