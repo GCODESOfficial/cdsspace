@@ -76,6 +76,21 @@ const requiredContracts = [
     text: "const accountHref = \"/login\";",
     message: "The navigation My account action must begin at the client login gateway.",
   },
+  {
+    file: "src/app/(dashboard)/dashboard/page.tsx",
+    text: "dashboardPath(\"/dashboard/book-session\")",
+    message: "Client session booking must navigate to its dedicated dashboard page.",
+  },
+  {
+    file: "src/app/(dashboard)/dashboard/book-session/page.tsx",
+    text: "Back to previous page",
+    message: "The dedicated client booking page must provide a return control.",
+  },
+  {
+    file: "src/app/[username]/dashboard/book-session/page.tsx",
+    text: "ScopedBookSessionPage",
+    message: "The booking page must remain available on scoped client dashboard URLs.",
+  },
 ];
 
 const failures = requiredContracts.flatMap(({ file, text, message }) => {

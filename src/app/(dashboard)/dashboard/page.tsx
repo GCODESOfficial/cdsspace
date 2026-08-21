@@ -11,7 +11,7 @@ import { BRANDING_WOTD_BLUE, getBrandingWordDateKey } from "@/lib/branding-word-
 import {
     Plus, FileText, Image as ImageIcon, Package, Calendar, MessageSquare,
     ShoppingBag, Loader2, ArrowRight, Volume2, Download,
-    X, Check, BookOpen, Clock, FileCheck, Star,
+    BookOpen, Clock, FileCheck, Star,
 } from "lucide-react";
 
 interface BrandingWord {
@@ -92,7 +92,6 @@ const SPEECH_LOCALES: Record<string, string> = {
 export default function DashboardPage() {
     const { account, dashboardPath } = useClientAccount();
     const userId = account.userId;
-    const userEmail = account.email;
     const userName = account.fullName?.split(" ")[0] || account.email.split("@")[0] || "there";
     const [word, setWord] = useState<BrandingWord>(INSTANT_WOTD_FALLBACK);
     const [pendingJobs, setPendingJobs] = useState<PendingJob[]>([]);
@@ -100,7 +99,6 @@ export default function DashboardPage() {
     const [messages, setMessages] = useState<ChatMessage[]>([]);
     const [recentDeliveries, setRecentDeliveries] = useState<RecentDelivery[]>([]);
     const [isLoading, setIsLoading] = useState(true);
-    const [showBookingModal, setShowBookingModal] = useState(false);
     const wordHeadingRef = useRef<HTMLHeadingElement>(null);
 
     useEffect(() => {
@@ -396,14 +394,14 @@ export default function DashboardPage() {
                     <div className="w-12 h-12 rounded-xl bg-amber-50 flex items-center justify-center mb-4">
                         <Calendar className="w-6 h-6 text-amber-600" />
                     </div>
-                    <h3 className="text-[20px] font-bold text-brand-navy mb-2">Book a Session</h3>
+                    <h3 className="text-[20px] font-bold text-brand-navy mb-2">Book a session</h3>
                     <p className="text-[13px] text-brand-body/60 leading-relaxed mb-6 flex-1">
                         Have something on your mind? Schedule a 1-on-1 with our team to talk strategy, design, or growth.
                     </p>
-                    <button onClick={() => setShowBookingModal(true)}
+                    <Link href={dashboardPath("/dashboard/book-session")}
                         className="flex items-center justify-center gap-2 px-5 py-3 bg-brand-blue text-white text-[13px] font-semibold rounded-xl hover:bg-brand-blue/90 transition">
-                        <Calendar className="w-4 h-4" /> Schedule Now
-                    </button>
+                        <Calendar className="w-4 h-4" /> Schedule now
+                    </Link>
                 </motion.div>
             </div>
 
@@ -479,16 +477,6 @@ export default function DashboardPage() {
                     )}
                 </Widget>
             </div>
-
-            {/* Booking Modal */}
-            {showBookingModal && userId && (
-                <BookingModal
-                    userId={userId}
-                    userEmail={userEmail}
-                    userName={userName}
-                    onClose={() => setShowBookingModal(false)}
-                />
-            )}
         </div>
     );
 }
@@ -521,111 +509,6 @@ function EmptyState({ icon, text }: { icon: React.ReactNode; text: string }) {
         <div className="py-8 text-center">
             <div className="flex justify-center mb-2">{icon}</div>
             <p className="text-[12px] text-brand-body/40">{text}</p>
-        </div>
-    );
-}
-
-function BookingModal({ userId, userEmail, userName, onClose }: { userId: string; userEmail: string; userName: string; onClose: () => void }) {
-    const [fullName, setFullName] = useState(userName);
-    const [email, setEmail] = useState(userEmail);
-    const [phone, setPhone] = useState("");
-    const [topic, setTopic] = useState("");
-    const [date, setDate] = useState("");
-    const [time, setTime] = useState("");
-    const [duration, setDuration] = useState("30 min");
-    const [notes, setNotes] = useState("");
-    const [submitting, setSubmitting] = useState(false);
-    const [submitted, setSubmitted] = useState(false);
-
-    async function handleSubmit(e: React.FormEvent) {
-        e.preventDefault();
-        if (!fullName.trim() || !email.trim() || !topic.trim() || !date) return;
-        setSubmitting(true);
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const { error } = await (supabase as any).from("booking_sessions").insert({
-            user_id: userId,
-            full_name: fullName.trim(),
-            email: email.trim(),
-            phone: phone.trim() || null,
-            topic: topic.trim(),
-            preferred_date: date,
-            preferred_time: time || null,
-            duration,
-            notes: notes.trim() || null,
-        });
-        setSubmitting(false);
-        if (!error) setSubmitted(true);
-    }
-
-    return (
-        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-            <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }}
-                className="bg-white rounded-2xl max-w-lg w-full shadow-2xl overflow-hidden">
-                <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between">
-                    <h2 className="text-lg font-bold text-brand-navy flex items-center gap-2">
-                        <Calendar className="w-5 h-5 text-amber-600" /> Book a Session
-                    </h2>
-                    <button onClick={onClose} className="p-2 rounded-lg hover:bg-gray-100">
-                        <X className="w-5 h-5 text-gray-400" />
-                    </button>
-                </div>
-                <div className="px-6 py-5 max-h-[70vh] overflow-y-auto">
-                    {submitted ? (
-                        <div className="text-center py-6">
-                            <div className="w-16 h-16 rounded-full bg-emerald-50 flex items-center justify-center mx-auto mb-4">
-                                <Check className="w-8 h-8 text-emerald-500" />
-                            </div>
-                            <h3 className="text-xl font-bold text-brand-navy mb-2">Session Requested</h3>
-                            <p className="text-sm text-brand-body/60">We'll confirm your session shortly via email.</p>
-                            <button onClick={onClose} className="mt-6 px-6 py-2.5 bg-brand-blue text-white text-sm font-semibold rounded-full hover:bg-brand-blue/90 transition">
-                                Close
-                            </button>
-                        </div>
-                    ) : (
-                        <form onSubmit={handleSubmit} className="space-y-4">
-                            <div className="grid grid-cols-2 gap-3">
-                                <Input label="Full Name *" value={fullName} onChange={setFullName} />
-                                <Input label="Email *" value={email} onChange={setEmail} type="email" />
-                                <Input label="Phone" value={phone} onChange={setPhone} />
-                                <div>
-                                    <label className="block text-[11px] font-medium text-gray-500 mb-1.5">Duration</label>
-                                    <select value={duration} onChange={(e) => setDuration(e.target.value)}
-                                        className="w-full px-3 py-2.5 rounded-xl bg-gray-50 border border-gray-200 text-sm cursor-pointer focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-300">
-                                        <option>15 min</option>
-                                        <option>30 min</option>
-                                        <option>60 min</option>
-                                    </select>
-                                </div>
-                            </div>
-                            <Input label="Topic *" value={topic} onChange={setTopic} placeholder="What do you want to discuss?" />
-                            <div className="grid grid-cols-2 gap-3">
-                                <Input label="Preferred Date *" value={date} onChange={setDate} type="date" />
-                                <Input label="Preferred Time" value={time} onChange={setTime} type="time" />
-                            </div>
-                            <div>
-                                <label className="block text-[11px] font-medium text-gray-500 mb-1.5">Notes</label>
-                                <textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={3}
-                                    className="w-full px-3 py-2.5 rounded-xl bg-gray-50 border border-gray-200 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-300" />
-                            </div>
-                            <button type="submit" disabled={submitting || !fullName.trim() || !email.trim() || !topic.trim() || !date}
-                                className="w-full flex items-center justify-center gap-2 px-6 py-3 bg-brand-blue text-white text-sm font-semibold rounded-full hover:bg-brand-blue/90 transition disabled:opacity-50">
-                                {submitting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Calendar className="w-4 h-4" />}
-                                {submitting ? "Booking..." : "Book Session"}
-                            </button>
-                        </form>
-                    )}
-                </div>
-            </motion.div>
-        </div>
-    );
-}
-
-function Input({ label, value, onChange, placeholder, type = "text" }: { label: string; value: string; onChange: (v: string) => void; placeholder?: string; type?: string }) {
-    return (
-        <div>
-            <label className="block text-[11px] font-medium text-gray-500 mb-1.5">{label}</label>
-            <input type={type} value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder}
-                className="w-full px-3 py-2.5 rounded-xl bg-gray-50 border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-300 transition" />
         </div>
     );
 }
