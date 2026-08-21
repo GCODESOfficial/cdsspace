@@ -196,8 +196,9 @@ export async function notifyTaskboardEvent(input: {
               link: absoluteLink,
             }),
             transporter,
-            // Compound task-flood emails into a single digest per recipient.
-            digestCategory: "tasks",
+            // Keep one detailed email per task event, grouped in the recipient's
+            // stable Taskboard conversation.
+            threadCategory: "tasks",
           });
         }),
       );

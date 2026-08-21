@@ -40,6 +40,20 @@ function validEmail(value: unknown) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) ? email : null;
 }
 
+function notificationThreadCategory(permissionKeys: readonly string[]) {
+  const keys = permissionKeys.map((key) => String(key));
+  const hasPrefix = (prefix: string) => keys.some((key) => key === prefix || key.startsWith(`${prefix}.`));
+  if (hasPrefix("messages")) return "chat";
+  if (hasPrefix("consultations")) return "consultations";
+  if (keys.some((key) => key === "finance.manage" || key.startsWith("finance_"))) return "finance";
+  if (hasPrefix("deliveries")) return "deliveries";
+  if (hasPrefix("projects")) return "projects";
+  if (hasPrefix("orders")) return "orders";
+  if (hasPrefix("clients.mailings")) return "mailings";
+  if (hasPrefix("clients")) return "clients";
+  return "system";
+}
+
 async function permissionRecipients(permissionKeys: readonly string[]) {
   const keys = [...new Set(["all", ...permissionKeys])];
   try {
@@ -133,6 +147,7 @@ export async function notifyAdminFeatureEvent(input: {
 
     const transporter = createEmailTransport();
     try {
+      const threadCategory = notificationThreadCategory(input.permissionKeys);
       const results = await Promise.allSettled(Array.from(emailRecipients.entries()).map(([email, name]) => sendEmail({
         to: email,
         subject: input.title,
@@ -146,6 +161,9 @@ export async function notifyAdminFeatureEvent(input: {
           details: input.details || {},
         }),
         transporter,
+        // Critical system events remain separate, detailed messages with their
+        // own destination button, grouped by business area in the inbox.
+        threadCategory,
       })));
       const failed = results.filter((result) => result.status === "rejected").length;
       if (failed) console.error(`[admin-feature-notifications] ${failed} email delivery attempt(s) failed.`);

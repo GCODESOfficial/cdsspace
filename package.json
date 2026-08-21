@@ -12,7 +12,7 @@
     "check:subscription": "node scripts/check-subscription-checkout-contract.mjs",
     "check:static-assets": "node scripts/check-static-assets.mjs",
     "prepare": "git config core.hooksPath .githooks || true",
-    "deploy": "glash deploy --asset-mode inline --source-upload chunked",
+    "deploy": "npx -y glashdb deploy --asset-mode inline --source-upload chunked",
     "start": "next start",
     "lint": "eslint ."
   },

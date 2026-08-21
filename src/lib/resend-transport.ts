@@ -57,6 +57,18 @@ export function createResendHttpTransport(apiKey: string) {
       if (typeof d.html === "string") payload.html = d.html;
       if (typeof d.text === "string") payload.text = d.text;
 
+      // Resend sends over JSON rather than Nodemailer's compiled MIME, so
+      // explicitly forward the standard conversation headers. Resend documents
+      // In-Reply-To and References as the supported threading mechanism.
+      const headers: Record<string, string> = {};
+      if (d.inReplyTo) headers["In-Reply-To"] = String(d.inReplyTo);
+      if (d.references) {
+        headers.References = Array.isArray(d.references)
+          ? d.references.map(String).join(" ")
+          : String(d.references);
+      }
+      if (Object.keys(headers).length) payload.headers = headers;
+
       // Forward attachments (incl. inline logo). Resend expects base64 `content`
       // and uses `content_id` to render an attachment inline via a cid: img src.
       // eslint-disable-next-line @typescript-eslint/no-explicit-any

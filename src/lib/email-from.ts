@@ -104,11 +104,13 @@ export interface SendEmailInput {
   /** Override the Date header - e.g. to reflect the original event time on a resend. */
   date?: Date;
   /**
-   * When set, this email is a repetitive notification that should be COMPOUNDED
-   * rather than sent immediately. It is queued and the notification-digest cron
-   * groups all items of the same category per recipient into one email. Set
-   * EMAIL_DIGEST=off to disable and send everything immediately.
+   * Queue this detailed message for delivery in a stable per-recipient inbox
+   * conversation. Every event remains a separate email; the worker adds the
+   * standard threading headers. Set EMAIL_NOTIFICATION_QUEUE=off to bypass the
+   * queue (EMAIL_DIGEST=off remains supported for older deployments).
    */
+  threadCategory?: string;
+  /** @deprecated Use threadCategory. */
   digestCategory?: string;
 }
 
@@ -125,20 +127,31 @@ export const EMAIL_MODE: "gmail_api" | "resend" | "smtp" = gmailApiCredsFromEnv(
  * Gmail SMTP otherwise. Either way the From address is EMAIL_FROM.
  */
 export async function sendEmail(input: SendEmailInput): Promise<void> {
-  // Compoundable notifications are queued; the digest cron sends a grouped email.
-  if (input.digestCategory && process.env.EMAIL_DIGEST !== "off") {
+  const threadCategory = input.threadCategory || input.digestCategory;
+  const queueEnabled = process.env.EMAIL_NOTIFICATION_QUEUE !== "off"
+    && process.env.EMAIL_DIGEST !== "off";
+
+  // Threaded notifications are queued so each event can be delivered and
+  // retried independently while retaining its full template and action button.
+  if (threadCategory && queueEnabled) {
     try {
+      const lines = (input.text || "")
+        .split(/\r?\n/)
+        .map((line) => line.trim())
+        .filter(Boolean);
+      const detectedLink = (input.text?.match(/https?:\/\/[^\s<>]+/) || [])[0]?.replace(/[),.;]+$/, "") || null;
+      const summary = lines.find((line) => line !== input.subject && line !== detectedLink) || null;
       await glashQuery(
         `insert into public.notification_email_queue
            (recipient_email, category, subject, title, body, link, html, text_body, from_name)
          values ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
         [
           input.to,
-          input.digestCategory,
+          threadCategory,
           input.subject,
           input.subject,
-          input.text?.split("\n")[1] || null,
-          (input.text?.match(/https?:\/\/\S+/) || [])[0] || null,
+          summary,
+          detectedLink,
           input.html || null,
           input.text || null,
           input.fromName || "CDS Space",

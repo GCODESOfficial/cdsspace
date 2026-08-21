@@ -1,7 +1,7 @@
--- Email digest queue: compound similar notification emails instead of sending
--- one per event. Repetitive notifications (task updates, chat, etc.) are queued
--- here and flushed by the notification-digest cron, which groups them per
--- recipient + category into a single compounded email.
+-- Notification thread queue: retain one detailed email per event while grouping
+-- related messages into a single inbox conversation per recipient + category.
+-- The legacy table and cron names are retained so existing deployments and
+-- scheduler URLs continue to work.
 create table if not exists public.notification_email_queue (
   id              uuid primary key default gen_random_uuid(),
   recipient_email text not null,

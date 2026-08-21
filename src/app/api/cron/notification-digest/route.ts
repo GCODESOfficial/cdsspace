@@ -20,6 +20,7 @@ interface QueueRow {
   id: string; recipient_email: string; category: string; subject: string;
   title: string; body: string | null; link: string | null; html: string | null;
   text_body: string | null; from_name: string | null; created_at: string;
+  delivery_version: number;
 }
 
 // The conversation title each category threads under.
@@ -29,6 +30,12 @@ const CATEGORY_SUBJECT: Record<string, string> = {
   deliveries: "Deliveries",
   content: "Content updates",
   finance: "Finance",
+  consultations: "Consultations",
+  projects: "Projects",
+  orders: "Orders",
+  clients: "Clients",
+  mailings: "Client mailings",
+  system: "CDS Space updates",
 };
 
 function authorized(req: NextRequest) {
@@ -40,12 +47,25 @@ function authorized(req: NextRequest) {
 export async function GET(req: NextRequest) {
   if (!authorized(req)) return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
 
+  // Atomically claim work so overlapping scheduler/manual runs cannot send the
+  // same message twice. An abandoned claim becomes eligible again after 15 min.
   const rows = await glashQuery<QueueRow>(
-    `select id, recipient_email, category, subject, title, body, link, html, text_body, from_name, created_at
-       from public.notification_email_queue
-      where sent_at is null
-      order by recipient_email, category, created_at
-      limit 2000`,
+    `with due as (
+       select id
+         from public.notification_email_queue
+        where sent_at is null
+          and (claimed_at is null or claimed_at < now() - interval '15 minutes')
+        order by recipient_email, category, created_at
+        limit 2000
+        for update skip locked
+     )
+     update public.notification_email_queue q
+        set claimed_at = now(), last_attempted_at = now(), last_error = null
+       from due
+      where q.id = due.id
+      returning q.id, q.recipient_email, q.category, q.subject, q.title, q.body,
+                q.link, q.html, q.text_body, q.from_name, q.created_at,
+                q.delivery_version`,
   );
   if (!rows.length) return NextResponse.json({ ok: true, emails: 0, items: 0 });
 
@@ -69,15 +89,27 @@ export async function GET(req: NextRequest) {
         // Thread every item of this category to the recipient into one conversation.
         references: root,
         inReplyTo: root,
-        messageId: `<cds-item-${row.id}@cdsspace.pro>`,
+        messageId: `<cds-item-${row.id}-v${row.delivery_version}@cdsspace.pro>`,
         // Reflect the real event time so the thread reads like OPay-style receipts.
         date: row.created_at ? new Date(row.created_at) : undefined,
       });
-      await glashQuery(`update public.notification_email_queue set sent_at = now() where id = $1::uuid`, [row.id]);
+      await glashQuery(
+        `update public.notification_email_queue
+            set first_sent_at = coalesce(first_sent_at, now()),
+                sent_at = now(), claimed_at = null, last_error = null
+          where id = $1::uuid`,
+        [row.id],
+      );
       emails += 1;
       threaded.add(`${row.recipient_email}|${row.category}`);
     } catch (error) {
       console.error("[notification-thread] send failed:", error);
+      await glashQuery(
+        `update public.notification_email_queue
+            set claimed_at = null, last_error = left($2, 1000)
+          where id = $1::uuid`,
+        [row.id, error instanceof Error ? error.message : "Email delivery failed"],
+      ).catch(() => []);
     }
   }
   transporter.close();

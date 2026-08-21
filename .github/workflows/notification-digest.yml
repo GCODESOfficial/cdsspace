@@ -1,13 +1,13 @@
 name: Notification digest
 
 # glashdb has no built-in scheduler, so this GitHub Actions workflow is the
-# external cron: every 30 minutes it flushes the notification email queue,
-# compounding bursts of similar notifications (task updates, chat, etc.) into a
-# single branded digest per recipient instead of one email per event.
+# external cron: every 10 minutes it flushes the notification email queue. Each
+# event is delivered as its own detailed message, while standard email headers
+# group related messages into one conversation per recipient.
 
 on:
   schedule:
-    - cron: "*/30 * * * *"
+    - cron: "*/10 * * * *"
   workflow_dispatch: {}
 
 jobs:
