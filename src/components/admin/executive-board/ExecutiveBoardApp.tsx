@@ -1,0 +1,1114 @@
+"use client";
+
+/**
+ * Executive Board workspace.
+ *
+ * One client component drives all five views (overview, budgets, targets,
+ * revenue models, vault) because they share a single board payload and the
+ * same save/reload cycle. Each route renders it with a fixed `view`.
+ */
+
+import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
+import Link from "next/link";
+import {
+  Check, ChevronDown, ChevronRight, Copy, Download, FileText, Folder,
+  FolderPlus, Landmark, Link2, Loader2, Lock, Pencil, Plus, Rocket, ShieldCheck,
+  Target as TargetIcon, Trash2, Unlock, Upload, Wallet, X,
+} from "lucide-react";
+import {
+  BUDGET_CATEGORIES, BUDGET_STATUSES, KIND_LABELS, MODEL_STATUSES, STATUS_LABELS,
+  STEP_STATUSES, TARGET_STATUSES, VAULT_KINDS,
+  BOARD_VIEW_CURRENCIES, budgetVariance, convertMoney, currencyUnit, formatBytes, formatMoneyView, planProgress,
+  type BoardViewCurrency,
+  shareIsLive, targetProgress,
+  type Budget, type RevenueModel, type RevenueStep, type Target,
+  type VaultFile, type VaultFolder, type VaultShare,
+} from "@/lib/executive-board";
+import { UnsavedDraftNotice, useUnsavedDraft } from "./useUnsavedDraft";
+
+export type BoardView = "overview" | "budgets" | "targets" | "models" | "vault";
+
+interface Board {
+  budgets: Budget[];
+  targets: Target[];
+  models: RevenueModel[];
+  folders: VaultFolder[];
+  files: VaultFile[];
+  shares: VaultShare[];
+}
+
+const EMPTY: Board = { budgets: [], targets: [], models: [], folders: [], files: [], shares: [] };
+
+const TONE: Record<string, string> = {
+  draft: "bg-slate-100 text-slate-600",
+  active: "bg-emerald-50 text-emerald-700",
+  closed: "bg-slate-100 text-slate-500",
+  on_track: "bg-emerald-50 text-emerald-700",
+  at_risk: "bg-amber-50 text-amber-700",
+  off_track: "bg-rose-50 text-rose-700",
+  achieved: "bg-blue-50 text-[#0A4FE8]",
+  exploring: "bg-slate-100 text-slate-600",
+  piloting: "bg-amber-50 text-amber-700",
+  paused: "bg-slate-100 text-slate-500",
+  retired: "bg-slate-100 text-slate-400",
+  todo: "bg-slate-100 text-slate-600",
+  doing: "bg-amber-50 text-amber-700",
+  blocked: "bg-rose-50 text-rose-700",
+  done: "bg-emerald-50 text-emerald-700",
+};
+
+const VIEW_META: Record<BoardView, { title: string; blurb: string }> = {
+  overview: { title: "Executive Board", blurb: "Budgets, targets, revenue models, and the documents behind them." },
+  budgets: { title: "Budgets", blurb: "What we planned to spend, and what we actually spent." },
+  targets: { title: "Targets", blurb: "The numbers we are holding ourselves to, and where each one stands." },
+  models: { title: "Revenue models", blurb: "How we make money, and the step-by-step plan to make each one work." },
+  vault: { title: "Document vault", blurb: "Legal documents, attachments, and files. Lock any of them, then share by link." },
+};
+
+const label = (value: string) => STATUS_LABELS[value] || value;
+
+/* ------------------------------------------------------------------ */
+
+/**
+ * The currency the board is currently being planned in. Every figure on the
+ * page is restated in it, whatever currency the line was entered in, so plans
+ * can be read end to end without doing arithmetic in your head.
+ */
+const CURRENCY_KEY = "cds.exec.currency";
+const BoardCurrency = createContext<BoardViewCurrency>("USD");
+const useBoardCurrency = () => useContext(BoardCurrency);
+
+function CurrencyToggle({ value, onChange }: { value: BoardViewCurrency; onChange: (next: BoardViewCurrency) => void }) {
+  return (
+    <div className="inline-flex items-center gap-1 rounded-xl border border-slate-200 bg-white p-1" role="group" aria-label="Planning currency">
+      {BOARD_VIEW_CURRENCIES.map((code) => (
+        <button
+          key={code}
+          type="button"
+          onClick={() => onChange(code)}
+          aria-pressed={value === code}
+          className={`rounded-lg px-3 py-1.5 text-xs font-bold transition ${value === code ? "bg-[#0A4FE8] text-white" : "text-slate-500 hover:bg-slate-50"}`}
+        >
+          {code}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+export default function ExecutiveBoardApp({ view }: { view: BoardView }) {
+  const [board, setBoard] = useState<Board>(EMPTY);
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState("");
+  const [notice, setNotice] = useState<{ tone: "success" | "error"; text: string } | null>(null);
+  const [currency, setCurrency] = useState<BoardViewCurrency>("USD");
+
+  // Remembered per browser so the board opens in the currency you plan in.
+  useEffect(() => {
+    try {
+      const saved = window.localStorage.getItem(CURRENCY_KEY);
+      if (saved && (BOARD_VIEW_CURRENCIES as readonly string[]).includes(saved)) {
+        setCurrency(saved as BoardViewCurrency);
+      }
+    } catch { /* private mode: stay on the default */ }
+  }, []);
+
+  const pickCurrency = useCallback((next: BoardViewCurrency) => {
+    setCurrency(next);
+    try { window.localStorage.setItem(CURRENCY_KEY, next); } catch { /* noop */ }
+  }, []);
+
+  const load = useCallback(async () => {
+    try {
+      const response = await fetch("/api/admin/executive-board", { cache: "no-store" });
+      const json = await response.json().catch(() => ({}));
+      if (!response.ok || !json.ok) throw new Error(json.error || "Could not load the Executive Board.");
+      setBoard({
+        budgets: json.budgets || [], targets: json.targets || [], models: json.models || [],
+        folders: json.folders || [], files: json.files || [], shares: json.shares || [],
+      });
+    } catch (error) {
+      setNotice({ tone: "error", text: error instanceof Error ? error.message : "Could not load the Executive Board." });
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { void load(); }, [load]);
+
+  const post = useCallback(async (url: string, payload: Record<string, unknown>, tag: string) => {
+    setBusy(tag); setNotice(null);
+    try {
+      const response = await fetch(url, {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
+      });
+      const json = await response.json().catch(() => ({}));
+      if (!response.ok || !json.ok) throw new Error(json.error || "Request failed.");
+      return json;
+    } finally {
+      setBusy("");
+    }
+  }, []);
+
+  const run = useCallback(async (
+    url: string, payload: Record<string, unknown>, tag: string, success: string,
+  ) => {
+    try {
+      const json = await post(url, payload, tag);
+      await load();
+      setNotice({ tone: "success", text: success });
+      return json;
+    } catch (error) {
+      setNotice({ tone: "error", text: error instanceof Error ? error.message : "Request failed." });
+      return null;
+    }
+  }, [post, load]);
+
+  const meta = VIEW_META[view];
+
+  return (
+    <div className="p-4 sm:p-6 lg:p-8">
+      <header className="mb-6 flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <Link href="/admin/executive-board" className="text-[11px] font-bold uppercase tracking-[0.18em] text-[#0A4FE8] hover:underline">
+            Executive Board
+          </Link>
+          <h1 className="mt-1 text-2xl font-black tracking-tight text-[#07133B] sm:text-[28px]">{meta.title}</h1>
+          <p className="mt-1 text-sm text-slate-500">{meta.blurb}</p>
+        </div>
+        <div className="flex items-center gap-3">
+          {loading && <Loader2 className="h-5 w-5 animate-spin text-[#0A4FE8]" />}
+          <CurrencyToggle value={currency} onChange={pickCurrency} />
+        </div>
+      </header>
+
+      {notice && (
+        <div className={`mb-5 flex items-start justify-between gap-3 rounded-2xl px-4 py-3 text-sm ${notice.tone === "success" ? "bg-emerald-50 text-emerald-800" : "bg-rose-50 text-rose-800"}`}>
+          <span>{notice.text}</span>
+          <button type="button" onClick={() => setNotice(null)} aria-label="Dismiss"><X className="h-4 w-4" /></button>
+        </div>
+      )}
+
+      <BoardCurrency.Provider value={currency}>
+        {view === "overview" && <Overview board={board} />}
+        {view === "budgets" && <Budgets board={board} busy={busy} run={run} />}
+        {view === "targets" && <Targets board={board} busy={busy} run={run} />}
+        {view === "models" && <Models board={board} busy={busy} run={run} />}
+        {view === "vault" && <Vault board={board} busy={busy} run={run} reload={load} setNotice={setNotice} />}
+      </BoardCurrency.Provider>
+    </div>
+  );
+}
+
+type Run = (url: string, payload: Record<string, unknown>, tag: string, success: string) => Promise<any>;
+
+/* ---------------------------- Shared bits ---------------------------- */
+
+function Badge({ value }: { value: string }) {
+  return <span className={`rounded-full px-2 py-0.5 text-[11px] font-bold ${TONE[value] || "bg-slate-100 text-slate-600"}`}>{label(value)}</span>;
+}
+
+/**
+ * A money figure shown in the board's planning currency, with the amount as it
+ * was actually entered underneath. The headline number is a conversion at our
+ * hand-maintained rate, so the entered figure stays visible as the record.
+ */
+function Money({ amount, currency, className = "", tone = "" }: { amount: number; currency: string; className?: string; tone?: string }) {
+  const view = useBoardCurrency();
+  const { primary, note } = formatMoneyView(amount, currency, view);
+  return (
+    <span className={className}>
+      <span className={tone}>{primary}</span>
+      {note && <span className="block text-xs font-medium text-slate-400">{note}</span>}
+    </span>
+  );
+}
+
+function Card({ children, className = "" }: { children: React.ReactNode; className?: string }) {
+  return <div className={`rounded-2xl border border-slate-200 bg-white p-4 sm:p-5 ${className}`}>{children}</div>;
+}
+
+function Stat({ icon: Icon, label: text, value, hint }: { icon: typeof Wallet; label: string; value: string; hint?: string }) {
+  return (
+    <Card>
+      <div className="flex items-center gap-2 text-[11px] font-bold uppercase tracking-wider text-slate-400">
+        <Icon className="h-3.5 w-3.5" /> {text}
+      </div>
+      <p className="mt-2 text-2xl font-black tracking-tight text-[#07133B]">{value}</p>
+      {hint && <p className="mt-1 text-xs text-slate-400">{hint}</p>}
+    </Card>
+  );
+}
+
+function Field({ label: text, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <label className="block">
+      <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500">{text}</span>
+      <div className="mt-1">{children}</div>
+    </label>
+  );
+}
+
+const inputClass = "h-10 w-full rounded-xl border border-slate-200 px-3 text-sm outline-none focus:border-[#0A4FE8]";
+const areaClass = "w-full rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none focus:border-[#0A4FE8]";
+
+function Modal({ title, onClose, children }: { title: string; onClose: () => void; children: React.ReactNode }) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-end justify-center overflow-y-auto bg-black/40 p-0 backdrop-blur-sm sm:items-center sm:p-4" onClick={onClose}>
+      <div
+        onClick={(event) => event.stopPropagation()}
+        className="max-h-[calc(100dvh-1rem)] w-full overflow-y-auto rounded-t-3xl bg-white p-5 sm:max-h-[90vh] sm:w-[min(40rem,100%)] sm:rounded-3xl sm:p-6"
+      >
+        <div className="mb-4 flex items-center justify-between gap-3">
+          <h2 className="text-lg font-bold text-[#07133B]">{title}</h2>
+          <button type="button" onClick={onClose} aria-label="Close" className="rounded-lg p-1 text-slate-400 hover:bg-slate-100"><X className="h-5 w-5" /></button>
+        </div>
+        {children}
+      </div>
+    </div>
+  );
+}
+
+function Empty({ text }: { text: string }) {
+  return <p className="rounded-2xl border border-dashed border-slate-200 bg-white py-14 text-center text-sm text-slate-400">{text}</p>;
+}
+
+/* ------------------------------ Overview ------------------------------ */
+
+function Overview({ board }: { board: Board }) {
+  const view = useBoardCurrency();
+  // Budget lines can each be entered in a different currency, so every one is
+  // converted into the view currency before it is added up. A line with no
+  // published rate is counted at face value rather than dropped.
+  const into = (amount: number, from: string) => convertMoney(amount, from, view) ?? Number(amount || 0);
+  const planned = board.budgets.reduce((sum, b) => sum + into(Number(b.planned_amount || 0), b.currency), 0);
+  const actual = board.budgets.reduce((sum, b) => sum + into(Number(b.actual_amount || 0), b.currency), 0);
+  const currency = view;
+  const activeModels = board.models.filter((m) => m.status === "active").length;
+  const atRisk = board.targets.filter((t) => t.status === "at_risk" || t.status === "off_track").length;
+  const locked = board.files.filter((f) => f.has_password || f.inherits_password).length;
+  const liveShares = board.shares.filter(shareIsLive).length;
+
+  const links: Array<{ href: string; icon: typeof Wallet; title: string; body: string }> = [
+    { href: "/admin/executive-board/budgets", icon: Wallet, title: "Budgets", body: `${board.budgets.length} line${board.budgets.length === 1 ? "" : "s"} tracked` },
+    { href: "/admin/executive-board/targets", icon: TargetIcon, title: "Targets", body: `${board.targets.length} target${board.targets.length === 1 ? "" : "s"}, ${atRisk} needing attention` },
+    { href: "/admin/executive-board/revenue-models", icon: Rocket, title: "Revenue models", body: `${board.models.length} model${board.models.length === 1 ? "" : "s"}, ${activeModels} active` },
+    { href: "/admin/executive-board/vault", icon: Lock, title: "Document vault", body: `${board.files.length} file${board.files.length === 1 ? "" : "s"}, ${locked} protected` },
+  ];
+
+  return (
+    <div className="space-y-6">
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        <Stat
+          icon={Wallet}
+          label="Planned spend"
+          value={formatMoneyView(planned, currency, view).primary}
+          hint={`${board.budgets.length} budget lines`}
+        />
+        <Stat
+          icon={Landmark}
+          label="Actual spend"
+          value={formatMoneyView(actual, currency, view).primary}
+          hint={`${formatMoneyView(planned - actual, currency, view).primary} variance`}
+        />
+        <Stat icon={TargetIcon} label="Targets at risk" value={String(atRisk)} hint={`of ${board.targets.length} tracked`} />
+        <Stat icon={Link2} label="Live share links" value={String(liveShares)} hint={`${locked} protected files`} />
+      </div>
+
+      <div className="grid gap-3 sm:grid-cols-2">
+        {links.map((link) => (
+          <Link key={link.href} href={link.href} className="group rounded-2xl border border-slate-200 bg-white p-5 transition hover:border-[#0A4FE8]">
+            <div className="flex items-center justify-between">
+              <span className="grid h-10 w-10 place-items-center rounded-xl bg-blue-50 text-[#0A4FE8]"><link.icon className="h-5 w-5" /></span>
+              <ChevronRight className="h-4 w-4 text-slate-300 transition group-hover:translate-x-0.5 group-hover:text-[#0A4FE8]" />
+            </div>
+            <p className="mt-3 text-sm font-bold text-[#07133B]">{link.title}</p>
+            <p className="text-xs text-slate-500">{link.body}</p>
+          </Link>
+        ))}
+      </div>
+
+      {board.models.length > 0 && (
+        <Card>
+          <h2 className="text-sm font-bold text-[#07133B]">Execution progress</h2>
+          <div className="mt-3 space-y-3">
+            {board.models.map((model) => (
+              <div key={model.id}>
+                <div className="flex items-center justify-between gap-3 text-sm">
+                  <span className="truncate font-semibold text-[#07133B]">{model.name}</span>
+                  <span className="shrink-0 text-xs text-slate-400">{planProgress(model.steps)}% of {model.steps.length} steps</span>
+                </div>
+                <div className="mt-1 h-1.5 w-full overflow-hidden rounded-full bg-slate-100">
+                  <div className="h-full rounded-full bg-[#0A4FE8]" style={{ width: `${planProgress(model.steps)}%` }} />
+                </div>
+              </div>
+            ))}
+          </div>
+        </Card>
+      )}
+    </div>
+  );
+}
+
+/* ------------------------------- Budgets ------------------------------- */
+
+const emptyBudget = (): Partial<Budget> => ({
+  title: "", category: "operations", period_label: "", currency: "USD",
+  planned_amount: 0, actual_amount: 0, status: "draft", owner: "", notes: "",
+});
+
+function Budgets({ board, busy, run }: { board: Board; busy: string; run: Run }) {
+  const [draft, setDraft] = useState<Partial<Budget> | null>(null);
+  // A blank form on every "new", with the last unsaved attempt offered beside it.
+  const recovery = useUnsavedDraft<Partial<Budget>>({
+    key: "budget",
+    draft,
+    isNew: Boolean(draft) && !draft?.id,
+    blank: emptyBudget(),
+    onResume: setDraft,
+  });
+
+  const save = async () => {
+    if (!draft) return;
+    const done = await run("/api/admin/executive-board", { action: "save_budget", ...draft }, "budget", "Budget saved.");
+    if (done) { recovery.clear(); setDraft(null); }
+  };
+
+  const view = useBoardCurrency();
+  const totals = useMemo(() => {
+    const into = (amount: number, from: string) => convertMoney(amount, from, view) ?? Number(amount || 0);
+    return {
+      currency: view,
+      planned: board.budgets.reduce((sum, b) => sum + into(Number(b.planned_amount || 0), b.currency), 0),
+      actual: board.budgets.reduce((sum, b) => sum + into(Number(b.actual_amount || 0), b.currency), 0),
+    };
+  }, [board.budgets, view]);
+
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex flex-wrap gap-3 text-sm text-slate-500">
+          <span>Planned <Money amount={totals.planned} currency={totals.currency} className="inline-block align-top" tone="font-bold text-[#07133B]" /></span>
+          <span>Actual <Money amount={totals.actual} currency={totals.currency} className="inline-block align-top" tone="font-bold text-[#07133B]" /></span>
+          <span>Variance <Money amount={totals.planned - totals.actual} currency={totals.currency} className="inline-block align-top" tone={totals.planned - totals.actual < 0 ? "font-bold text-rose-600" : "font-bold text-emerald-700"} /></span>
+        </div>
+        <button type="button" onClick={() => setDraft(emptyBudget())} className="inline-flex h-10 items-center gap-2 rounded-xl bg-[#0A4FE8] px-4 text-sm font-bold text-white">
+          <Plus className="h-4 w-4" /> New budget line
+        </button>
+      </div>
+
+      {board.budgets.length === 0 ? <Empty text="No budget lines yet." /> : (
+        <div className="overflow-x-auto rounded-2xl border border-slate-200 bg-white">
+          <table className="w-full min-w-[820px] text-sm">
+            <thead className="bg-slate-50 text-left text-[11px] font-bold uppercase tracking-wider text-slate-400">
+              <tr>
+                <th className="px-4 py-3">Line</th><th className="px-4 py-3">Period</th>
+                <th className="px-4 py-3 text-right">Planned</th><th className="px-4 py-3 text-right">Actual</th>
+                <th className="px-4 py-3 text-right">Variance</th><th className="px-4 py-3">Status</th><th className="px-4 py-3" />
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {board.budgets.map((budget) => {
+                const variance = budgetVariance(budget);
+                return (
+                  <tr key={budget.id}>
+                    <td className="px-4 py-3">
+                      <p className="font-semibold text-[#07133B]">{budget.title}</p>
+                      <p className="text-xs text-slate-400">{budget.category}{budget.owner ? ` · ${budget.owner}` : ""}</p>
+                    </td>
+                    <td className="px-4 py-3 text-slate-500">{budget.period_label || (budget.period_start ? `${budget.period_start} to ${budget.period_end || "open"}` : "-")}</td>
+                    <td className="px-4 py-3 text-right text-slate-600"><Money amount={budget.planned_amount} currency={budget.currency} /></td>
+                    <td className="px-4 py-3 text-right text-slate-600"><Money amount={budget.actual_amount} currency={budget.currency} /></td>
+                    <td className="px-4 py-3 text-right"><Money amount={variance} currency={budget.currency} tone={`font-semibold ${variance < 0 ? "text-rose-600" : "text-emerald-700"}`} /></td>
+                    <td className="px-4 py-3"><Badge value={budget.status} /></td>
+                    <td className="px-4 py-3">
+                      <div className="flex justify-end gap-1">
+                        <button type="button" onClick={() => setDraft(budget)} className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100" aria-label="Edit"><Pencil className="h-4 w-4" /></button>
+                        <button type="button" onClick={() => run("/api/admin/executive-board", { action: "delete_budget", id: budget.id }, "budget", "Budget removed.")} className="rounded-lg p-1.5 text-slate-400 hover:bg-rose-50 hover:text-rose-600" aria-label="Delete"><Trash2 className="h-4 w-4" /></button>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {draft && (
+        <Modal title={draft.id ? "Edit budget line" : "New budget line"} onClose={() => setDraft(null)}>
+          <UnsavedDraftNotice<Partial<Budget>>
+            recovery={recovery}
+            label="budget line"
+            describe={(item) => item.title || ""}
+          />
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div className="sm:col-span-2"><Field label="Title"><input className={inputClass} value={draft.title || ""} onChange={(e) => setDraft({ ...draft, title: e.target.value })} placeholder="Q1 marketing" /></Field></div>
+            <Field label="Category">
+              <select className={inputClass} value={draft.category} onChange={(e) => setDraft({ ...draft, category: e.target.value })}>
+                {BUDGET_CATEGORIES.map((c) => <option key={c} value={c}>{c}</option>)}
+              </select>
+            </Field>
+            <Field label="Status">
+              <select className={inputClass} value={draft.status} onChange={(e) => setDraft({ ...draft, status: e.target.value as Budget["status"] })}>
+                {BUDGET_STATUSES.map((s) => <option key={s} value={s}>{label(s)}</option>)}
+              </select>
+            </Field>
+            <Field label="Period label"><input className={inputClass} value={draft.period_label || ""} onChange={(e) => setDraft({ ...draft, period_label: e.target.value })} placeholder="Q1 2026" /></Field>
+            <Field label="Owner"><input className={inputClass} value={draft.owner || ""} onChange={(e) => setDraft({ ...draft, owner: e.target.value })} placeholder="Who owns this" /></Field>
+            <Field label="Starts"><input type="date" className={inputClass} value={draft.period_start || ""} onChange={(e) => setDraft({ ...draft, period_start: e.target.value })} /></Field>
+            <Field label="Ends"><input type="date" className={inputClass} value={draft.period_end || ""} onChange={(e) => setDraft({ ...draft, period_end: e.target.value })} /></Field>
+            <Field label="Currency"><input className={inputClass} maxLength={3} value={draft.currency || "USD"} onChange={(e) => setDraft({ ...draft, currency: e.target.value.toUpperCase() })} /></Field>
+            <Field label="Planned"><input type="number" step="0.01" className={inputClass} value={String(draft.planned_amount ?? 0)} onChange={(e) => setDraft({ ...draft, planned_amount: Number(e.target.value) })} /></Field>
+            <Field label="Actual"><input type="number" step="0.01" className={inputClass} value={String(draft.actual_amount ?? 0)} onChange={(e) => setDraft({ ...draft, actual_amount: Number(e.target.value) })} /></Field>
+            <div className="sm:col-span-2"><Field label="Notes"><textarea rows={3} className={areaClass} value={draft.notes || ""} onChange={(e) => setDraft({ ...draft, notes: e.target.value })} /></Field></div>
+          </div>
+          <button type="button" onClick={save} disabled={busy === "budget" || !draft.title} className="mt-5 inline-flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-[#0A4FE8] text-sm font-bold text-white disabled:opacity-50">
+            {busy === "budget" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />} Save budget line
+          </button>
+        </Modal>
+      )}
+    </div>
+  );
+}
+
+/* ------------------------------- Targets ------------------------------- */
+
+const emptyTarget = (): Partial<Target> => ({
+  title: "", metric: "", unit: "", target_value: 0, current_value: 0,
+  status: "on_track", owner: "", notes: "", model_id: null,
+});
+
+function Targets({ board, busy, run }: { board: Board; busy: string; run: Run }) {
+  const view = useBoardCurrency();
+  const [draft, setDraft] = useState<Partial<Target> | null>(null);
+  // A blank form on every "new", with the last unsaved attempt offered beside it.
+  const recovery = useUnsavedDraft<Partial<Target>>({
+    key: "target",
+    draft,
+    isNew: Boolean(draft) && !draft?.id,
+    blank: emptyTarget(),
+    onResume: setDraft,
+  });
+
+  const save = async () => {
+    if (!draft) return;
+    const done = await run("/api/admin/executive-board", { action: "save_target", ...draft }, "target", "Target saved.");
+    if (done) { recovery.clear(); setDraft(null); }
+  };
+
+  return (
+    <div className="space-y-4">
+      <div className="flex justify-end">
+        <button type="button" onClick={() => setDraft(emptyTarget())} className="inline-flex h-10 items-center gap-2 rounded-xl bg-[#0A4FE8] px-4 text-sm font-bold text-white">
+          <Plus className="h-4 w-4" /> New target
+        </button>
+      </div>
+
+      {board.targets.length === 0 ? <Empty text="No targets set yet." /> : (
+        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+          {board.targets.map((target) => {
+            const progress = targetProgress(target);
+            const model = board.models.find((m) => m.id === target.model_id);
+            return (
+              <Card key={target.id}>
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0">
+                    <p className="truncate font-bold text-[#07133B]">{target.title}</p>
+                    <p className="truncate text-xs text-slate-400">{target.metric || "No metric"}{model ? ` · ${model.name}` : ""}</p>
+                  </div>
+                  <Badge value={target.status} />
+                </div>
+                <p className="mt-3 text-2xl font-black tracking-tight text-[#07133B]">
+                  {Number(target.current_value || 0).toLocaleString()}
+                  <span className="text-sm font-semibold text-slate-400"> / {Number(target.target_value || 0).toLocaleString()} {target.unit}</span>
+                </p>
+                {/* A target is money only when its unit names a currency; a
+                    headcount or a percentage has no counterpart to show. */}
+                {(() => {
+                  const unitCurrency = currencyUnit(target.unit);
+                  if (!unitCurrency || unitCurrency === view) return null;
+                  const current = formatMoneyView(target.current_value, unitCurrency, view);
+                  const goal = formatMoneyView(target.target_value, unitCurrency, view);
+                  return <p className="mt-0.5 text-xs font-medium text-slate-400">{current.primary} / {goal.primary}</p>;
+                })()}
+                <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-slate-100">
+                  <div className="h-full rounded-full bg-[#0A4FE8]" style={{ width: `${progress}%` }} />
+                </div>
+                <div className="mt-3 flex items-center justify-between text-xs text-slate-400">
+                  <span>{target.due_on ? `Due ${target.due_on}` : "No due date"}{target.owner ? ` · ${target.owner}` : ""}</span>
+                  <span className="flex gap-1">
+                    <button type="button" onClick={() => setDraft(target)} className="rounded p-1 hover:bg-slate-100" aria-label="Edit"><Pencil className="h-3.5 w-3.5" /></button>
+                    <button type="button" onClick={() => run("/api/admin/executive-board", { action: "delete_target", id: target.id }, "target", "Target removed.")} className="rounded p-1 hover:bg-rose-50 hover:text-rose-600" aria-label="Delete"><Trash2 className="h-3.5 w-3.5" /></button>
+                  </span>
+                </div>
+              </Card>
+            );
+          })}
+        </div>
+      )}
+
+      {draft && (
+        <Modal title={draft.id ? "Edit target" : "New target"} onClose={() => setDraft(null)}>
+          <UnsavedDraftNotice<Partial<Target>>
+            recovery={recovery}
+            label="target"
+            describe={(item) => item.title || ""}
+          />
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div className="sm:col-span-2"><Field label="Title"><input className={inputClass} value={draft.title || ""} onChange={(e) => setDraft({ ...draft, title: e.target.value })} placeholder="Annual recurring revenue" /></Field></div>
+            <Field label="Metric"><input className={inputClass} value={draft.metric || ""} onChange={(e) => setDraft({ ...draft, metric: e.target.value })} placeholder="Signed retainers" /></Field>
+            <Field label="Unit"><input className={inputClass} value={draft.unit || ""} onChange={(e) => setDraft({ ...draft, unit: e.target.value })} placeholder="clients" /></Field>
+            <Field label="Target value"><input type="number" step="0.01" className={inputClass} value={String(draft.target_value ?? 0)} onChange={(e) => setDraft({ ...draft, target_value: Number(e.target.value) })} /></Field>
+            <Field label="Current value"><input type="number" step="0.01" className={inputClass} value={String(draft.current_value ?? 0)} onChange={(e) => setDraft({ ...draft, current_value: Number(e.target.value) })} /></Field>
+            <Field label="Due"><input type="date" className={inputClass} value={draft.due_on || ""} onChange={(e) => setDraft({ ...draft, due_on: e.target.value })} /></Field>
+            <Field label="Owner"><input className={inputClass} value={draft.owner || ""} onChange={(e) => setDraft({ ...draft, owner: e.target.value })} /></Field>
+            <Field label="Status">
+              <select className={inputClass} value={draft.status} onChange={(e) => setDraft({ ...draft, status: e.target.value as Target["status"] })}>
+                {TARGET_STATUSES.map((s) => <option key={s} value={s}>{label(s)}</option>)}
+              </select>
+            </Field>
+            <Field label="Revenue model">
+              <select className={inputClass} value={draft.model_id || ""} onChange={(e) => setDraft({ ...draft, model_id: e.target.value || null })}>
+                <option value="">Not linked</option>
+                {board.models.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
+              </select>
+            </Field>
+            <div className="sm:col-span-2"><Field label="Notes"><textarea rows={3} className={areaClass} value={draft.notes || ""} onChange={(e) => setDraft({ ...draft, notes: e.target.value })} /></Field></div>
+          </div>
+          <button type="button" onClick={save} disabled={busy === "target" || !draft.title} className="mt-5 inline-flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-[#0A4FE8] text-sm font-bold text-white disabled:opacity-50">
+            {busy === "target" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />} Save target
+          </button>
+        </Modal>
+      )}
+    </div>
+  );
+}
+
+/* --------------------------- Revenue models --------------------------- */
+
+const emptyModel = (): Partial<RevenueModel> => ({
+  name: "", summary: "", pricing_basis: "", status: "exploring",
+  currency: "USD", target_annual_value: 0, target_monthly_value: 0, owner: "", position: 0,
+});
+
+function Models({ board, busy, run }: { board: Board; busy: string; run: Run }) {
+  const view = useBoardCurrency();
+  const [draft, setDraft] = useState<Partial<RevenueModel> | null>(null);
+  // A blank form on every "new", with the last unsaved attempt offered beside it.
+  const recovery = useUnsavedDraft<Partial<RevenueModel>>({
+    key: "model",
+    draft,
+    isNew: Boolean(draft) && !draft?.id,
+    blank: emptyModel(),
+    onResume: setDraft,
+  });
+  const [stepDraft, setStepDraft] = useState<(Partial<RevenueStep> & { model_id: string }) | null>(null);
+  const [open, setOpen] = useState<string[]>([]);
+
+  const toggle = (id: string) => setOpen((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
+
+  const saveModel = async () => {
+    if (!draft) return;
+    const done = await run("/api/admin/executive-board", { action: "save_model", ...draft }, "model", "Revenue model saved.");
+    if (done) { recovery.clear(); setDraft(null); }
+  };
+
+  const saveStep = async () => {
+    if (!stepDraft) return;
+    const done = await run("/api/admin/executive-board", { action: "save_step", ...stepDraft }, "step", "Step saved.");
+    if (done) setStepDraft(null);
+  };
+
+  return (
+    <div className="space-y-4">
+      <div className="flex justify-end">
+        <button type="button" onClick={() => setDraft(emptyModel())} className="inline-flex h-10 items-center gap-2 rounded-xl bg-[#0A4FE8] px-4 text-sm font-bold text-white">
+          <Plus className="h-4 w-4" /> New revenue model
+        </button>
+      </div>
+
+      {board.models.length === 0 ? <Empty text="No revenue models yet." /> : (
+        <div className="space-y-3">
+          {board.models.map((model) => {
+            const expanded = open.includes(model.id);
+            const progress = planProgress(model.steps);
+            return (
+              <Card key={model.id} className="!p-0">
+                <div className="flex flex-wrap items-start justify-between gap-3 p-4 sm:p-5">
+                  <button type="button" onClick={() => toggle(model.id)} className="flex min-w-0 flex-1 items-start gap-3 text-left">
+                    <span className="mt-0.5 text-slate-300">{expanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}</span>
+                    <span className="min-w-0">
+                      <span className="flex flex-wrap items-center gap-2">
+                        <span className="font-bold text-[#07133B]">{model.name}</span>
+                        <Badge value={model.status} />
+                      </span>
+                      {model.summary && <span className="mt-0.5 block text-sm text-slate-500">{model.summary}</span>}
+                      <span className="mt-1 block text-xs text-slate-400">
+                        {formatMoneyView(model.target_monthly_value, model.currency, view).primary}/mo
+                        {" · "}
+                        {formatMoneyView(model.target_annual_value, model.currency, view).primary}/yr
+                        {model.pricing_basis ? ` · ${model.pricing_basis}` : ""}
+                        {model.owner ? ` · ${model.owner}` : ""}
+                      </span>
+                    </span>
+                  </button>
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs text-slate-400">{progress}% of {model.steps.length}</span>
+                    <button type="button" onClick={() => setDraft(model)} className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100" aria-label="Edit"><Pencil className="h-4 w-4" /></button>
+                    <button type="button" onClick={() => run("/api/admin/executive-board", { action: "delete_model", id: model.id }, "model", "Revenue model removed.")} className="rounded-lg p-1.5 text-slate-400 hover:bg-rose-50 hover:text-rose-600" aria-label="Delete"><Trash2 className="h-4 w-4" /></button>
+                  </div>
+                </div>
+
+                {expanded && (
+                  <div className="border-t border-slate-100 p-4 sm:p-5">
+                    <div className="mb-3 flex items-center justify-between">
+                      <h3 className="text-sm font-bold text-[#07133B]">Execution plan</h3>
+                      <button type="button" onClick={() => setStepDraft({ model_id: model.id, title: "", status: "todo" })} className="inline-flex items-center gap-1.5 rounded-lg border border-blue-200 px-2.5 py-1.5 text-xs font-bold text-[#0A4FE8] hover:bg-blue-50">
+                        <Plus className="h-3.5 w-3.5" /> Add step
+                      </button>
+                    </div>
+                    {model.steps.length === 0 ? (
+                      <p className="rounded-xl border border-dashed border-slate-200 py-8 text-center text-sm text-slate-400">No steps yet. Add the first one.</p>
+                    ) : (
+                      <ol className="space-y-2">
+                        {model.steps.map((step, index) => (
+                          <li key={step.id} className="flex items-start gap-3 rounded-xl border border-slate-200 p-3">
+                            <span className="grid h-6 w-6 shrink-0 place-items-center rounded-full bg-blue-50 text-[11px] font-bold text-[#0A4FE8]">{index + 1}</span>
+                            <div className="min-w-0 flex-1">
+                              <div className="flex flex-wrap items-center gap-2">
+                                <p className="font-semibold text-[#07133B]">{step.title}</p>
+                                <Badge value={step.status} />
+                              </div>
+                              {step.detail && <p className="mt-0.5 text-sm text-slate-500">{step.detail}</p>}
+                              {(step.owner || step.due_on) && (
+                                <p className="mt-1 text-xs text-slate-400">{[step.owner, step.due_on ? `due ${step.due_on}` : ""].filter(Boolean).join(" · ")}</p>
+                              )}
+                            </div>
+                            <span className="flex shrink-0 gap-1">
+                              <button type="button" onClick={() => setStepDraft({ ...step, model_id: model.id })} className="rounded p-1 text-slate-400 hover:bg-slate-100" aria-label="Edit step"><Pencil className="h-3.5 w-3.5" /></button>
+                              <button type="button" onClick={() => run("/api/admin/executive-board", { action: "delete_step", id: step.id }, "step", "Step removed.")} className="rounded p-1 text-slate-400 hover:bg-rose-50 hover:text-rose-600" aria-label="Delete step"><Trash2 className="h-3.5 w-3.5" /></button>
+                            </span>
+                          </li>
+                        ))}
+                      </ol>
+                    )}
+                  </div>
+                )}
+              </Card>
+            );
+          })}
+        </div>
+      )}
+
+      {draft && (
+        <Modal title={draft.id ? "Edit revenue model" : "New revenue model"} onClose={() => setDraft(null)}>
+          <UnsavedDraftNotice<Partial<RevenueModel>>
+            recovery={recovery}
+            label="revenue model"
+            describe={(item) => item.name || ""}
+          />
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div className="sm:col-span-2"><Field label="Name"><input className={inputClass} value={draft.name || ""} onChange={(e) => setDraft({ ...draft, name: e.target.value })} placeholder="Brand systems retainer" /></Field></div>
+            <div className="sm:col-span-2"><Field label="Summary"><textarea rows={3} className={areaClass} value={draft.summary || ""} onChange={(e) => setDraft({ ...draft, summary: e.target.value })} placeholder="What this model is and who it serves" /></Field></div>
+            <div className="sm:col-span-2"><Field label="Pricing basis"><input className={inputClass} value={draft.pricing_basis || ""} onChange={(e) => setDraft({ ...draft, pricing_basis: e.target.value })} placeholder="Monthly retainer, per seat, per project" /></Field></div>
+            <Field label="Status">
+              <select className={inputClass} value={draft.status} onChange={(e) => setDraft({ ...draft, status: e.target.value as RevenueModel["status"] })}>
+                {MODEL_STATUSES.map((s) => <option key={s} value={s}>{label(s)}</option>)}
+              </select>
+            </Field>
+            <Field label="Owner"><input className={inputClass} value={draft.owner || ""} onChange={(e) => setDraft({ ...draft, owner: e.target.value })} /></Field>
+            <Field label="Currency"><input className={inputClass} maxLength={3} value={draft.currency || "USD"} onChange={(e) => setDraft({ ...draft, currency: e.target.value.toUpperCase() })} /></Field>
+            <Field label="Monthly target">
+              <input
+                type="number"
+                step="0.01"
+                className={inputClass}
+                value={String(draft.target_monthly_value ?? 0)}
+                // Typing a monthly figure fills the annual one for you. Either
+                // stays editable afterwards, so a phased ramp that is not a
+                // clean twelfth can still be recorded.
+                onChange={(e) => {
+                  const monthly = Number(e.target.value);
+                  setDraft({
+                    ...draft,
+                    target_monthly_value: monthly,
+                    target_annual_value: Math.round(monthly * 12 * 100) / 100,
+                  });
+                }}
+              />
+            </Field>
+            <Field label="Annual target">
+              <input
+                type="number"
+                step="0.01"
+                className={inputClass}
+                value={String(draft.target_annual_value ?? 0)}
+                onChange={(e) => {
+                  const annual = Number(e.target.value);
+                  setDraft({
+                    ...draft,
+                    target_annual_value: annual,
+                    target_monthly_value: Math.round((annual / 12) * 100) / 100,
+                  });
+                }}
+              />
+            </Field>
+            <div className="sm:col-span-2">
+              <p className="text-xs text-slate-400">
+                Monthly and annual stay in step as you type. Edit either one on its own afterwards if the year ramps unevenly.
+              </p>
+            </div>
+          </div>
+          <button type="button" onClick={saveModel} disabled={busy === "model" || !draft.name} className="mt-5 inline-flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-[#0A4FE8] text-sm font-bold text-white disabled:opacity-50">
+            {busy === "model" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />} Save revenue model
+          </button>
+        </Modal>
+      )}
+
+      {stepDraft && (
+        <Modal title={stepDraft.id ? "Edit step" : "Add step"} onClose={() => setStepDraft(null)}>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div className="sm:col-span-2"><Field label="Step"><input className={inputClass} value={stepDraft.title || ""} onChange={(e) => setStepDraft({ ...stepDraft, title: e.target.value })} placeholder="Package the offer and price it" /></Field></div>
+            <div className="sm:col-span-2"><Field label="How it gets done"><textarea rows={3} className={areaClass} value={stepDraft.detail || ""} onChange={(e) => setStepDraft({ ...stepDraft, detail: e.target.value })} /></Field></div>
+            <Field label="Owner"><input className={inputClass} value={stepDraft.owner || ""} onChange={(e) => setStepDraft({ ...stepDraft, owner: e.target.value })} /></Field>
+            <Field label="Due"><input type="date" className={inputClass} value={stepDraft.due_on || ""} onChange={(e) => setStepDraft({ ...stepDraft, due_on: e.target.value })} /></Field>
+            <Field label="Status">
+              <select className={inputClass} value={stepDraft.status} onChange={(e) => setStepDraft({ ...stepDraft, status: e.target.value as RevenueStep["status"] })}>
+                {STEP_STATUSES.map((s) => <option key={s} value={s}>{label(s)}</option>)}
+              </select>
+            </Field>
+          </div>
+          <button type="button" onClick={saveStep} disabled={busy === "step" || !stepDraft.title} className="mt-5 inline-flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-[#0A4FE8] text-sm font-bold text-white disabled:opacity-50">
+            {busy === "step" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />} Save step
+          </button>
+        </Modal>
+      )}
+    </div>
+  );
+}
+
+/* -------------------------------- Vault -------------------------------- */
+
+function Vault({ board, busy, run, reload, setNotice }: {
+  board: Board; busy: string; run: Run; reload: () => Promise<void>;
+  setNotice: (value: { tone: "success" | "error"; text: string } | null) => void;
+}) {
+  const [folderId, setFolderId] = useState<string | null>(null);
+  const [folderDraft, setFolderDraft] = useState<(Partial<VaultFolder> & { password?: string; clear_password?: boolean }) | null>(null);
+  const [fileDraft, setFileDraft] = useState<(Partial<VaultFile> & { password?: string; clear_password?: boolean }) | null>(null);
+  const [uploading, setUploading] = useState(false);
+  const [upload, setUpload] = useState<{ file: File | null; title: string; kind: string; description: string; password: string } | null>(null);
+  const [share, setShare] = useState<{ file_id?: string; folder_id?: string; name: string; password: string; recipient_email: string; note: string; expires_in_days: string; max_downloads: string } | null>(null);
+  const [shareUrl, setShareUrl] = useState("");
+  const [copied, setCopied] = useState(false);
+
+  const folders = board.folders.filter((f) => (f.parent_id || null) === folderId);
+  const files = board.files.filter((f) => (f.folder_id || null) === folderId);
+  const current = board.folders.find((f) => f.id === folderId) || null;
+
+  // Breadcrumb from the current folder back to the root.
+  const trail = useMemo(() => {
+    const path: VaultFolder[] = [];
+    let cursor = current;
+    for (let depth = 0; cursor && depth < 12; depth++) {
+      path.unshift(cursor);
+      cursor = board.folders.find((f) => f.id === cursor?.parent_id) || null;
+    }
+    return path;
+  }, [current, board.folders]);
+
+  const sharesFor = (fileId: string) => board.shares.filter((s) => s.file_id === fileId && shareIsLive(s));
+
+  const doUpload = async () => {
+    if (!upload?.file) return;
+    setUploading(true); setNotice(null);
+    try {
+      const data = new FormData();
+      data.append("file", upload.file);
+      data.append("title", upload.title || upload.file.name);
+      data.append("kind", upload.kind);
+      data.append("description", upload.description);
+      if (upload.password) data.append("password", upload.password);
+      if (folderId) data.append("folder_id", folderId);
+      const response = await fetch("/api/admin/executive-board/vault", { method: "POST", body: data });
+      const json = await response.json().catch(() => ({}));
+      if (!response.ok || !json.ok) throw new Error(json.error || "Upload failed.");
+      setUpload(null);
+      await reload();
+      setNotice({ tone: "success", text: "File uploaded." });
+    } catch (error) {
+      setNotice({ tone: "error", text: error instanceof Error ? error.message : "Upload failed." });
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const createShare = async () => {
+    if (!share) return;
+    const json = await run("/api/admin/executive-board/vault", {
+      action: "create_share",
+      file_id: share.file_id,
+      folder_id: share.folder_id,
+      password: share.password || undefined,
+      recipient_email: share.recipient_email || undefined,
+      note: share.note || undefined,
+      expires_in_days: Number(share.expires_in_days) || 0,
+      max_downloads: Number(share.max_downloads) || 0,
+    }, "share", "Share link created.");
+    if (json?.url) { setShareUrl(json.url); setCopied(false); }
+  };
+
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <nav className="flex flex-wrap items-center gap-1 text-sm text-slate-500">
+          <button type="button" onClick={() => setFolderId(null)} className="rounded px-1.5 py-0.5 font-semibold hover:bg-slate-100">Vault</button>
+          {trail.map((folder) => (
+            <span key={folder.id} className="flex items-center gap-1">
+              <ChevronRight className="h-3.5 w-3.5 text-slate-300" />
+              <button type="button" onClick={() => setFolderId(folder.id)} className="rounded px-1.5 py-0.5 font-semibold hover:bg-slate-100">{folder.name}</button>
+            </span>
+          ))}
+        </nav>
+        <div className="flex flex-wrap gap-2">
+          <button type="button" onClick={() => setFolderDraft({ parent_id: folderId, name: "" })} className="inline-flex h-10 items-center gap-2 rounded-xl border border-slate-200 px-3.5 text-sm font-bold text-slate-600 hover:bg-slate-50">
+            <FolderPlus className="h-4 w-4" /> New folder
+          </button>
+          <button type="button" onClick={() => setUpload({ file: null, title: "", kind: "attachment", description: "", password: "" })} className="inline-flex h-10 items-center gap-2 rounded-xl bg-[#0A4FE8] px-4 text-sm font-bold text-white">
+            <Upload className="h-4 w-4" /> Upload file
+          </button>
+        </div>
+      </div>
+
+      {current?.has_password && (
+        <p className="flex items-center gap-2 rounded-2xl bg-amber-50 px-4 py-2.5 text-sm text-amber-800">
+          <Lock className="h-4 w-4 shrink-0" /> This folder is password protected. Everything inside it inherits that password unless a file sets its own.
+        </p>
+      )}
+
+      {folders.length === 0 && files.length === 0 ? <Empty text="This folder is empty." /> : (
+        <div className="space-y-3">
+          {folders.map((folder) => (
+            <Card key={folder.id} className="flex flex-wrap items-center justify-between gap-3">
+              <button type="button" onClick={() => setFolderId(folder.id)} className="flex min-w-0 flex-1 items-center gap-3 text-left">
+                <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-blue-50 text-[#0A4FE8]"><Folder className="h-5 w-5" /></span>
+                <span className="min-w-0">
+                  <span className="flex items-center gap-2">
+                    <span className="truncate font-bold text-[#07133B]">{folder.name}</span>
+                    {folder.has_password && <Lock className="h-3.5 w-3.5 shrink-0 text-amber-500" />}
+                  </span>
+                  {folder.description && <span className="block truncate text-xs text-slate-400">{folder.description}</span>}
+                </span>
+              </button>
+              <div className="flex shrink-0 gap-1">
+                <button type="button" onClick={() => setShare({ folder_id: folder.id, name: folder.name, password: "", recipient_email: "", note: "", expires_in_days: "7", max_downloads: "" })} className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100" aria-label="Share folder"><Link2 className="h-4 w-4" /></button>
+                <button type="button" onClick={() => setFolderDraft(folder)} className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100" aria-label="Edit folder"><Pencil className="h-4 w-4" /></button>
+                <button type="button" onClick={() => run("/api/admin/executive-board/vault", { action: "delete_folder", id: folder.id }, "vault", "Folder removed.")} className="rounded-lg p-1.5 text-slate-400 hover:bg-rose-50 hover:text-rose-600" aria-label="Delete folder"><Trash2 className="h-4 w-4" /></button>
+              </div>
+            </Card>
+          ))}
+
+          {files.map((file) => {
+            const live = sharesFor(file.id);
+            return (
+              <Card key={file.id} className="flex flex-wrap items-center justify-between gap-3">
+                <div className="flex min-w-0 flex-1 items-center gap-3">
+                  <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-slate-100 text-slate-500"><FileText className="h-5 w-5" /></span>
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="truncate font-bold text-[#07133B]">{file.title}</span>
+                      <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-bold text-slate-500">{KIND_LABELS[file.kind] || file.kind}</span>
+                      {file.has_password
+                        ? <span className="inline-flex items-center gap-1 text-[11px] font-bold text-amber-600"><Lock className="h-3 w-3" /> Password</span>
+                        : file.inherits_password
+                          ? <span className="inline-flex items-center gap-1 text-[11px] font-bold text-amber-500"><Lock className="h-3 w-3" /> Folder password</span>
+                          : <span className="inline-flex items-center gap-1 text-[11px] font-bold text-slate-300"><Unlock className="h-3 w-3" /> Open</span>}
+                      {live.length > 0 && <span className="text-[11px] font-bold text-[#0A4FE8]">{live.length} live link{live.length === 1 ? "" : "s"}</span>}
+                    </div>
+                    <p className="truncate text-xs text-slate-400">{file.file_name} · {formatBytes(file.file_size_bytes)}</p>
+                  </div>
+                </div>
+                <div className="flex shrink-0 gap-1">
+                  <a href={`/api/admin/executive-board/vault?file=${file.id}`} className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100" aria-label="Download"><Download className="h-4 w-4" /></a>
+                  <button type="button" onClick={() => setShare({ file_id: file.id, name: file.title, password: "", recipient_email: "", note: "", expires_in_days: "7", max_downloads: "" })} className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100" aria-label="Share"><Link2 className="h-4 w-4" /></button>
+                  <button type="button" onClick={() => setFileDraft(file)} className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100" aria-label="Edit"><Pencil className="h-4 w-4" /></button>
+                  <button type="button" onClick={() => run("/api/admin/executive-board/vault", { action: "delete_file", id: file.id }, "vault", "File removed.")} className="rounded-lg p-1.5 text-slate-400 hover:bg-rose-50 hover:text-rose-600" aria-label="Delete"><Trash2 className="h-4 w-4" /></button>
+                </div>
+              </Card>
+            );
+          })}
+        </div>
+      )}
+
+      {board.shares.some(shareIsLive) && (
+        <Card>
+          <h2 className="text-sm font-bold text-[#07133B]">Live share links</h2>
+          <div className="mt-3 space-y-2">
+            {board.shares.filter(shareIsLive).map((entry) => {
+              const target = entry.file_id
+                ? board.files.find((f) => f.id === entry.file_id)?.title
+                : board.folders.find((f) => f.id === entry.folder_id)?.name;
+              return (
+                <div key={entry.id} className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-slate-200 p-3 text-sm">
+                  <div className="min-w-0">
+                    <p className="truncate font-semibold text-[#07133B]">{target || "Removed item"}</p>
+                    <p className="truncate text-xs text-slate-400">
+                      {entry.recipient_email || "No recipient noted"}
+                      {entry.expires_at ? ` · expires ${new Date(entry.expires_at).toLocaleDateString()}` : " · no expiry"}
+                      {` · ${entry.download_count}${entry.max_downloads ? `/${entry.max_downloads}` : ""} downloads`}
+                      {entry.has_password ? " · own password" : ""}
+                    </p>
+                  </div>
+                  <div className="flex shrink-0 items-center gap-1">
+                    <button type="button" onClick={() => { void navigator.clipboard.writeText(`${window.location.origin}/vault/${entry.token}`); setNotice({ tone: "success", text: "Link copied." }); }} className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100" aria-label="Copy link"><Copy className="h-4 w-4" /></button>
+                    <button type="button" onClick={() => run("/api/admin/executive-board/vault", { action: "revoke_share", id: entry.id }, "vault", "Share link revoked.")} className="rounded-lg px-2 py-1 text-xs font-bold text-slate-500 hover:bg-rose-50 hover:text-rose-600">Revoke</button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </Card>
+      )}
+
+      {/* ----- Folder modal ----- */}
+      {folderDraft && (
+        <Modal title={folderDraft.id ? "Edit folder" : "New folder"} onClose={() => setFolderDraft(null)}>
+          <div className="space-y-3">
+            <Field label="Name"><input className={inputClass} value={folderDraft.name || ""} onChange={(e) => setFolderDraft({ ...folderDraft, name: e.target.value })} placeholder="Board resolutions" /></Field>
+            <Field label="Description"><textarea rows={2} className={areaClass} value={folderDraft.description || ""} onChange={(e) => setFolderDraft({ ...folderDraft, description: e.target.value })} /></Field>
+            <Field label={folderDraft.has_password ? "Replace password" : "Password (optional)"}>
+              <input type="password" className={inputClass} value={folderDraft.password || ""} onChange={(e) => setFolderDraft({ ...folderDraft, password: e.target.value, clear_password: false })} placeholder={folderDraft.has_password ? "Leave empty to keep the current one" : "Locks every file inside"} />
+            </Field>
+            {folderDraft.has_password && (
+              <label className="flex items-center gap-2 text-sm text-slate-600">
+                <input type="checkbox" checked={!!folderDraft.clear_password} onChange={(e) => setFolderDraft({ ...folderDraft, clear_password: e.target.checked, password: "" })} />
+                Remove the password from this folder
+              </label>
+            )}
+          </div>
+          <button
+            type="button"
+            onClick={async () => {
+              const done = await run("/api/admin/executive-board/vault", { action: "save_folder", ...folderDraft }, "vault", "Folder saved.");
+              if (done) setFolderDraft(null);
+            }}
+            disabled={busy === "vault" || !folderDraft.name}
+            className="mt-5 inline-flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-[#0A4FE8] text-sm font-bold text-white disabled:opacity-50"
+          >
+            {busy === "vault" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />} Save folder
+          </button>
+        </Modal>
+      )}
+
+      {/* ----- Upload modal ----- */}
+      {upload && (
+        <Modal title="Upload file" onClose={() => setUpload(null)}>
+          <div className="space-y-3">
+            <Field label="File">
+              <input type="file" onChange={(e) => { const chosen = e.target.files?.[0] || null; setUpload({ ...upload, file: chosen, title: upload.title || (chosen?.name ?? "") }); }} className="w-full text-sm" />
+            </Field>
+            <Field label="Title"><input className={inputClass} value={upload.title} onChange={(e) => setUpload({ ...upload, title: e.target.value })} /></Field>
+            <Field label="Kind">
+              <select className={inputClass} value={upload.kind} onChange={(e) => setUpload({ ...upload, kind: e.target.value })}>
+                {VAULT_KINDS.map((k) => <option key={k} value={k}>{KIND_LABELS[k]}</option>)}
+              </select>
+            </Field>
+            <Field label="Description"><textarea rows={2} className={areaClass} value={upload.description} onChange={(e) => setUpload({ ...upload, description: e.target.value })} /></Field>
+            <Field label="Password (optional)">
+              <input type="password" className={inputClass} value={upload.password} onChange={(e) => setUpload({ ...upload, password: e.target.value })} placeholder="Needed to open this file from a share link" />
+            </Field>
+            {folderId && <p className="text-xs text-slate-400">Uploading into {current?.name}.</p>}
+          </div>
+          <button type="button" onClick={doUpload} disabled={uploading || !upload.file} className="mt-5 inline-flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-[#0A4FE8] text-sm font-bold text-white disabled:opacity-50">
+            {uploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />} Upload
+          </button>
+        </Modal>
+      )}
+
+      {/* ----- File edit modal ----- */}
+      {fileDraft && (
+        <Modal title="Edit file" onClose={() => setFileDraft(null)}>
+          <div className="space-y-3">
+            <Field label="Title"><input className={inputClass} value={fileDraft.title || ""} onChange={(e) => setFileDraft({ ...fileDraft, title: e.target.value })} /></Field>
+            <Field label="Kind">
+              <select className={inputClass} value={fileDraft.kind} onChange={(e) => setFileDraft({ ...fileDraft, kind: e.target.value as VaultFile["kind"] })}>
+                {VAULT_KINDS.map((k) => <option key={k} value={k}>{KIND_LABELS[k]}</option>)}
+              </select>
+            </Field>
+            <Field label="Folder">
+              <select className={inputClass} value={fileDraft.folder_id || ""} onChange={(e) => setFileDraft({ ...fileDraft, folder_id: e.target.value || null })}>
+                <option value="">Vault root</option>
+                {board.folders.map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}
+              </select>
+            </Field>
+            <Field label="Description"><textarea rows={2} className={areaClass} value={fileDraft.description || ""} onChange={(e) => setFileDraft({ ...fileDraft, description: e.target.value })} /></Field>
+            <Field label={fileDraft.has_password ? "Replace password" : "Password (optional)"}>
+              <input type="password" className={inputClass} value={fileDraft.password || ""} onChange={(e) => setFileDraft({ ...fileDraft, password: e.target.value, clear_password: false })} placeholder={fileDraft.has_password ? "Leave empty to keep the current one" : ""} />
+            </Field>
+            {fileDraft.has_password && (
+              <label className="flex items-center gap-2 text-sm text-slate-600">
+                <input type="checkbox" checked={!!fileDraft.clear_password} onChange={(e) => setFileDraft({ ...fileDraft, clear_password: e.target.checked, password: "" })} />
+                Remove the password from this file
+              </label>
+            )}
+          </div>
+          <button
+            type="button"
+            onClick={async () => {
+              const done = await run("/api/admin/executive-board/vault", { action: "update_file", ...fileDraft }, "vault", "File updated.");
+              if (done) setFileDraft(null);
+            }}
+            disabled={busy === "vault" || !fileDraft.title}
+            className="mt-5 inline-flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-[#0A4FE8] text-sm font-bold text-white disabled:opacity-50"
+          >
+            {busy === "vault" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />} Save changes
+          </button>
+        </Modal>
+      )}
+
+      {/* ----- Share modal ----- */}
+      {share && (
+        <Modal title={`Share ${share.name}`} onClose={() => { setShare(null); setShareUrl(""); }}>
+          {shareUrl ? (
+            <div>
+              <p className="text-sm text-slate-600">Send this link to the recipient. The password is not in the link, so share it separately.</p>
+              <div className="mt-3 flex items-center gap-2 rounded-xl border border-slate-200 p-2">
+                <input readOnly value={shareUrl} className="min-w-0 flex-1 bg-transparent px-2 text-sm outline-none" />
+                <button
+                  type="button"
+                  onClick={() => { void navigator.clipboard.writeText(shareUrl); setCopied(true); }}
+                  className="inline-flex shrink-0 items-center gap-1.5 rounded-lg bg-[#0A4FE8] px-3 py-2 text-xs font-bold text-white"
+                >
+                  {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />} {copied ? "Copied" : "Copy"}
+                </button>
+              </div>
+              <button type="button" onClick={() => { setShare(null); setShareUrl(""); }} className="mt-4 h-11 w-full rounded-xl border border-slate-200 text-sm font-bold text-slate-600">Done</button>
+            </div>
+          ) : (
+            <>
+              <div className="space-y-3">
+                <Field label="Password for this link (optional)">
+                  <input type="password" className={inputClass} value={share.password} onChange={(e) => setShare({ ...share, password: e.target.value })} placeholder="Leave empty to use the item's own password" />
+                </Field>
+                <Field label="Recipient email (for your records)"><input type="email" className={inputClass} value={share.recipient_email} onChange={(e) => setShare({ ...share, recipient_email: e.target.value })} /></Field>
+                <Field label="Note shown to the recipient"><textarea rows={2} className={areaClass} value={share.note} onChange={(e) => setShare({ ...share, note: e.target.value })} /></Field>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <Field label="Expires in (days)"><input type="number" min={0} max={365} className={inputClass} value={share.expires_in_days} onChange={(e) => setShare({ ...share, expires_in_days: e.target.value })} placeholder="0 for never" /></Field>
+                  <Field label="Max downloads"><input type="number" min={0} max={1000} className={inputClass} value={share.max_downloads} onChange={(e) => setShare({ ...share, max_downloads: e.target.value })} placeholder="0 for unlimited" /></Field>
+                </div>
+                <p className="flex items-start gap-2 rounded-xl bg-slate-50 p-3 text-xs text-slate-500">
+                  <ShieldCheck className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                  A link with no password anywhere on it is refused. Set one here, or on the file or folder, before sending.
+                </p>
+              </div>
+              <button type="button" onClick={createShare} disabled={busy === "share"} className="mt-5 inline-flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-[#0A4FE8] text-sm font-bold text-white disabled:opacity-50">
+                {busy === "share" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Link2 className="h-4 w-4" />} Create share link
+              </button>
+            </>
+          )}
+        </Modal>
+      )}
+    </div>
+  );
+}

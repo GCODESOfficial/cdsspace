@@ -189,7 +189,7 @@ export const NavbarDashboard = ({ onMenuClick }: NavbarDashboardProps) => {
     };
 
     return (
-        <header className="h-[64px] 2xl:h-[80px] bg-white border-b border-[#E3E8F4]/40 w-full px-3 sm:px-4 lg:px-6 2xl:px-8 flex items-center justify-between gap-2 lg:gap-0 sticky top-0 z-50">
+        <header className="h-[64px] 2xl:h-[80px] bg-white border-b border-[#E3E8F4]/40 w-full px-3 sm:px-4 lg:px-6 2xl:px-8 flex items-center justify-between gap-2 lg:gap-0 sticky top-0 z-30">
             {/* Mobile Logo */}
             <div className="lg:hidden shrink-0">
                 <Image src="/dashboard/Group 1000004159.svg" alt="Logo" width={46} height={18} />

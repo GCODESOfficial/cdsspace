@@ -6,6 +6,10 @@ import { ArrowLeft, Calendar, CheckCircle2, Loader2 } from "lucide-react";
 import { useClientAccount } from "@/components/dashboard/ClientAccountProvider";
 import { supabase } from "@/lib/supabase";
 
+// Same meeting windows offered on the public /consultation page, so a client
+// picks a window we can actually staff instead of an exact clock time.
+const TIME_WINDOWS = ["Morning (8am - 12pm)", "Afternoon (12 - 4pm)", "Evening (4 - 8pm)"];
+
 export default function BookSessionPage() {
   const router = useRouter();
   const { account, dashboardPath } = useClientAccount();
@@ -134,7 +138,31 @@ export default function BookSessionPage() {
 
             <div className="grid gap-5 md:grid-cols-2">
               <SessionInput name="booking_date" label="Preferred date" required value={date} onChange={setDate} type="date" min={new Date().toISOString().slice(0, 10)} />
-              <SessionInput name="booking_time" label="Preferred time" value={time} onChange={setTime} type="time" />
+              <div>
+                <span className="mb-2 block text-[13px] font-medium text-brand-body">Preferred time window</span>
+                <div className="flex flex-wrap gap-2.5" role="radiogroup" aria-label="Preferred time window">
+                  {TIME_WINDOWS.map((window) => {
+                    const selected = time === window;
+                    return (
+                      <button
+                        key={window}
+                        type="button"
+                        role="radio"
+                        aria-checked={selected}
+                        onClick={() => setTime(selected ? "" : window)}
+                        className={`min-h-11 rounded-xl border px-4 text-[13px] font-semibold transition ${
+                          selected
+                            ? "border-[#0A4FE8] bg-[#0A4FE8] text-white shadow-sm"
+                            : "border-brand-stroke/50 bg-white text-brand-navy hover:border-blue-200 hover:bg-blue-50"
+                        }`}
+                      >
+                        {window}
+                      </button>
+                    );
+                  })}
+                </div>
+                <p className="mt-2 text-[12px] leading-5 text-brand-body/60">We confirm the exact start time inside the window you pick.</p>
+              </div>
             </div>
 
             <div>

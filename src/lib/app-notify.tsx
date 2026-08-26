@@ -389,24 +389,45 @@ function PromptModal({ rec }: { rec: PromptRec }) {
 /* -------- Toast -------- */
 function ToastCard({ rec }: { rec: ToastRec }) {
   const { title, message, kind = "info", id } = rec;
+  // Success and info both sit in CDS blue: a routine confirmation is not a
+  // different brand moment, it is the ordinary one. Only genuine problems
+  // borrow a colour, because that is the whole point of using one.
   const accent =
-    kind === "success" ? "#059669" :
     kind === "error" ? "#DC2626" :
     kind === "warning" ? "#D97706" :
     BRAND.blue;
+  const tint =
+    kind === "error" ? "#FEF2F2" :
+    kind === "warning" ? "#FFFBEB" :
+    "#EEF3FE";
   return (
     <div
-      className="bg-white rounded-xl shadow-[0_18px_36px_rgba(4,11,55,0.18)] ring-1 px-4 py-3 flex items-start gap-3 animate-fadeIn"
+      data-app-toast
+      className="flex items-start gap-3 rounded-2xl bg-white px-4 py-3 shadow-[0_18px_36px_rgba(4,11,55,0.18)] ring-1 animate-fadeIn"
       style={{ borderColor: BRAND.line }}
     >
-      <div className="w-1.5 self-stretch rounded-full" style={{ background: accent }} />
-      <div className="flex-1 min-w-0">
-        {title && <p className="text-[12px] font-bold" style={{ color: BRAND.navy }}>{title}</p>}
+      <span
+        aria-hidden
+        className="grid h-7 w-7 shrink-0 place-items-center rounded-full"
+        style={{ background: tint, color: accent }}
+      >
+        {kind === "error" || kind === "warning" ? (
+          <svg viewBox="0 0 20 20" fill="none" className="h-4 w-4" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+            <path d="M10 6v5" /><path d="M10 14h.01" />
+          </svg>
+        ) : (
+          <svg viewBox="0 0 20 20" fill="none" className="h-4 w-4" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="m5 10.5 3.2 3.2L15 7" />
+          </svg>
+        )}
+      </span>
+      <div className="min-w-0 flex-1">
+        {title && <p className="text-[12.5px] font-bold" style={{ color: BRAND.navy }}>{title}</p>}
         <p className="text-[12px]" style={{ color: "#4B5563" }}>{message}</p>
       </div>
       <button
         onClick={() => store.closeToast(id)}
-        className="text-[11px] text-gray-400 hover:text-gray-600 px-1"
+        className="-mr-1 rounded-lg px-1 text-[11px] text-gray-300 transition hover:bg-gray-50 hover:text-gray-600"
         aria-label="Dismiss"
       >
         ✕

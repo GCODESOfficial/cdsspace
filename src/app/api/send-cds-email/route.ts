@@ -53,8 +53,8 @@ Delivery Options: ${formData.giftDeliveryOptions?.join(", ")}
   };
 
   try {
-    await transporter.sendMail(adminEmail);
-    await transporter.sendMail(userEmail);
+    await transporter.sendMail({ ...adminEmail, attachments: emailAttachmentsFor((adminEmail as { html?: string }).html) });
+    await transporter.sendMail({ ...userEmail, attachments: emailAttachmentsFor(userEmail.html) });
 
     return NextResponse.json({ success: true });
   } catch (error) {

@@ -28,6 +28,7 @@ import {
 import { cn } from "@/lib/utils";
 import Image from "next/image";
 import { appAlert, appConfirm, appPrompt } from "@/lib/app-notify";
+import Link from "next/link";
 
 // --- Types ---
 
@@ -335,12 +336,12 @@ const BannerCard = ({
                 {/* Actions Footer */}
                 <div className="flex items-center gap-2 pt-1">
                     {banner.status === "AWAITING_PAYMENT" && banner.invoice_public_token && (
-                        <a
+                        <Link
                             href={`/invoice/${banner.invoice_public_token}#payment`}
                             className="flex h-9 flex-1 items-center justify-center rounded-[10px] border border-[#0A4FE8] bg-white text-[11px] font-semibold text-[#0A4FE8] transition hover:bg-blue-50 active:scale-95"
                         >
                             Pay now
-                        </a>
+                        </Link>
                     )}
                     <button 
                         onClick={onPreview}

@@ -102,19 +102,21 @@ export async function GET(req: NextRequest) {
 
     // Email → assigned publisher.
     if (channels.includes("email") && transporter && r.publisher_email) {
+      const reminderHtml = brandedEmailHtml(
+        `
+            <h2 style="margin:0 0 8px;color:#0D1B39;">${r.title}</h2>
+            <p style="color:#4B5563;">Due on <b>${platform}</b> at <b>${when}</b> (${whenWord}).</p>
+            <p style="color:#4B5563;">Open Content Hub to copy the caption and download the assets.</p>
+          `,
+        { eyebrow: "Content Hub", preheader: `Due on ${platform} at ${when}` },
+      );
       await transporter
         .sendMail({
           from: emailFrom("CDS Space Content Hub"),
           to: r.publisher_email,
           subject: title,
-          html: brandedEmailHtml(
-            `
-            <h2 style="margin:0 0 8px;color:#0D1B39;">${r.title}</h2>
-            <p style="color:#4B5563;">Due on <b>${platform}</b> at <b>${when}</b> (${whenWord}).</p>
-            <p style="color:#4B5563;">Open Content Hub to copy the caption and download the assets.</p>
-          `,
-            { eyebrow: "Content Hub", preheader: `Due on ${platform} at ${when}` },
-          ),
+          html: reminderHtml,
+          attachments: emailAttachmentsFor(reminderHtml),
         })
         .then(() => { emails++; })
         .catch(() => {});

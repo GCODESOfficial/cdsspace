@@ -6,6 +6,7 @@ import { PERMISSION_GROUPS, ALL_PERMISSIONS } from "@/lib/admin-permissions";
 import { useToast } from "@/hooks/use-toast";
 import { Trash2, Loader2, Plus, Eye, EyeOff, Shield, UserPlus, Check, ToggleLeft, ToggleRight, ChevronDown, ChevronRight, Copy, Mail, Link2, X, Send, ShieldPlus, Pencil } from "lucide-react";
 import { appAlert, appConfirm, appPrompt } from "@/lib/app-notify";
+import Link from "next/link";
 
 interface AdminRole {
   id: string;
@@ -745,13 +746,13 @@ export default function SubAdminsPage() {
                         </div>
                       </div>
                     </div>
-                    <a
+                    <Link
                       href="/admin/team-members"
                       className="flex-shrink-0 inline-flex items-center gap-1.5 rounded-lg border border-gray-200 px-3 py-1.5 text-[12px] font-semibold text-gray-500 hover:border-[#0A4FE8] hover:text-[#0A4FE8] transition"
                       title="Manage this team member"
                     >
                       <Pencil className="w-3.5 h-3.5" /> Manage
-                    </a>
+                    </Link>
                   </div>
                 </div>
               );

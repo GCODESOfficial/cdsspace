@@ -1,5 +1,6 @@
 'use client';
 
+import { useRouter } from "next/navigation";
 import { useEffect, useState, use } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -18,6 +19,7 @@ import { useFinanceDisplayCurrency } from "@/components/finance/FinanceCurrencyS
 import { appAlert, appConfirm, appPrompt } from "@/lib/app-notify";
 
 export default function PayrollRunPage({ params }: { params: Promise<{ id: string }> }) {
+  const router = useRouter();
   const { currency: displayCurrency, rates } = useFinanceDisplayCurrency();
   const { id } = use(params);
   const [run, setRun] = useState<FinancePayrollRun | null>(null);
@@ -68,7 +70,7 @@ export default function PayrollRunPage({ params }: { params: Promise<{ id: strin
   const removeRun = async () => {
     if (!(await appConfirm("Delete this entire payroll run?"))) return;
     const r = await fetch(`/api/admin/finance/payroll/runs/${id}`, { method: "DELETE" });
-    if (r.ok) window.location.href = "/admin/finance/payroll";
+    if (r.ok) router.push("/admin/finance/payroll");
   };
 
   if (!run) return <FinanceShell title="Loading…"><div className={`${glassCard} p-10 text-gray-500`}>Loading…</div></FinanceShell>;

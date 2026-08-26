@@ -14,6 +14,7 @@ import {
 import { clientDashboardPath } from "@/lib/client-routes";
 import { deliverClientWelcome } from "@/lib/client-welcome";
 import { ensureMarketerProfile } from "@/lib/marketer-account";
+import { BLOCKED_EMAIL_MESSAGE, isBlockedEmail } from "@/lib/security/email-blocklist";
 
 type OAuthAuthClient = {
   signOut: (options?: { scope?: "global" | "local" | "others" }) => Promise<unknown>;
@@ -24,6 +25,18 @@ export async function finalizeClientOAuthSignIn(input: {
   user: User;
   next?: string | null;
 }) {
+  // OAuth bypasses the email/password forms entirely, so the blocklist has to
+  // be enforced here too - otherwise "Continue with Google" is an open door.
+  if (isBlockedEmail(input.user.email)) {
+    await input.auth.signOut({ scope: "global" }).catch(() => undefined);
+    return clearMarketerDashboardSessionOnResponse(clearClientDashboardSessionOnResponse(
+      NextResponse.json(
+        { ok: false, next: "/login?account=blocked", error: BLOCKED_EMAIL_MESSAGE },
+        { status: 403, headers: { "Cache-Control": "no-store" } },
+      ),
+    ));
+  }
+
   if (input.user.user_metadata?.account_type === "brand_marketer") {
     const marketer = await ensureMarketerProfile(input.user);
     if (marketer.status === "suspended" || marketer.status === "closed") {

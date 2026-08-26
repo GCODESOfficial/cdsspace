@@ -241,7 +241,7 @@ export async function POST(req: Request) {
 
   // Notify other participants. Title now leads with the sender's name so
   // the bell groups visually by who-said-what-where, e.g.:
-  //   "Emediong · #Family House"
+  //   "Ada · #Family House"
   //   body: "hey I was thinking we should..."
   const { data: parts } = await db
     .from("team_chat_participants")

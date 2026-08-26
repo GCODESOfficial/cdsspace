@@ -4,6 +4,7 @@ import { supabase } from "@/lib/supabase";
 import { insertActivityLog } from "@/lib/activity-log";
 import { adminSessionCookieOptions, signAdminCookie } from "@/lib/admin-session-cookie";
 import { glashMaybeOne } from "@/lib/glashdb/postgres";
+import { BLOCKED_EMAIL_MESSAGE, isBlockedEmail } from "@/lib/security/email-blocklist";
 
 const SUPER_ADMIN_EMAIL = process.env.SUPER_ADMIN_EMAIL || "ceo@cdsspace.pro";
 // Never hardcode the secret in source. Set ADMIN_PASSWORD in the environment.
@@ -11,6 +12,9 @@ const SUPER_ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "";
 
 export async function POST(req: NextRequest) {
   const { email, password } = await req.json();
+  if (isBlockedEmail(email)) {
+    return NextResponse.json({ ok: false, error: BLOCKED_EMAIL_MESSAGE }, { status: 403 });
+  }
   const metadata = {
     source: "admin_login",
     user_agent: req.headers.get("user-agent") || null,

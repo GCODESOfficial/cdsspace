@@ -23,8 +23,11 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
 
       <div className="flex min-w-0 flex-1 flex-col">
         <NavbarDashboard onMenuClick={() => setIsSidebarOpen(true)} />
+        {/* No backdrop-filter on the page surface: it would create a containing
+            block that traps every `position: fixed` modal rendered by a page
+            inside this scroll container, stacking them under the chrome. */}
         <main data-app-content className="min-w-0 flex-1 overflow-x-clip p-0 sm:p-4 lg:overflow-hidden lg:p-5 2xl:p-6">
-          <div data-mobile-page-surface className="relative min-h-[calc(100dvh-64px)] w-full overflow-x-clip bg-white/80 backdrop-blur-xl sm:rounded-[20px] sm:border sm:border-white/70 sm:shadow-[0_10px_40px_rgba(15,40,90,0.06)] lg:h-full lg:min-h-0 lg:overflow-y-auto lg:rounded-3xl premium-scrollbar">
+          <div data-mobile-page-surface className="relative min-h-[calc(100dvh-64px)] w-full overflow-x-clip bg-white/80 sm:rounded-[20px] sm:border sm:border-white/70 sm:shadow-[0_10px_40px_rgba(15,40,90,0.06)] lg:h-full lg:min-h-0 lg:overflow-y-auto lg:rounded-3xl premium-scrollbar">
             {children}
           </div>
         </main>

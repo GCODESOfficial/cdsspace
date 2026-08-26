@@ -76,7 +76,7 @@ export function exportBrandBriefToPdf(draft: BrandBriefDraft, opts?: {
         },
         {
             title: "Scope & Goals",
-            fields: ["assets_needed", "goals", "long_term_vision", "budget_range", "timeline", "additional_notes"],
+            fields: ["assets_needed", "goals", "long_term_vision", "budget_currency", "budget_range", "timeline", "additional_notes"],
         },
     ];
 

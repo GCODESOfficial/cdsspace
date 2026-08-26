@@ -20,6 +20,9 @@ async function createCmeetRoom(sb: any, consultation: any, scheduledAt: string |
     if (!existing) break;
     roomCode = genRoomCode();
   }
+  // The invited client skips the lobby. The token is their proof of invitation
+  // when they have no account, so it travels only in the link we send them.
+  const guestToken = crypto.randomUUID().replace(/-/g, "");
   const { error } = await sb.from("team_meetings").insert({
     room_code: roomCode,
     title: `Consultation · ${consultation.full_name}`,
@@ -29,9 +32,11 @@ async function createCmeetRoom(sb: any, consultation: any, scheduledAt: string |
     created_by_admin: true,
     status: scheduledAt ? "scheduled" : "live",
     started_at: scheduledAt ? null : new Date().toISOString(),
+    guest_email: consultation.email || null,
+    guest_token: guestToken,
   });
   if (error) throw new Error(error.message);
-  return { roomCode, link: `/meet/${roomCode}` };
+  return { roomCode, link: `/meet/${roomCode}?g=${guestToken}` };
 }
 
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {

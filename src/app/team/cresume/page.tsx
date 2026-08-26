@@ -3,6 +3,7 @@
 /* eslint-disable @next/next/no-img-element */
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import Link from "next/link";
 import { Save, Link2, Eye, Loader2, Plus, X as XIcon, Check, Brain, RefreshCw, AlertCircle } from "lucide-react";
 import { initials } from "@/lib/utils";
 import { SKILL_TABS } from "@/lib/cresume-skills";
@@ -233,9 +234,9 @@ export default function CResumeEditor() {
             Public
           </label>
           {resume.is_public && username && (
-            <a href={`/${username}`} target="_blank" rel="noreferrer" className="inline-flex w-full sm:w-auto items-center justify-center gap-1.5 px-3 py-2.5 rounded-xl border border-[#0A4FE8]/30 text-[#0A4FE8] text-[12px] font-medium hover:bg-blue-50">
+            <Link href={`/${username}`} target="_blank" rel="noreferrer" className="inline-flex w-full sm:w-auto items-center justify-center gap-1.5 px-3 py-2.5 rounded-xl border border-[#0A4FE8]/30 text-[#0A4FE8] text-[12px] font-medium hover:bg-blue-50">
               <Eye className="w-3.5 h-3.5" /> Preview
-            </a>
+            </Link>
           )}
           <button onClick={save} disabled={saving} className="inline-flex w-full sm:w-auto items-center justify-center gap-1.5 px-4 py-2.5 rounded-xl bg-[#0A4FE8] text-white text-[12.5px] font-medium hover:bg-[#083EC0] disabled:opacity-50">
             {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}

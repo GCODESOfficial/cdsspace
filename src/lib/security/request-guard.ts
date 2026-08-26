@@ -114,7 +114,18 @@ function productionAllowedHosts() {
   // Keep the platform hostname available for Glash's deployment health check.
   // This is the canonical hostname for the linked `cdsspace` project, not a
   // wildcard, so arbitrary Glash tenants remain blocked.
-  const allowed = new Set(["cdsspace.pro", "www.cdsspace.pro", "cdsspace.glashdb.com"]);
+  // cdsspace.com and its www form are ours but are not canonical. They are
+  // admitted only so the request reaches Next and the redirect in
+  // next.config.ts can send it to cdsspace.pro. Rejecting them here produced a
+  // bodyless 421 on every .com URL, which browsers render as "this page
+  // couldn't load" and which no redirect could ever undo.
+  const allowed = new Set([
+    "cdsspace.pro",
+    "www.cdsspace.pro",
+    "cdsspace.com",
+    "www.cdsspace.com",
+    "cdsspace.glashdb.com",
+  ]);
   for (const value of [process.env.NEXT_PUBLIC_SITE_URL, process.env.VERCEL_URL, process.env.VERCEL_PROJECT_PRODUCTION_URL]) {
     if (!value) continue;
     try {
@@ -126,9 +137,28 @@ function productionAllowedHosts() {
   return allowed;
 }
 
+function isInternalHost(host: string) {
+  // Glash starts the container and probes it directly on the pod network
+  // before any domain is attached, so the Host header is an address such as
+  // "localhost:3000" or "172.30.0.3:3000". Those requests can only originate
+  // inside the deployment network, and rejecting them made the runtime probe
+  // read the app as unhealthy and fail the deployment.
+  const hostname = host.replace(/:\d+$/u, "").replace(/^\[|\]$/gu, "");
+  if (hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1") return true;
+  const parts = hostname.split(".");
+  if (parts.length !== 4 || parts.some((part) => !/^\d{1,3}$/u.test(part))) return false;
+  const [first, second] = parts.map(Number);
+  if (parts.some((part) => Number(part) > 255)) return false;
+  return first === 10
+    || first === 127
+    || (first === 172 && second >= 16 && second <= 31)
+    || (first === 192 && second === 168);
+}
+
 function productionHostAllowed(request: NextRequest) {
   if (process.env.NODE_ENV !== "production") return true;
-  return productionAllowedHosts().has(requestHost(request));
+  const host = requestHost(request);
+  return productionAllowedHosts().has(host) || isInternalHost(host);
 }
 
 function mutationOriginAllowed(request: NextRequest, origin: string) {

@@ -4,7 +4,7 @@
  *   - Status pill top-right ("Sent", "Paid", etc.)
  *   - "INVOICE-XXXX" title
  *   - "Client: <name>" subtitle
- *   - Globe footer with cdsspace.com | cdsspace.pro
+ *   - Globe footer with cdsspace.pro
  *
  * Sized for the canonical 1.91:1 Meta/WhatsApp spec - see brand-card.tsx
  * for the reasoning. All pixel values are tuned for 1200×630 and must be
@@ -183,7 +183,7 @@ export function renderInvoiceCard(p: InvoiceCardProps): ReactElement {
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img src={GLOBE_ICON} alt="" width={30} height={30} />
                 <div style={{ fontSize: 25, fontWeight: 600, color: "#ffffff", opacity: 0.92, display: "flex" }}>
-                    cdsspace.com | cdsspace.pro
+                    cdsspace.pro
                 </div>
             </div>
         </div>

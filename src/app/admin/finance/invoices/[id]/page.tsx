@@ -1,5 +1,7 @@
 'use client';
 
+import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { useEffect, useState, use } from "react";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -50,6 +52,7 @@ function versionActionLabel(action: string) {
 }
 
 export default function InvoiceDetailPage({ params }: { params: Promise<{ id: string }> }) {
+  const router = useRouter();
   const { id } = use(params);
   const [invoice, setInvoice] = useState<FinanceInvoice | null>(null);
   const [items, setItems] = useState<FinanceInvoiceItem[]>([]);
@@ -215,7 +218,7 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
   const remove = async () => {
     if (!(await appConfirm("Delete this invoice?"))) return;
     const r = await fetch(`/api/admin/finance/invoices/${id}`, { method: "DELETE" });
-    if (r.ok) window.location.href = "/admin/finance/invoices";
+    if (r.ok) router.push("/admin/finance/invoices");
   };
 
   const publicUrl = invoice ? `${typeof window !== "undefined" ? window.location.origin : ""}/invoice/${invoice.public_token}` : "";
@@ -284,7 +287,7 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
             <Button onClick={load} className="h-10 px-4 rounded-xl">Retry</Button>
             <Button
               variant="outline"
-              onClick={() => (window.location.href = "/admin/finance/invoices")}
+              onClick={() => (router.push("/admin/finance/invoices"))}
               className="h-10 px-4 rounded-xl"
             >
               Back to invoices
@@ -321,7 +324,7 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
               <SelectItem value="cancelled">Cancelled</SelectItem>
             </SelectContent>
           </Select>
-          <Button variant="outline" className="h-11 px-4 rounded-xl" onClick={() => window.location.href = `/admin/finance/invoices/new?draft=${id}`}>
+          <Button variant="outline" className="h-11 px-4 rounded-xl" onClick={() => router.push(`/admin/finance/invoices/new?draft=${id}`)}>
             <Pencil className="w-4 h-4 mr-1.5" /> Edit
           </Button>
           <Button variant="outline" className="h-11 px-4 rounded-xl" onClick={toggleHistory}>
@@ -348,9 +351,9 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
             {emailing ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : <Mail className="w-4 h-4 mr-1" />}Email
           </Button>
           <Button variant="outline" size="sm" className="rounded-lg" onClick={copyLink}><Copy className="w-4 h-4 mr-1" />{copied ? "Copied" : "Copy"}</Button>
-          <a href={publicUrl} target="_blank" rel="noopener noreferrer">
+          <Link href={publicUrl} target="_blank" rel="noopener noreferrer">
             <Button variant="outline" size="sm" className="rounded-lg"><ExternalLink className="w-4 h-4 mr-1" />Open</Button>
-          </a>
+          </Link>
           <UniversalShareButton title={`Invoice ${invoice.invoice_number}`} text={shareMessage} url={publicUrl} className="min-h-10 rounded-lg px-3" />
         </div>
       </div>
@@ -433,7 +436,7 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
 
       {(paymentSubmissions.length > 0 || receipt) && (
         <section className={`${glassCard} mb-6 p-5`}>
-          <div className="mb-4 flex items-center justify-between gap-3"><div><h3 className="flex items-center gap-2 font-semibold text-gray-900"><Banknote className="h-4 w-4 text-blue-600" />Payment review</h3><p className="mt-1 text-xs text-gray-500">Only admins with payment confirmation clearance can approve a transfer and start linked work.</p></div>{receipt && <a href={`/receipt/${receipt.public_token}`} target="_blank" rel="noreferrer" className="rounded-lg bg-emerald-50 px-3 py-2 text-[11px] font-bold text-emerald-700">Open receipt</a>}</div>
+          <div className="mb-4 flex items-center justify-between gap-3"><div><h3 className="flex items-center gap-2 font-semibold text-gray-900"><Banknote className="h-4 w-4 text-blue-600" />Payment review</h3><p className="mt-1 text-xs text-gray-500">Only admins with payment confirmation clearance can approve a transfer and start linked work.</p></div>{receipt && <Link href={`/receipt/${receipt.public_token}`} target="_blank" rel="noreferrer" className="rounded-lg bg-emerald-50 px-3 py-2 text-[11px] font-bold text-emerald-700">Open receipt</Link>}</div>
           <div className="space-y-3">{paymentSubmissions.map((submission) => <div key={submission.id} className="rounded-2xl border border-slate-100 bg-white/80 p-4"><div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between"><div><div className="flex flex-wrap items-center gap-2"><span className={`rounded-full px-2.5 py-1 text-[9px] font-bold uppercase tracking-wider ${submission.status === "confirmed" ? "bg-emerald-50 text-emerald-700" : submission.status === "rejected" ? "bg-red-50 text-red-700" : "bg-amber-50 text-amber-700"}`}>{submission.status}</span><span className="text-sm font-black text-[#0D1B39]">{formatMoney(submission.amount, submission.currency)}</span></div><p className="mt-2 text-xs text-slate-500">Submitted {new Date(submission.submitted_at).toLocaleString()}{submission.transfer_reference ? ` · Ref: ${submission.transfer_reference}` : ""}</p>{submission.proof_file_name && <p className="mt-1 text-[11px] font-semibold text-slate-600">Proof: {submission.proof_file_name}</p>}</div><div className="flex shrink-0 flex-wrap gap-2">{submission.proof_url && <a href={submission.proof_url} target="_blank" rel="noreferrer" className="inline-flex h-9 items-center rounded-lg border border-blue-100 px-3 text-[11px] font-bold text-blue-700">View proof</a>}{submission.status === "pending" && <><button onClick={() => reviewPayment(submission, "reject")} disabled={reviewingPayment === submission.id} className="h-9 rounded-lg border border-red-100 px-3 text-[11px] font-bold text-red-600">Reject</button><button onClick={() => reviewPayment(submission, "confirm")} disabled={reviewingPayment === submission.id} className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-emerald-600 px-4 text-[11px] font-bold text-white disabled:opacity-60">{reviewingPayment === submission.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />}Confirm payment</button></>}</div></div></div>)}</div>
         </section>
       )}

@@ -28,6 +28,7 @@ import {
   type SubscriptionPlanDefinition,
   type SubscriptionPlanId,
 } from "@/lib/subscription-plans";
+import Link from "next/link";
 
 interface PriceRow {
   plan: SubscriptionPlanId;
@@ -186,9 +187,9 @@ export function SubscriptionPlanCatalog({
               <p className="text-sm font-semibold text-brand-navy">Invoice {pendingInvoice.invoice_number} is awaiting payment</p>
               <p className="mt-1 text-xs text-brand-body">{formatPrice(Number(pendingInvoice.total), pendingInvoice.currency)} · Your plan activates after payment is verified.</p>
             </div>
-            <a href={`/invoice/${pendingInvoice.public_token}`} className="inline-flex h-10 items-center justify-center gap-2 rounded-[10px] bg-[#0A4FE8] px-4 text-sm font-semibold text-white">
+            <Link href={`/invoice/${pendingInvoice.public_token}`} className="inline-flex h-10 items-center justify-center gap-2 rounded-[10px] bg-[#0A4FE8] px-4 text-sm font-semibold text-white">
               <FileText className="h-4 w-4" /> Open invoice
-            </a>
+            </Link>
           </div>
         )}
 

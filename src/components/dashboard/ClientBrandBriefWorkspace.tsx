@@ -28,6 +28,7 @@ import {
   type BrandBrief,
   type BrandBriefDraft,
 } from "@/lib/brand-brief";
+import { CLIENT_BILLING_CURRENCY_OPTIONS } from "@/lib/client-billing";
 
 type ClientBrandBrief = BrandBrief;
 
@@ -62,6 +63,7 @@ export function ClientBrandBriefWorkspace() {
     contact_name: account.fullName,
     contact_email: account.email,
     contact_phone: account.phoneNumber,
+    budget_currency: account.billingCurrency || "",
   }));
   const [brief, setBrief] = useState<ClientBrandBrief | null>(null);
   const [assets, setAssets] = useState<BrandAsset[]>([]);
@@ -83,13 +85,18 @@ export function ClientBrandBriefWorkspace() {
       if (briefResponse.ok && briefPayload.brief) {
         const loaded = briefPayload.brief as ClientBrandBrief;
         setBrief(loaded);
-        setDraft(briefToDraft(loaded));
+        const loadedDraft = briefToDraft(loaded);
+        setDraft({
+          ...loadedDraft,
+          budget_currency: loadedDraft.budget_currency || account.billingCurrency || "",
+        });
       } else if (briefResponse.ok) {
         setDraft({
           ...EMPTY_BRAND_BRIEF_DRAFT,
           contact_name: account.fullName,
           contact_email: account.email,
           contact_phone: account.phoneNumber,
+          budget_currency: account.billingCurrency || "",
         });
       }
       if (assetsResponse.ok) setAssets(assetPayload.assets || []);
@@ -97,14 +104,18 @@ export function ClientBrandBriefWorkspace() {
       if (active) setIsLoading(false);
     });
     return () => { active = false; };
-  }, [account.email, account.fullName, account.phoneNumber]);
+  }, [account.email, account.fullName, account.phoneNumber, account.billingCurrency]);
 
   const completedFields = useMemo(
     () => Object.values(draft).filter((value) => Array.isArray(value) ? value.length > 0 : value.trim().length > 0).length,
     [draft],
   );
   const completion = Math.round((completedFields / Object.keys(EMPTY_BRAND_BRIEF_DRAFT).length) * 100);
-  const budgetRanges = useMemo(() => budgetRangesForCurrency(account.billingCurrency), [account.billingCurrency]);
+  // The brief carries its own budget currency. It starts from the currency the
+  // client chose during onboarding, but they can quote this project in another
+  // one, and the ranges follow whatever is selected here.
+  const budgetCurrency = draft.budget_currency || "";
+  const budgetRanges = useMemo(() => budgetRangesForCurrency(budgetCurrency), [budgetCurrency]);
 
   const updateField = <K extends keyof BrandBriefDraft>(field: K, value: BrandBriefDraft[K]) => {
     setDraft((current) => ({ ...current, [field]: value }));
@@ -287,7 +298,31 @@ export function ClientBrandBriefWorkspace() {
               <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-2">
                 <TextArea label="Short-term goals" value={draft.goals} onChange={(value) => updateField("goals", value)} placeholder="What does success look like in the next 3–6 months?" />
                 <TextArea label="Long-term vision" value={draft.long_term_vision} onChange={(value) => updateField("long_term_vision", value)} placeholder="Where do you see the brand in 2–5 years?" />
-                <SelectField label={`Budget range (${account.billingCurrency})`} value={draft.budget_range} onChange={(value) => updateField("budget_range", value)} options={budgetRanges} placeholder="Select a range" />
+                <label>
+                  <span className={labelClass}>Budget currency</span>
+                  <select
+                    className={inputClass}
+                    value={budgetCurrency}
+                    onChange={(event) => {
+                      // Ranges are currency specific, so switching currency clears the range.
+                      setDraft((current) => ({ ...current, budget_currency: event.target.value, budget_range: "" }));
+                      setNotice("");
+                    }}
+                  >
+                    <option value="">Select a currency</option>
+                    {CLIENT_BILLING_CURRENCY_OPTIONS.map((option) => (
+                      <option key={option.code} value={option.code}>{option.symbol} {option.name} ({option.code})</option>
+                    ))}
+                  </select>
+                </label>
+                {budgetCurrency ? (
+                  <SelectField label={`Budget range (${budgetCurrency})`} value={draft.budget_range} onChange={(value) => updateField("budget_range", value)} options={budgetRanges} placeholder="Select a range" />
+                ) : (
+                  <label>
+                    <span className={labelClass}>Budget range</span>
+                    <p className="mt-1 text-[13px] leading-6 text-brand-body/60">Choose a budget currency and the matching ranges will appear here.</p>
+                  </label>
+                )}
                 <SelectField label="Timeline" value={draft.timeline} onChange={(value) => updateField("timeline", value)} options={TIMELINE_OPTIONS} placeholder="Select a timeline" />
                 <div className="md:col-span-2"><TextArea label="Anything else we should know?" value={draft.additional_notes} onChange={(value) => updateField("additional_notes", value)} placeholder="Anything important that did not fit above." /></div>
               </div>

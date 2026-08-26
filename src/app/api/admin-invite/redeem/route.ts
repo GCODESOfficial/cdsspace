@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createHash } from "crypto";
 import { getSupabaseAdmin } from "@/lib/supabase";
+import { BLOCKED_EMAIL_MESSAGE, isBlockedEmail } from "@/lib/security/email-blocklist";
 
 export const runtime = "nodejs";
 
@@ -70,6 +71,10 @@ export async function POST(req: NextRequest) {
 
     if (!subAdmin.is_active) {
         return NextResponse.json({ error: "Account is inactive" }, { status: 403 });
+    }
+
+    if (isBlockedEmail(subAdmin.email)) {
+        return NextResponse.json({ error: BLOCKED_EMAIL_MESSAGE }, { status: 403 });
     }
 
     return NextResponse.json({

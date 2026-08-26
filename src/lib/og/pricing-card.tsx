@@ -7,7 +7,7 @@
  *   - Logo top-left, "Pricing · <CUR>" pill top-right
  *   - Left column: title + market line + tagline + effective date
  *   - Right column: white panel listing packages with prices (max 6 rows)
- *   - Globe footer with cdsspace.com | cdsspace.pro
+ *   - Globe footer with cdsspace.pro
  */
 import type { ReactElement } from "react";
 import { getMetadataBgDataUri, getCdsLogoDataUri, OG_SIZE } from "./brand-card";
@@ -188,7 +188,7 @@ export function renderPricingCard(list: PricingListData, currency: CurrencyCode)
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img src={GLOBE_ICON} alt="" width={28} height={28} />
                 <div style={{ fontSize: 23, fontWeight: 600, color: "#ffffff", opacity: 0.92, display: "flex" }}>
-                    cdsspace.com | cdsspace.pro
+                    cdsspace.pro
                 </div>
             </div>
         </div>

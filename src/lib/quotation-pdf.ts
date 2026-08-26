@@ -395,7 +395,7 @@ export async function exportQuotationToPdf(
         doc.setFontSize(8);
         doc.setTextColor(156, 163, 175);
         doc.text(`Page ${i} of ${pageCount}`, pageWidth - margin, pageHeight - 24, { align: "right" });
-        doc.text("cdsspace.com  |  cdsspace.pro", margin, pageHeight - 24);
+        doc.text("cdsspace.pro", margin, pageHeight - 24);
     }
 
     doc.save(`Quotation-${quotation.quotation_number}.pdf`);

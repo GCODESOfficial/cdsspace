@@ -69,13 +69,6 @@ const teamMembers: TeamMember[] = [
         role: "Account Manager",
         description: "Edidiong manages the agency's financial health and client accounts. She ensures every project remains profitable and balanced. Focused on the numbers.",
         image: "/optimized/about/edidiong-esuene.webp",
-    },
-    {
-        name: "Emediong John",
-        role: "Human Resource Manager",
-        description: "Emediong focuses on building the right team and supporting people. Handles hiring and growth. Sometimes too focused on well-being.",
-        image: "/optimized/about/emediong-john.webp",
-        socials: { x: "https://x.com/Johnemedion" },
     }
 ];
 

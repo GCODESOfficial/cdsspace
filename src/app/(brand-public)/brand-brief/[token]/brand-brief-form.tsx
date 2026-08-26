@@ -5,13 +5,14 @@ import Image from "next/image";
 import { Check, Download, Loader2, Send, AlertCircle } from "lucide-react";
 import {
     ASSET_OPTIONS,
-    BUDGET_RANGES,
+    budgetRangesForCurrency,
     TIMELINE_OPTIONS,
     briefToDraft,
     EMPTY_BRAND_BRIEF_DRAFT,
     type BrandBrief,
     type BrandBriefDraft,
 } from "@/lib/brand-brief";
+import { CLIENT_BILLING_CURRENCY_OPTIONS } from "@/lib/client-billing";
 
 interface Props {
     token: string;
@@ -424,21 +425,49 @@ export function BrandBriefForm({ token, initial }: Props) {
                                 className="input min-h-[90px]"
                             />
                         </Field>
-                        <Field label="Budget range">
+                        <Field label="Budget currency">
                             <select
-                                value={draft.budget_range}
-                                onChange={(e) => update("budget_range", e.target.value)}
+                                value={draft.budget_currency}
+                                onChange={(e) => {
+                                    // Ranges are currency specific, so a change of
+                                    // currency invalidates whatever range was picked.
+                                    update("budget_currency", e.target.value);
+                                    update("budget_range", "");
+                                }}
                                 disabled={readOnly}
                                 className="input"
                             >
-                                <option value="">Select a range</option>
-                                {BUDGET_RANGES.map((b) => (
-                                    <option key={b} value={b}>
-                                        {b}
+                                <option value="">Select a currency</option>
+                                {CLIENT_BILLING_CURRENCY_OPTIONS.map((option) => (
+                                    <option key={option.code} value={option.code}>
+                                        {option.symbol} {option.name} ({option.code})
                                     </option>
                                 ))}
                             </select>
                         </Field>
+                        {draft.budget_currency ? (
+                            <Field label={`Budget range (${draft.budget_currency})`}>
+                                <select
+                                    value={draft.budget_range}
+                                    onChange={(e) => update("budget_range", e.target.value)}
+                                    disabled={readOnly}
+                                    className="input"
+                                >
+                                    <option value="">Select a range</option>
+                                    {budgetRangesForCurrency(draft.budget_currency).map((b) => (
+                                        <option key={b} value={b}>
+                                            {b}
+                                        </option>
+                                    ))}
+                                </select>
+                            </Field>
+                        ) : (
+                            <Field label="Budget range">
+                                <p className="text-[13px] leading-6 text-brand-body/60">
+                                    Choose a budget currency above and the matching ranges will appear here.
+                                </p>
+                            </Field>
+                        )}
                         <Field label="Timeline">
                             <select
                                 value={draft.timeline}

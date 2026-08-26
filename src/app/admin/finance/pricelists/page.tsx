@@ -404,14 +404,14 @@ export default function PricelistsPage() {
                                     <Mail className="h-3.5 w-3.5" /> Email
                                 </button>
                                 {list.published && (
-                                    <a
+                                    <Link
                                         href={`/pricing/${list.slug}`}
                                         target="_blank"
                                         rel="noreferrer"
                                         className="inline-flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs font-semibold text-gray-700 hover:border-blue-300"
                                     >
                                         <ExternalLink className="h-3.5 w-3.5" /> Open
-                                    </a>
+                                    </Link>
                                 )}
                                 <button
                                     type="button"

@@ -1,6 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase";
+import { BLOCKED_EMAIL_MESSAGE, isBlockedEmail } from "@/lib/security/email-blocklist";
 
 export const runtime = "nodejs";
 
@@ -37,6 +38,9 @@ export async function POST(req: Request) {
   }
   if (!member.is_active) {
     return NextResponse.json({ error: "Account is inactive" }, { status: 403 });
+  }
+  if (isBlockedEmail(member.email)) {
+    return NextResponse.json({ error: BLOCKED_EMAIL_MESSAGE }, { status: 403 });
   }
   if (!member.invite_temp_password) {
     return NextResponse.json(

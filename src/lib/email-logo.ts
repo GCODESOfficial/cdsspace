@@ -20,3 +20,15 @@ export function emailLogoAttachment() {
     contentType: "image/png",
   };
 }
+
+/**
+ * Attachments a message needs so its branded shell renders.
+ *
+ * The logo is referenced as `cid:` inside brandedEmailHtml, which only resolves
+ * when the message actually carries the matching inline attachment. Any sender
+ * that builds its own transport instead of going through sendEmail must spread
+ * this into `attachments`, or the recipient sees a broken image box.
+ */
+export function emailAttachmentsFor(html: string | undefined | null) {
+  return html?.includes(`cid:${EMAIL_LOGO_CID}`) ? [emailLogoAttachment()] : [];
+}

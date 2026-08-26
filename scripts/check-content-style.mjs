@@ -35,6 +35,7 @@ function isIgnored(relativePath) {
     segments.includes("node_modules") ||
     segments.includes(".git") ||
     segments.some((segment) => segment === ".next" || segment.startsWith(".next-")) ||
+    segments.some((segment) => segment === ".tmpbuild" || segment.startsWith(".tmpbuild-")) ||
     segments.includes("coverage") ||
     normalized === "public/uploads" ||
     normalized.startsWith("public/uploads/")

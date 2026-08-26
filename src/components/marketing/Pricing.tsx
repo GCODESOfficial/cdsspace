@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
 import Image from "next/image";
+import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 
 /**
@@ -11,6 +12,7 @@ import { createClient } from "@/lib/supabase/client";
  */
 
 export const Pricing = () => {
+    const router = useRouter();
     const [isLoggedIn, setIsLoggedIn] = useState(false);
     const [isLoading, setIsLoading] = useState(false);
 
@@ -23,12 +25,12 @@ export const Pricing = () => {
 
     const handleGetStarted = () => {
         if (isLoggedIn) {
-            window.location.href = "/dashboard/subscription";
+            router.push("/dashboard/subscription");
             return;
         }
         setIsLoading(true);
         // Route through our own /api/auth/google/login so the Google consent
-        // screen reads "to continue to cdsspace.com" instead of the Supabase URL.
+        // screen reads "to continue to cdsspace.pro" instead of the Supabase URL.
         const siteUrl = process.env.NEXT_PUBLIC_SITE_URL || window.location.origin;
         window.location.href = `${siteUrl}/api/auth/google/login?next=/subscription`;
     };

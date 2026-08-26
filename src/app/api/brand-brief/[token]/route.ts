@@ -28,6 +28,7 @@ const ALLOWED_FIELDS = [
     "goals",
     "long_term_vision",
     "budget_range",
+    "budget_currency",
     "timeline",
     "additional_notes",
 ] as const;

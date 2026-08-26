@@ -319,7 +319,7 @@ export default function DashboardPage() {
                 ) : (
                     <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
                         {recentDeliveries.map((delivery) => (
-                            <a key={delivery.id} href={delivery.url} target="_blank" rel="noopener noreferrer" className="group rounded-xl border border-brand-stroke/20 bg-white p-4 transition hover:border-blue-200 hover:shadow-[0_8px_24px_rgba(10,79,232,0.08)]">
+                            <Link key={delivery.id} href={delivery.url} target="_blank" rel="noopener noreferrer" className="group rounded-xl border border-brand-stroke/20 bg-white p-4 transition hover:border-blue-200 hover:shadow-[0_8px_24px_rgba(10,79,232,0.08)]">
                                 <div className="flex items-start gap-3">
                                     <div className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-blue-50 text-brand-blue"><FileCheck className="h-5 w-5" /></div>
                                     <div className="min-w-0 flex-1">
@@ -329,7 +329,7 @@ export default function DashboardPage() {
                                     </div>
                                     <ArrowRight className="mt-1 h-4 w-4 shrink-0 text-brand-mute transition group-hover:translate-x-0.5 group-hover:text-brand-blue" />
                                 </div>
-                            </a>
+                            </Link>
                         ))}
                     </div>
                 )}

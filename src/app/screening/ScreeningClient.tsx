@@ -21,6 +21,7 @@ import {
   Clock3,
 } from "lucide-react";
 import ObjectiveTest from "./ObjectiveTest";
+import Link from "next/link";
 
 interface Stage {
   status: string;
@@ -238,7 +239,7 @@ function LoginView({ onSuccess }: { onSuccess: () => void }) {
 
         <p className="mt-5 text-center text-xs text-brand-mute">
           Lost your tracking code? Check it on the{" "}
-          <a href="/Career" className="font-semibold text-brand-blue hover:underline">careers page</a>.
+          <Link href="/Career" className="font-semibold text-brand-blue hover:underline">careers page</Link>.
         </p>
       </motion.div>
     </div>

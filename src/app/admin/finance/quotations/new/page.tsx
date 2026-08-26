@@ -22,6 +22,7 @@ import {
 } from "@/lib/finance/types";
 import { AIAssistButton } from "@/components/ai/AIAssistButton";
 import { appAlert } from "@/lib/app-notify";
+import { DraftRecoveryBanner, useDraftRecovery } from "@/lib/use-draft-recovery";
 
 interface Row { name: string; description: string; quantity: string; unit_price: string; isNew: boolean; }
 interface ProjectLite { id: string; name: string; client: string; currency: Currency; }
@@ -68,6 +69,8 @@ export default function NewQuotationPage() {
   const [uploading, setUploading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [draftId, setDraftId] = useState<string | null>(null);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const draft = useDraftRecovery<any>("quotation", { skip: !!editDraftId });
   const [lastSaved, setLastSaved] = useState<Date | null>(null);
   const [isOffline, setIsOffline] = useState(false);
   const [clientMatches, setClientMatches] = useState<ClientLite[]>([]);
@@ -158,7 +161,7 @@ export default function NewQuotationPage() {
         const d = await r.json();
         if (cancelled || !d?.quotation) return;
         const q = d.quotation;
-        localStorage.removeItem("pending_quotation");
+        draft.clear();
         setScope((q.scope as typeof scope) || "custom");
         setProjectId(q.project_id || "");
         setMilestoneId(q.milestone_id || "");
@@ -196,36 +199,29 @@ export default function NewQuotationPage() {
     return () => { cancelled = true; };
   }, [editDraftId]);
 
-  useEffect(() => {
-    if (editDraftId) return;
-    const saved = localStorage.getItem("pending_quotation");
-    if (saved) {
-      try {
-        const d = JSON.parse(saved);
-        setScope(d.scope || "custom");
-        setProjectId(d.projectId || "");
-        setMilestoneId(d.milestoneId || "");
-        setPeriodMonth(d.periodMonth || "");
-        setProjectName(d.projectName || "");
-        setClient(d.client || { name: "", email: "", address: "" });
-        setCurrency(d.currency || "NGN");
-        setIssueDate(d.issueDate || new Date().toISOString().slice(0, 10));
-        setValidUntil(d.validUntil || "");
-        setTaxRate(d.taxRate || "0");
-        setDiscount(d.discount || "0");
-        setNotes(d.notes || "");
-        setEstimateNote(d.estimateNote || DEFAULT_QUOTATION_ESTIMATE_NOTE);
-        setRevisionsNote(d.revisionsNote || DEFAULT_REVISIONS_NOTE);
-        setWorkingHours(d.workingHours || DEFAULT_WORKING_HOURS);
-        setDeliveryPeriod(d.deliveryPeriod || QUOTATION_DELIVERY_PERIODS[0]);
-        setRows(d.rows || [{ name: "", description: "", quantity: "1", unit_price: "0", isNew: false }]);
-        setSamples(d.samples || []);
-        if (d.draftId) setDraftId(d.draftId);
-      } catch (e) {
-        console.error("Failed to restore quotation draft", e);
-      }
-    }
-  }, [editDraftId]);
+  // A new quotation always opens blank; autosaved work is offered, never applied
+  // on its own. See src/lib/use-draft-recovery.tsx.
+  const applyDraft = (d: any) => {
+    setScope(d.scope || "custom");
+    setProjectId(d.projectId || "");
+    setMilestoneId(d.milestoneId || "");
+    setPeriodMonth(d.periodMonth || "");
+    setProjectName(d.projectName || "");
+    setClient(d.client || { name: "", email: "", address: "" });
+    setCurrency(d.currency || "NGN");
+    setIssueDate(d.issueDate || new Date().toISOString().slice(0, 10));
+    setValidUntil(d.validUntil || "");
+    setTaxRate(d.taxRate || "0");
+    setDiscount(d.discount || "0");
+    setNotes(d.notes || "");
+    setEstimateNote(d.estimateNote || DEFAULT_QUOTATION_ESTIMATE_NOTE);
+    setRevisionsNote(d.revisionsNote || DEFAULT_REVISIONS_NOTE);
+    setWorkingHours(d.workingHours || DEFAULT_WORKING_HOURS);
+    setDeliveryPeriod(d.deliveryPeriod || QUOTATION_DELIVERY_PERIODS[0]);
+    setRows(d.rows || [{ name: "", description: "", quantity: "1", unit_price: "0", isNew: false }]);
+    setSamples(d.samples || []);
+    if (d.draftId) setDraftId(d.draftId);
+  };
 
   useEffect(() => {
     if (hydrating) return;
@@ -234,7 +230,7 @@ export default function NewQuotationPage() {
       issueDate, validUntil, taxRate, discount, notes, estimateNote,
       revisionsNote, workingHours, deliveryPeriod, rows, samples, draftId,
     };
-    localStorage.setItem("pending_quotation", JSON.stringify(state));
+    draft.save(state);
 
     const timeout = setTimeout(async () => {
       if (!projectName.trim() || !client.name || rows.length === 0 || rows.every((r) => !r.name)) return;
@@ -244,7 +240,7 @@ export default function NewQuotationPage() {
         const method = draftId ? "PATCH" : "POST";
         const res = await fetch(url, {
           method,
-          headers: { "Content-Type": "application/json" },
+          headers: { "Content-Type": "application/json", "x-cds-silent": "1" },
           body: JSON.stringify(payload),
         });
         if (res.ok) {
@@ -367,7 +363,7 @@ export default function NewQuotationPage() {
         return;
       }
       const d = await r.json();
-      localStorage.removeItem("pending_quotation");
+      draft.clear();
       const targetId = d?.quotation?.id || draftId;
       if (!targetId) {
         appAlert("Quotation created but no id was returned.");
@@ -401,6 +397,8 @@ export default function NewQuotationPage() {
         </div>
       }
     >
+      <DraftRecoveryBanner draft={draft} label="quotation" onRestore={applyDraft} />
+
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div className="lg:col-span-2 space-y-6">
           <div className={`${glassCard} p-6`}>

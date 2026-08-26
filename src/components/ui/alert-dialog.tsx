@@ -19,7 +19,7 @@ const AlertDialogOverlay = React.forwardRef<
   <AlertDialogPrimitive.Overlay
     data-slot="alert-dialog-overlay"
     className={cn(
-      "fixed inset-0 z-50 bg-[#040B37]/55 backdrop-blur-[4px] data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0",
+      "fixed inset-0 layer-overlay bg-[#040B37]/55 backdrop-blur-[4px] data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0",
       className
     )}
     {...props}
@@ -38,7 +38,7 @@ const AlertDialogContent = React.forwardRef<
       data-slot="alert-dialog-content"
       ref={ref}
       className={cn(
-        "workspace-dialog-position fixed z-50 grid w-full max-w-[calc(100vw-1rem)] gap-4 rounded-[24px] border border-white/80 bg-white p-5 shadow-[0_28px_90px_rgba(4,11,55,0.24)] duration-200 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 data-[state=closed]:slide-out-to-left-1/2 data-[state=closed]:slide-out-to-top-[48%] data-[state=open]:slide-in-from-left-1/2 data-[state=open]:slide-in-from-top-[48%] sm:max-w-lg sm:p-6",
+        "workspace-dialog-position fixed layer-modal grid w-full max-w-[calc(100vw-1rem)] gap-4 rounded-[24px] border border-white/80 bg-white p-5 shadow-[0_28px_90px_rgba(4,11,55,0.24)] duration-200 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 data-[state=closed]:slide-out-to-left-1/2 data-[state=closed]:slide-out-to-top-[48%] data-[state=open]:slide-in-from-left-1/2 data-[state=open]:slide-in-from-top-[48%] sm:max-w-lg sm:p-6",
         className
       )}
       {...props}

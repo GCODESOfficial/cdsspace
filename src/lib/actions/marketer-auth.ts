@@ -7,6 +7,7 @@ import {
   clearMarketerDashboardSessionCookie,
   setMarketerDashboardSessionCookie,
 } from "@/lib/marketer-dashboard-session";
+import { BLOCKED_EMAIL_MESSAGE, isBlockedEmail } from "@/lib/security/email-blocklist";
 
 function siteOrigin() {
   if (process.env.NEXT_PUBLIC_SITE_URL) return process.env.NEXT_PUBLIC_SITE_URL.replace(/\/$/, "");
@@ -15,6 +16,7 @@ function siteOrigin() {
 }
 
 export async function marketerLogin(input: { email: string; password: string }) {
+  if (isBlockedEmail(input.email)) return { error: BLOCKED_EMAIL_MESSAGE };
   const db = await createClient();
   const { data, error } = await db.auth.signInWithPassword({ email: input.email, password: input.password });
   if (error || !data.user) return { error: error?.message || "Could not sign in." };
@@ -32,6 +34,7 @@ export async function marketerLogin(input: { email: string; password: string }) 
 }
 
 export async function marketerSignup(input: { email: string; password: string; fullName: string }) {
+  if (isBlockedEmail(input.email)) return { error: BLOCKED_EMAIL_MESSAGE };
   const db = await createClient();
   const { data, error } = await db.auth.signUp({
     email: input.email,

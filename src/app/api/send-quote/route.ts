@@ -37,7 +37,7 @@ export async function POST(req: Request) {
       ),
     };
 
-    await transporter.sendMail(mailOptions);
+    await transporter.sendMail({ ...mailOptions, attachments: emailAttachmentsFor(mailOptions.html) });
 
     return NextResponse.json({ success: true });
   } catch (err) {

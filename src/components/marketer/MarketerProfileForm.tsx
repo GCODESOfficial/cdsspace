@@ -1,11 +1,13 @@
 "use client";
 
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 import { Check, Landmark, Loader2, UserRound } from "lucide-react";
 import type { MarketerPayoutAccount, MarketerProfile } from "@/lib/marketer-account";
 import { SecureProfilePhotoPicker } from "@/components/shared/SecureProfilePhotoPicker";
 
 export function MarketerProfileForm({ profile, payoutAccount, setup }: { profile: MarketerProfile; payoutAccount: MarketerPayoutAccount | null; setup: boolean }) {
+  const router = useRouter();
   const [profileSaving, setProfileSaving] = useState(false);
   const [accountSaving, setAccountSaving] = useState(false);
   const [profileMessage, setProfileMessage] = useState("");
@@ -18,7 +20,7 @@ export function MarketerProfileForm({ profile, payoutAccount, setup }: { profile
     const response = await fetch("/api/marketer/profile", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
     const result = await response.json().catch(() => ({}));
     if (!response.ok) { setProfileMessage(result.error || "Could not save profile."); setProfileSaving(false); return; }
-    if (setup) { window.location.replace("/marketer"); return; }
+    if (setup) { router.replace("/marketer"); return; }
     setProfileMessage("Profile saved."); setProfileSaving(false);
   }
 

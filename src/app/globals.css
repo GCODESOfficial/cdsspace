@@ -450,3 +450,37 @@ summary,
 .cursor-not-allowed {
   cursor: not-allowed;
 }
+
+/* ------------------------------------------------------------------ *
+ *  Layer scale
+ *
+ *  One documented stacking order for the whole app, so a modal can never
+ *  open underneath the sidebar, a page header, or a floating widget again.
+ *
+ *    content   0 - 49    in-page stacking (cards, sticky rows, click catchers)
+ *    chrome    90        fixed navigation: sidebars, navbars, drawers
+ *    overlay   1000      modal backdrop
+ *    modal     1010      modal panel
+ *    popover   2000      menus and selects, which must clear an open modal
+ *    toast     3000      transient notifications
+ *    critical  9000+     blocking confirm prompts (see app-notify)
+ *
+ *  Use the utility classes below on new overlays rather than inventing a
+ *  number. Existing hand-rolled modals sit in the content band at z-50 and
+ *  still clear chrome, because chrome is deliberately kept below them.
+ * ------------------------------------------------------------------ */
+:root {
+  --z-chrome: 90;
+  --z-chrome-panel: 91;
+  --z-overlay: 1000;
+  --z-modal: 1010;
+  --z-popover: 2000;
+  --z-toast: 3000;
+}
+
+.layer-chrome { z-index: var(--z-chrome); }
+.layer-chrome-panel { z-index: var(--z-chrome-panel); }
+.layer-overlay { z-index: var(--z-overlay); }
+.layer-modal { z-index: var(--z-modal); }
+.layer-popover { z-index: var(--z-popover); }
+.layer-toast { z-index: var(--z-toast); }

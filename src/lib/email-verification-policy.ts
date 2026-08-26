@@ -2,6 +2,7 @@ import "server-only";
 
 import { resolveMx } from "node:dns/promises";
 import { domainToASCII } from "node:url";
+import { BLOCKED_EMAIL_MESSAGE, isBlockedEmail } from "@/lib/security/email-blocklist";
 
 const RESERVED_DOMAINS = new Set([
   "example.com",
@@ -70,6 +71,7 @@ export async function verifyNewAccountEmail(value: unknown): Promise<
 > {
   const email = normalizedAddress(value);
   if (!email) return { ok: false, error: "Enter a valid email address." };
+  if (isBlockedEmail(email)) return { ok: false, error: BLOCKED_EMAIL_MESSAGE };
 
   const domain = email.slice(email.lastIndexOf("@") + 1);
   if (domainIsBlocked(domain)) {

@@ -2,6 +2,7 @@ import "server-only";
 
 import { chatComplete } from "@/lib/ai/openai";
 import type { SiteResearch, WebSearchResult } from "@/lib/sales-growth-research";
+import { emptyDeck, normalizeDeck, type ProposalDeck } from "@/lib/proposal-deck";
 
 export interface DealProposalContent {
   executive_summary: string;
@@ -197,6 +198,110 @@ export async function buildDealBrandAudit(input: {
       future_state: String(data.future_state || fallback.future_state).trim(),
       metrics: finalScores.map((entry) => ({ label: entry.area, value: entry.score, maximum: 100 })),
     };
+  } catch {
+    return fallback;
+  }
+}
+
+// Builds the nine-slide landscape deck used by the public proposal page, the
+// admin editor, and the PDF. Sections that are fixed CDS Space material (the
+// process, the payoff, the kickoff, the call to action) come from the deck
+// defaults; the AI only writes the client-specific narrative.
+export async function buildProposalDeck(input: {
+  brandName: string;
+  focusArea: string;
+  targetUrl: string;
+  socialUrl: string;
+  title: string;
+  research: SiteResearch | null;
+  marketSources: WebSearchResult[];
+}): Promise<ProposalDeck> {
+  const fallback = emptyDeck(input.brandName, input.focusArea, input.title);
+  if (!canUseAi()) return fallback;
+
+  const system = [
+    "You are the senior proposal strategist for CDS Space Branding Agency.",
+    "Write the client-specific narrative for a nine-slide landscape proposal deck.",
+    "Return strict JSON with these keys only: cover, who_we_are, big_picture, rewind, opportunities, payoff, kickoff, cta.",
+    "cover: {title, subtitle, prepared_for}. subtitle is a single line of positioning for this client.",
+    "who_we_are: {heading, body[]} - two short paragraphs. Keep CDS Space's identity as a full-service branding agency, but tilt the second paragraph toward the solution this client wants.",
+    "big_picture: {heading, intro, outcomes[{title, detail}]} - the client's desired outcome, three outcomes.",
+    "rewind: {heading, intro, problems[]} - the problem, stated plainly, three to five points, no blame.",
+    "opportunities: {heading, intro, items[{title, detail, value}]} - money and ground currently being left on the table. If the evidence shows no obvious gap, articulate an opportunity the client could create. value is a short qualitative outcome label, never an invented figure.",
+    "payoff: {heading, intro, items[]} - what the client gets for the investment, up to eight short items.",
+    "kickoff: {heading, intro, steps[{title, detail}]} - exactly five steps, concluded in one to two meetings.",
+    "cta: {heading, body} - invite them to schedule a meeting.",
+    "Use only the supplied public evidence. Never invent market size, growth rates, revenue, customers, results, awards, or relationships. Never state a currency figure.",
+    "Frame outcomes as reasonable expectations, not guarantees. No hype, no em dashes.",
+  ].join("\n");
+
+  const evidence = {
+    brand_name: input.brandName,
+    focus_area: input.focusArea,
+    target_url: input.targetUrl,
+    social_url: input.socialUrl,
+    website: input.research ? {
+      title: input.research.title,
+      description: input.research.description,
+      text: input.research.text.slice(0, 14_000),
+      signals: input.research.brandSignals,
+      technical_metrics: input.research.technicalMetrics,
+    } : null,
+    market_sources: input.marketSources.map((source) => ({ title: source.title, url: source.url, description: source.description })),
+  };
+
+  try {
+    const { text } = await chatComplete(
+      [{ role: "system", content: system }, { role: "user", content: JSON.stringify(evidence).slice(0, 28_000) }],
+      { response_format: { type: "json_object" }, temperature: 0.35, max_tokens: 3200 },
+    );
+    return normalizeDeck(objectFrom(text), { brandName: input.brandName, focusArea: input.focusArea, title: input.title });
+  } catch {
+    return fallback;
+  }
+}
+
+/**
+ * Writes the opening line for the proposal email, drawn from the deck the
+ * client is about to read so the note and the proposal say the same thing.
+ * Falls back to the big picture intro, which is what the sender already
+ * gets when the field is left empty.
+ */
+export async function buildProposalEmailOpening(input: {
+  brandName: string;
+  focusArea: string;
+  deck: ProposalDeck;
+}): Promise<string> {
+  const fallback = input.deck.big_picture.intro;
+  if (!canUseAi()) return fallback;
+
+  const system = [
+    "You write the opening line of an email that delivers a branding proposal to a prospective client.",
+    "Return strict JSON: {\"message\": string}.",
+    "Two to three sentences, at most 60 words. Warm, direct, and specific to this client.",
+    "Ground every claim in the supplied deck. Never invent figures, results, timelines, or relationships.",
+    "Do not greet the reader, do not sign off, and do not repeat the proposal title - the email template already carries those.",
+    "Name the outcome the client cares about and point at the proposal. No hype, no em dashes.",
+  ].join("\n");
+
+  const evidence = {
+    brand_name: input.brandName,
+    focus_area: input.focusArea,
+    cover: input.deck.cover,
+    big_picture: input.deck.big_picture,
+    rewind: input.deck.rewind,
+    opportunities: input.deck.opportunities,
+    payoff: input.deck.payoff,
+    cta: { heading: input.deck.cta.heading, body: input.deck.cta.body },
+  };
+
+  try {
+    const { text } = await chatComplete(
+      [{ role: "system", content: system }, { role: "user", content: JSON.stringify(evidence).slice(0, 12_000) }],
+      { response_format: { type: "json_object" }, temperature: 0.4, max_tokens: 400 },
+    );
+    const message = String(objectFrom(text).message || "").trim();
+    return message.slice(0, 1200) || fallback;
   } catch {
     return fallback;
   }

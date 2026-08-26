@@ -228,6 +228,21 @@ export const PERMISSION_GROUPS: PermissionGroup[] = [
     ],
   },
 
+  // ─────────────── Executive Board ───────────────
+  {
+    key: "executive_board",
+    label: "Executive Board",
+    route: "/admin/executive-board",
+    permissions: [
+      { key: "executive_board.view", label: "View Executive Board", description: "See budgets, targets, revenue models, and the vault index" },
+      { key: "executive_board.budgets", label: "Manage Budgets", description: "Create, edit, and delete budget lines" },
+      { key: "executive_board.targets", label: "Manage Targets", description: "Create, edit, and delete company targets" },
+      { key: "executive_board.models", label: "Manage Revenue Models", description: "Create revenue models and their step-by-step execution plans" },
+      { key: "executive_board.vault_view", label: "Open Vault Files", description: "Download legal documents and attachments held in the vault" },
+      { key: "executive_board.vault_manage", label: "Manage Vault", description: "Upload files, build folders, set passwords, and issue share links" },
+    ],
+  },
+
   // ─────────────── Finance ───────────────
   {
     key: "finance",

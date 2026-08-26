@@ -7,7 +7,7 @@ import Link from "next/link";
 import { cn } from "@/lib/utils";
 import { motion, AnimatePresence } from "framer-motion";
 import { LogOut, LayoutDashboard, Newspaper, FileText, Image as ImageIcon, Package, MessageSquare, ShoppingBag, Settings, ReceiptText, FolderOpen, Palette, CalendarRange, ChevronDown } from "lucide-react";
-import { useClientAccount } from "@/components/dashboard/ClientAccountProvider";
+import { useClientAccount, type ClientAccountSnapshot } from "@/components/dashboard/ClientAccountProvider";
 
 type NavigationItem = {
     name: string;
@@ -100,9 +100,61 @@ export const Sidebar = ({ isOpen = false, onClose }: SidebarProps) => {
         if (onClose) onClose();
     };
 
-    const NavItem = ({ item, isMobile }: { item: NavigationItem; isMobile?: boolean }) => {
-        const itemHref = dashboardPath(item.href);
-        const isActive = pathname === itemHref;
+    return (
+        <>
+            {/* Desktop */}
+            <aside className="hidden lg:block h-screen bg-white sticky top-0">
+                <SidebarContent
+                    onClose={onClose}
+                    account={account}
+                    userName={userName}
+                    userCompany={userCompany}
+                    userInitials={userInitials}
+                    collapsedSections={collapsedSections}
+                    toggleSection={toggleSection}
+                    handleLogout={handleLogout}
+                    dashboardPath={dashboardPath}
+                    pathname={pathname}
+                />
+            </aside>
+
+            {/* Mobile Drawer */}
+            <AnimatePresence>
+                {isOpen && (
+                    <>
+                        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={onClose}
+                            className="fixed inset-0 bg-black/20 backdrop-blur-xs layer-chrome lg:hidden" />
+                        <motion.div initial={{ x: "var(--drawer-offset)" }} animate={{ x: 0 }} exit={{ x: "var(--drawer-offset)" }}
+                            transition={{ type: "spring", damping: 25, stiffness: 200 }}
+                            className="fixed inset-y-0 start-0 layer-chrome-panel w-[86vw] max-w-[320px] border-e border-[#E3E8F4]/60 bg-white shadow-2xl [--drawer-offset:-100%] rtl:[--drawer-offset:100%] lg:hidden">
+                            <SidebarContent
+                                isMobile
+                                onClose={onClose}
+                                account={account}
+                                userName={userName}
+                                userCompany={userCompany}
+                                userInitials={userInitials}
+                                collapsedSections={collapsedSections}
+                                toggleSection={toggleSection}
+                                handleLogout={handleLogout}
+                                dashboardPath={dashboardPath}
+                                pathname={pathname}
+                            />
+                        </motion.div>
+                    </>
+                )}
+            </AnimatePresence>
+        </>
+    );
+};
+
+function NavItem({ item, isMobile, itemHref, isActive, onClose }: {
+    item: NavigationItem;
+    isMobile?: boolean;
+    itemHref: string;
+    isActive: boolean;
+    onClose?: () => void;
+}) {
         const Icon = item.icon;
         const isLocked = item.comingSoon;
 
@@ -160,9 +212,34 @@ export const Sidebar = ({ isOpen = false, onClose }: SidebarProps) => {
                 </span>
             </Link>
         );
-    };
+}
 
-    const SidebarContent = ({ isMobile = false }) => (
+function SidebarContent({
+    isMobile = false,
+    onClose,
+    account,
+    userName,
+    userCompany,
+    userInitials,
+    collapsedSections,
+    toggleSection,
+    handleLogout,
+    dashboardPath,
+    pathname,
+}: {
+    isMobile?: boolean;
+    onClose?: () => void;
+    account: ClientAccountSnapshot;
+    userName: string;
+    userCompany: string;
+    userInitials: string;
+    collapsedSections: Record<string, boolean>;
+    toggleSection: (name: string) => void;
+    handleLogout: () => void;
+    dashboardPath: (destination?: string) => string;
+    pathname: string;
+}) {
+    return (
         <div className={cn(
             "h-full flex flex-col bg-white transition-all duration-300",
             isMobile ? "w-full" : "w-[220px] 2xl:w-[260px] border-e border-[#E3E8F4]/60 premium-scrollbar"
@@ -225,7 +302,14 @@ export const Sidebar = ({ isOpen = false, onClose }: SidebarProps) => {
                                         className="space-y-0.5 overflow-hidden"
                                     >
                                         {section.items.map((item) => (
-                                            <NavItem key={item.name} item={item} isMobile={isMobile} />
+                                            <NavItem
+                                                key={item.name}
+                                                item={item}
+                                                isMobile={isMobile}
+                                                itemHref={dashboardPath(item.href)}
+                                                isActive={pathname === dashboardPath(item.href)}
+                                                onClose={onClose}
+                                            />
                                         ))}
                                     </motion.div>
                                 )}
@@ -275,28 +359,4 @@ export const Sidebar = ({ isOpen = false, onClose }: SidebarProps) => {
             )}
         </div>
     );
-
-    return (
-        <>
-            {/* Desktop */}
-            <aside className="hidden lg:block h-screen bg-white sticky top-0">
-                <SidebarContent />
-            </aside>
-
-            {/* Mobile Drawer */}
-            <AnimatePresence>
-                {isOpen && (
-                    <>
-                        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={onClose}
-                            className="fixed inset-0 bg-black/20 backdrop-blur-xs z-[100] lg:hidden" />
-                        <motion.div initial={{ x: "var(--drawer-offset)" }} animate={{ x: 0 }} exit={{ x: "var(--drawer-offset)" }}
-                            transition={{ type: "spring", damping: 25, stiffness: 200 }}
-                            className="fixed inset-y-0 start-0 z-[101] w-[86vw] max-w-[320px] border-e border-[#E3E8F4]/60 bg-white shadow-2xl [--drawer-offset:-100%] rtl:[--drawer-offset:100%] lg:hidden">
-                            <SidebarContent isMobile />
-                        </motion.div>
-                    </>
-                )}
-            </AnimatePresence>
-        </>
-    );
-};
+}

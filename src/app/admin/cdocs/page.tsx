@@ -1,5 +1,6 @@
 "use client";
 
+import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import {
@@ -32,6 +33,7 @@ interface DocSummary {
 }
 
 export default function AdminCdocsPage() {
+  const router = useRouter();
   const [docs, setDocs] = useState<DocSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
@@ -65,7 +67,7 @@ export default function AdminCdocsPage() {
     });
     const j = await r.json();
     setCreating(false);
-    if (r.ok && j.ok) window.location.href = `/team/cdocs/${j.slug}`;
+    if (r.ok && j.ok) router.push(`/team/cdocs/${j.slug}`);
   }
 
   const totalViews = docs.reduce((s, d) => s + d.views, 0);

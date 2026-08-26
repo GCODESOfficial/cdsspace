@@ -186,6 +186,7 @@ export async function deliverAnnouncementByEmail(
         to,
         subject: title,
         html,
+        attachments: emailAttachmentsFor(html),
       }),
     ),
   );

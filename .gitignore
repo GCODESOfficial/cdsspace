@@ -50,3 +50,6 @@ desktop/dist/
 
 # Large build artifacts (exceed GitHub 100MB limit) - not for git
 public/downloads/*.dmg
+
+# build output
+/.tmpbuild/

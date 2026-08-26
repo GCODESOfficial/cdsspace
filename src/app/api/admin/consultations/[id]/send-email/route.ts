@@ -49,6 +49,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       subject,
       text: message,
       html,
+      attachments: emailAttachmentsFor(html),
     });
   } catch (e) {
     return NextResponse.json({ error: e instanceof Error ? e.message : "Could not send the email." }, { status: 500 });

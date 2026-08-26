@@ -31,7 +31,9 @@ export function AuthBrandPanel() {
     useEffect(() => {
         let active = true;
         // Defer the DB round-trip until the browser is idle so it never competes
-        // with first paint / hydration. The fallback testimonials show instantly.
+        // with first paint / hydration. Older Safari and embedded mobile browsers
+        // do not expose requestIdleCallback, so use a short timer fallback instead
+        // of letting the auth tree crash during hydration.
         const run = () => {
             supabase
                 .from("testimonials")
@@ -44,10 +46,19 @@ export function AuthBrandPanel() {
                     }
                 });
         };
-        const handle = window.requestIdleCallback(run, { timeout: 2500 });
+
+        const supportsIdleCallback = typeof window.requestIdleCallback === "function";
+        const handle = supportsIdleCallback
+            ? window.requestIdleCallback(run, { timeout: 2500 })
+            : window.setTimeout(run, 250);
+
         return () => {
             active = false;
-            window.cancelIdleCallback(handle);
+            if (supportsIdleCallback && typeof window.cancelIdleCallback === "function") {
+                window.cancelIdleCallback(handle);
+            } else {
+                window.clearTimeout(handle);
+            }
         };
     }, []);
 

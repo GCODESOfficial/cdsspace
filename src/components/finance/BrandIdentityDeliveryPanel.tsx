@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import {
   Archive,
   CheckCircle2,
@@ -232,7 +233,7 @@ export function BrandIdentityDeliveryPanel({ projectId }: { projectId: string })
               {delivery?.is_public && delivery.public_url && (
                 <div className="flex gap-1">
                   <button type="button" onClick={copyShareLink} aria-label="Copy public Brand Identity link" className="grid h-8 w-8 place-items-center rounded-[8px] text-gray-500 hover:bg-blue-50 hover:text-blue-600"><Copy className="h-4 w-4" /></button>
-                  <a href={delivery.public_url} target="_blank" rel="noreferrer" aria-label="Open public Brand Identity page" className="grid h-8 w-8 place-items-center rounded-[8px] text-gray-500 hover:bg-blue-50 hover:text-blue-600"><ExternalLink className="h-4 w-4" /></a>
+                  <Link href={delivery.public_url} target="_blank" rel="noreferrer" aria-label="Open public Brand Identity page" className="grid h-8 w-8 place-items-center rounded-[8px] text-gray-500 hover:bg-blue-50 hover:text-blue-600"><ExternalLink className="h-4 w-4" /></Link>
                 </div>
               )}
             </div>

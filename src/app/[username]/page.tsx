@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { notFound } from "next/navigation";
 import { supabaseAdmin } from "@/lib/supabase";
 import { buildProductMetadata } from "@/lib/product-metadata";
 import ResumeClient from "./ResumeClient";
@@ -58,6 +59,13 @@ export async function generateMetadata({ params }: { params: Promise<{ username:
     });
 }
 
-export default function Page() {
+export default async function Page({ params }: { params: Promise<{ username: string }> }) {
+    // This route sits at the site root, so it matches every unrecognised
+    // top-level URL. Resolving the username on the server means a wrong link
+    // gets the branded 404 with a real 404 status, instead of a client-side
+    // spinner that settles into a bare "profile not found" line at HTTP 200.
+    const { username } = await params;
+    const data = await fetchResume(username);
+    if (!data) notFound();
     return <ResumeClient />;
 }

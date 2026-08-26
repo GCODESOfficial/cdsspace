@@ -23,12 +23,13 @@ import { BrandBriefShareModal, type BrandBriefSharePayload } from "@/components/
 import {
     ASSET_OPTIONS,
     BRAND_BRIEF_FIELD_LABELS,
-    BUDGET_RANGES,
+    budgetRangesForCurrency,
     TIMELINE_OPTIONS,
     briefToDraft,
     type BrandBrief,
     type BrandBriefDraft,
 } from "@/lib/brand-brief";
+import { CLIENT_BILLING_CURRENCY_OPTIONS } from "@/lib/client-billing";
 
 const STATUS_STYLES: Record<string, string> = {
     pending: "bg-amber-50 text-amber-700 ring-1 ring-amber-200",
@@ -201,7 +202,7 @@ export default function AdminBrandBriefDetailPage({
                 { title: "Contact", fields: ["contact_name", "contact_email", "contact_phone"] as (keyof BrandBriefDraft)[] },
                 { title: "Audience & Market", fields: ["target_audience", "competitors", "unique_selling_point"] as (keyof BrandBriefDraft)[] },
                 { title: "Brand Identity", fields: ["brand_personality", "brand_values", "design_preferences", "inspiration_references"] as (keyof BrandBriefDraft)[] },
-                { title: "Scope & Goals", fields: ["assets_needed", "goals", "long_term_vision", "budget_range", "timeline", "additional_notes"] as (keyof BrandBriefDraft)[] },
+                { title: "Scope & Goals", fields: ["assets_needed", "goals", "long_term_vision", "budget_currency", "budget_range", "timeline", "additional_notes"] as (keyof BrandBriefDraft)[] },
             ],
         [],
     );
@@ -522,19 +523,40 @@ function FieldCell({
                         );
                     })}
                 </div>
-            ) : fieldKey === "budget_range" ? (
+            ) : fieldKey === "budget_currency" ? (
                 <select
-                    value={draft.budget_range}
-                    onChange={(e) => onChange("budget_range", e.target.value)}
+                    value={draft.budget_currency}
+                    onChange={(e) => {
+                        // Ranges are currency specific, so a change of currency clears the range.
+                        onChange("budget_currency", e.target.value);
+                        onChange("budget_range", "");
+                    }}
                     className="w-full h-11 px-3 rounded-xl border border-gray-200 text-sm bg-white"
                 >
                     <option value="">Select</option>
-                    {BUDGET_RANGES.map((b) => (
-                        <option key={b} value={b}>
-                            {b}
+                    {CLIENT_BILLING_CURRENCY_OPTIONS.map((option) => (
+                        <option key={option.code} value={option.code}>
+                            {option.symbol} {option.name} ({option.code})
                         </option>
                     ))}
                 </select>
+            ) : fieldKey === "budget_range" ? (
+                draft.budget_currency ? (
+                    <select
+                        value={draft.budget_range}
+                        onChange={(e) => onChange("budget_range", e.target.value)}
+                        className="w-full h-11 px-3 rounded-xl border border-gray-200 text-sm bg-white"
+                    >
+                        <option value="">Select</option>
+                        {budgetRangesForCurrency(draft.budget_currency).map((b) => (
+                            <option key={b} value={b}>
+                                {b}
+                            </option>
+                        ))}
+                    </select>
+                ) : (
+                    <p className="text-sm text-gray-400">Pick a budget currency first.</p>
+                )
             ) : fieldKey === "timeline" ? (
                 <select
                     value={draft.timeline}

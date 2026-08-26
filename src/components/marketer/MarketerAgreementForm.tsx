@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { Check, FileSignature, Loader2, ShieldCheck } from "lucide-react";
 
@@ -13,6 +14,7 @@ export function MarketerAgreementForm(props: {
   privacyVersion: number;
   agreementVersion: number;
 }) {
+  const router = useRouter();
   const [name, setName] = useState(props.fullName);
   const [accepted, setAccepted] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -24,7 +26,7 @@ export function MarketerAgreementForm(props: {
     const response = await fetch("/api/marketer/agreement", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ accepted: true, signerName: name.trim() }) });
     const result = await response.json().catch(() => ({}));
     if (!response.ok) { setError(result.error || "Could not record the agreement."); setSaving(false); return; }
-    window.location.replace(result.next || "/marketer/onboarding");
+    router.replace(result.next || "/marketer/onboarding");
   }
 
   return (

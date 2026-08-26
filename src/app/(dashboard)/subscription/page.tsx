@@ -7,6 +7,7 @@ import { ActiveSubscriptionView } from "@/components/subscription/ActiveSubscrip
 import { SubscriptionPlanCatalog } from "@/components/subscription/SubscriptionPlanCatalog";
 import { useClientAccount } from "@/components/dashboard/ClientAccountProvider";
 import { storageService } from "@/lib/supabase/storage";
+import Link from "next/link";
 
 interface SubscriptionRecord {
   id: string;
@@ -133,9 +134,9 @@ export default function SubscriptionPage() {
             <p className="text-sm font-semibold text-brand-navy">A plan change is awaiting payment</p>
             <p className="mt-0.5 text-xs text-brand-body">Invoice {pending.invoice.invoice_number} is ready. Your current plan remains active until payment is verified.</p>
           </div>
-          <a href={`/invoice/${pending.invoice.public_token}`} className="inline-flex h-10 shrink-0 items-center justify-center gap-2 rounded-[10px] bg-[#0A4FE8] px-4 text-sm font-semibold text-white">
+          <Link href={`/invoice/${pending.invoice.public_token}`} className="inline-flex h-10 shrink-0 items-center justify-center gap-2 rounded-[10px] bg-[#0A4FE8] px-4 text-sm font-semibold text-white">
             <FileText className="h-4 w-4" /> Open invoice
-          </a>
+          </Link>
         </div>
       )}
       <div className="min-h-0 flex-1">

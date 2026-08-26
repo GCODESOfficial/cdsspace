@@ -19,6 +19,7 @@ import DeliverySurchargeModal from "@/components/finance/DeliverySurchargeModal"
 import { appAlert, appConfirm, appPrompt } from "@/lib/app-notify";
 import { AIAssistButton } from "@/components/ai/AIAssistButton";
 import Link from "next/link";
+import { DraftRecoveryBanner, useDraftRecovery } from "@/lib/use-draft-recovery";
 
 interface Row { name: string; description: string; quantity: string; unit_price: string; isNew: boolean; }
 interface ProjectLite { id: string; name: string; client: string; currency: Currency; }
@@ -57,6 +58,8 @@ export default function NewInvoicePage() {
   const [rows, setRows] = useState<Row[]>([{ name: "", description: "", quantity: "1", unit_price: "0", isNew: false }]);
   const [saving, setSaving] = useState(false);
   const [draftId, setDraftId] = useState<string | null>(null);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const draft = useDraftRecovery<any>("invoice", { skip: !!editDraftId });
   const [lastSaved, setLastSaved] = useState<Date | null>(null);
   const [isOffline, setIsOffline] = useState(false);
 
@@ -196,7 +199,7 @@ export default function NewInvoicePage() {
         if (cancelled || !d?.invoice) return;
         const inv = d.invoice;
         // Wipe any stale LS draft so the autosave effect doesn't race us.
-        localStorage.removeItem("pending_invoice");
+        draft.clear();
         setScope((inv.scope as typeof scope) || "custom");
         setProjectId(inv.project_id || "");
         setMilestoneId(inv.milestone_id || "");
@@ -244,34 +247,29 @@ export default function NewInvoicePage() {
     return () => { cancelled = true; };
   }, [editDraftId]);
 
-  // Recovery from LocalStorage - only when we're NOT hydrating a specific draft.
-  useEffect(() => {
-    if (editDraftId) return;
-    const saved = localStorage.getItem("pending_invoice");
-    if (saved) {
-      try {
-        const d = JSON.parse(saved);
-        setScope(d.scope || "custom");
-        setProjectId(d.projectId || "");
-        setMilestoneId(d.milestoneId || "");
-        setPeriodMonth(d.periodMonth || "");
-        setClient(d.client || { name: "", email: "", address: "" });
-        setCurrency(d.currency || "NGN");
-        setIssueDate(d.issueDate || new Date().toISOString().slice(0, 10));
-        setDueDate(d.dueDate || "");
-        setTaxRate(d.taxRate || "0");
-        setDiscount(d.discount || "0");
-        setNotes(d.notes || "");
-        setRows(d.rows || [{ name: "", description: "", quantity: "1", unit_price: "0", isNew: false }]);
-        setPaymentTerms(d.paymentTerms || DEFAULT_PAYMENT_TERMS);
-        setRevisionsNote(d.revisionsNote || DEFAULT_REVISIONS_NOTE);
-        setWorkingHours(d.workingHours || DEFAULT_WORKING_HOURS);
-        setDeliverySpeed(d.deliverySpeed || "standard");
-        setDeliveryPeriod(d.deliveryPeriod || "");
-        if (d.draftId) setDraftId(d.draftId);
-      } catch (e) { console.error("Failed to restore draft", e); }
-    }
-  }, [editDraftId]);
+  // A new invoice always opens blank. Any autosaved work is offered through the
+  // banner instead of being applied silently - restoring it automatically also
+  // revived the previous invoice's draft id, so saving overwrote that record.
+  const applyDraft = (d: any) => {
+    setScope(d.scope || "custom");
+    setProjectId(d.projectId || "");
+    setMilestoneId(d.milestoneId || "");
+    setPeriodMonth(d.periodMonth || "");
+    setClient(d.client || { name: "", email: "", address: "" });
+    setCurrency(d.currency || "NGN");
+    setIssueDate(d.issueDate || new Date().toISOString().slice(0, 10));
+    setDueDate(d.dueDate || "");
+    setTaxRate(d.taxRate || "0");
+    setDiscount(d.discount || "0");
+    setNotes(d.notes || "");
+    setRows(d.rows || [{ name: "", description: "", quantity: "1", unit_price: "0", isNew: false }]);
+    setPaymentTerms(d.paymentTerms || DEFAULT_PAYMENT_TERMS);
+    setRevisionsNote(d.revisionsNote || DEFAULT_REVISIONS_NOTE);
+    setWorkingHours(d.workingHours || DEFAULT_WORKING_HOURS);
+    setDeliverySpeed(d.deliverySpeed || "standard");
+    setDeliveryPeriod(d.deliveryPeriod || "");
+    if (d.draftId) setDraftId(d.draftId);
+  };
 
   // Auto-save Persistence
   useEffect(() => {
@@ -282,7 +280,7 @@ export default function NewInvoicePage() {
       paymentTerms, revisionsNote, workingHours, deliverySpeed, deliveryPeriod,
       draftId,
     };
-    localStorage.setItem("pending_invoice", JSON.stringify(state));
+    draft.save(state);
 
     const timeout = setTimeout(async () => {
       if (!client.name || rows.length === 0 || rows.every(r => !r.name)) return;
@@ -305,7 +303,7 @@ export default function NewInvoicePage() {
         const url = draftId ? `/api/admin/finance/invoices/${draftId}` : "/api/admin/finance/invoices";
         const method = draftId ? "PATCH" : "POST";
         const res = await fetch(url, {
-          method, headers: { "Content-Type": "application/json" },
+          method, headers: { "Content-Type": "application/json", "x-cds-silent": "1" },
           body: JSON.stringify(payload),
         });
         if (res.ok) {
@@ -409,7 +407,7 @@ export default function NewInvoicePage() {
           });
           if (retry.ok) {
             const d = await retry.json();
-            localStorage.removeItem("pending_invoice");
+            draft.clear();
             router.push(`/admin/finance/invoices/${d.invoice.id}`);
             return;
           }
@@ -419,7 +417,7 @@ export default function NewInvoicePage() {
       }
 
       const d = await r.json();
-      localStorage.removeItem("pending_invoice");
+      draft.clear();
       const targetId = d?.invoice?.id || draftId;
       if (!targetId) {
         appAlert("Invoice created but no id was returned.");
@@ -453,6 +451,8 @@ export default function NewInvoicePage() {
         </div>
       }
     >
+      <DraftRecoveryBanner draft={draft} label="invoice" onRestore={applyDraft} />
+
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* LEFT: details + items */}
         <div className="lg:col-span-2 space-y-6">

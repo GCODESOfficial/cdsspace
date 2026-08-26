@@ -1,11 +1,11 @@
 'use client';
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
-import { Button } from "@/components/ui/button";
-import { Calendar, Mail, Phone, Building2, DollarSign, MessageSquare, Paperclip, Trash2, Search, Video, Copy, Check, ExternalLink, Loader2, CalendarClock, MapPin, MessageCircle, Send, Clock } from "lucide-react";
+import { Calendar, Mail, Phone, Building2, DollarSign, MessageSquare, Paperclip, Trash2, Search, Video, Copy, Check, ExternalLink, Loader2, CalendarClock, MapPin, MessageCircle, Send, Clock, FileText } from "lucide-react";
 import { appConfirm } from "@/lib/app-notify";
 import { toast } from "sonner";
 
@@ -31,6 +31,9 @@ interface Consultation {
   preferred_days?: string[] | null;
   preferred_times?: string[] | null;
   email_sent_at?: string | null;
+  // Set when the request came from the Kickoff Meet button on a proposal link.
+  proposal_id?: string | null;
+  proposal?: { id: string; title: string | null; brand_name: string | null; public_token: string } | null;
   created_at: string;
 }
 
@@ -247,7 +250,6 @@ export default function ConsultationsPage() {
                   <th className="px-5 py-4">Name</th>
                   <th className="px-5 py-4">Email</th>
                   <th className="px-5 py-4">Company</th>
-                  <th className="px-5 py-4">Budget</th>
                   <th className="px-5 py-4">Submitted</th>
                   <th className="px-5 py-4">Status</th>
                   <th className="px-5 py-4"></th>
@@ -256,10 +258,14 @@ export default function ConsultationsPage() {
               <tbody>
                 {filtered.map((c) => (
                   <tr key={c.id} className="border-t border-white/60 hover:bg-white/50 transition cursor-pointer" onClick={() => setActive(c)}>
-                    <td className="px-5 py-4 font-semibold text-gray-900">{c.full_name}</td>
+                    <td className="px-5 py-4 font-semibold text-gray-900">
+                      {c.full_name}
+                      {c.proposal_id && (
+                        <span className="ml-2 rounded-full bg-blue-50 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-blue-700 ring-1 ring-blue-100">Kickoff</span>
+                      )}
+                    </td>
                     <td className="px-5 py-4 text-gray-600">{c.email}</td>
                     <td className="px-5 py-4 text-gray-500">{c.company ?? "-"}</td>
-                    <td className="px-5 py-4 text-gray-500">{c.budget_range ?? "-"}</td>
                     <td className="px-5 py-4 text-gray-500">{new Date(c.created_at).toLocaleDateString()}</td>
                     <td className="px-5 py-4">
                       <span className={`text-[10px] uppercase tracking-wider font-semibold px-2.5 py-1 rounded-full ${STATUS_STYLES[c.status]}`}>{c.status}</span>
@@ -290,6 +296,19 @@ export default function ConsultationsPage() {
                 </div>
               </DialogHeader>
               <div className="px-7 pb-7 space-y-5">
+                {active.proposal && (
+                  <Link
+                    href={`/admin/deals/proposals?proposal=${active.proposal.id}`}
+                    className="flex items-center gap-2.5 rounded-xl border border-blue-100 bg-blue-50/70 px-4 py-3 text-sm font-semibold text-blue-800 transition hover:border-blue-300"
+                  >
+                    <FileText className="w-4 h-4 shrink-0" />
+                    <span className="min-w-0 flex-1 truncate">
+                      Kickoff meet booked from proposal: {active.proposal.title || active.proposal.brand_name}
+                    </span>
+                    <ExternalLink className="w-3.5 h-3.5 shrink-0" />
+                  </Link>
+                )}
+
                 <div className="grid grid-cols-2 gap-3">
                   <Info icon={Mail} label="Email">{active.email}</Info>
                   {active.whatsapp && <Info icon={MessageCircle} label="WhatsApp">{active.whatsapp}</Info>}
@@ -482,34 +501,53 @@ export default function ConsultationsPage() {
                         className="rounded-xl mt-1.5 min-h-[160px] bg-white"
                       />
                     </div>
-                    <div className="flex items-center justify-end gap-2">
-                      <Button variant="outline" className="rounded-xl" onClick={() => setEmailOpen(false)}>Cancel</Button>
+                    <div className="flex flex-wrap items-center justify-end gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setEmailOpen(false)}
+                        className="inline-flex h-11 shrink-0 items-center whitespace-nowrap rounded-xl border border-gray-200 px-4 text-sm font-medium text-gray-600 transition hover:bg-gray-50"
+                      >
+                        Cancel
+                      </button>
                       <button
                         type="button"
                         onClick={sendEmail}
                         disabled={sendingEmail}
-                        className="inline-flex items-center gap-2 h-11 px-5 rounded-xl bg-[#0A4FE8] text-white font-medium shadow-lg shadow-blue-600/30 disabled:opacity-60"
+                        className="inline-flex h-11 shrink-0 items-center gap-2 whitespace-nowrap rounded-xl bg-[#0A4FE8] px-5 text-sm font-medium text-white shadow-lg shadow-blue-600/30 transition hover:bg-[#083FC2] disabled:opacity-60"
                       >
-                        {sendingEmail ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />} Send email
+                        {sendingEmail ? <Loader2 className="h-4 w-4 shrink-0 animate-spin" /> : <Send className="h-4 w-4 shrink-0" />}
+                        Send email
                       </button>
                     </div>
                   </div>
                 )}
 
-                <div className="flex items-center justify-between pt-2">
-                  <Button variant="outline" className="rounded-xl text-red-600 border-red-200 hover:bg-red-50" onClick={() => remove(active.id)}>
-                    <Trash2 className="w-4 h-4 mr-1.5" /> Delete
-                  </Button>
-                  <div className="flex items-center gap-2">
+                {/* Wraps instead of compressing: at narrow widths the labels used
+                    to break mid-word and the buttons lost their fixed height. */}
+                <div className="flex flex-wrap items-center justify-between gap-3 border-t border-gray-100 pt-4">
+                  <button
+                    type="button"
+                    onClick={() => remove(active.id)}
+                    className="inline-flex h-11 shrink-0 items-center gap-2 whitespace-nowrap rounded-xl border border-red-200 px-4 text-sm font-medium text-red-600 transition hover:border-red-300 hover:bg-red-50"
+                  >
+                    <Trash2 className="h-4 w-4 shrink-0" />
+                    Delete
+                  </button>
+
+                  <div className="flex flex-wrap items-center justify-end gap-2">
                     {active.email_sent_at && (
-                      <span className="text-[11px] text-emerald-600 font-medium">Sent {new Date(active.email_sent_at).toLocaleDateString()}</span>
+                      <span className="inline-flex h-8 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full bg-emerald-50 px-3 text-[11px] font-medium text-emerald-700">
+                        <Check className="h-3 w-3 shrink-0" />
+                        Sent {new Date(active.email_sent_at).toLocaleDateString()}
+                      </span>
                     )}
                     <button
                       type="button"
                       onClick={openComposer}
-                      className="inline-flex items-center gap-2 h-11 px-5 rounded-xl bg-[#0A4FE8] text-white font-medium shadow-lg shadow-blue-600/30 hover:bg-[#083FC2] transition"
+                      className="inline-flex h-11 shrink-0 items-center gap-2 whitespace-nowrap rounded-xl bg-[#0A4FE8] px-5 text-sm font-medium text-white shadow-lg shadow-blue-600/30 transition hover:bg-[#083FC2]"
                     >
-                      <Mail className="w-4 h-4" /> {active.email_sent_at ? "Send another email" : "Compose email"}
+                      <Mail className="h-4 w-4 shrink-0" />
+                      {active.email_sent_at ? "Send another email" : "Compose email"}
                     </button>
                   </div>
                 </div>

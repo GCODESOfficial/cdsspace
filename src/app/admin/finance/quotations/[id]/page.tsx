@@ -1,5 +1,7 @@
 'use client';
 
+import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { useEffect, useState, use } from "react";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -39,6 +41,7 @@ function versionActionLabel(action: string) {
 }
 
 export default function QuotationDetailPage({ params }: { params: Promise<{ id: string }> }) {
+  const router = useRouter();
   const { id } = use(params);
   const [quotation, setQuotation] = useState<FinanceQuotation | null>(null);
   const [items, setItems] = useState<FinanceQuotationItem[]>([]);
@@ -164,13 +167,13 @@ export default function QuotationDetailPage({ params }: { params: Promise<{ id: 
   const remove = async () => {
     if (!(await appConfirm("Delete this quotation?"))) return;
     const r = await fetch(`/api/admin/finance/quotations/${id}`, { method: "DELETE" });
-    if (r.ok) window.location.href = "/admin/finance/quotations";
+    if (r.ok) router.push("/admin/finance/quotations");
   };
 
   const convertToInvoice = async () => {
     if (!quotation) return;
     if (quotation.converted_invoice_id) {
-      window.location.href = `/admin/finance/invoices/${quotation.converted_invoice_id}`;
+      router.push(`/admin/finance/invoices/${quotation.converted_invoice_id}`);
       return;
     }
     const conversionTarget = quotation.user_id ? "a priced invoice and send it to the client" : "a draft invoice";
@@ -183,7 +186,7 @@ export default function QuotationDetailPage({ params }: { params: Promise<{ id: 
         appAlert(d?.error || "Couldn't convert quotation.");
         return;
       }
-      window.location.href = `/admin/finance/invoices/${d.invoice.id}`;
+      router.push(`/admin/finance/invoices/${d.invoice.id}`);
     } finally {
       setConverting(false);
     }
@@ -197,7 +200,7 @@ export default function QuotationDetailPage({ params }: { params: Promise<{ id: 
           <p className="text-gray-600 text-sm mb-4">{loadError}</p>
           <div className="flex gap-2">
             <Button onClick={load} className="h-10 px-4 rounded-xl">Retry</Button>
-            <Button variant="outline" onClick={() => (window.location.href = "/admin/finance/quotations")} className="h-10 px-4 rounded-xl">Back to quotations</Button>
+            <Button variant="outline" onClick={() => (router.push("/admin/finance/quotations"))} className="h-10 px-4 rounded-xl">Back to quotations</Button>
           </div>
         </div>
       </FinanceShell>
@@ -261,7 +264,7 @@ export default function QuotationDetailPage({ params }: { params: Promise<{ id: 
               <SelectItem value="cancelled">Cancelled</SelectItem>
             </SelectContent>
           </Select>
-          <Button variant="outline" className="h-11 px-4 rounded-xl" onClick={() => window.location.href = `/admin/finance/quotations/new?draft=${id}`}>
+          <Button variant="outline" className="h-11 px-4 rounded-xl" onClick={() => router.push(`/admin/finance/quotations/new?draft=${id}`)}>
             <Pencil className="w-4 h-4 mr-1.5" /> Edit
           </Button>
           <Button variant="outline" className="h-11 px-4 rounded-xl" onClick={toggleHistory}>
@@ -289,9 +292,9 @@ export default function QuotationDetailPage({ params }: { params: Promise<{ id: 
             {emailing ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : <Mail className="w-4 h-4 mr-1" />}Email
           </Button>
           <Button variant="outline" size="sm" className="rounded-lg" onClick={copyLink}><Copy className="w-4 h-4 mr-1" />{copied ? "Copied" : "Copy"}</Button>
-          <a href={publicUrl} target="_blank" rel="noopener noreferrer">
+          <Link href={publicUrl} target="_blank" rel="noopener noreferrer">
             <Button variant="outline" size="sm" className="rounded-lg"><ExternalLink className="w-4 h-4 mr-1" />Open</Button>
-          </a>
+          </Link>
           <UniversalShareButton title={`Quotation ${quotation.quotation_number}`} text={shareMessage} url={publicUrl} className="min-h-10 rounded-lg px-3" />
         </div>
       </div>

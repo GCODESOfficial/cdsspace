@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { BarChart3, Boxes, BrainCircuit, Check, Images, Loader2, Pencil, Wand2, X, Zap } from "lucide-react";
+import Link from "next/link";
 
 type Role = "client" | "team" | "admin";
 interface Tool {
@@ -72,8 +73,8 @@ export default function AdminCreatePage() {
           <p className="mt-2 max-w-3xl text-sm text-gray-500">Manage CREATE tools, availability, credit cost, and role access. Changes reflect on create.cdsspace.pro immediately.</p>
         </div>
         <div className="flex flex-wrap items-center gap-2 self-start">
-          <a href="/admin/create/engines" className="inline-flex items-center gap-2 rounded-xl bg-[#0A4FE8] px-4 py-2.5 text-[13px] font-bold text-white hover:bg-[#083EC0]"><BrainCircuit className="h-4 w-4" /> AI Engines</a>
-          <a href="/create" className="inline-flex items-center gap-2 rounded-xl border border-blue-200 bg-blue-50 px-4 py-2.5 text-[13px] font-bold text-[#0A4FE8] hover:bg-blue-100"><Wand2 className="h-4 w-4" /> Open CREATE</a>
+          <Link href="/admin/create/engines" className="inline-flex items-center gap-2 rounded-xl bg-[#0A4FE8] px-4 py-2.5 text-[13px] font-bold text-white hover:bg-[#083EC0]"><BrainCircuit className="h-4 w-4" /> AI Engines</Link>
+          <Link href="/create" className="inline-flex items-center gap-2 rounded-xl border border-blue-200 bg-blue-50 px-4 py-2.5 text-[13px] font-bold text-[#0A4FE8] hover:bg-blue-100"><Wand2 className="h-4 w-4" /> Open CREATE</Link>
         </div>
       </header>
 

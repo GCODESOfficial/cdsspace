@@ -19,6 +19,10 @@ import {
   ShieldCheck,
   HelpCircle,
   Wallet,
+  CreditCard,
+  Landmark,
+  Target,
+  Lock,
   ChevronDown,
   Briefcase,
   Tag,
@@ -84,6 +88,7 @@ const clientEngagementNavItems = [
   { label: "Brand Briefs", href: "/admin/brand-briefs", icon: FileText, permission: "dashboard" },
   { label: "Banner Commerce", href: "/admin/clients/banners", icon: Images, permission: "clients.banners.view" },
   { label: "Merch Commerce", href: "/admin/clients/merch", icon: PackageCheck, permission: "clients.merch.view" },
+  { label: "Subscription settings", href: "/admin/pricing", icon: CreditCard, permission: "pricing.view" },
   { label: "Sales Settings", href: "/admin/clients/sales-settings", icon: SettingsIcon, permission: "clients.sales_settings.view" },
   { label: "Client Orders", href: "/admin/orders", icon: ShoppingBag, permission: "orders" },
   { label: "Deliveries", href: "/admin/clients/deliveries", icon: PackageCheck, permission: "deliveries" },
@@ -97,14 +102,26 @@ const dealsNavItems = [
   { label: "Prospect checklist", href: "/admin/deals/prospects", icon: Users, permission: "deals.prospects" },
 ];
 
+const executiveBoardNavItems = [
+  { label: "Overview", href: "/admin/executive-board", icon: LayoutDashboard, permission: "executive_board.view" },
+  { label: "Budgets", href: "/admin/executive-board/budgets", icon: Wallet, permission: "executive_board.view" },
+  { label: "Targets", href: "/admin/executive-board/targets", icon: Target, permission: "executive_board.view" },
+  { label: "Revenue models", href: "/admin/executive-board/revenue-models", icon: Rocket, permission: "executive_board.view" },
+  { label: "Document vault", href: "/admin/executive-board/vault", icon: Lock, permission: "executive_board.view" },
+];
+
 const complianceNavItems = [
   { label: "Audit & Report", href: "/admin/audit-report", icon: ClipboardCheck, permission: "audit_report" },
   { label: "Legal Documents", href: "/admin/legal", icon: Scale, permission: "legal" },
 ];
 
-const contentHubNavItems = [
+// CREATE is its own product, not a Content Hub feature, so it gets its own group.
+const createNavItems = [
   { label: "CREATE Studio", href: "/create", icon: Wand2, permission: "content_hub" },
   { label: "CREATE Management", href: "/admin/create", icon: Wand2, permission: "create.view" },
+];
+
+const contentHubNavItems = [
   { label: "Dashboard", href: "/admin/content-hub", icon: LayoutDashboard, permission: "content_hub" },
   { label: "Content Calendar", href: "/admin/content-hub/calendar", icon: Calendar, permission: "content_hub.calendar" },
   { label: "Content Library", href: "/admin/content-hub/library", icon: Boxes, permission: "content_hub" },
@@ -209,7 +226,7 @@ interface NavGroupProps {
 const OPEN_NAV_GROUPS = new Set<string>();
 
 function NavGroup({ label, icon: GroupIcon, items, pathname, permissions, isSuperAdmin, onNavigate, collapsed = false, onExpandRequest, badges = {} }: NavGroupProps) {
-  const exactRoutes = ["/admin/finance", "/admin/projects", "/admin/clients", "/admin/deals", "/admin/hrm", "/admin/content-hub", "/admin/intelligence"];
+  const exactRoutes = ["/admin/finance", "/admin/projects", "/admin/clients", "/admin/deals", "/admin/hrm", "/admin/content-hub", "/admin/intelligence", "/admin/executive-board"];
 
   // Filter sub-items by per-item permission. "super_admin_only" is a
   // reserved key that only renders when the session role is super_admin.
@@ -459,7 +476,7 @@ export default function AdminSidebar({ mobileOpen = false, onMobileClose, collap
     (item) => isSuperAdmin || hasPermission(permissions, item.permission)
   );
 
-  const SidebarContent = ({ mobile = false }: { mobile?: boolean }) => {
+  const renderSidebarContent = (mobile = false) => {
     const isCollapsed = !mobile && collapsed;
     const onNavigate = mobile ? handleMobileNavigate : handleDesktopNavigate;
 
@@ -572,6 +589,7 @@ export default function AdminSidebar({ mobileOpen = false, onMobileClose, collap
         <NavGroup label="Web Content" icon={Newspaper} items={contentWebNavItems} {...navGroupCommon} />
         <NavGroup label="Deals" icon={Handshake} items={dealsNavItems} {...navGroupCommon} />
         <NavGroup label="Sales Hub" icon={Briefcase} items={clientEngagementNavItems} badges={{ "/admin/messages": clientUnreadCount }} {...navGroupCommon} />
+        <NavGroup label="Executive Board" icon={Landmark} items={executiveBoardNavItems} {...navGroupCommon} />
         <NavGroup label="Compliance" icon={Scale} items={complianceNavItems} {...navGroupCommon} />
 
         {isCollapsed ? (
@@ -603,6 +621,7 @@ export default function AdminSidebar({ mobileOpen = false, onMobileClose, collap
           </Link>
         )}
 
+        <NavGroup label="CREATE" icon={Wand2} items={createNavItems} {...navGroupCommon} />
         <NavGroup label="Content Hub" icon={LayoutGrid} items={contentHubNavItems} {...navGroupCommon} />
         <NavGroup label="Intelligence" icon={Newspaper} items={intelligenceNavItems} {...navGroupCommon} />
         <NavGroup label="Finance" icon={Wallet} items={financeNavItems} {...navGroupCommon} />
@@ -656,7 +675,7 @@ export default function AdminSidebar({ mobileOpen = false, onMobileClose, collap
           collapsed ? "w-[76px]" : "w-[230px]"
         }`}
       >
-        <SidebarContent />
+        {renderSidebarContent()}
       </aside>
 
       <AnimatePresence>
@@ -678,7 +697,7 @@ export default function AdminSidebar({ mobileOpen = false, onMobileClose, collap
               transition={{ type: "spring", damping: 28, stiffness: 260 }}
               className="fixed inset-y-0 start-0 z-50 w-[86vw] max-w-[320px] border-e border-gray-100 bg-white shadow-2xl [--drawer-offset:-100%] rtl:[--drawer-offset:100%] lg:hidden"
             >
-              <SidebarContent mobile />
+              {renderSidebarContent(true)}
             </motion.aside>
           </>
         )}

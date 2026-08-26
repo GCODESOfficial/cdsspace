@@ -9,7 +9,11 @@ import {
   MessageCircle, Send, Smile, X as XIcon, Loader2, Check,
   AtSign, Search, CircleStop, AlertTriangle, Users, Circle,
 } from "lucide-react";
-import { CMeetClient, type RemotePeer, type ChatMessage } from "@/lib/cmeet-rtc";
+import {
+  requestAdmission, pollAdmission, fetchWaitingGuests, decideAdmission,
+  type WaitingGuest,
+} from "@/lib/cmeet-admission";
+import { CMeetClient, type RemotePeer, type ChatMessage, type ConnectionQuality } from "@/lib/cmeet-rtc";
 import { appAlert } from "@/lib/app-notify";
 import { UniversalShareButton } from "@/components/share/UniversalShareButton";
 
@@ -88,9 +92,49 @@ function VideoTile({
       autoPlay
       playsInline
       muted={muted}
+      // Hint the compositor to keep the video on its own layer - stops the
+      // whole grid repainting every frame when several tiles are live.
+      style={{ transform: "translateZ(0)", backfaceVisibility: "hidden" }}
       className={`w-full h-full bg-black ${objectFit === "contain" ? "object-contain" : "object-cover"} ${className}`}
     />
   );
+}
+
+/**
+ * Remote audio is played from its own <audio> element, never from a video
+ * tile. Video tiles get mounted, unmounted and re-keyed as the layout changes
+ * (grid <-> presenter, participant strip), and every one of those churns used
+ * to cut or double a peer's audio. These elements are mounted once per peer
+ * for the whole call and are never re-keyed, so the sound stays continuous.
+ */
+function RemoteAudio({ peers }: { peers: RemotePeer[] }) {
+  return (
+    <div aria-hidden className="sr-only">
+      {peers.map((p) => <PeerAudio key={p.peerId} stream={p.stream} />)}
+    </div>
+  );
+}
+
+function PeerAudio({ stream }: { stream: MediaStream }) {
+  const ref = useRef<HTMLAudioElement>(null);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    if (el.srcObject !== stream) el.srcObject = stream;
+    const play = () => { void el.play().catch(() => { /* resumed on first gesture */ }); };
+    play();
+    // Some browsers only deliver the audio track a moment after the peer
+    // connects, so re-arm playback when the stream gains a track.
+    stream.addEventListener("addtrack", play);
+    // If the tab is backgrounded and the element gets paused, resume it.
+    const onVisible = () => { if (document.visibilityState === "visible") play(); };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      stream.removeEventListener("addtrack", play);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
+  }, [stream]);
+  return <audio ref={ref} autoPlay playsInline />;
 }
 
 /* ------------------------------------------------------------------ */
@@ -107,6 +151,16 @@ export default function MeetRoomPage() {
   const [joining, setJoining] = useState(false);
   const [joined, setJoined] = useState(false);
   const [mediaError, setMediaError] = useState<string | null>(null);
+  // Lobby. `waitingForHost` holds this peer while a host decides; `canAdmit`
+  // is set only for staff, who are the only ones shown the admit panel.
+  const [waitingForHost, setWaitingForHost] = useState(false);
+  const [admissionDenied, setAdmissionDenied] = useState(false);
+  const [canAdmit, setCanAdmit] = useState(false);
+  const [waitingGuests, setWaitingGuests] = useState<WaitingGuest[]>([]);
+  const admissionPollRef = useRef<number | null>(null);
+  useEffect(() => () => {
+    if (admissionPollRef.current) window.clearInterval(admissionPollRef.current);
+  }, []);
 
   // Media state
   const [localStream, setLocalStream] = useState<MediaStream | null>(null);
@@ -129,6 +183,7 @@ export default function MeetRoomPage() {
 
   // Peers
   const [remotes, setRemotes] = useState<RemotePeer[]>([]);
+  const [activeSpeaker, setActiveSpeaker] = useState<string | null>(null);
   const clientRef = useRef<CMeetClient | null>(null);
 
   // Chat (source of truth: CMeetClient.onChat - which already fires with self:true on send)
@@ -229,18 +284,63 @@ export default function MeetRoomPage() {
       const wantVideo = !meeting.audio_only;
 
       const stream = await navigator.mediaDevices.getUserMedia({
-        audio,
-        video: wantVideo ? { width: { ideal: 1280 }, height: { ideal: 720 } } : false,
+        // Ask the browser DSP for the same treatment Meet relies on: echo
+        // cancellation, noise suppression and auto gain. Mono at 48kHz is what
+        // Opus wants anyway, and halves the audio we have to ship per peer.
+        audio: audio && {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+          channelCount: 1,
+          sampleRate: 48000,
+        },
+        video: wantVideo
+          ? {
+              width: { ideal: 1280, max: 1920 },
+              height: { ideal: 720, max: 1080 },
+              frameRate: { ideal: 30, max: 30 },
+              facingMode: "user",
+            }
+          : false,
       });
+      // Tell the encoder this is a talking head, not sport - it will drop
+      // resolution before it drops frames, which reads as much smoother.
+      stream.getVideoTracks().forEach((t) => { t.contentHint = "motion"; });
+      stream.getAudioTracks().forEach((t) => { t.contentHint = "speech"; });
 
       cameraTrackRef.current = stream.getVideoTracks()[0] || null;
       setLocalStream(stream);
 
       const peerId = crypto.randomUUID();
+
+      // Ask to come in before any signaling happens. Staff and the client the
+      // room was booked for are admitted immediately; anyone else waits here.
+      const verdict = await requestAdmission(code, peerId, name);
+      setCanAdmit(verdict.canAdmit);
+      if (verdict.status !== "admitted") {
+        setWaitingForHost(true);
+        const decision = await new Promise<string>((resolve) => {
+          const poll = window.setInterval(async () => {
+            const status = await pollAdmission(code, peerId).catch(() => "waiting");
+            if (status === "waiting") return;
+            window.clearInterval(poll);
+            resolve(status);
+          }, 2000);
+          admissionPollRef.current = poll;
+        });
+        setWaitingForHost(false);
+        if (decision !== "admitted") {
+          setAdmissionDenied(true);
+          stream.getTracks().forEach((t) => t.stop());
+          return;
+        }
+      }
+
       const client = new CMeetClient(code, peerId, name, {
         onRemoteUpdate: (peers) => setRemotes([...peers]),
         onChat: (m) => setChat((prev) => [...prev, m]),
         onError: (e) => console.error("[cMeet]", e),
+        onActiveSpeaker: (id) => setActiveSpeaker(id),
       });
       clientRef.current = client;
       await client.join(stream);
@@ -259,6 +359,26 @@ export default function MeetRoomPage() {
     } finally {
       setJoining(false);
     }
+  }
+
+  // Staff keep an eye on the lobby for as long as they are in the room.
+  useEffect(() => {
+    if (!joined || !canAdmit || !code) return;
+    let active = true;
+    const load = () => {
+      fetchWaitingGuests(code)
+        .then((guests) => { if (active) setWaitingGuests(guests); })
+        .catch(() => undefined);
+    };
+    load();
+    const timer = window.setInterval(load, 3000);
+    return () => { active = false; window.clearInterval(timer); };
+  }, [joined, canAdmit, code]);
+
+  async function decideGuest(requestId: string, admit: boolean) {
+    if (!code) return;
+    setWaitingGuests((prev) => prev.filter((guest) => guest.id !== requestId));
+    await decideAdmission(code, requestId, admit);
   }
 
   /* -------- Controls -------- */
@@ -315,7 +435,12 @@ export default function MeetRoomPage() {
     }
 
     try {
-      const disp = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: false });
+      const disp = await navigator.mediaDevices.getDisplayMedia({
+        // Text stays readable at full resolution; 15fps is plenty for slides
+        // and keeps the extra pixels affordable.
+        video: { frameRate: { ideal: 15, max: 30 }, width: { max: 1920 }, height: { max: 1080 } },
+        audio: false,
+      });
       const shareTrack: MediaStreamTrack = disp.getVideoTracks()[0];
       shareTrack.contentHint = "detail";
       const cameraTrack = currentStream.getVideoTracks()[0];
@@ -488,6 +613,43 @@ export default function MeetRoomPage() {
     );
   }
 
+  /* -------- Lobby: denied -------- */
+  if (admissionDenied) {
+    return (
+      <div className="min-h-screen bg-[#0A1130] text-white flex items-center justify-center p-4">
+        <div className="bg-[#0F1A4A] rounded-2xl p-6 w-full max-w-sm border border-white/10 text-center">
+          <h1 className="text-lg font-bold">Not admitted</h1>
+          <p className="mt-2 text-sm text-white/60">
+            The host did not let you into this meeting. If you think that is a mistake, contact them and try the link again.
+          </p>
+          <button
+            type="button"
+            onClick={() => { setAdmissionDenied(false); }}
+            className="mt-5 h-11 w-full rounded-xl bg-white/10 text-sm font-semibold hover:bg-white/15"
+          >
+            Back
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  /* -------- Lobby: waiting on the host -------- */
+  if (waitingForHost) {
+    return (
+      <div className="min-h-screen bg-[#0A1130] text-white flex items-center justify-center p-4">
+        <div className="bg-[#0F1A4A] rounded-2xl p-6 w-full max-w-sm border border-white/10 text-center">
+          <Loader2 className="mx-auto h-6 w-6 animate-spin text-white/70" />
+          <h1 className="mt-4 text-lg font-bold">Waiting to be let in</h1>
+          <p className="mt-2 text-sm text-white/60">
+            The host has been asked to admit you. Keep this tab open.
+          </p>
+          <p className="mt-4 text-xs text-white/35">{meeting.title}</p>
+        </div>
+      </div>
+    );
+  }
+
   /* -------- Join screen -------- */
   if (!joined) {
     return (
@@ -529,7 +691,7 @@ export default function MeetRoomPage() {
 
   /* -------- In-call UI -------- */
   return (
-    <div className="h-screen bg-[#0A1130] text-white flex flex-col">
+    <div className="relative h-screen bg-[#0A1130] text-white flex flex-col">
       <header className="px-5 py-3 border-b border-white/10 flex items-center gap-3 shrink-0">
         <div className="flex-1 min-w-0">
           <p className="text-[10.5px] uppercase tracking-[0.2em] text-[#6B92FF]">CDS Space · cMeet</p>
@@ -541,6 +703,43 @@ export default function MeetRoomPage() {
         <p className="text-[11px] text-white/60 font-mono">{code}</p>
       </header>
 
+      {/* Mounted once per peer for the whole call - see RemoteAudio. */}
+      <RemoteAudio peers={remotes} />
+
+      {/* Lobby. Only staff ever receive entries here: the invited client is
+          admitted by the server and never knocks. */}
+      {canAdmit && waitingGuests.length > 0 && (
+        <div className="absolute right-4 top-20 z-40 w-[min(92vw,320px)] rounded-2xl border border-white/10 bg-[#0F1A4A] p-3 shadow-2xl">
+          <p className="px-1 text-[11px] font-bold uppercase tracking-wider text-white/50">
+            Waiting to join ({waitingGuests.length})
+          </p>
+          <ul className="mt-2 space-y-2">
+            {waitingGuests.map((guest) => (
+              <li key={guest.id} className="rounded-xl bg-white/5 p-2.5">
+                <p className="truncate text-sm font-semibold">{guest.name}</p>
+                {guest.email && <p className="truncate text-[11px] text-white/45">{guest.email}</p>}
+                <div className="mt-2 flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => decideGuest(guest.id, true)}
+                    className="h-8 flex-1 rounded-lg bg-[#0A4FE8] text-[12px] font-bold hover:bg-[#083FC0]"
+                  >
+                    Admit
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => decideGuest(guest.id, false)}
+                    className="h-8 flex-1 rounded-lg bg-white/10 text-[12px] font-bold hover:bg-white/15"
+                  >
+                    Deny
+                  </button>
+                </div>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
       <main className="flex-1 flex min-h-0">
         <div className="flex-1 min-w-0 p-4 flex flex-col gap-3 min-h-0">
           {presenter ? (
@@ -550,7 +749,7 @@ export default function MeetRoomPage() {
                 {presenter === "local" ? (
                   <VideoTile key={localStream?.id || "local"} stream={localStream} muted objectFit="contain" />
                 ) : (
-                  <VideoTile key={presenter.peer.stream.id} stream={presenter.peer.stream} objectFit="contain" />
+                  <VideoTile key={presenter.peer.stream.id} stream={presenter.peer.stream} muted objectFit="contain" />
                 )}
                 <div className="absolute top-3 left-3 px-2.5 py-1 rounded-md bg-black/70 text-[11px] font-medium inline-flex items-center gap-1.5">
                   <ScreenShare className="w-3 h-3" />
@@ -578,6 +777,8 @@ export default function MeetRoomPage() {
                       stream={p.stream}
                       label={`${p.name}${p.isHost ? " · host" : ""}`}
                       showVideoOff={!p.hasVideo}
+                      speaking={activeSpeaker === p.peerId}
+                      quality={p.quality}
                     />
                   ))}
               </div>
@@ -592,6 +793,8 @@ export default function MeetRoomPage() {
                   stream={p.stream}
                   label={`${p.name}${p.isHost ? " · host" : ""}`}
                   showVideoOff={!p.hasVideo}
+                  speaking={activeSpeaker === p.peerId}
+                  quality={p.quality}
                   large
                 />
               ))}
@@ -714,19 +917,31 @@ export default function MeetRoomPage() {
 function ParticipantTile({
   stream,
   label,
-  muted = false,
   showVideoOff = false,
   large = false,
+  speaking = false,
+  quality = "good",
 }: {
   stream: MediaStream | null;
   label: string;
+  /** Kept for call-site compatibility; every tile is muted - audio plays from RemoteAudio. */
   muted?: boolean;
   showVideoOff?: boolean;
   large?: boolean;
+  speaking?: boolean;
+  quality?: ConnectionQuality;
 }) {
   return (
-    <div className={`relative rounded-2xl overflow-hidden bg-black border border-white/10 ${large ? "w-full h-full" : "w-[180px] h-[110px] shrink-0"}`}>
-      <VideoTile stream={stream} muted={muted} />
+    <div className={`relative rounded-2xl overflow-hidden bg-black border transition-[box-shadow,border-color] duration-200 ${speaking ? "border-[#5B8CFF] shadow-[0_0_0_2px_rgba(91,140,255,0.55)]" : "border-white/10"} ${large ? "w-full h-full" : "w-[180px] h-[110px] shrink-0"}`}>
+      <VideoTile stream={stream} muted />
+      {quality !== "good" && (
+        <div
+          title={quality === "poor" ? "Weak connection" : "Unstable connection"}
+          className={`absolute top-2 right-2 px-1.5 py-0.5 rounded text-[9px] font-semibold ${quality === "poor" ? "bg-rose-500/85" : "bg-amber-400/85 text-black"}`}
+        >
+          {quality === "poor" ? "Weak" : "Unstable"}
+        </div>
+      )}
       {showVideoOff && (
         <div className="absolute inset-0 bg-[#0A1130]/80 flex items-center justify-center">
           <VideoOff className={`${large ? "w-7 h-7" : "w-4 h-4"} text-white/40`} />

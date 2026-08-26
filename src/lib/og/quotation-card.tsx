@@ -120,7 +120,7 @@ export function renderQuotationCard(p: QuotationCardProps): ReactElement {
             <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
                 <img src={GLOBE_ICON} alt="" width={30} height={30} />
                 <div style={{ fontSize: 25, fontWeight: 600, color: "#ffffff", opacity: 0.92, display: "flex" }}>
-                    cdsspace.com | cdsspace.pro
+                    cdsspace.pro
                 </div>
             </div>
         </div>

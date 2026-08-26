@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { randomBytes, createHash } from "crypto";
 import { emailFrom, createEmailTransport, EMAIL_MODE } from "@/lib/email-from";
 import { brandedEmailHtml } from "@/lib/email-template";
+import { emailAttachmentsFor } from "@/lib/email-logo";
 import { getSupabaseAdmin } from "@/lib/supabase";
 import { getAdminSession } from "@/app/api/admin-check/route";
 
@@ -89,16 +90,18 @@ export async function POST(req: NextRequest) {
         try {
             const transporter = createEmailTransport();
 
+            const inviteHtml = buildInviteHtml({
+                name: subAdmin.name,
+                email: subAdmin.email,
+                inviteUrl,
+                ttlDays: INVITE_TTL_DAYS,
+            });
             await transporter.sendMail({
                 from: emailFrom("CDS Space Admin"),
                 to: subAdmin.email,
                 subject: "You've been added as a CDS Space admin",
-                html: buildInviteHtml({
-                    name: subAdmin.name,
-                    email: subAdmin.email,
-                    inviteUrl,
-                    ttlDays: INVITE_TTL_DAYS,
-                }),
+                html: inviteHtml,
+                attachments: emailAttachmentsFor(inviteHtml),
                 text: buildInviteText({
                     name: subAdmin.name,
                     inviteUrl,

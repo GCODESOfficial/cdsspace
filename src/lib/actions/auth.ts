@@ -39,6 +39,7 @@ import {
     verifyBotProtection,
 } from '@/lib/client-login-security'
 import { getGlashDbAdmin } from '@/lib/glashdb'
+import { BLOCKED_EMAIL_MESSAGE, isBlockedEmail } from '@/lib/security/email-blocklist'
 
 type AuthFormData = {
     email: string;
@@ -86,6 +87,7 @@ export async function login(formData: AuthFormData) {
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/i.test(email) || !password || password.length > 128) {
         return { error: 'Email or password is incorrect.' }
     }
+    if (isBlockedEmail(email)) return { error: BLOCKED_EMAIL_MESSAGE }
 
     const context = await clientRequestContext();
     const human = await verifyBotProtection({ token: formData.botToken, remoteIp: context.ip, action: 'client_login' });
@@ -295,6 +297,7 @@ export async function resendClientLoginOtp(input: { challengeId: string }) {
 
 export async function signup(formData: AuthFormData) {
     const email = normalizeClientEmail(formData.email);
+    if (isBlockedEmail(email)) return { error: BLOCKED_EMAIL_MESSAGE }
     const validated = signupSchema.safeParse({
         email,
         password: formData.password,
@@ -389,6 +392,7 @@ export async function resendClientSignupVerification(input: { email: string; nex
         message: 'If this address has a pending CDS Space account, a new verification link has been sent.',
         resendInSeconds: CLIENT_SIGNUP_RESEND_SECONDS,
     };
+    if (isBlockedEmail(email)) return generic;
     const context = await clientRequestContext();
     const [networkBlocked, identityBlocked] = await Promise.all([
         consumeSecurityRateLimit({ bucket: 'client-signup-resend-network', identifier: context.ipHash, limit: 10, windowSeconds: 60 * 60, blockSeconds: 60 * 60 }),
@@ -429,6 +433,8 @@ export async function resendClientSignupVerification(input: { email: string; nex
 export async function requestClientPasswordReset(input: { email: string; botToken?: string | null }) {
     const email = normalizeClientEmail(input.email);
     const generic = { success: true, message: 'If that email belongs to a CDS Space client account, a reset link has been sent.' };
+    // Blocked addresses get the same generic answer as an unknown one.
+    if (isBlockedEmail(email)) return generic;
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/i.test(email)) return generic;
 
     const context = await clientRequestContext();
@@ -484,8 +490,8 @@ export async function completeClientPasswordReset(input: { password: string; con
 export async function oauthLogin(provider: 'google' | 'twitter' | 'facebook', next?: string) {
     const siteUrl = getSiteUrl()
 
-    // Google uses a custom OAuth dance hosted on cdsspace.com so the consent
-    // screen reads "to continue to cdsspace.com" instead of the GlashDB URL.
+    // Google uses a custom OAuth dance hosted on our own domain so the consent
+    // screen reads "to continue to cdsspace.pro" instead of the GlashDB URL.
     if (provider === 'google') {
         const url = new URL(`${siteUrl}/api/auth/google/login`)
         if (next) url.searchParams.set('next', next)

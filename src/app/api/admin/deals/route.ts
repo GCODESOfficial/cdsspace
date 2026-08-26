@@ -6,7 +6,8 @@ import { getSupabaseAdmin } from "@/lib/supabase";
 import { assertTrustedMutationOrigin } from "@/lib/intelligence/security";
 import { checkIntelligenceRateLimit } from "@/lib/intelligence/rate-limit";
 import { researchPublicSite, searchOpenWeb } from "@/lib/sales-growth-research";
-import { buildDealBrandAudit, buildDealProposalContent, type DealProposalContent } from "@/lib/deals-ai";
+import { buildDealBrandAudit, buildDealProposalContent, buildProposalDeck, buildProposalEmailOpening, type DealProposalContent } from "@/lib/deals-ai";
+import { normalizeDeck, PROPOSAL_STAGES, type ProposalDeck } from "@/lib/proposal-deck";
 import { brandedEmailHtml } from "@/lib/email-template";
 import { sendEmail, verifyEmailReady } from "@/lib/email-from";
 import { logActivity } from "@/lib/activity-log";
@@ -71,6 +72,34 @@ function proposalContent(value: unknown): DealProposalContent | null {
   };
 }
 
+function stageValue(value: unknown) {
+  const candidate = str(value, 40);
+  return PROPOSAL_STAGES.some((stage) => stage.key === candidate) || candidate === "archived" ? candidate : "";
+}
+
+// The funnel stage is the field the team manages; status stays in step with it
+// so the public proposal link keeps working while a deal moves.
+function statusForStage(stage: string) {
+  if (stage === "won") return "accepted";
+  if (stage === "lost") return "declined";
+  if (stage === "archived") return "archived";
+  if (stage === "negotiation") return "sent";
+  return stage;
+}
+
+async function recordProposalEvent(input: {
+  proposalId: string;
+  type: "created" | "edited" | "sent" | "viewed" | "downloaded" | "stage_changed" | "note";
+  actor?: string | null;
+  detail?: string | null;
+  metadata?: Record<string, unknown>;
+}) {
+  await glashQuery(
+    `insert into public.deal_proposal_events (proposal_id,event_type,actor,detail,metadata) values ($1,$2,$3,$4,$5)`,
+    [input.proposalId, input.type, input.actor || null, input.detail || null, JSON.stringify(input.metadata || {})],
+  );
+}
+
 async function signedProposalRows() {
   const rows = await glashQuery<any>(`select * from public.deal_proposals order by updated_at desc limit 200`);
   const storage = getSupabaseAdmin() as any;
@@ -87,7 +116,15 @@ export async function GET(req: NextRequest) {
   const { denied } = await requireAdmin(req, permission);
   if (denied) return denied;
   try {
-    if (resource === "proposals") return NextResponse.json({ ok: true, proposals: await signedProposalRows() });
+    if (resource === "proposals") {
+      const [proposals, events, funnel] = await Promise.all([
+        signedProposalRows(),
+        glashQuery<any>(`select * from public.deal_proposal_events order by created_at desc limit 400`),
+        glashQuery<any>(`select stage, count(*)::int total, coalesce(sum(deal_value),0)::float value
+                           from public.deal_proposals where stage <> 'archived' group by stage`),
+      ]);
+      return NextResponse.json({ ok: true, proposals, events, funnel });
+    }
     if (resource === "audits") {
       const audits = await glashQuery<any>(`select * from public.deal_brand_audits order by updated_at desc limit 200`);
       return NextResponse.json({ ok: true, audits });
@@ -131,7 +168,11 @@ export async function POST(req: NextRequest) {
       const research = targetUrl ? await researchPublicSite(targetUrl, true) : null;
       const query = `${brandName} ${focusArea} market statistics report`;
       const marketSources = await searchOpenWeb(query, 8);
-      const content = await buildDealProposalContent({ brandName, focusArea, targetUrl, socialUrl, research, marketSources });
+      const title = str(body.title, 240) || `${brandName} ${focusArea} proposal`;
+      const [content, deck] = await Promise.all([
+        buildDealProposalContent({ brandName, focusArea, targetUrl, socialUrl, research, marketSources }),
+        buildProposalDeck({ brandName, focusArea, targetUrl, socialUrl, title, research, marketSources }),
+      ]);
       const sources = [
         ...(research?.sources || []).map((url) => ({ title: `${brandName} public website`, url, kind: "website" })),
         ...marketSources.map((source) => ({ title: source.title, url: source.url, kind: "market" })),
@@ -140,32 +181,90 @@ export async function POST(req: NextRequest) {
       if (coverPath && !coverPath.startsWith("proposals/")) {
         return NextResponse.json({ ok: false, error: "Invalid proposal cover path." }, { status: 400 });
       }
-      const title = str(body.title, 240) || `${brandName} ${focusArea} proposal`;
       const proposal = await glashMaybeOne<any>(
         `insert into public.deal_proposals
-          (brand_name,target_url,social_url,recipient_email,focus_area,title,status,cover_storage_path,cover_mime_type,content,sources,email_subject,created_by,updated_by)
-         values ($1,$2,$3,$4,$5,$6,'ready',$7,$8,$9,$10,$11,$12,$12)
+          (brand_name,target_url,social_url,recipient_email,focus_area,title,status,stage,cover_storage_path,cover_mime_type,content,deck,sources,email_subject,owner_email,created_by,updated_by)
+         values ($1,$2,$3,$4,$5,$6,'ready','ready',$7,$8,$9,$10,$11,$12,$13,$13,$13)
          returning *`,
-        [brandName, targetUrl || null, socialUrl || null, str(body.recipient_email, 320).toLowerCase() || null, focusArea, title, coverPath || null, coverPath ? "image/webp" : null, JSON.stringify(content), JSON.stringify(sources), `A focused proposal for ${brandName}`, session.email],
+        [brandName, targetUrl || null, socialUrl || null, str(body.recipient_email, 320).toLowerCase() || null, focusArea, title, coverPath || null, coverPath ? "image/webp" : null, JSON.stringify(content), JSON.stringify(deck), JSON.stringify(sources), `A focused proposal for ${brandName}`, session.email],
       );
+      if (proposal?.id) await recordProposalEvent({ proposalId: proposal.id, type: "created", actor: session.email, detail: title });
       await logActivity({ action: "deals.proposal.generate", page: "deals/proposals", resource_type: "deal_proposal", resource_id: proposal?.id, resource_label: title, metadata: { source_count: sources.length } });
       return NextResponse.json({ ok: true, proposal }, { status: 201 });
     }
 
     if (action === "save_proposal") {
       const id = uuid(body.id);
-      const content = proposalContent(body.content);
-      if (!id || !content) return NextResponse.json({ ok: false, error: "Proposal content is invalid." }, { status: 400 });
+      if (!id) return NextResponse.json({ ok: false, error: "Proposal is invalid." }, { status: 400 });
+      const existing = await glashMaybeOne<any>(`select * from public.deal_proposals where id=$1`, [id]);
+      if (!existing) return NextResponse.json({ ok: false, error: "Proposal not found." }, { status: 404 });
+      const title = str(body.title, 240) || existing.title;
+      const focusArea = str(body.focus_area, 1200) || existing.focus_area;
+      const content = proposalContent(body.content) || existing.content;
+      const deck: ProposalDeck = normalizeDeck(body.deck ?? existing.deck, { brandName: existing.brand_name, focusArea, title });
       const updated = await glashMaybeOne<any>(
         `update public.deal_proposals
-            set title=coalesce(nullif($2,''),title), recipient_email=nullif($3,''), focus_area=coalesce(nullif($4,''),focus_area),
-                content=$5, status=case when status='draft' then 'ready' else status end,
-                updated_by=$6, updated_at=now()
+            set title=$2, recipient_email=nullif($3,''), focus_area=$4,
+                content=$5, deck=$6,
+                deal_value=nullif($7,'')::numeric, expected_close_on=nullif($8,'')::date, client_note=nullif($9,''),
+                status=case when status='draft' then 'ready' else status end,
+                stage=case when stage='draft' then 'ready' else stage end,
+                updated_by=$10, updated_at=now()
           where id=$1 returning *`,
-        [id, str(body.title, 240), str(body.recipient_email, 320).toLowerCase(), str(body.focus_area, 1200), JSON.stringify(content), session.email],
+        [
+          id, title, str(body.recipient_email, 320).toLowerCase(), focusArea,
+          JSON.stringify(content), JSON.stringify(deck),
+          str(body.deal_value, 20), str(body.expected_close_on, 20), str(body.client_note, 2000),
+          session.email,
+        ],
+      );
+      await recordProposalEvent({ proposalId: id, type: "edited", actor: session.email, detail: title });
+      return NextResponse.json({ ok: true, proposal: updated });
+    }
+
+    if (action === "set_proposal_stage") {
+      const id = uuid(body.id);
+      const stage = stageValue(body.stage);
+      if (!id || !stage) return NextResponse.json({ ok: false, error: "Choose a valid funnel stage." }, { status: 400 });
+      const updated = await glashMaybeOne<any>(
+        `update public.deal_proposals
+            set stage=$2, status=$3, lost_reason=case when $2='lost' then nullif($4,'') else null end,
+                updated_by=$5, updated_at=now()
+          where id=$1 returning *`,
+        [id, stage, statusForStage(stage), str(body.lost_reason, 600), session.email],
       );
       if (!updated) return NextResponse.json({ ok: false, error: "Proposal not found." }, { status: 404 });
+      await recordProposalEvent({ proposalId: id, type: "stage_changed", actor: session.email, detail: stage, metadata: { lost_reason: str(body.lost_reason, 600) } });
+      await logActivity({ action: "deals.proposal.stage", page: "deals/proposals", resource_type: "deal_proposal", resource_id: id, resource_label: updated.title, metadata: { stage } });
       return NextResponse.json({ ok: true, proposal: updated });
+    }
+
+    if (action === "add_proposal_note") {
+      const id = uuid(body.id);
+      const note = str(body.note, 2000);
+      if (!id || !note) return NextResponse.json({ ok: false, error: "Write a note before saving it." }, { status: 400 });
+      await recordProposalEvent({ proposalId: id, type: "note", actor: session.email, detail: note });
+      return NextResponse.json({ ok: true });
+    }
+
+    if (action === "delete_proposal") {
+      const id = uuid(body.id);
+      if (!id) return NextResponse.json({ ok: false, error: "Invalid proposal." }, { status: 400 });
+      await glashQuery(`delete from public.deal_proposals where id=$1`, [id]);
+      await logActivity({ action: "deals.proposal.delete", page: "deals/proposals", resource_type: "deal_proposal", resource_id: id });
+      return NextResponse.json({ ok: true });
+    }
+
+    if (action === "draft_proposal_message") {
+      const id = uuid(body.id);
+      const proposal = id ? await glashMaybeOne<any>(`select * from public.deal_proposals where id=$1`, [id]) : null;
+      if (!proposal) return NextResponse.json({ ok: false, error: "Proposal not found." }, { status: 404 });
+      if (!checkIntelligenceRateLimit(`deal-proposal-message:${session.email}`, 30, 60 * 60_000).allowed) {
+        return NextResponse.json({ ok: false, error: "Draft limit reached. Please wait before generating another." }, { status: 429 });
+      }
+      const deck = normalizeDeck(proposal.deck, { brandName: proposal.brand_name, focusArea: proposal.focus_area, title: proposal.title });
+      const message = await buildProposalEmailOpening({ brandName: proposal.brand_name, focusArea: proposal.focus_area, deck });
+      return NextResponse.json({ ok: true, message });
     }
 
     if (action === "send_proposal") {
@@ -178,16 +277,28 @@ export async function POST(req: NextRequest) {
       const readyError = await verifyEmailReady();
       if (readyError) return NextResponse.json({ ok: false, error: readyError }, { status: 503 });
       const link = `${siteUrl()}/proposal/${proposal.public_token}`;
-      const content = proposal.content as DealProposalContent;
+      const deck = normalizeDeck(proposal.deck, { brandName: proposal.brand_name, focusArea: proposal.focus_area, title: proposal.title });
+      const intro = str(body.message, 1200) || deck.big_picture.intro;
       const html = brandedEmailHtml(`
-        <p style="margin:0 0 16px;">Hello,</p>
-        <p style="margin:0 0 16px;">We prepared a focused proposal for ${escapeHtml(proposal.brand_name)} based on a review of the public information currently available.</p>
-        <p style="margin:0 0 20px;">${escapeHtml(content.executive_summary || proposal.title)}</p>
-        <table role="presentation" cellpadding="0" cellspacing="0" style="margin:22px 0;"><tr><td style="border-radius:10px;background:#0A4FE8;"><a href="${escapeHtml(link)}" style="display:inline-block;padding:13px 22px;color:#ffffff;text-decoration:none;font-weight:700;">View proposal</a></td></tr></table>
-        <p style="margin:0;color:#667085;font-size:13px;">The proposal is evidence-led and intended as a starting point for a working conversation. Final scope and outcomes are confirmed collaboratively.</p>
-      `, { eyebrow: "CDS Space proposal", preheader: proposal.title });
+        <p style="margin:0 0 16px;">Excellent Day Admin,</p>
+        <p style="margin:0 0 16px;">We prepared a proposal for ${escapeHtml(proposal.brand_name)}: <strong>${escapeHtml(deck.cover.title)}</strong>.</p>
+        <p style="margin:0 0 20px;">${escapeHtml(intro)}</p>
+        <table role="presentation" cellpadding="0" cellspacing="0" style="margin:22px 0;"><tr><td style="border-radius:10px;background:#0A4FE8;"><a href="${escapeHtml(link)}" style="display:inline-block;padding:13px 22px;color:#ffffff;text-decoration:none;font-weight:700;">View the proposal</a></td></tr></table>
+        <p style="margin:0 0 16px;">It runs through who we are, the big picture, the problem, the opportunities, our process, the payoff, and how we kick off. You can also download it as a PDF from the same page.</p>
+        <p style="margin:0 0 16px;">When you are ready, book a time with us at <a href="${escapeHtml(deck.cta.primary_url)}" style="color:#0A4FE8;">${escapeHtml(deck.cta.primary_url)}</a>.</p>
+        <p style="margin:0;color:#667085;font-size:13px;">This proposal is evidence-led and intended as the starting point for a working conversation. Final scope and outcomes are confirmed together.</p>
+      `, { eyebrow: "CDS Space proposal", preheader: deck.cover.title });
       await sendEmail({ to: recipient, subject: proposal.email_subject || proposal.title, html, fromName: "CDS Space" });
-      await glashQuery(`update public.deal_proposals set recipient_email=$2,status='sent',sent_at=now(),updated_by=$3,updated_at=now() where id=$1`, [id, recipient, session.email]);
+      await glashQuery(
+        `update public.deal_proposals
+            set recipient_email=$2, status='sent',
+                stage=case when stage in ('draft','ready') then 'sent' else stage end,
+                sent_at=coalesce(sent_at, now()), last_sent_at=now(), send_count=send_count+1,
+                updated_by=$3, updated_at=now()
+          where id=$1`,
+        [id, recipient, session.email],
+      );
+      await recordProposalEvent({ proposalId: id, type: "sent", actor: session.email, detail: recipient });
       await logActivity({ action: "deals.proposal.send", page: "deals/proposals", resource_type: "deal_proposal", resource_id: id, resource_label: proposal.title, metadata: { recipient } });
       return NextResponse.json({ ok: true, sent_at: new Date().toISOString() });
     }

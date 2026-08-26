@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import {
   Plus, Pencil, Trash2, Loader2, ArrowLeft, Eye, Search, Users2, X,
   FileText, Send, CalendarClock, EyeOff, Archive, Wand2, ImagePlus,
@@ -389,7 +390,7 @@ export default function IntelligenceManagerPage() {
                     <td className="px-6">
                       <div className="flex items-center justify-end gap-1">
                         {p.status === "published" && (
-                          <a href={`/intelligence/${p.slug}`} target="_blank" rel="noopener noreferrer" className="p-1.5 rounded-md text-gray-400 hover:text-[#0A4FE8] hover:bg-blue-50" title="View live"><Eye className="w-4 h-4" /></a>
+                          <Link href={`/intelligence/${p.slug}`} target="_blank" rel="noopener noreferrer" className="p-1.5 rounded-md text-gray-400 hover:text-[#0A4FE8] hover:bg-blue-50" title="View live"><Eye className="w-4 h-4" /></Link>
                         )}
                         <button onClick={() => editPost(p)} className="p-1.5 rounded-md text-gray-400 hover:text-[#0A4FE8] hover:bg-blue-50" title="Edit"><Pencil className="w-4 h-4" /></button>
                         <button onClick={() => remove(p)} className="p-1.5 rounded-md text-gray-400 hover:text-rose-500 hover:bg-rose-50" title="Delete"><Trash2 className="w-4 h-4" /></button>

@@ -8,6 +8,7 @@ import {
   Search, Shapes, Shirt, Spline, Star, Trash2, Upload, Video, Wand2, X,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
+import Link from "next/link";
 
 /* ---------- Types (mirror /api/create/session) ---------- */
 type Role = "client" | "team" | "admin";
@@ -325,8 +326,8 @@ export function CreateApp() {
           <h1 className="mt-1 text-3xl font-black tracking-tight">Welcome to CREATE</h1>
           <p className="mt-2 text-sm text-white/80">Professional creative tools powered by CDS Space. A CDS Space account is required to access CREATE.</p>
           <div className="mt-6 flex flex-col gap-2.5">
-            <a href="/login?next=/create" className="rounded-xl bg-white px-5 py-3 text-sm font-bold text-[#0A4FE8] hover:bg-blue-50">Sign In</a>
-            <a href="/signup?next=/create" className="rounded-xl border border-white/40 px-5 py-3 text-sm font-bold text-white hover:bg-white/10">Create CDS Space account</a>
+            <Link href="/login?next=/create" className="rounded-xl bg-white px-5 py-3 text-sm font-bold text-[#0A4FE8] hover:bg-blue-50">Sign In</Link>
+            <Link href="/signup?next=/create" className="rounded-xl border border-white/40 px-5 py-3 text-sm font-bold text-white hover:bg-white/10">Create CDS Space account</Link>
           </div>
         </div>
       </div>
@@ -341,7 +342,7 @@ export function CreateApp() {
           <p className="text-[11px] font-bold uppercase tracking-[0.2em] text-white/70">CDS Space</p>
           <h1 className="mt-1 text-3xl font-black tracking-tight">CREATE is coming soon</h1>
           <p className="mt-2 text-sm text-white/80">We are putting the finishing touches on the CREATE studio. It will be available on your account shortly.</p>
-          <a href={actor.dashboardHref} className="mt-6 inline-block rounded-xl bg-white px-5 py-3 text-sm font-bold text-[#0A4FE8] hover:bg-blue-50">Back to {actor.dashboardLabel}</a>
+          <Link href={actor.dashboardHref} className="mt-6 inline-block rounded-xl bg-white px-5 py-3 text-sm font-bold text-[#0A4FE8] hover:bg-blue-50">Back to {actor.dashboardLabel}</Link>
         </div>
       </div>
     );
@@ -398,7 +399,7 @@ export function CreateApp() {
         {/* Profile */}
         <div className="mt-auto pt-2">
           {actor && (
-            <a href={actor.dashboardHref} title={actor.name} className={`flex items-center rounded-xl transition hover:bg-gray-100 ${collapsed ? "justify-center py-1" : "gap-2.5 p-1.5"}`}>
+            <Link href={actor.dashboardHref} title={actor.name} className={`flex items-center rounded-xl transition hover:bg-gray-100 ${collapsed ? "justify-center py-1" : "gap-2.5 p-1.5"}`}>
               <Avatar actor={actor} size={collapsed ? 34 : 32} />
               {!collapsed && (
                 <div className="min-w-0 leading-tight">
@@ -406,7 +407,7 @@ export function CreateApp() {
                   <p className="truncate text-[10px] font-semibold text-gray-400">{actor.permissionLevel}</p>
                 </div>
               )}
-            </a>
+            </Link>
           )}
         </div>
       </aside>
@@ -428,28 +429,28 @@ export function CreateApp() {
             )}
             <button onClick={() => setView("creations")} className={`rounded-lg px-3 py-2 text-[13px] font-semibold ${view === "creations" ? "bg-blue-50 text-[#0A4FE8]" : "text-gray-600 hover:bg-gray-100"}`}>My Creations</button>
             {/* Role-aware return to dashboard */}
-            <a href={actor?.dashboardHref || "/dashboard"} className="inline-flex items-center gap-1.5 rounded-lg bg-[#0D1B39] px-3.5 py-2 text-[13px] font-bold text-white transition hover:bg-[#1a2a52]">
+            <Link href={actor?.dashboardHref || "/dashboard"} className="inline-flex items-center gap-1.5 rounded-lg bg-[#0D1B39] px-3.5 py-2 text-[13px] font-bold text-white transition hover:bg-[#1a2a52]">
               <LayoutDashboard className="h-4 w-4" /> {actor?.dashboardLabel || "Dashboard"}
-            </a>
+            </Link>
             {/* Profile chip */}
             {actor && (
-              <a href={actor.dashboardHref} className="flex items-center gap-2 rounded-full border border-gray-100 bg-white py-1 pl-1 pr-3 shadow-sm transition hover:border-blue-200">
+              <Link href={actor.dashboardHref} className="flex items-center gap-2 rounded-full border border-gray-100 bg-white py-1 pl-1 pr-3 shadow-sm transition hover:border-blue-200">
                 <Avatar actor={actor} size={30} />
                 <div className="hidden leading-tight sm:block">
                   <p className="max-w-[130px] truncate text-[12.5px] font-bold text-[#0D1B39]">{actor.name}</p>
                   <p className="text-[10px] font-semibold text-gray-400">{actor.permissionLevel}</p>
                 </div>
-              </a>
+              </Link>
             )}
           </div>
         </header>
 
         <main className="flex-1 overflow-y-auto px-6 py-6 sm:px-10 sm:py-8">
           {actor?.setupRequiredHref && (
-            <a href={actor.setupRequiredHref} className="mb-5 flex items-center justify-between rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-[13px] font-semibold text-amber-800">
+            <Link href={actor.setupRequiredHref} className="mb-5 flex items-center justify-between rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-[13px] font-semibold text-amber-800">
               <span>Finish your CDS Space account setup to run CREATE tools.</span>
               <span className="rounded-lg bg-amber-500 px-3 py-1.5 text-white">{actor.setupRequiredLabel || "Continue"}</span>
-            </a>
+            </Link>
           )}
 
           {activeTool ? (

@@ -8,6 +8,7 @@ import { isReservedUsername } from "@/lib/reserved-usernames";
 import { logActivity } from "@/lib/activity-log";
 import { notifyTeamMember } from "@/lib/notify-team";
 import { lagosDate } from "@/lib/timebook";
+import { BLOCKED_EMAIL_MESSAGE, isBlockedEmail } from "@/lib/security/email-blocklist";
 
 export const runtime = "nodejs";
 
@@ -108,6 +109,10 @@ export async function POST(req: Request) {
       { ok: false, error: "Full name, email and username are required" },
       { status: 400 }
     );
+  }
+
+  if (isBlockedEmail(email)) {
+    return NextResponse.json({ ok: false, error: BLOCKED_EMAIL_MESSAGE }, { status: 403 });
   }
 
   const cleanUsername = String(username).trim().toLowerCase();

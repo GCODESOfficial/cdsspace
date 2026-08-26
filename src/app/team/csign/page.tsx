@@ -161,7 +161,7 @@ function Inner() {
                       </div>
                     </div>
                     <div className="flex items-center gap-2 sm:shrink-0">
-                      <a
+                      <Link
                         href={`${typeof window !== "undefined" ? window.location.origin : ""}/sign/${r.access_token}`}
                         target="_blank"
                         rel="noreferrer"
@@ -169,7 +169,7 @@ function Inner() {
                         title="Open signing link"
                       >
                         <Link2 className="w-4 h-4" />
-                      </a>
+                      </Link>
                       {r.status === "signed" && r.team_cdocs && (
                         <button
                           onClick={() => downloadSigned(r)}

@@ -32,6 +32,21 @@ const requiredContracts = [
     message: "The permanent workspace authentication rule is missing.",
   },
   {
+    file: "src/app/admin/layout.tsx",
+    text: "if (isChecking && !isAuthed)",
+    message: "The admin shell may only be replaced while establishing the initial session, not during route changes.",
+  },
+  {
+    file: "src/app/admin/layout.tsx",
+    text: "const isRoutePending = validatedPathname !== pathname",
+    message: "Admin route revalidation must be represented inside the persistent content region.",
+  },
+  {
+    file: "src/components/admin/AdminSidebar.tsx",
+    text: "{renderSidebarContent()}",
+    message: "The desktop sidebar content must retain a stable React subtree across pathname updates.",
+  },
+  {
     file: "AGENTS.md",
     text: "Staff portal switching invariant:",
     message: "The permanent team/admin portal-switching rule is missing.",

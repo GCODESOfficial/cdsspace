@@ -1,5 +1,6 @@
 'use client';
 
+import { useRouter } from "next/navigation";
 import { useEffect, useState, use } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -22,6 +23,7 @@ const STATUS_PILL: Record<string, string> = {
 };
 
 export default function ProjectDetail({ params }: { params: Promise<{ id: string }> }) {
+  const router = useRouter();
   const { id } = use(params);
   const [project, setProject] = useState<FinanceProject | null>(null);
   const [milestones, setMilestones] = useState<FinanceMilestone[]>([]);
@@ -80,7 +82,7 @@ export default function ProjectDetail({ params }: { params: Promise<{ id: string
   const removeProject = async () => {
     if (!(await appConfirm("Delete this project and all its milestones? This cannot be undone."))) return;
     const r = await fetch(`/api/admin/finance/projects/${id}`, { method: "DELETE" });
-    if (r.ok) window.location.href = "/admin/finance/projects";
+    if (r.ok) router.push("/admin/finance/projects");
   };
 
   if (loading || !project) {

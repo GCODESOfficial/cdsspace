@@ -7,7 +7,7 @@
  *   - Optional status / eyebrow pill top-right
  *   - Huge bold title left-centre
  *   - Subtitle / client line under the title
- *   - Globe-cursor icon + "cdsspace.com" bottom-left
+ *   - Globe-cursor icon + "cdsspace.pro" bottom-left
  *
  * Typography: Inter 400 / 700 / 800 via `src/lib/og/fonts.ts`. Title uses 800.
  */
@@ -227,7 +227,7 @@ function FooterDomain() {
                     display: "flex",
                 }}
             >
-                cdsspace.com | cdsspace.pro
+                cdsspace.pro
             </div>
         </div>
     );
@@ -240,7 +240,7 @@ interface BrandCardProps {
     description?: string;
     tags?: string[];         // kept in the API for back-compat - not rendered
     eyebrow?: string;        // shown as the status pill top-right
-    domainPath?: string;     // kept for back-compat; footer always shows cdsspace.com
+    domainPath?: string;     // kept for back-compat; footer always shows cdsspace.pro
 }
 
 /**

@@ -85,7 +85,7 @@ export default function Navbar() {
     >
       <div className="mx-auto md:px-6 py-4 flex items-center justify-between">
         {/* Logo */}
-        <div className="flex items-center z-[999]">
+        <div className="flex items-center relative z-10">
           <Link href="/Home">
             <Image
               src="/images/cds-logo.svg"

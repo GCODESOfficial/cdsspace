@@ -1,5 +1,6 @@
 'use client';
 
+import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
@@ -36,6 +37,7 @@ const STATUS: Record<string, string> = {
 };
 
 export default function QuotationsPage() {
+  const router = useRouter();
   const [rows, setRows] = useState<Row[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
@@ -201,7 +203,7 @@ export default function QuotationsPage() {
 
   const convertQuotation = async (row: Row) => {
     if (row.converted_invoice_id) {
-      window.location.href = `/admin/finance/invoices/${row.converted_invoice_id}`;
+      router.push(`/admin/finance/invoices/${row.converted_invoice_id}`);
       return;
     }
     if (!(await appConfirm(`Convert ${row.quotation_number} to a draft invoice?`))) return;
@@ -211,7 +213,7 @@ export default function QuotationsPage() {
       appAlert(d?.error || "Couldn't convert quotation.");
       return;
     }
-    window.location.href = `/admin/finance/invoices/${d.invoice.id}`;
+    router.push(`/admin/finance/invoices/${d.invoice.id}`);
   };
 
   const filtered = rows.filter((r) =>

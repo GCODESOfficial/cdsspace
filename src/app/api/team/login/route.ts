@@ -6,6 +6,7 @@ import {
 } from "@/lib/team-auth";
 import { glashMaybeOne } from "@/lib/glashdb/postgres";
 import { createTeamSession, locationFromPayload } from "@/lib/team-login-security";
+import { BLOCKED_EMAIL_MESSAGE, isBlockedEmail } from "@/lib/security/email-blocklist";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -21,16 +22,20 @@ export async function POST(req: NextRequest) {
   }
 
   const id = String(identifier).trim().toLowerCase();
+  if (isBlockedEmail(id)) {
+    return NextResponse.json({ ok: false, error: BLOCKED_EMAIL_MESSAGE }, { status: 403 });
+  }
   const member = await glashMaybeOne<{
     id: string;
     full_name: string;
+    email: string;
     username: string;
     is_sub_admin: boolean;
     is_active: boolean;
     password_salt: string;
     password_hash: string;
   }>(
-    `select id, full_name, username, is_sub_admin, is_active, password_salt, password_hash
+    `select id, full_name, email, username, is_sub_admin, is_active, password_salt, password_hash
      from public.team_members
      where lower(email) = $1 or lower(username) = $1
      limit 1`,
@@ -42,6 +47,10 @@ export async function POST(req: NextRequest) {
   }
   if (!member.is_active) {
     return NextResponse.json({ ok: false, error: "Account is inactive" }, { status: 403 });
+  }
+  // Signing in by username must not sidestep the blocklist.
+  if (isBlockedEmail(member.email)) {
+    return NextResponse.json({ ok: false, error: BLOCKED_EMAIL_MESSAGE }, { status: 403 });
   }
 
   const expected = hashPassword(password, member.password_salt);

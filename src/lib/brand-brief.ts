@@ -40,6 +40,7 @@ export interface BrandBrief {
     goals: string | null;
     long_term_vision: string | null;
     budget_range: string | null;
+    budget_currency: string | null;
     timeline: string | null;
     additional_notes: string | null;
 
@@ -77,15 +78,22 @@ export const AED_BUDGET_RANGES = ["Under AED 2,000", "AED 2,000 – AED 4,000", 
 /** Backwards-compatible default for public and admin brief surfaces. */
 export const BUDGET_RANGES = NGN_BUDGET_RANGES;
 
+/**
+ * Ranges for one of the seven client billing currencies. Returns an empty list
+ * when no currency has been chosen yet, so budget pickers stay hidden until the
+ * client tells us which currency they are quoting in.
+ */
 export function budgetRangesForCurrency(currency: string | null | undefined): readonly string[] {
-    switch (currency?.toUpperCase()) {
+    if (!currency) return [];
+    switch (currency.toUpperCase()) {
         case "USD": return USD_BUDGET_RANGES;
         case "GBP": return GBP_BUDGET_RANGES;
         case "EUR": return EUR_BUDGET_RANGES;
         case "RWF": return RWF_BUDGET_RANGES;
         case "CNY": return CNY_BUDGET_RANGES;
         case "AED": return AED_BUDGET_RANGES;
-        default: return NGN_BUDGET_RANGES;
+        case "NGN": return NGN_BUDGET_RANGES;
+        default: return [];
     }
 }
 
@@ -133,6 +141,7 @@ export const BRAND_BRIEF_FIELD_LABELS: Record<string, string> = {
     goals: "Short-term goals",
     long_term_vision: "Long-term vision",
     budget_range: "Budget range",
+    budget_currency: "Budget currency",
     timeline: "Timeline",
     additional_notes: "Anything else we should know",
 };
@@ -156,6 +165,7 @@ export interface BrandBriefDraft {
     goals: string;
     long_term_vision: string;
     budget_range: string;
+    budget_currency: string;
     timeline: string;
     additional_notes: string;
 }
@@ -179,6 +189,7 @@ export const EMPTY_BRAND_BRIEF_DRAFT: BrandBriefDraft = {
     goals: "",
     long_term_vision: "",
     budget_range: "",
+    budget_currency: "",
     timeline: "",
     additional_notes: "",
 };
@@ -203,6 +214,7 @@ export function briefToDraft(b: BrandBrief): BrandBriefDraft {
         goals: b.goals ?? "",
         long_term_vision: b.long_term_vision ?? "",
         budget_range: b.budget_range ?? "",
+        budget_currency: b.budget_currency ?? "",
         timeline: b.timeline ?? "",
         additional_notes: b.additional_notes ?? "",
     };

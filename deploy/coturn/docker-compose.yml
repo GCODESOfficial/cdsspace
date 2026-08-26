@@ -1,0 +1,12 @@
+# Host networking is required: coturn hands out the relay addresses it sees on
+# its own interfaces, and a bridged network would advertise unreachable ones.
+services:
+  coturn:
+    image: coturn/coturn:4.6-alpine
+    container_name: cds-coturn
+    network_mode: host
+    restart: unless-stopped
+    volumes:
+      - ./turnserver.conf:/etc/coturn/turnserver.conf:ro
+      - /etc/letsencrypt/live/turn.cdsspace.pro:/etc/coturn/certs:ro
+    command: ["-c", "/etc/coturn/turnserver.conf"]

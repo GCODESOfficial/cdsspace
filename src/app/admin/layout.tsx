@@ -1,7 +1,7 @@
 // app/admin/layout.tsx
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
 import Image from 'next/image';
 import AdminSidebar from '@/components/admin/AdminSidebar';
@@ -25,9 +25,11 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
   const [sessionUnavailable, setSessionUnavailable] = useState(false);
   const [authCheckVersion, setAuthCheckVersion] = useState(0);
   const [denied, setDenied] = useState(false);
+  const [validatedPathname, setValidatedPathname] = useState<string | null>(null);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   // Desktop rail starts collapsed by default; the user's choice is remembered.
   const [sidebarCollapsed, setSidebarCollapsed] = useState(true);
+  const hasEstablishedSession = useRef(false);
 
   const isLoginPage = pathname === '/admin/login';
 
@@ -48,18 +50,21 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
     if (isLoginPage) {
       setIsChecking(false);
       setIsAuthed(true);
+      setValidatedPathname(pathname);
       return;
     }
 
     let cancelled = false;
-    setIsChecking(true);
+    if (!hasEstablishedSession.current) setIsChecking(true);
     setSessionUnavailable(false);
 
     fetch('/api/admin-check', { credentials: 'include', cache: 'no-store' })
       .then(async (res) => {
         if (!res.ok) {
           if (res.status === 401 || res.status === 403) {
+            hasEstablishedSession.current = false;
             setIsAuthed(false);
+            setValidatedPathname(null);
             router.replace('/admin/login');
           } else if (!cancelled) {
             setSessionUnavailable(true);
@@ -68,38 +73,26 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
         }
         const data: SessionData = await res.json();
         if (cancelled) return;
+        hasEstablishedSession.current = true;
         setIsAuthed(true);
 
-        // Super admin can access everything
-        if (data.role === "super_admin") {
-          setDenied(false);
-          return;
-        }
+        let routeDenied = false;
+        if (data.role !== "super_admin" && pathname !== "/admin") {
+          const requiredPerm = getPermissionForRoute(pathname || "");
 
-        // Sub-admin route check
-        const requiredPerm = getPermissionForRoute(pathname || "");
-        if (pathname === "/admin") {
-          setDenied(false);
-          return;
-        }
-
-        // Sub-admins page is super-admin only. `team_members.promote`
-        // (granted via a role) also unlocks role management for delegated
-        // admins who need to create new team members.
-        if (pathname === "/admin/sub-admins") {
-          setDenied(
-            !(
+          // Sub-admins page is super-admin only. `team_members.promote`
+          // also unlocks role management for delegated admins.
+          if (pathname === "/admin/sub-admins") {
+            routeDenied = !(
               data.permissions.includes("all") ||
               data.permissions.includes("team_members.promote")
-            ),
-          );
-          return;
+            );
+          } else if (requiredPerm && !hasPermission(data.permissions, requiredPerm)) {
+            routeDenied = true;
+          }
         }
-        if (requiredPerm && !hasPermission(data.permissions, requiredPerm)) {
-          setDenied(true);
-        } else {
-          setDenied(false);
-        }
+        setDenied(routeDenied);
+        setValidatedPathname(pathname || "/admin");
       })
       .catch(() => {
         if (!cancelled) setSessionUnavailable(true);
@@ -112,14 +105,14 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
     };
   }, [pathname, router, isLoginPage, authCheckVersion]);
 
-  if (isChecking) {
+  if (isChecking && !isAuthed) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-[#F0F5FF]">
         <Loader2 className="h-6 w-6 animate-spin text-[#0A4FE8]" />
       </div>
     );
   }
-  if (sessionUnavailable) {
+  if (sessionUnavailable && !isAuthed) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-[#F0F5FF] px-4">
         <div className="w-full max-w-sm rounded-2xl border border-[#E4EAF5] bg-white p-6 text-center shadow-sm">
@@ -140,6 +133,8 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
   }
   if (!isAuthed) return null;
   if (isLoginPage) return <>{children}</>;
+
+  const isRoutePending = validatedPathname !== pathname && !sessionUnavailable;
 
   return (
     <div data-app-shell="admin" className="min-h-[100dvh] overflow-x-clip bg-[#F0F5FF]">
@@ -168,8 +163,31 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
           <AdminNotificationBell />
         </div>
 
-        <main data-app-content className="min-h-[calc(100dvh-64px)] min-w-0 overflow-x-clip lg:min-h-screen">
-          {denied ? (
+        <main data-app-content aria-busy={isRoutePending} className="min-h-[calc(100dvh-64px)] min-w-0 overflow-x-clip lg:min-h-screen">
+          {sessionUnavailable ? (
+            <div className="flex min-h-[calc(100dvh-64px)] items-center justify-center px-4 lg:min-h-screen">
+              <div className="w-full max-w-sm rounded-2xl border border-[#E4EAF5] bg-white p-6 text-center shadow-sm">
+                <h1 className="text-lg font-semibold text-[#0D1B39]">This page is temporarily unavailable</h1>
+                <p className="mt-2 text-sm leading-6 text-slate-500">
+                  Your admin session and navigation are still active. Retry this page without leaving the portal.
+                </p>
+                <button
+                  type="button"
+                  onClick={() => setAuthCheckVersion((value) => value + 1)}
+                  className="mt-5 min-h-11 rounded-xl bg-[#0A4FE8] px-5 text-sm font-semibold text-white transition hover:bg-[#083FC0]"
+                >
+                  Try again
+                </button>
+              </div>
+            </div>
+          ) : isRoutePending ? (
+            <div className="grid min-h-[calc(100dvh-64px)] place-items-center px-4 lg:min-h-screen" role="status" aria-label="Loading admin page">
+              <div className="flex items-center gap-3 rounded-xl border border-[#E4EAF5] bg-white px-4 py-3 text-sm font-medium text-slate-500 shadow-sm">
+                <Loader2 className="h-4 w-4 animate-spin text-[#0A4FE8]" />
+                Loading page…
+              </div>
+            </div>
+          ) : denied ? (
             <div className="flex items-center justify-center min-h-[calc(100dvh-64px)] px-4">
             <div className="text-center">
               <div className="w-16 h-16 rounded-2xl bg-red-50 flex items-center justify-center mx-auto mb-4">

@@ -526,7 +526,7 @@ export async function exportInvoiceToPdf(invoice: FinanceInvoice, items: Finance
         doc.setFontSize(8);
         doc.setTextColor(156, 163, 175);
         doc.text(`Page ${i} of ${pageCount}`, pageWidth - margin, pageHeight - 24, { align: "right" });
-        doc.text("cdsspace.com  |  cdsspace.pro", margin, pageHeight - 24);
+        doc.text("cdsspace.pro", margin, pageHeight - 24);
     }
 
     doc.save(isReceipt ? `Receipt-${receipt?.receipt_number || invoice.invoice_number}.pdf` : `Invoice-${invoice.invoice_number}.pdf`);

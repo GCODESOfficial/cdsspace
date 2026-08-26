@@ -51,6 +51,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
         "goals",
         "long_term_vision",
         "budget_range",
+        "budget_currency",
         "timeline",
         "additional_notes",
         "client_user_id",

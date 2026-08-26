@@ -10,11 +10,14 @@ export async function POST(req: NextRequest) {
     const full_name = String(form.get("full_name") || "").trim();
     const email = String(form.get("email") || "").trim();
     const company = String(form.get("company") || "").trim() || null;
-    const budget_range = String(form.get("budget_range") || "").trim() || null;
     const message = String(form.get("message") || "").trim() || null;
     const how_heard = String(form.get("how_heard") || "").trim() || null;
     const whatsapp = String(form.get("whatsapp") || "").trim() || null;
     const location = String(form.get("location") || "").trim() || null;
+    // Present only when the visitor arrived from the Kickoff Meet button on a
+    // proposal link. Never trusted as-is: it is looked up before it is stored.
+    const proposalTokenRaw = String(form.get("proposal_token") || "").trim();
+    const proposalToken = /^[0-9a-f-]{36}$/i.test(proposalTokenRaw) ? proposalTokenRaw : null;
 
     // Chip multi-selects arrive as JSON arrays of strings.
     const parseList = (key: string): string[] => {
@@ -29,8 +32,25 @@ export async function POST(req: NextRequest) {
     const preferred_days = parseList("preferred_days");
     const preferred_times = parseList("preferred_times");
 
-    if (!full_name || !email) {
-      return NextResponse.json({ error: "Full name and email are required" }, { status: 400 });
+    // Everything except the messenger number and the uploads is required.
+    if (!full_name || !email || !/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email)) {
+      return NextResponse.json({ error: "A full name and a valid email address are required" }, { status: 400 });
+    }
+    if (!company || !location || !message || !how_heard) {
+      return NextResponse.json({ error: "Company, business location, project details, and how you heard about us are required" }, { status: 400 });
+    }
+    if (topics.length === 0) {
+      return NextResponse.json({ error: "Choose at least one thing to discuss" }, { status: 400 });
+    }
+    // One meeting day at a time, and Sundays have no morning session.
+    if (preferred_days.length !== 1) {
+      return NextResponse.json({ error: "Choose one preferred meeting day" }, { status: 400 });
+    }
+    if (preferred_times.length === 0) {
+      return NextResponse.json({ error: "Choose at least one preferred meeting time" }, { status: 400 });
+    }
+    if (preferred_days[0] === "Sun" && preferred_times.some((slot) => /^morning/i.test(slot))) {
+      return NextResponse.json({ error: "Sunday sessions run in the afternoon and evening only" }, { status: 400 });
     }
 
     const sb = getSupabaseAdmin();
@@ -58,12 +78,42 @@ export async function POST(req: NextRequest) {
       file_urls.push(data.publicUrl);
     }
 
+    // Resolve the proposal before storing it, so a forged or stale token simply
+    // produces an unattributed request rather than a failed booking.
+    let proposal: { id: string; title: string | null; brand_name: string | null } | null = null;
+    if (proposalToken) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { data } = await (sb as any)
+        .from("deal_proposals")
+        .select("id, title, brand_name")
+        .eq("public_token", proposalToken)
+        .maybeSingle();
+      proposal = data || null;
+    }
+
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const { data: consultation, error } = await (sb as any).from("consultation_requests").insert({
-      full_name, email, company, budget_range, message, how_heard, file_urls,
+      full_name, email, company, message, how_heard, file_urls,
       whatsapp, location, topics, preferred_days, preferred_times,
+      proposal_id: proposal?.id ?? null,
     }).select("id, created_at").single();
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+
+    // Put the booking on the proposal's funnel timeline. Decorative for the
+    // client, so a failure here must never fail the booking itself.
+    if (proposal) {
+      const requestedWindow = [preferred_days.join(", "), preferred_times.join(", ")].filter(Boolean).join(" ");
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      await (sb as any).from("deal_proposal_events").insert({
+        proposal_id: proposal.id,
+        event_type: "scheduled",
+        actor: full_name,
+        detail: requestedWindow
+          ? `Kickoff meet requested for ${requestedWindow}`
+          : "Kickoff meet requested",
+        metadata: { consultation_id: consultation?.id, email },
+      }).then(undefined, () => undefined);
+    }
 
     await notifyAdminFeatureEvent({
       permissionKeys: ADMIN_FEATURE_PERMISSION_KEYS.consultations,
@@ -74,8 +124,8 @@ export async function POST(req: NextRequest) {
       details: {
         Email: email,
         Company: company,
-        Budget: budget_range,
         Topics: topics.join(", "),
+        Proposal: proposal ? (proposal.title || proposal.brand_name) : null,
         Reference: consultation?.id,
       },
     });
