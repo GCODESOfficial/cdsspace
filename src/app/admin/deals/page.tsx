@@ -2,12 +2,13 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { ArrowRight, ClipboardCheck, FileText, Loader2, Rocket, ShieldCheck, UsersRound } from "lucide-react";
+import { ArrowRight, ClipboardCheck, FileText, Loader2, Radar, Rocket, ShieldCheck, UsersRound } from "lucide-react";
 
 const tools = [
   { href: "/admin/deals/growth", title: "Growth Engine", description: "Find public buying signals, research prospects globally, and prepare human-approved outreach.", icon: Rocket, metric: "growth_prospects" },
   { href: "/admin/deals/proposals", title: "Proposals", description: "Create editable, evidence-led proposals and send a branded link or PDF.", icon: FileText, metric: "proposals" },
   { href: "/admin/deals/brand-audits", title: "Brand audits", description: "Assess identity, messaging, consistency, and digital experience using public evidence.", icon: ClipboardCheck, metric: "audits" },
+  { href: "/admin/deals/prospect-generation", title: "Prospect generation", description: "Paste a company list or link and research every company from public sources: trading status, dated websites, decision-maker emails, competitors, and where we fit.", icon: Radar, metric: "generated_companies" },
   { href: "/admin/deals/prospects", title: "Prospect checklist", description: "Organise potential clients, investors, influencers, and industry leaders for follow-up.", icon: UsersRound, metric: "checklist" },
 ] as const;
 

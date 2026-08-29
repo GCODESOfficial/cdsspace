@@ -45,6 +45,10 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ code
 
   const encoder = new TextEncoder();
   let closed = false;
+  // Held outside the stream so `cancel` can shut the timers down too. A browser
+  // that navigates away cancels the stream without ever aborting the request,
+  // and a poll that keeps running is a database query every 300ms, forever.
+  let stop = () => { closed = true; };
 
   const stream = new ReadableStream({
     async start(controller) {
@@ -82,7 +86,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ code
         }
       }, POLL_MS);
 
-      const stop = () => {
+      stop = () => {
         if (closed) return;
         closed = true;
         clearInterval(poll);
@@ -90,9 +94,12 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ code
         try { controller.close(); } catch { /* already closed */ }
       };
 
+      // Already gone by the time the stream started, which happens when a peer
+      // reconnects fast enough that the old request aborts during setup.
+      if (req.signal.aborted) { stop(); return; }
       req.signal.addEventListener("abort", stop);
     },
-    cancel() { closed = true; },
+    cancel() { stop(); },
   });
 
   return new Response(stream, {

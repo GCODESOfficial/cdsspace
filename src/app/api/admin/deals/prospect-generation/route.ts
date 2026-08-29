@@ -1,0 +1,585 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
+import { NextRequest, NextResponse } from "next/server";
+import { requireAdmin } from "@/lib/admin-api-auth";
+import { glashMaybeOne, glashQuery } from "@/lib/glashdb/postgres";
+import { assertTrustedMutationOrigin } from "@/lib/intelligence/security";
+import { checkIntelligenceRateLimit } from "@/lib/intelligence/rate-limit";
+import { dedupeCandidates, harvestFromUrl, parseCompanyInput, type CompanyCandidate } from "@/lib/prospect-generation";
+import { mergeCandidates, runRegistryImport } from "@/lib/prospect-import";
+import { enrichCompany } from "@/lib/prospect-enrichment";
+import { DIRECTORY_TARGET, SIZE_BANDS, companyNameKey, normalizeCountry, sizeBandFor } from "@/lib/prospect-directory";
+import { registryCatalogue, registryFor } from "@/lib/prospect-registries";
+import { browserConfigured, browserSetupHint } from "@/lib/prospect-browser";
+import { logActivity } from "@/lib/activity-log";
+
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+export const maxDuration = 300;
+
+const PERMISSION = "deals.prospects";
+
+// Enrichment is a live crawl, so a request handles a small slice and the page
+// keeps calling back until the queue drains. That keeps a directory of millions
+// moving without any single request exceeding the execution ceiling.
+const MAX_BATCH = 8;
+const DEFAULT_BATCH = 4;
+
+// Above this many matching rows the list view reports an estimate. Counting ten
+// million rows exactly on every keystroke is not worth the table scan.
+const EXACT_COUNT_LIMIT = 50_000;
+
+
+function str(value: unknown, max = 4000) {
+  return typeof value === "string" ? value.trim().slice(0, max) : "";
+}
+
+function uuid(value: unknown) {
+  const candidate = str(value, 80);
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(candidate) ? candidate : "";
+}
+
+function intValue(value: unknown, fallback: number, min: number, max: number) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? Math.max(min, Math.min(max, Math.round(parsed))) : fallback;
+}
+
+function boolValue(value: unknown) {
+  if (value === "true" || value === true) return true;
+  if (value === "false" || value === false) return false;
+  return null;
+}
+
+function csvCell(value: unknown) {
+  const text = value === null || value === undefined ? "" : String(value);
+  return /[",\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+}
+
+/** Builds the shared where clause for every filtered company query. */
+function companyFilters(params: URLSearchParams) {
+  const conditions: string[] = [];
+  const values: unknown[] = [];
+  const add = (clause: (index: number) => string, value: unknown) => {
+    values.push(value);
+    conditions.push(clause(values.length));
+  };
+
+  const status = str(params.get("status"), 20);
+  const review = str(params.get("review"), 20);
+  const priority = str(params.get("priority"), 20);
+  const websiteStatus = str(params.get("website_status"), 20);
+  const activity = str(params.get("activity"), 20);
+  const country = str(params.get("country"), 60);
+  const industry = str(params.get("industry"), 60);
+  const sizeBand = str(params.get("size_band"), 20);
+  const letter = str(params.get("letter"), 1);
+  const query = str(params.get("q"), 120);
+  const batchId = uuid(params.get("batch_id"));
+  const isPublic = boolValue(params.get("is_public"));
+  const isStartup = boolValue(params.get("is_startup"));
+  const multiCountry = boolValue(params.get("multi_country"));
+  const hasWebsite = boolValue(params.get("has_website"));
+  const hideInactive = boolValue(params.get("hide_inactive"));
+
+  if (status) add((index) => `enrichment_status = $${index}`, status);
+  if (review) add((index) => `review_status = $${index}`, review);
+  if (priority) add((index) => `priority = $${index}`, priority);
+  if (websiteStatus) add((index) => `website_status = $${index}`, websiteStatus);
+  if (activity) add((index) => `activity_status = $${index}`, activity);
+  if (industry) add((index) => `industry ilike $${index}`, `%${industry}%`);
+  if (SIZE_BANDS.some((band) => band.value === sizeBand)) add((index) => `size_band = $${index}`, sizeBand);
+  if (batchId) add((index) => `batch_id = $${index}`, batchId);
+  // A company is only ever marked public or startup on positive evidence, so
+  // "not listed" has to mean "not proven listed" rather than "proven private".
+  if (isPublic === true) conditions.push("is_public is true");
+  if (isPublic === false) conditions.push("is_public is not true");
+  if (isStartup === true) conditions.push("is_startup is true");
+  if (isStartup === false) conditions.push("is_startup is not true");
+  if (multiCountry === true) conditions.push("country_count > 1");
+  // A company the register already calls dead is never worth showing by default.
+  if (hideInactive === true) conditions.push("activity_status <> 'inactive'");
+  if (hasWebsite === true) conditions.push("website is not null");
+  if (hasWebsite === false) conditions.push("website is null");
+  if (/^[a-z]$/i.test(letter)) add((index) => `name_key like $${index}`, `${letter.toLowerCase()}%`);
+  if (query) add((index) => `(company_name ilike $${index} or domain ilike $${index} or industry ilike $${index})`, `%${query}%`);
+
+  const foundedFrom = Number(params.get("founded_from"));
+  const foundedTo = Number(params.get("founded_to"));
+  if (Number.isFinite(foundedFrom) && foundedFrom > 1500) add((index) => `founded_year >= $${index}`, Math.round(foundedFrom));
+  if (Number.isFinite(foundedTo) && foundedTo > 1500) add((index) => `founded_year <= $${index}`, Math.round(foundedTo));
+
+  const staffFrom = Number(params.get("staff_from"));
+  const staffTo = Number(params.get("staff_to"));
+  if (Number.isFinite(staffFrom) && staffFrom > 0) add((index) => `employee_count >= $${index}`, Math.round(staffFrom));
+  if (Number.isFinite(staffTo) && staffTo > 0) add((index) => `employee_count <= $${index}`, Math.round(staffTo));
+
+  const exchange = str(params.get("exchange"), 20);
+  if (exchange) add((index) => `stock_exchanges @> $${index}::jsonb`, JSON.stringify([exchange.toUpperCase()]));
+
+  // Country is a presence row, not a column, so a company trading in six
+  // countries is found by any of the six without being stored six times.
+  if (country) {
+    values.push(country.toLowerCase());
+    conditions.push(`exists (select 1 from public.prospect_company_countries pcc where pcc.company_id = prospect_companies.id and lower(pcc.country) = $${values.length})`);
+  }
+
+  return { where: conditions.length ? `where ${conditions.join(" and ")}` : "", values };
+}
+
+const SORTS: Record<string, string> = {
+  score: "deal_score desc, updated_at desc",
+  name_asc: "name_key asc",
+  name_desc: "name_key desc",
+  founded_new: "founded_year desc nulls last",
+  founded_old: "founded_year asc nulls last",
+  staff_desc: "employee_count desc nulls last",
+  staff_asc: "employee_count asc nulls last",
+  countries: "country_count desc, deal_score desc",
+  newest: "created_at desc",
+};
+
+/** Exact below the limit, planner estimate above it. */
+async function countCompanies(where: string, values: unknown[]) {
+  const [exact] = await glashQuery<any>(
+    `select count(*)::bigint total from (select 1 from public.prospect_companies ${where} limit ${EXACT_COUNT_LIMIT + 1}) sample`,
+    values,
+  );
+  const sampled = Number(exact?.total || 0);
+  if (sampled <= EXACT_COUNT_LIMIT) return { total: sampled, estimated: false };
+  const plan = await glashQuery<any>(`explain (format json) select 1 from public.prospect_companies ${where}`, values);
+  const rows = plan?.[0]?.["QUERY PLAN"]?.[0]?.Plan?.["Plan Rows"];
+  return { total: Math.max(sampled, Math.round(Number(rows) || sampled)), estimated: true };
+}
+
+export async function GET(req: NextRequest) {
+  const { denied } = await requireAdmin(req, PERMISSION);
+  if (denied) return denied;
+  const params = req.nextUrl.searchParams;
+  const resource = str(params.get("resource"), 40) || "summary";
+
+  try {
+    if (resource === "summary") {
+      // Counters are trigger-maintained, so this stays instant at any size.
+      const counters = await glashQuery<any>(`select bucket, value from public.prospect_directory_counters`);
+      const value = (bucket: string) => Number(counters.find((row) => row.bucket === bucket)?.value || 0);
+      const [extras] = await glashQuery<any>(`select
+        (select count(*)::bigint from public.prospect_companies where country_count > 1) multi_country,
+        (select count(distinct lower(country))::int from public.prospect_company_countries) countries_covered,
+        (select count(*)::bigint from public.prospect_company_contacts where seniority = 'decision_maker' and email is not null) reachable_decision_makers`);
+      const batches = await glashQuery<any>(`select * from public.prospect_import_batches order by created_at desc limit 30`);
+      const topCountries = await glashQuery<any>(
+        `select country, count(*)::int companies from public.prospect_company_countries group by country order by companies desc limit 25`,
+      );
+      const industries = await glashQuery<any>(
+        `select industry, count(*)::int companies from public.prospect_companies where industry is not null group by industry order by companies desc limit 40`,
+      );
+      return NextResponse.json({
+        totals: {
+          total: value("total"),
+          queued: value("enrichment:queued"),
+          running: value("enrichment:running"),
+          enriched: value("enrichment:enriched"),
+          failed: value("enrichment:failed"),
+          active_companies: value("activity:active"),
+          needs_website: value("website:outdated") + value("website:missing") + value("website:broken"),
+          high_priority: value("priority:high"),
+          promoted: value("review:promoted"),
+          multi_country: Number(extras?.multi_country || 0),
+          countries_covered: Number(extras?.countries_covered || 0),
+          reachable_decision_makers: Number(extras?.reachable_decision_makers || 0),
+        },
+        batches,
+        topCountries,
+        industries: industries.map((row) => row.industry),
+        target: DIRECTORY_TARGET,
+      });
+    }
+
+    if (resource === "registries") {
+      const runs = await glashQuery<any>(
+        `select registry_key, id, label, cursor, exhausted, created_count, last_run_at
+         from public.prospect_import_batches where registry_key is not null
+         order by last_run_at desc nulls last limit 50`,
+      );
+      return NextResponse.json({
+        registries: registryCatalogue(),
+        runs,
+        browser: { connected: browserConfigured(), hint: browserSetupHint() },
+      });
+    }
+
+    if (resource === "companies") {
+      const { where, values } = companyFilters(params);
+      const limit = intValue(params.get("limit"), 50, 1, 200);
+      const offset = intValue(params.get("offset"), 0, 0, 5_000_000);
+      const sort = SORTS[str(params.get("sort"), 20)] || SORTS.score;
+
+      const rows = await glashQuery<any>(
+        `select * from public.prospect_companies ${where} order by ${sort} limit ${limit} offset ${offset}`,
+        values,
+      );
+      const ids = rows.map((row) => row.id);
+      const [contacts, countries, count] = await Promise.all([
+        ids.length ? glashQuery<any>(`select * from public.prospect_company_contacts where company_id = any($1::uuid[]) order by seniority, full_name`, [ids]) : [],
+        ids.length ? glashQuery<any>(`select company_id, country, is_headquarters from public.prospect_company_countries where company_id = any($1::uuid[]) order by is_headquarters desc, country`, [ids]) : [],
+        countCompanies(where, values),
+      ]);
+      return NextResponse.json({
+        companies: rows.map((row) => ({
+          ...row,
+          contacts: contacts.filter((contact) => contact.company_id === row.id),
+          countries: countries.filter((entry) => entry.company_id === row.id).map((entry) => entry.country),
+        })),
+        total: count.total,
+        estimated: count.estimated,
+      });
+    }
+
+    if (resource === "export") {
+      const { where, values } = companyFilters(params);
+      const limit = intValue(params.get("limit"), 50_000, 1, 200_000);
+      const rows = await glashQuery<any>(`select * from public.prospect_companies ${where} order by deal_score desc limit ${limit}`, values);
+      const ids = rows.map((row) => row.id);
+      const [contacts, countries] = await Promise.all([
+        ids.length ? glashQuery<any>(`select * from public.prospect_company_contacts where company_id = any($1::uuid[]) and seniority = 'decision_maker'`, [ids]) : [],
+        ids.length ? glashQuery<any>(`select company_id, country from public.prospect_company_countries where company_id = any($1::uuid[])`, [ids]) : [],
+      ]);
+      const header = ["Company", "Domain", "Website", "HQ country", "Countries", "Country count", "Industry", "Staff", "Size band", "Founded", "Publicly traded", "Exchanges", "Ticker", "Startup", "Activity", "Website status", "Website score", "Deal score", "Priority", "Decision makers", "Decision maker emails", "General emails", "Socials", "Brief", "Pain points", "How we help", "Service fit", "Local competitors", "Global competitors", "Outreach subject", "Outreach email"];
+      const lines = [header.join(",")];
+      for (const row of rows) {
+        const rowContacts = contacts.filter((contact) => contact.company_id === row.id);
+        const rowCountries = countries.filter((entry) => entry.company_id === row.id).map((entry) => entry.country);
+        lines.push([
+          row.company_name, row.domain, row.website, row.hq_country, rowCountries.join("; "), row.country_count,
+          row.industry, row.employee_count, row.size_band, row.founded_year,
+          row.is_public === null ? "" : row.is_public ? "yes" : "no",
+          (row.stock_exchanges || []).join("; "), row.ticker,
+          row.is_startup === null ? "" : row.is_startup ? "yes" : "no",
+          row.activity_status, row.website_status, row.website_score, row.deal_score, row.priority,
+          rowContacts.map((contact: any) => `${contact.full_name} (${contact.job_title || "unknown"})`).join("; "),
+          rowContacts.map((contact: any) => contact.email).filter(Boolean).join("; "),
+          (row.emails || []).map((entry: any) => entry.email).join("; "),
+          (row.socials || []).map((entry: any) => entry.url).join("; "),
+          row.brief,
+          (row.pain_points || []).join(" | "),
+          (row.how_we_help || []).join(" | "),
+          (row.service_fit || []).map((entry: any) => entry.service).join("; "),
+          (row.competitors_local || []).map((entry: any) => entry.name).join("; "),
+          (row.competitors_global || []).map((entry: any) => entry.name).join("; "),
+          row.outreach_subject, row.outreach_email,
+        ].map(csvCell).join(","));
+      }
+      return new NextResponse(lines.join("\n"), {
+        headers: {
+          "Content-Type": "text/csv; charset=utf-8",
+          "Content-Disposition": `attachment; filename="cdsspace-directory-${new Date().toISOString().slice(0, 10)}.csv"`,
+        },
+      });
+    }
+
+    return NextResponse.json({ error: "Unknown resource." }, { status: 400 });
+  } catch (error) {
+    return NextResponse.json({ error: error instanceof Error ? error.message : "Prospect generation could not be loaded." }, { status: 500 });
+  }
+}
+
+export async function POST(req: NextRequest) {
+  const { session, denied } = await requireAdmin(req, PERMISSION);
+  if (denied) return denied;
+  if (!assertTrustedMutationOrigin(req)) return NextResponse.json({ error: "Untrusted request origin." }, { status: 403 });
+  const actor = session?.email || "admin";
+
+  let body: any = {};
+  try {
+    body = await req.json();
+  } catch {
+    return NextResponse.json({ error: "Invalid request body." }, { status: 400 });
+  }
+  const action = str(body.action, 40);
+
+  try {
+    if (action === "import") {
+      const rate = checkIntelligenceRateLimit(`prospect-import:${actor}`, 60, 60 * 60 * 1000);
+      if (!rate.allowed) return NextResponse.json({ error: "Import limit reached for this hour. Try again shortly." }, { status: 429 });
+
+      const sourceKind = body.source_kind === "url" ? "url" : "text";
+      const rawInput = str(body.raw_input, 4_000_000);
+      const sourceUrl = str(body.source_url, 1000);
+      const country = normalizeCountry(str(body.country, 60));
+      const maxPages = intValue(body.max_pages, 5, 1, 40);
+      const render = body.render === true;
+      const scrolls = intValue(body.scrolls, 12, 0, 60);
+      const clickSelector = str(body.click_selector, 200);
+      if (sourceKind === "url" && !sourceUrl) return NextResponse.json({ error: "Paste the link to the company list." }, { status: 400 });
+      if (sourceKind === "text" && !rawInput) return NextResponse.json({ error: "Paste the company details to research." }, { status: 400 });
+
+      let candidates: CompanyCandidate[] = [];
+      let warnings: string[] = [];
+      let label = str(body.label, 180);
+      if (sourceKind === "url") {
+        const harvest = await harvestFromUrl(sourceUrl, { country, maxPages, render, scrolls, clickSelector: clickSelector || undefined });
+        candidates = harvest.candidates;
+        warnings = harvest.warnings;
+        label = label || harvest.title || harvest.sourceUrl;
+      } else {
+        candidates = parseCompanyInput(rawInput, { country, source_url: sourceUrl || null });
+        label = label || `Pasted list, ${new Date().toISOString().slice(0, 10)}`;
+      }
+      if (!candidates.length) {
+        return NextResponse.json({
+          error: warnings[0] || "No companies could be read from that input. Include company names or website addresses.",
+          warnings,
+        }, { status: 422 });
+      }
+
+      const entries = dedupeCandidates(candidates);
+      const batch = await glashMaybeOne<any>(
+        `insert into public.prospect_import_batches (label,source_kind,source_url,raw_input,status,discovered_count,created_by)
+         values ($1,$2,$3,$4,'parsed',$5,$6) returning *`,
+        [label, sourceKind, sourceUrl || null, sourceKind === "url" ? "" : rawInput.slice(0, 100_000), entries.length, actor],
+      );
+      const { created, merged, countriesAdded } = await mergeCandidates(entries, batch.id, actor);
+      await glashQuery(
+        `update public.prospect_import_batches set created_count=$2, duplicate_count=$3, updated_at=now() where id=$1`,
+        [batch.id, created, merged],
+      );
+      await logActivity({
+        action: "deals.prospect_generation.import", page: "deals/prospect-generation", resource_type: "prospect_batch",
+        resource_id: batch.id, resource_label: label, metadata: { discovered: entries.length, created, merged, countriesAdded },
+      });
+      return NextResponse.json({
+        batch: { ...batch, created_count: created, duplicate_count: merged },
+        created, merged, countriesAdded, discovered: entries.length, warnings,
+      });
+    }
+
+    if (action === "import_registry") {
+      const rate = checkIntelligenceRateLimit(`prospect-registry:${actor}`, 600, 60 * 60 * 1000);
+      if (!rate.allowed) return NextResponse.json({ error: "Registry import limit reached for this hour. Try again shortly." }, { status: 429 });
+
+      const key = str(body.registry, 40);
+      if (!registryFor(key)) return NextResponse.json({ error: "Unknown register." }, { status: 400 });
+      const result = await runRegistryImport({ registryKey: key, actor, slices: intValue(body.slices, 3, 1, 10) });
+      const batch = await glashMaybeOne<any>(`select * from public.prospect_import_batches where id=$1`, [result.batchId]);
+      await logActivity({
+        action: "deals.prospect_generation.registry", page: "deals/prospect-generation", resource_type: "prospect_batch",
+        resource_id: result.batchId, resource_label: registryFor(key)!.label,
+        metadata: { created: result.created, merged: result.merged, done: result.done },
+      });
+      return NextResponse.json({ ...result, batch });
+    }
+
+    if (action === "enrich_batch") {
+      const rate = checkIntelligenceRateLimit(`prospect-enrich:${actor}`, 2000, 60 * 60 * 1000);
+      if (!rate.allowed) return NextResponse.json({ error: "Research limit reached for this hour. Try again shortly." }, { status: 429 });
+
+      const limit = intValue(body.limit, DEFAULT_BATCH, 1, MAX_BATCH);
+      const batchId = uuid(body.batch_id);
+      // Claiming inside one statement stops two open tabs researching the same row.
+      const claimed = await glashQuery<any>(
+        `update public.prospect_companies set enrichment_status='running', enrichment_attempts = enrichment_attempts + 1, updated_at=now()
+         where id in (
+           select id from public.prospect_companies
+           where enrichment_status = 'queued' ${batchId ? "and batch_id = $2" : ""}
+           order by created_at limit $1
+           for update skip locked
+         ) returning *`,
+        batchId ? [limit, batchId] : [limit],
+      );
+
+      const processed: Array<{ id: string; company_name: string; status: string; deal_score?: number }> = [];
+      for (const row of claimed) {
+        try {
+          const result = await enrichCompany({
+            company_name: row.company_name,
+            domain: row.domain,
+            website: row.website,
+            country: row.hq_country || row.country,
+            industry: row.industry,
+          });
+          await glashQuery(
+            `update public.prospect_companies set
+               company_name=$2, name_key=$3, domain=coalesce($4, domain), website=$5, country=$6, city=$7, industry=$8,
+               employee_range=$9, employee_count=$10, size_band=$11, founded_year=$12,
+               is_public=$13, stock_exchanges=$14::jsonb, ticker=$15, is_startup=$16,
+               activity_status=$17, activity_evidence=$18,
+               website_status=$19, website_score=$20, website_findings=$21::jsonb,
+               socials=$22::jsonb, emails=$23::jsonb, phones=$24::jsonb,
+               brief=$25, pain_points=$26::jsonb, how_we_help=$27::jsonb, service_fit=$28::jsonb,
+               competitors_local=$29::jsonb, competitors_global=$30::jsonb,
+               outreach_angle=$31, outreach_subject=$32, outreach_email=$33,
+               deal_score=$34, priority=$35, sources=$36::jsonb,
+               enrichment_status='enriched', enrichment_error=null, enriched_at=now(), updated_by=$37, updated_at=now()
+             where id=$1`,
+            [
+              row.id, result.company_name, companyNameKey(result.company_name), result.domain, result.website,
+              result.country, result.city, result.industry,
+              result.employee_range, result.employee_count, result.size_band, result.founded_year,
+              result.is_public, JSON.stringify(result.stock_exchanges), result.ticker, result.is_startup,
+              result.activity_status, result.activity_evidence,
+              result.website_status, result.website_score, JSON.stringify(result.website_findings),
+              JSON.stringify(result.socials), JSON.stringify(result.emails), JSON.stringify(result.phones),
+              result.brief, JSON.stringify(result.pain_points), JSON.stringify(result.how_we_help), JSON.stringify(result.service_fit),
+              JSON.stringify(result.competitors_local), JSON.stringify(result.competitors_global),
+              result.outreach_angle, result.outreach_subject, result.outreach_email,
+              result.deal_score, result.priority, JSON.stringify(result.sources), actor,
+            ],
+          );
+
+          // Research often reveals further countries of operation. They attach to
+          // this one company row rather than creating duplicates per country.
+          for (const country of result.countries) {
+            await glashQuery(
+              `insert into public.prospect_company_countries (company_id,country,is_headquarters,source_url)
+               values ($1,$2,$3,$4) on conflict do nothing`,
+              [row.id, country, country === result.country, result.website],
+            );
+          }
+
+          await glashQuery(`delete from public.prospect_company_contacts where company_id=$1`, [row.id]);
+          for (const contact of result.contacts) {
+            await glashQuery(
+              `insert into public.prospect_company_contacts (company_id,full_name,job_title,seniority,email,email_confidence,phone,linkedin_url,source_url)
+               values ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+              [row.id, contact.full_name, contact.job_title, contact.seniority, contact.email, contact.email_confidence, contact.phone, contact.linkedin_url, contact.source_url],
+            );
+          }
+          processed.push({ id: row.id, company_name: result.company_name, status: "enriched", deal_score: result.deal_score });
+        } catch (error) {
+          const message = error instanceof Error ? error.message : "Research failed.";
+          await glashQuery(
+            `update public.prospect_companies set enrichment_status = case when enrichment_attempts >= 3 then 'failed' else 'queued' end,
+             enrichment_error=$2, updated_at=now() where id=$1`,
+            [row.id, message.slice(0, 500)],
+          );
+          processed.push({ id: row.id, company_name: row.company_name, status: "failed" });
+        }
+      }
+
+      const [counter] = await glashQuery<any>(`select value from public.prospect_directory_counters where bucket = 'enrichment:queued'`);
+      return NextResponse.json({ processed, remaining: Number(counter?.value || 0) });
+    }
+
+    if (action === "requeue") {
+      const id = uuid(body.id);
+      const rows = id
+        ? await glashQuery<any>(`update public.prospect_companies set enrichment_status='queued', enrichment_attempts=0, enrichment_error=null, updated_at=now() where id=$1 returning id`, [id])
+        : await glashQuery<any>(`update public.prospect_companies set enrichment_status='queued', enrichment_attempts=0, enrichment_error=null, updated_at=now() where enrichment_status in ('failed','running') returning id`);
+      return NextResponse.json({ requeued: rows.length });
+    }
+
+    if (action === "add_country") {
+      const id = uuid(body.id);
+      const country = normalizeCountry(str(body.country, 60));
+      if (!id || !country) return NextResponse.json({ error: "A company and a country are required." }, { status: 400 });
+      await glashQuery(
+        `insert into public.prospect_company_countries (company_id,country,is_headquarters) values ($1,$2,false) on conflict do nothing`,
+        [id, country],
+      );
+      const company = await glashMaybeOne<any>(`select * from public.prospect_companies where id=$1`, [id]);
+      return NextResponse.json({ company });
+    }
+
+    if (action === "merge") {
+      const keepId = uuid(body.keep_id);
+      const mergeId = uuid(body.merge_id);
+      if (!keepId || !mergeId || keepId === mergeId) return NextResponse.json({ error: "Two different companies are required." }, { status: 400 });
+      const [keep, drop] = await Promise.all([
+        glashMaybeOne<any>(`select * from public.prospect_companies where id=$1`, [keepId]),
+        glashMaybeOne<any>(`select * from public.prospect_companies where id=$1`, [mergeId]),
+      ]);
+      if (!keep || !drop) return NextResponse.json({ error: "Company not found." }, { status: 404 });
+      // Country rows, contacts, and the discarded spelling move to the kept row.
+      await glashQuery(`insert into public.prospect_company_countries (company_id,country,registration_id,source_url)
+        select $1, country, registration_id, source_url from public.prospect_company_countries where company_id=$2
+        on conflict do nothing`, [keepId, mergeId]);
+      await glashQuery(`update public.prospect_company_contacts set company_id=$1 where company_id=$2`, [keepId, mergeId]);
+      await glashQuery(`insert into public.prospect_company_aliases (company_id,alias,name_key) values ($1,$2,$3) on conflict do nothing`,
+        [keepId, drop.company_name, drop.name_key]);
+      await glashQuery(`delete from public.prospect_companies where id=$1`, [mergeId]);
+      return NextResponse.json({ ok: true });
+    }
+
+    if (action === "update_company") {
+      const id = uuid(body.id);
+      if (!id) return NextResponse.json({ error: "A company is required." }, { status: 400 });
+      const review = str(body.review_status, 20);
+      if (review && !["new", "shortlisted", "promoted", "rejected"].includes(review)) {
+        return NextResponse.json({ error: "Unknown review status." }, { status: 400 });
+      }
+      const company = await glashMaybeOne<any>(
+        `update public.prospect_companies set review_status=coalesce($2, review_status), notes=coalesce($3, notes), updated_by=$4, updated_at=now()
+         where id=$1 returning *`,
+        [id, review || null, typeof body.notes === "string" ? str(body.notes, 4000) : null, actor],
+      );
+      if (!company) return NextResponse.json({ error: "Company not found." }, { status: 404 });
+      return NextResponse.json({ company });
+    }
+
+    if (action === "promote") {
+      const id = uuid(body.id);
+      if (!id) return NextResponse.json({ error: "A company is required." }, { status: 400 });
+      const company = await glashMaybeOne<any>(`select * from public.prospect_companies where id=$1`, [id]);
+      if (!company) return NextResponse.json({ error: "Company not found." }, { status: 404 });
+      if (company.prospect_id) return NextResponse.json({ error: "This company is already on the prospect checklist." }, { status: 409 });
+
+      const [contacts, countries] = await Promise.all([
+        glashQuery<any>(`select * from public.prospect_company_contacts where company_id=$1 order by seniority`, [id]),
+        glashQuery<any>(`select country from public.prospect_company_countries where company_id=$1 order by is_headquarters desc`, [id]),
+      ]);
+      const lead = contacts.find((contact) => contact.seniority === "decision_maker" && contact.email) || contacts.find((contact) => contact.email) || contacts[0];
+      const notes = [
+        company.brief,
+        countries.length > 1 ? `Present in ${countries.length} countries: ${countries.map((entry) => entry.country).join(", ")}` : "",
+        company.is_public ? `Publicly traded${company.ticker ? ` (${(company.stock_exchanges || []).join(", ")}: ${company.ticker})` : ""}` : "",
+        company.employee_count ? `Approximately ${company.employee_count} staff` : "",
+        company.pain_points?.length ? `Pain points: ${company.pain_points.join(" | ")}` : "",
+        company.how_we_help?.length ? `How CDS Space helps: ${company.how_we_help.join(" | ")}` : "",
+        company.competitors_local?.length ? `Local competitors: ${company.competitors_local.map((entry: any) => entry.name).join("; ")}` : "",
+        company.competitors_global?.length ? `Global competitors: ${company.competitors_global.map((entry: any) => entry.name).join("; ")}` : "",
+        company.activity_evidence ? `Activity: ${company.activity_evidence}` : "",
+      ].filter(Boolean).join("\n\n").slice(0, 6000);
+
+      const prospect = await glashMaybeOne<any>(
+        `insert into public.deal_prospects (category,display_name,company_name,website,social_url,email,phone,location,notes,next_action,status,created_by,updated_by)
+         values ('potential_client',$1,$2,$3,$4,$5,$6,$7,$8,$9,'ready',$10,$10) returning *`,
+        [
+          lead?.full_name || company.company_name,
+          company.company_name,
+          company.website,
+          company.socials?.[0]?.url || null,
+          lead?.email || company.emails?.[0]?.email || null,
+          lead?.phone || company.phones?.[0] || null,
+          [company.city, company.hq_country || company.country].filter(Boolean).join(", ") || null,
+          notes,
+          company.outreach_angle || "Send the researched outreach email.",
+          actor,
+        ],
+      );
+      await glashQuery(`update public.prospect_companies set prospect_id=$2, review_status='promoted', updated_by=$3, updated_at=now() where id=$1`, [id, prospect.id, actor]);
+      await logActivity({
+        action: "deals.prospect_generation.promote", page: "deals/prospect-generation", resource_type: "prospect_company",
+        resource_id: id, resource_label: company.company_name, metadata: { prospect_id: prospect.id },
+      });
+      return NextResponse.json({ prospect, company: { ...company, prospect_id: prospect.id, review_status: "promoted" } });
+    }
+
+    if (action === "delete_company") {
+      const id = uuid(body.id);
+      if (!id) return NextResponse.json({ error: "A company is required." }, { status: 400 });
+      await glashQuery(`delete from public.prospect_companies where id=$1`, [id]);
+      return NextResponse.json({ ok: true });
+    }
+
+    if (action === "delete_batch") {
+      const id = uuid(body.batch_id);
+      if (!id) return NextResponse.json({ error: "A batch is required." }, { status: 400 });
+      await glashQuery(`delete from public.prospect_companies where batch_id=$1 and review_status <> 'promoted'`, [id]);
+      await glashQuery(`delete from public.prospect_import_batches where id=$1`, [id]);
+      return NextResponse.json({ ok: true });
+    }
+
+    return NextResponse.json({ error: "Unknown action." }, { status: 400 });
+  } catch (error) {
+    return NextResponse.json({ error: error instanceof Error ? error.message : "The request could not be completed." }, { status: 500 });
+  }
+}

@@ -60,6 +60,7 @@ import {
   PanelLeftClose,
   PanelLeftOpen,
   PackageCheck,
+  Radar,
   Rocket,
   Handshake,
   Mail,
@@ -99,6 +100,7 @@ const dealsNavItems = [
   { label: "Growth Engine", href: "/admin/deals/growth", icon: Rocket, permission: "clients.growth.view" },
   { label: "Proposals", href: "/admin/deals/proposals", icon: FileText, permission: "deals.proposals" },
   { label: "Brand audits", href: "/admin/deals/brand-audits", icon: ClipboardCheck, permission: "deals.audits" },
+  { label: "Prospect generation", href: "/admin/deals/prospect-generation", icon: Radar, permission: "deals.prospects" },
   { label: "Prospect checklist", href: "/admin/deals/prospects", icon: Users, permission: "deals.prospects" },
 ];
 

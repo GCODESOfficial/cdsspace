@@ -17,7 +17,8 @@
     "prepare": "git config core.hooksPath .githooks || true",
     "deploy": "npx -y glashdb deploy --asset-mode inline --source-upload chunked",
     "start": "next start",
-    "lint": "eslint ."
+    "lint": "eslint .",
+    "populate-prospects": "npx --yes esbuild@0.24.0 scripts/populate-prospects.ts --bundle --platform=node --format=cjs --outfile=node_modules/.cache/populate-prospects.cjs --alias:@=./src --alias:server-only=./scripts/server-only-stub.js --external:pg --log-level=warning && node -r dotenv/config node_modules/.cache/populate-prospects.cjs"
   },
   "dependencies": {
     "@dnd-kit/core": "6.3.1",

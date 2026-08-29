@@ -138,7 +138,8 @@ export async function GET(req: NextRequest) {
       (select count(*)::int from public.deal_proposals where status not in ('archived')) proposals,
       (select count(*)::int from public.deal_brand_audits where status not in ('archived')) audits,
       (select count(*)::int from public.deal_prospects where status not in ('converted','not_relevant')) checklist,
-      (select count(*)::int from public.deal_prospects where follow_up_at <= now() and status in ('ready','contacted','follow_up')) due_follow_ups`);
+      (select count(*)::int from public.deal_prospects where follow_up_at <= now() and status in ('ready','contacted','follow_up')) due_follow_ups,
+      (select count(*)::int from public.prospect_companies where enrichment_status = 'enriched') generated_companies`);
     return NextResponse.json({ ok: true, metrics: metrics || {} });
   } catch (error) {
     return NextResponse.json({ ok: false, error: error instanceof Error ? error.message : "Could not load Deals." }, { status: 500 });

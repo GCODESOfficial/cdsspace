@@ -27,6 +27,7 @@ export interface SiteResearch {
   people: PublicPerson[];
   clientSignals: Array<{ name: string; domain: string; source_url: string; evidence: string }>;
   brandSignals: string[];
+  socialLinks: Array<{ platform: string; url: string }>;
   technicalMetrics: {
     page_title_length: number;
     meta_description_length: number;
@@ -37,6 +38,16 @@ export interface SiteResearch {
     script_count: number;
     visible_text_characters: number;
   };
+}
+
+/**
+ * Several public registries, the SEC among them, reject or throttle crawlers that
+ * do not identify a contact address. Set RESEARCH_CONTACT_EMAIL so those sources
+ * stay reachable; the fallback keeps the agency site as the point of contact.
+ */
+function researchUserAgent() {
+  const contact = (process.env.RESEARCH_CONTACT_EMAIL || "").trim();
+  return `CDSSpace-MarketResearch/1.0 (+https://cdsspace.pro${contact ? `; ${contact}` : ""})`;
 }
 
 const SOCIAL_HOSTS = new Set([
@@ -106,7 +117,7 @@ async function fetchHtml(input: string) {
       const response = await fetch(url, {
         signal: controller.signal,
         redirect: "manual",
-        headers: { "User-Agent": "CDSSpace-MarketResearch/1.0 (+https://cdsspace.pro)" },
+        headers: { "User-Agent": researchUserAgent(), "Accept": "text/html,application/xhtml+xml" },
       });
       if (response.status >= 300 && response.status < 400) {
         const location = response.headers.get("location");
@@ -200,14 +211,18 @@ function emailsIn(html: string) {
   return Array.from(new Set(found.map((email) => email.toLowerCase()).filter((email) => !/example\.(com|org)|sentry|wixpress/i.test(email))));
 }
 
-export async function searchOpenWeb(query: string, limit = 10): Promise<WebSearchResult[]> {
+export async function searchOpenWeb(
+  query: string,
+  limit = 10,
+  options: { includeSocial?: boolean } = {},
+): Promise<WebSearchResult[]> {
   const url = new URL("https://www.bing.com/search");
   url.searchParams.set("q", query.slice(0, 240));
   url.searchParams.set("format", "rss");
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 10_000);
   try {
-    const response = await fetch(url, { signal: controller.signal, headers: { "User-Agent": "CDSSpace-MarketResearch/1.0" } });
+    const response = await fetch(url, { signal: controller.signal, headers: { "User-Agent": researchUserAgent() } });
     if (!response.ok) return [];
     const xml = await response.text();
     const results: WebSearchResult[] = [];
@@ -217,7 +232,10 @@ export async function searchOpenWeb(query: string, limit = 10): Promise<WebSearc
       const link = decodeHtml(body.match(/<link>([\s\S]*?)<\/link>/i)?.[1] || "").trim();
       const description = stripHtml(body.match(/<description>([\s\S]*?)<\/description>/i)?.[1] || "");
       const domain = normalDomain(link);
-      if (!title || !domain || SOCIAL_HOSTS.has(domain)) continue;
+      // Social results are noise when researching a website, but they are the
+      // whole point when a company has no site and we need a way to reach it.
+      if (!title || !domain) continue;
+      if (SOCIAL_HOSTS.has(domain) && !options.includeSocial) continue;
       results.push({ title, url: link, description, domain });
       if (results.length >= limit) break;
     }
@@ -247,10 +265,15 @@ export async function researchPublicSite(input: string, deep = false): Promise<S
   }
 
   const people: PublicPerson[] = [];
+  const socialLinks: Array<{ platform: string; url: string }> = [];
   const emails: Array<{ email: string; source_url: string }> = [];
   const clientSignals: SiteResearch['clientSignals'] = [];
   for (const page of pages) {
     people.push(...collectPeople(page.html, page.url));
+    for (const link of hrefs(page.html, new URL(page.url))) {
+      const domain = normalDomain(link);
+      if (SOCIAL_HOSTS.has(domain)) socialLinks.push({ platform: domain.replace(/\.(com|net)$/, ""), url: link });
+    }
     emails.push(...emailsIn(page.html).map((email) => ({ email, source_url: page.url })));
     if (/\/(work|portfolio|case-stud|clients?)(\/|$|\?)/i.test(new URL(page.url).pathname)) {
       for (const link of hrefs(page.html, new URL(page.url))) {
@@ -307,8 +330,58 @@ export async function researchPublicSite(input: string, deep = false): Promise<S
     people: uniquePeople,
     clientSignals: uniqueSignals,
     brandSignals,
+    socialLinks: Array.from(new Map(socialLinks.map((entry) => [entry.platform, entry])).values()).slice(0, 12),
     technicalMetrics,
   };
+}
+
+/**
+ * Fetches one public page and returns its text and outbound links. Prospect
+ * generation uses this to harvest company candidates from a pasted directory or
+ * listing URL without repeating the SSRF and content-type guards above.
+ */
+export async function fetchPublicPage(input: string): Promise<{ url: string; title: string; html: string; text: string; links: string[] }> {
+  const url = await assertPublicUrl(input);
+  const html = await fetchHtml(url.toString());
+  return {
+    url: url.toString(),
+    title: pageTitle(html),
+    html,
+    text: stripHtml(html).slice(0, 60_000),
+    links: hrefs(html, url),
+  };
+}
+
+/**
+ * Fetches a public URL that is not necessarily HTML. Sitemaps are XML, and the
+ * HTML-only guard in fetchHtml would reject them.
+ */
+export async function fetchPublicText(input: string, maxBytes = 4_000_000): Promise<string> {
+  const url = await assertPublicUrl(input);
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 15_000);
+  try {
+    const response = await fetch(url, {
+      signal: controller.signal,
+      headers: { "User-Agent": researchUserAgent(), "Accept": "application/xml,text/xml,text/html,text/plain" },
+    });
+    if (!response.ok) throw new Error(`Source responded ${response.status}.`);
+    const type = response.headers.get("content-type") || "";
+    if (!/(xml|html|text|json)/i.test(type)) throw new Error("Source did not return a text document.");
+    const body = await response.text();
+    return body.slice(0, maxBytes);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/** Exposes the SSRF guard so other harvesters validate URLs the same way. */
+export async function assertPublicHttpUrl(input: string) {
+  return assertPublicUrl(input);
+}
+
+export function isSocialHost(value: string) {
+  return SOCIAL_HOSTS.has(normalDomain(value));
 }
 
 export function normalizeDomain(value: string) {

@@ -213,7 +213,7 @@ export const PERMISSION_GROUPS: PermissionGroup[] = [
       { key: "deals.view", label: "View Deals", description: "See the Deals overview and activity totals" },
       { key: "deals.proposals", label: "Manage Proposals", description: "Generate, edit, download, and send source-backed proposals" },
       { key: "deals.audits", label: "Manage Brand Audits", description: "Generate and review evidence-led public brand audits" },
-      { key: "deals.prospects", label: "Manage Prospect Checklist", description: "Create, update, and follow up prospect records" },
+      { key: "deals.prospects", label: "Manage Prospect Checklist", description: "Create, update, and follow up prospect records, and run prospect generation research" },
     ],
   },
   {
@@ -595,6 +595,7 @@ export function getPermissionForRoute(pathname: string): string | null {
   if (pathname.startsWith("/admin/deals/growth")) return "clients.growth.view";
   if (pathname.startsWith("/admin/deals/proposals")) return "deals.proposals";
   if (pathname.startsWith("/admin/deals/brand-audits")) return "deals.audits";
+  if (pathname.startsWith("/admin/deals/prospect-generation")) return "deals.prospects";
   if (pathname.startsWith("/admin/deals/prospects")) return "deals.prospects";
   if (pathname.startsWith("/admin/deals")) return "deals";
   if (pathname.startsWith("/admin/vendors")) return "clients";
