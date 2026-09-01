@@ -5,6 +5,8 @@ import { CATEGORIES } from "@/lib/constants";
 import { fetchPublicPage, isSocialHost, normalizeDomain, researchPublicSite, searchOpenWeb, type SiteResearch } from "@/lib/sales-growth-research";
 import { detectListing, looksLikeStartup, normalizeCountry, sizeBandFor, type SizeBand } from "@/lib/prospect-directory";
 import { isExcludedDomain } from "@/lib/prospect-exclusions";
+import { assessBrandConsistency, checkDomainVariants, domainVariantFinding, type BrandFinding, type DomainVariant } from "@/lib/prospect-brand";
+import { likelyMailboxes, traceDomainContacts, type DnsContact } from "@/lib/prospect-dns";
 
 export type ActivityStatus = "unknown" | "active" | "dormant" | "inactive";
 export type WebsiteStatus = "unknown" | "missing" | "broken" | "outdated" | "dated" | "modern";
@@ -41,6 +43,10 @@ export interface EnrichedCompany {
   website_status: WebsiteStatus;
   website_score: number | null;
   website_findings: string[];
+  brand_consistency: BrandFinding[];
+  domain_variants: DomainVariant[];
+  dns_contacts: DnsContact[];
+  suggested_mailboxes: string[];
   socials: Array<{ platform: string; url: string }>;
   emails: Array<{ email: string; source_url: string; kind: string }>;
   phones: string[];
@@ -186,6 +192,9 @@ async function synthesise(input: {
   contacts: EnrichedContact[];
   country: string | null;
   listing: { is_public: boolean; exchanges: string[]; ticker: string | null };
+  brandFindings: string[];
+  domainNotes: string;
+  mailNotes: string;
 }) {
   const fallback = {
     brief: input.research?.description || `${input.companyName} is a company sourced from a pasted prospect list; public detail was limited, so confirm the business description before outreach.`,
@@ -196,7 +205,7 @@ async function synthesise(input: {
     employee_count: 0,
     founded_year: 0,
     countries: [] as string[],
-    pain_points: input.websiteFindings.slice(0, 5),
+    pain_points: [...input.websiteFindings, ...input.brandFindings, input.domainNotes, input.mailNotes].filter(Boolean).slice(0, 6),
     how_we_help: ["Review the brand and digital experience against the findings above, then propose the smallest change that removes the biggest friction."],
     service_fit: [{ service: "UX/UI Design & Website Development", reason: "The public website is the clearest observable gap." }],
     competitors_local: input.localResults.slice(0, 5).map((entry) => ({ name: entry.title, url: entry.url, note: entry.description })),
@@ -214,6 +223,9 @@ async function synthesise(input: {
     input.country ? `Stated location: ${input.country}` : "",
     `Activity evidence: ${input.activityEvidence}`,
     `Website findings: ${input.websiteFindings.join(" ") || "none"}`,
+    `Brand consistency between the website and the social accounts: ${input.brandFindings.join(" ") || "not assessed"}`,
+    `Domain configuration: ${input.domainNotes || "not assessed"}`,
+    `Mail configuration: ${input.mailNotes || "not assessed"}`,
     `Homepage summary: ${clip(input.research?.description || input.research?.title, 600)}`,
     `Site text sample: ${clip(input.research?.text, 6000)}`,
     `Stock listing signals read from the site: ${input.listing.is_public ? `${input.listing.exchanges.join(", ") || "investor relations pages present"}${input.listing.ticker ? ` ticker ${input.listing.ticker}` : ""}` : "none found"}`,
@@ -232,7 +244,10 @@ async function synthesise(input: {
           "You are a B2B research analyst at CDS Space, a branding, design, and digital product agency.",
           "You summarise ONLY what the supplied evidence supports. Never invent people, emails, revenue, or client names.",
           "If the evidence does not support a field, return an empty string or an empty array for it.",
-          "Pain points must be specific to this company and traceable to the evidence, not generic marketing statements.",
+          "Each pain point must be a full paragraph of 40 to 90 words, not a headline. State what was observed, where it was observed, what it costs the business in customers, credibility, search visibility or staff time, and who inside the company feels it. Name the page, the platform or the record the evidence came from.",
+      "Pain points must be specific to this company and traceable to the supplied evidence. Never write a generic marketing statement that would read the same for any company.",
+      "Order the pain points by how much they cost the business, worst first, and return between three and six of them where the evidence supports it.",
+      "Each how_we_help entry pairs with the pain point at the same position: say concretely what CDS Space would do, what the company would have at the end, and roughly how quickly.",
           "Every service you recommend must be chosen from the supplied CDS Space service list, verbatim.",
           "Write in plain professional English. Do not use em dashes.",
           "Return only JSON matching: {brief, industry, country, city, countries[], employee_range, employee_count, founded_year, pain_points[], how_we_help[], service_fit[{service, reason}], competitors_local[{name,url,note}], competitors_global[{name,url,note}], outreach_angle, outreach_subject, outreach_email, contact_titles[{full_name, seniority}]}.",
@@ -255,8 +270,8 @@ async function synthesise(input: {
       employee_count: Number(parsed.employee_count) || 0,
       founded_year: Number(parsed.founded_year) || 0,
       countries: list(parsed.countries, 40, 60),
-      pain_points: list(parsed.pain_points, 8, 500).length ? list(parsed.pain_points, 8, 500) : fallback.pain_points,
-      how_we_help: list(parsed.how_we_help, 8, 500).length ? list(parsed.how_we_help, 8, 500) : fallback.how_we_help,
+      pain_points: list(parsed.pain_points, 8, 1200).length ? list(parsed.pain_points, 8, 1200) : fallback.pain_points,
+      how_we_help: list(parsed.how_we_help, 8, 1200).length ? list(parsed.how_we_help, 8, 1200) : fallback.how_we_help,
       service_fit: objectList<{ service: string; reason: string }>(parsed.service_fit, { service: 120, reason: 500 }, 6)
         .filter((entry) => SERVICE_NAMES.includes(entry.service)),
       competitors_local: objectList<{ name: string; url: string; note: string }>(parsed.competitors_local, { name: 160, url: 500, note: 400 }, 8),
@@ -483,6 +498,12 @@ export async function enrichCompany(input: {
           : "No public website could be found for this company."],
       };
 
+  // The bare host and the www host are checked separately, and the domain's own
+  // DNS is read for contact routes, whether or not the site itself loaded.
+  const [domainVariants, dnsContacts] = domain
+    ? await Promise.all([checkDomainVariants(domain), traceDomainContacts(domain)])
+    : [[] as DomainVariant[], [] as DnsContact[]];
+
   const activity = assessActivity({ reachable, html, mentions });
 
   // A ticker printed on the company's own site is far stronger evidence of a
@@ -532,6 +553,27 @@ export async function enrichCompany(input: {
     } as EnrichedContact;
   });
 
+  // Brand consistency between the site and each social account.
+  const brandConsistency = await assessBrandConsistency({
+    companyName: input.company_name,
+    siteHtml: html,
+    siteUrl: website || "",
+    socials: socialLinks,
+  }).catch(() => [] as BrandFinding[]);
+
+  const variantFinding = domainVariantFinding(domainVariants);
+  if (variantFinding) websiteAssessment.findings.push(variantFinding);
+  for (const finding of brandConsistency) {
+    if (finding.status === "differs" || finding.status === "missing") websiteAssessment.findings.push(`${finding.area}: ${finding.detail}`);
+  }
+
+  const mailWorks = !dnsContacts.some((entry) => entry.kind === "no_mail");
+  for (const entry of dnsContacts) {
+    if ((entry.kind === "soa_admin" || entry.kind === "txt_email") && !publicEmails.some((existing) => existing.email === entry.value)) {
+      publicEmails.push({ email: entry.value, source_url: `dns:${domain}`, kind: "dns" });
+    }
+  }
+
   const synthesis = await synthesise({
     companyName: input.company_name,
     website,
@@ -544,6 +586,9 @@ export async function enrichCompany(input: {
     contacts,
     country: input.country,
     listing,
+    brandFindings: brandConsistency.filter((entry) => entry.status !== "consistent").map((entry) => `${entry.area}: ${entry.detail}`),
+    domainNotes: variantFinding || domainVariants.map((entry) => `${entry.host} ${entry.note}`).join("; "),
+    mailNotes: dnsContacts.map((entry) => entry.detail).join(" "),
   });
 
   // The model may read a title the page markup did not label clearly; it can only
@@ -625,6 +670,10 @@ export async function enrichCompany(input: {
     website_status: websiteAssessment.status,
     website_score: websiteAssessment.score,
     website_findings: websiteAssessment.findings,
+    brand_consistency: brandConsistency,
+    domain_variants: domainVariants,
+    dns_contacts: dnsContacts,
+    suggested_mailboxes: domain ? likelyMailboxes(domain, mailWorks) : [],
     socials: socialLinks,
     emails: publicEmails,
     phones: [],

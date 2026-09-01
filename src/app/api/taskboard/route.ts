@@ -1127,7 +1127,13 @@ export async function POST(req: NextRequest) {
                 )`,
             [listId, boardId, canReorderAll, viewer.kind, viewer.id, viewer.memberId, taskIds],
           );
-          if (!ownsList.rowCount) throw new Error("A moved list does not belong to this board.");
+          // A board shows lists the viewer owns nothing in, for instance a list
+          // they are a member of. Those columns are sent back with everything
+          // else, and failing the whole request on them meant a team member
+          // could not save any move at all. Skip them instead: the per task
+          // update below still enforces who may move what, and the list
+          // position update is already gated on canReorderAll.
+          if (!ownsList.rowCount) continue;
           if (canReorderAll) {
             await client.query(
               "update public.task_board_lists set position = $3 where id = $1 and board_id = $2",

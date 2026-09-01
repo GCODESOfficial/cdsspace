@@ -54,13 +54,14 @@ export async function mergeCandidates(
     const nameMatch = nameIndex.get(entry.candidate.name_key);
     if (!nameMatch) { fresh.push(entry); continue; }
 
-    // Two entries from the same register carrying different registration
-    // numbers are different companies however alike the names read. Qualifying
-    // the key keeps them apart instead of silently folding one into the other.
+    // Two entries carrying different official registration numbers are different
+    // companies however alike the names read, and that holds across registers as
+    // much as within one: "Vistra Corp" on the SEC register and "Vistra OU" on
+    // the Estonian register are unrelated businesses that share a word. Only a
+    // shared domain is evidence strong enough to merge across registers.
     const held = nameRows.get(entry.candidate.name_key);
     const conflicting = Boolean(
       held && entry.candidate.registration_id && held.registration_id
-      && held.registry_source && entry.candidate.registry_source === held.registry_source
       && held.registration_id !== entry.candidate.registration_id,
     );
     if (conflicting) {

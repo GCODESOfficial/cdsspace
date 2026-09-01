@@ -4,7 +4,8 @@ export type GlashQueryAction = "select" | "insert" | "update" | "delete" | "upse
 export type GlashFilter =
   | { op: "eq" | "neq" | "gt" | "gte" | "lt" | "lte" | "ilike"; column: string; value: any }
   | { op: "in"; column: string; value: any[] }
-  | { op: "is"; column: string; value: any };
+  | { op: "is"; column: string; value: any }
+  | { op: "not"; column: string; value: { op: GlashFilter["op"]; value: any } };
 
 export interface GlashQueryPayload {
   table?: string;
@@ -86,6 +87,11 @@ export class GlashQueryBuilder<T = any> implements PromiseLike<GlashQueryResult<
   ilike(column: string, value: any) { return this.addFilter({ op: "ilike", column, value }); }
   in(column: string, value: any[]) { return this.addFilter({ op: "in", column, value }); }
   is(column: string, value: any) { return this.addFilter({ op: "is", column, value }); }
+
+  /** Negates any other filter, e.g. not("deleted_at", "is", null). */
+  not(column: string, op: GlashFilter["op"], value: any) {
+    return this.addFilter({ op: "not", column, value: { op, value } });
+  }
 
   match(values: Record<string, any>) {
     for (const [column, value] of Object.entries(values || {})) this.eq(column, value);

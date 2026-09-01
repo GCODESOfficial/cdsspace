@@ -616,7 +616,11 @@ function TaskList({
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: listDndId(list.id),
     data: { type: "list", listId: list.id },
-    disabled: !canReorder,
+    // Only a board manager may reorder the lists themselves, but the column has
+    // to stay a drop target for everyone: a boolean `disabled` switches off the
+    // droppable as well as the draggable, which stopped anyone else dropping a
+    // task into another list at all, and into an empty list in particular.
+    disabled: { draggable: !canReorder, droppable: false },
   });
   const style = { transform: CSS.Transform.toString(transform), transition };
 

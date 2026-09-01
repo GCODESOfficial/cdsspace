@@ -63,7 +63,7 @@ function pushParam(params: any[], value: any) {
   return `$${params.length}`;
 }
 
-function filterSql(filter: GlashFilter, params: any[]) {
+function filterSql(filter: GlashFilter, params: any[]): string {
   const column = quoteIdent(filter.column);
   if (filter.op === "eq") {
     if (filter.value === null) return `${column} is null`;
@@ -83,6 +83,10 @@ function filterSql(filter: GlashFilter, params: any[]) {
     if (filter.value === true) return `${column} is true`;
     if (filter.value === false) return `${column} is false`;
     return `${column} is ${String(filter.value)}`;
+  }
+  if (filter.op === "not") {
+    const inner = filter.value as { op: GlashFilter["op"]; value: any };
+    return `not (${filterSql({ op: inner.op, column: filter.column, value: inner.value } as GlashFilter, params)})`;
   }
   const opMap = { gt: ">", gte: ">=", lt: "<", lte: "<=", ilike: "ilike" } as const;
   return `${column} ${opMap[filter.op]} ${pushParam(params, filter.value)}`;

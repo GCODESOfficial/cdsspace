@@ -5,13 +5,13 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { ExternalLink, Loader2, Pencil, Plus, Trash2, UsersRound } from "lucide-react";
 import { appConfirm } from "@/lib/app-notify";
 
-type Prospect = { id: string; category: string; display_name: string; company_name: string | null; website: string | null; social_url: string | null; email: string | null; phone: string | null; location: string | null; notes: string | null; next_action: string | null; follow_up_at: string | null; status: string; updated_at: string };
+type Prospect = { id: string; research_brief: string | null; category: string; display_name: string; company_name: string | null; website: string | null; social_url: string | null; email: string | null; phone: string | null; location: string | null; notes: string | null; next_action: string | null; follow_up_at: string | null; status: string; updated_at: string };
 type ProspectForm = Omit<Prospect, "id" | "updated_at"> & { id?: string };
-const EMPTY: ProspectForm = { category: "potential_client", display_name: "", company_name: "", website: "", social_url: "", email: "", phone: "", location: "", notes: "", next_action: "", follow_up_at: "", status: "to_research" };
+const EMPTY: ProspectForm = { research_brief: "", category: "potential_client", display_name: "", company_name: "", website: "", social_url: "", email: "", phone: "", location: "", notes: "", next_action: "", follow_up_at: "", status: "to_research" };
 const CATEGORIES = [{ value: "potential_client", label: "Potential clients" }, { value: "investor", label: "Investors" }, { value: "influencer", label: "Influencers" }, { value: "industry_leader", label: "Industry leaders" }];
 const STATUSES = [{ value: "to_research", label: "To research" }, { value: "ready", label: "Ready" }, { value: "contacted", label: "Contacted" }, { value: "follow_up", label: "Follow up" }, { value: "converted", label: "Converted" }, { value: "not_relevant", label: "Not relevant" }];
 
-function formFrom(prospect: Prospect): ProspectForm { return { ...prospect, company_name: prospect.company_name || "", website: prospect.website || "", social_url: prospect.social_url || "", email: prospect.email || "", phone: prospect.phone || "", location: prospect.location || "", notes: prospect.notes || "", next_action: prospect.next_action || "", follow_up_at: prospect.follow_up_at ? new Date(prospect.follow_up_at).toISOString().slice(0, 16) : "" }; }
+function formFrom(prospect: Prospect): ProspectForm { return { ...prospect, research_brief: prospect.research_brief || "", company_name: prospect.company_name || "", website: prospect.website || "", social_url: prospect.social_url || "", email: prospect.email || "", phone: prospect.phone || "", location: prospect.location || "", notes: prospect.notes || "", next_action: prospect.next_action || "", follow_up_at: prospect.follow_up_at ? new Date(prospect.follow_up_at).toISOString().slice(0, 16) : "" }; }
 
 export default function DealProspectsPage() {
   const [prospects, setProspects] = useState<Prospect[]>([]);
@@ -84,6 +84,11 @@ export default function DealProspectsPage() {
         <Field label="Follow-up date" type="datetime-local" value={form.follow_up_at || ""} onChange={(value) => setForm({ ...form, follow_up_at: value })} />
         <label className="md:col-span-2"><span className="mb-1.5 block text-xs font-semibold text-slate-600">Next action</span><input value={form.next_action || ""} onChange={(event) => setForm({ ...form, next_action: event.target.value })} className="h-11 w-full rounded-xl border border-slate-200 px-3 text-sm outline-none focus:border-[#0A4FE8]" /></label>
         <label className="md:col-span-2 xl:col-span-4"><span className="mb-1.5 block text-xs font-semibold text-slate-600">Notes</span><textarea rows={3} value={form.notes || ""} onChange={(event) => setForm({ ...form, notes: event.target.value })} className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-[#0A4FE8]" /></label>
+        <label className="md:col-span-2 xl:col-span-4">
+          <span className="mb-1.5 block text-xs font-semibold text-slate-600">Research brief</span>
+          <span className="mb-1.5 block text-xs text-slate-400">Copied from prospect generation when this company was added. Yours to edit: correct anything the research got wrong and add your own findings.</span>
+          <textarea rows={16} value={form.research_brief || ""} onChange={(event) => setForm({ ...form, research_brief: event.target.value })} className="w-full rounded-xl border border-slate-200 px-3 py-2.5 font-mono text-xs leading-5 outline-none focus:border-[#0A4FE8]" />
+        </label>
       </div>
       <button disabled={busy === "save"} className="mt-4 inline-flex min-h-11 items-center gap-2 rounded-xl bg-[#0A4FE8] px-5 text-sm font-semibold text-white disabled:opacity-60">{busy === "save" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}{form.id ? "Save now" : "Add prospect"}</button>
     </form>

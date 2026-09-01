@@ -27,7 +27,8 @@ export async function GET(req: NextRequest) {
 
   type ClientRow = {
     id: string; name: string; brand_name: string | null;
-    email: string | null; phone: string | null; whatsapp: string | null; birthday: string | null;
+    // birthday is a Postgres date, which the driver returns as a Date.
+    email: string | null; phone: string | null; whatsapp: string | null; birthday: string | Date | null;
     birthday_reminder_enabled: boolean;
     birthday_reminder_days: number;
     preferred_contact_method: "email" | "whatsapp" | "phone" | null;

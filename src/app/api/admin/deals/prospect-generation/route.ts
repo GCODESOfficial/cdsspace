@@ -54,8 +54,33 @@ function csvCell(value: unknown) {
   return /[",\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
 }
 
+// A company found under a different spelling in another country's register is
+// still the company being searched for. At most this many are folded in, which
+// is far more than a person reads in one page of results.
+const ALIAS_MATCH_LIMIT = 500;
+
+/** Ids of companies whose alternate names match every word typed. */
+async function aliasMatches(tokens: string[]): Promise<string[]> {
+  if (!tokens.length) return [];
+  const values: string[] = [];
+  const clauses = tokens.map((token) => {
+    const key = companyNameKey(token) || token.toLowerCase();
+    const contains = token.length >= 3;
+    values.push(contains ? `%${token}%` : `${token}%`);
+    const aliasIndex = values.length;
+    values.push(contains ? `%${key}%` : `${key}%`);
+    return `(alias ilike $${aliasIndex} or name_key ilike $${values.length})`;
+  });
+  const rows = await glashQuery<any>(
+    `select distinct company_id from public.prospect_company_aliases
+      where ${clauses.join(" and ")} limit ${ALIAS_MATCH_LIMIT}`,
+    values,
+  );
+  return rows.map((row) => row.company_id);
+}
+
 /** Builds the shared where clause for every filtered company query. */
-function companyFilters(params: URLSearchParams) {
+async function companyFilters(params: URLSearchParams) {
   const conditions: string[] = [];
   const values: unknown[] = [];
   const add = (clause: (index: number) => string, value: unknown) => {
@@ -100,7 +125,54 @@ function companyFilters(params: URLSearchParams) {
   if (hasWebsite === true) conditions.push("website is not null");
   if (hasWebsite === false) conditions.push("website is null");
   if (/^[a-z]$/i.test(letter)) add((index) => `name_key like $${index}`, `${letter.toLowerCase()}%`);
-  if (query) add((index) => `(company_name ilike $${index} or domain ilike $${index} or industry ilike $${index})`, `%${query}%`);
+
+  // Search matches every word typed, in any order, anywhere inside the name,
+  // the normalised name, the alternate names, the domain or the industry. So
+  // "vistra" finds "Vistra Corp" and "Vistra Energy", and "lagos bank" finds a
+  // bank in Lagos however the two words are arranged in its registered name.
+  let rank = "";
+  if (query) {
+    const tokens = query.split(/\s+/).filter(Boolean).slice(0, 5);
+    const tokenClauses: string[] = [];
+    for (const token of tokens) {
+      const key = companyNameKey(token) || token.toLowerCase();
+      // Two characters are too few for a trigram lookup, so a short word is
+      // matched as the start of a name rather than as a scan for it anywhere.
+      const contains = token.length >= 3;
+      values.push(contains ? `%${token}%` : `${token}%`);
+      const nameIndex = values.length;
+      values.push(contains ? `%${key}%` : `${key}%`);
+      const keyIndex = values.length;
+      tokenClauses.push(`(
+        company_name ilike $${nameIndex}
+        or name_key ilike $${keyIndex}
+        or domain ilike $${nameIndex}
+        or industry ilike $${nameIndex}
+      )`);
+    }
+
+    // Alternate names are matched by id rather than by an `exists` subquery on
+    // the alias table. The subquery reads cheaply on its own, but sitting
+    // inside the same OR it stops the planner using the trigram indexes on the
+    // company columns, which turned a 10ms search into a 1.9s scan of every
+    // row. Resolving the ids first keeps both halves on an index.
+    const aliasIds = await aliasMatches(tokens);
+    let searchClause = tokenClauses.join(" and ");
+    if (aliasIds.length) {
+      values.push(aliasIds);
+      searchClause = `(${searchClause} or id = any($${values.length}::uuid[]))`;
+    }
+    conditions.push(searchClause);
+
+    // The whole phrase, for ordering only: an exact name first, then a name
+    // starting with what was typed, then everything else that matched.
+    // Written inline rather than as a parameter because the ordering is shared
+    // with the count query, which binds the same value list and would reject a
+    // parameter it does not itself reference. companyNameKey() leaves only
+    // letters, digits and spaces, so there is nothing here to escape.
+    const whole = companyNameKey(query);
+    if (whole) rank = `case when name_key = '${whole}' then 0 when name_key like '${whole}%' then 1 else 2 end`;
+  }
 
   const foundedFrom = Number(params.get("founded_from"));
   const foundedTo = Number(params.get("founded_to"));
@@ -122,7 +194,7 @@ function companyFilters(params: URLSearchParams) {
     conditions.push(`exists (select 1 from public.prospect_company_countries pcc where pcc.company_id = prospect_companies.id and lower(pcc.country) = $${values.length})`);
   }
 
-  return { where: conditions.length ? `where ${conditions.join(" and ")}` : "", values };
+  return { where: conditions.length ? `where ${conditions.join(" and ")}` : "", values, rank };
 }
 
 const SORTS: Record<string, string> = {
@@ -208,10 +280,12 @@ export async function GET(req: NextRequest) {
     }
 
     if (resource === "companies") {
-      const { where, values } = companyFilters(params);
+      const { where, values, rank } = await companyFilters(params);
       const limit = intValue(params.get("limit"), 50, 1, 200);
       const offset = intValue(params.get("offset"), 0, 0, 5_000_000);
-      const sort = SORTS[str(params.get("sort"), 20)] || SORTS.score;
+      // When a name has been typed, the closest name comes first whatever the
+      // chosen sort; the sort then orders the companies of equal closeness.
+      const sort = `${rank ? `${rank}, ` : ""}${SORTS[str(params.get("sort"), 20)] || SORTS.score}`;
 
       const rows = await glashQuery<any>(
         `select * from public.prospect_companies ${where} order by ${sort} limit ${limit} offset ${offset}`,
@@ -235,7 +309,7 @@ export async function GET(req: NextRequest) {
     }
 
     if (resource === "export") {
-      const { where, values } = companyFilters(params);
+      const { where, values } = await companyFilters(params);
       const limit = intValue(params.get("limit"), 50_000, 1, 200_000);
       const rows = await glashQuery<any>(`select * from public.prospect_companies ${where} order by deal_score desc limit ${limit}`, values);
       const ids = rows.map((row) => row.id);
@@ -403,6 +477,7 @@ export async function POST(req: NextRequest) {
                is_public=$13, stock_exchanges=$14::jsonb, ticker=$15, is_startup=$16,
                activity_status=$17, activity_evidence=$18,
                website_status=$19, website_score=$20, website_findings=$21::jsonb,
+               brand_consistency=$38::jsonb, domain_variants=$39::jsonb, dns_contacts=$40::jsonb,
                socials=$22::jsonb, emails=$23::jsonb, phones=$24::jsonb,
                brief=$25, pain_points=$26::jsonb, how_we_help=$27::jsonb, service_fit=$28::jsonb,
                competitors_local=$29::jsonb, competitors_global=$30::jsonb,
@@ -422,6 +497,7 @@ export async function POST(req: NextRequest) {
               JSON.stringify(result.competitors_local), JSON.stringify(result.competitors_global),
               result.outreach_angle, result.outreach_subject, result.outreach_email,
               result.deal_score, result.priority, JSON.stringify(result.sources), actor,
+              JSON.stringify(result.brand_consistency), JSON.stringify(result.domain_variants), JSON.stringify(result.dns_contacts),
             ],
           );
 
@@ -527,6 +603,45 @@ export async function POST(req: NextRequest) {
         glashQuery<any>(`select country from public.prospect_company_countries where company_id=$1 order by is_headquarters desc`, [id]),
       ]);
       const lead = contacts.find((contact) => contact.seniority === "decision_maker" && contact.email) || contacts.find((contact) => contact.email) || contacts[0];
+
+      // The whole write-up is copied onto the checklist entry so the team can
+      // edit it and add their own findings, leaving the researched record intact.
+      const section = (title: string, body: string) => body.trim() ? `${title}\n${body.trim()}` : "";
+      const bullets = (items: unknown[], format: (entry: any) => string) =>
+        (Array.isArray(items) ? items : []).map((entry) => `- ${format(entry)}`).join("\n");
+
+      const researchBrief = [
+        section("SUMMARY", company.brief || ""),
+        section("TRADING STATUS", company.activity_evidence || ""),
+        section("PROFILE", [
+          company.industry ? `Industry: ${company.industry}` : "",
+          company.employee_count ? `Staff: ${company.employee_count}` : "",
+          company.founded_year ? `Founded: ${company.founded_year}` : "",
+          company.is_public ? `Publicly traded${company.ticker ? ` (${(company.stock_exchanges || []).join(", ")}: ${company.ticker})` : ""}` : "",
+          countries.length ? `Countries: ${countries.map((entry) => entry.country).join(", ")}` : "",
+          company.website ? `Website: ${company.website}` : "No website found",
+        ].filter(Boolean).join("\n")),
+        section("PAIN POINTS", bullets(company.pain_points, (entry) => String(entry))),
+        section("HOW CDS SPACE HELPS", bullets(company.how_we_help, (entry) => String(entry))),
+        section("SERVICE FIT", bullets(company.service_fit, (entry) => `${entry.service}: ${entry.reason}`)),
+        section("WEBSITE FINDINGS", bullets(company.website_findings, (entry) => String(entry))
+          + (company.website_score !== null ? `\n(Website score ${company.website_score} out of 100)` : "")),
+        section("BRAND CONSISTENCY", bullets(company.brand_consistency, (entry) => `${entry.area} [${entry.status}]: ${entry.detail}`)),
+        section("DOMAIN CONFIGURATION", bullets(company.domain_variants, (entry) => `${entry.host}: ${entry.note}`)),
+        section("CONTACT ROUTES", [
+          bullets(contacts, (entry) => `${entry.full_name}${entry.job_title ? `, ${entry.job_title}` : ""} (${entry.seniority.replace("_", " ")})${entry.email ? ` - ${entry.email}` : " - no public email"}`),
+          bullets(company.emails, (entry) => `${entry.email} (${entry.kind})`),
+          bullets(company.dns_contacts, (entry) => `${entry.value}: ${entry.detail}`),
+          bullets(company.socials, (entry) => `${entry.platform}: ${entry.url}`),
+        ].filter(Boolean).join("\n")),
+        section("LOCAL COMPETITORS", bullets(company.competitors_local, (entry) => `${entry.name}${entry.note ? `: ${entry.note}` : ""}`)),
+        section("GLOBAL COMPETITORS", bullets(company.competitors_global, (entry) => `${entry.name}${entry.note ? `: ${entry.note}` : ""}`)),
+        section("OUTREACH ANGLE", company.outreach_angle || ""),
+        section("SUGGESTED FIRST EMAIL", [company.outreach_subject ? `Subject: ${company.outreach_subject}` : "", company.outreach_email || ""].filter(Boolean).join("\n\n")),
+        section("SOURCES", bullets((company.sources || []).slice(0, 15), (entry) => String(entry))),
+        "OUR NOTES\n(Add your own findings here.)",
+      ].filter(Boolean).join("\n\n");
+
       const notes = [
         company.brief,
         countries.length > 1 ? `Present in ${countries.length} countries: ${countries.map((entry) => entry.country).join(", ")}` : "",
@@ -540,8 +655,8 @@ export async function POST(req: NextRequest) {
       ].filter(Boolean).join("\n\n").slice(0, 6000);
 
       const prospect = await glashMaybeOne<any>(
-        `insert into public.deal_prospects (category,display_name,company_name,website,social_url,email,phone,location,notes,next_action,status,created_by,updated_by)
-         values ('potential_client',$1,$2,$3,$4,$5,$6,$7,$8,$9,'ready',$10,$10) returning *`,
+        `insert into public.deal_prospects (category,display_name,company_name,website,social_url,email,phone,location,notes,next_action,status,created_by,updated_by,research_brief)
+         values ('potential_client',$1,$2,$3,$4,$5,$6,$7,$8,$9,'ready',$10,$10,$11) returning *`,
         [
           lead?.full_name || company.company_name,
           company.company_name,
@@ -553,6 +668,7 @@ export async function POST(req: NextRequest) {
           notes,
           company.outreach_angle || "Send the researched outreach email.",
           actor,
+          researchBrief,
         ],
       );
       await glashQuery(`update public.prospect_companies set prospect_id=$2, review_status='promoted', updated_by=$3, updated_at=now() where id=$1`, [id, prospect.id, actor]);

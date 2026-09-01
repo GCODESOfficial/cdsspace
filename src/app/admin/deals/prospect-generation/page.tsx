@@ -5,7 +5,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import {
   Building2, ChevronDown, ChevronUp, Chrome, Download, ExternalLink, EyeOff, Globe, Landmark, Library, Link2, Loader2,
-  Mail, MapPin, Play, RefreshCw, Search, SlidersHorizontal, Square, Target, Trash2, TrendingUp, Users,
+  Mail, MapPin, Palette, Play, RefreshCw, Search, Send, Server, SlidersHorizontal, Square, Target, Trash2, TrendingUp, Users,
 } from "lucide-react";
 import { appConfirm } from "@/lib/app-notify";
 import { DIRECTORY_TARGET, SIZE_BANDS, STOCK_EXCHANGES } from "@/lib/prospect-directory";
@@ -18,6 +18,9 @@ type Company = {
   is_public: boolean | null; stock_exchanges: string[]; ticker: string | null; is_startup: boolean | null;
   activity_status: string; activity_evidence: string | null;
   website_status: string; website_score: number | null; website_findings: string[];
+  brand_consistency: Array<{ area: string; status: string; detail: string; evidence: string[] }>;
+  domain_variants: Array<{ host: string; url: string; status: number | null; ok: boolean; redirectsTo: string | null; note: string }>;
+  dns_contacts: Array<{ kind: string; value: string; detail: string }>;
   socials: Array<{ platform: string; url: string }>; emails: Array<{ email: string; source_url: string; kind: string }>;
   brief: string | null; pain_points: string[]; how_we_help: string[]; service_fit: Array<{ service: string; reason: string }>;
   competitors_local: Array<{ name: string; url: string; note: string }>; competitors_global: Array<{ name: string; url: string; note: string }>;
@@ -53,6 +56,10 @@ export default function ProspectGenerationPage() {
   const [total, setTotal] = useState(0);
   const [estimated, setEstimated] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [listLoading, setListLoading] = useState(true);
+  const [search, setSearch] = useState("");
+  const listRequestRef = useRef(0);
+  const listAbortRef = useRef<AbortController | null>(null);
   const [busy, setBusy] = useState("");
   const [notice, setNotice] = useState<{ tone: "success" | "error"; text: string } | null>(null);
   const [expanded, setExpanded] = useState<string>("");
@@ -106,8 +113,22 @@ export default function ProspectGenerationPage() {
   const loadCompanies = useCallback(async () => {
     const params = new URLSearchParams(queryString);
     params.set("resource", "companies"); params.set("limit", String(pageSize)); params.set("offset", String(page * pageSize));
-    const response = await fetch(`/api/admin/deals/prospect-generation?${params}`, { cache: "no-store" });
+    // Every list request is numbered and the previous one is abandoned, so a
+    // slow answer to an earlier search can never land on top of the newer one.
+    // That is what put the whole directory back on screen after a search.
+    const request = ++listRequestRef.current;
+    listAbortRef.current?.abort();
+    const controller = new AbortController();
+    listAbortRef.current = controller;
+    let response: Response;
+    try {
+      response = await fetch(`/api/admin/deals/prospect-generation?${params}`, { cache: "no-store", signal: controller.signal });
+    } catch (error) {
+      if (controller.signal.aborted) return;
+      throw error;
+    }
     const json = await response.json().catch(() => ({}));
+    if (request !== listRequestRef.current) return;
     if (!response.ok) throw new Error(json.error || "Could not load companies.");
     setCompanies(json.companies || []); setTotal(json.total || 0); setEstimated(Boolean(json.estimated));
   }, [queryString, page, pageSize]);
@@ -117,7 +138,26 @@ export default function ProspectGenerationPage() {
     catch (error) { setNotice({ tone: "error", text: error instanceof Error ? error.message : "Could not load." }); }
   }, [loadSummary, loadCompanies, loadRegistries]);
 
-  useEffect(() => { refresh().finally(() => setLoading(false)); }, [refresh]);
+  // The summary and the registry list do not change when a filter does, so a
+  // search reloads the list alone.
+  useEffect(() => {
+    Promise.all([loadSummary(), loadRegistries()]).catch((error) => setNotice({ tone: "error", text: error instanceof Error ? error.message : "Could not load." }));
+  }, [loadSummary, loadRegistries]);
+
+  useEffect(() => {
+    setListLoading(true);
+    loadCompanies()
+      .catch((error) => setNotice({ tone: "error", text: error instanceof Error ? error.message : "Could not load companies." }))
+      .finally(() => { setListLoading(false); setLoading(false); });
+  }, [loadCompanies]);
+
+  // Typing runs the search as it is typed, one short pause after the last key,
+  // so a name shows its matches without waiting for a request per keystroke.
+  useEffect(() => {
+    if (search === filters.q) return;
+    const timer = setTimeout(() => { setPage(0); setFilters((current) => ({ ...current, q: search })); }, 250);
+    return () => clearTimeout(timer);
+  }, [search, filters.q]);
 
   const post = async (body: Record<string, unknown>) => {
     const response = await fetch("/api/admin/deals/prospect-generation", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
@@ -196,6 +236,37 @@ export default function ProspectGenerationPage() {
   const removeCompany = async (company: Company) => {
     if (!(await appConfirm({ title: "Remove company?", message: `Remove ${company.company_name} and its research from the directory?`, confirmLabel: "Remove" }))) return;
     await act(company.id, { action: "delete_company", id: company.id }, "Company removed.");
+  };
+
+  // Every address the research turned up, decision makers first, then published
+  // mailboxes, then anything traced from the domain's DNS records.
+  const recipientsFor = (company: Company) => {
+    const ordered = [
+      ...company.contacts.filter((contact) => contact.seniority === "decision_maker" && contact.email).map((contact) => contact.email as string),
+      ...company.contacts.filter((contact) => contact.seniority !== "decision_maker" && contact.email).map((contact) => contact.email as string),
+      ...(company.emails || []).map((entry) => entry.email),
+      ...(company.dns_contacts || []).filter((entry) => entry.value.includes("@")).map((entry) => entry.value),
+    ];
+    return Array.from(new Set(ordered.map((email) => email.toLowerCase())));
+  };
+
+  const composeEmail = (company: Company) => {
+    const recipients = recipientsFor(company);
+    if (!recipients.length) { setNotice({ tone: "error", text: `No email address was found for ${company.company_name}. Reach out through a social account instead.` }); return; }
+    const subject = company.outreach_subject || `A few notes on ${company.company_name}`;
+    const body = company.outreach_email || "";
+    // A mailto opens whichever mail client the team already uses, with every
+    // address discovered for the company already on the line.
+    window.location.href = `mailto:${encodeURIComponent(recipients[0])}?cc=${encodeURIComponent(recipients.slice(1).join(","))}&subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+  };
+
+  const copyRecipients = async (company: Company) => {
+    const recipients = recipientsFor(company);
+    if (!recipients.length) { setNotice({ tone: "error", text: "No email address was found for this company." }); return; }
+    try {
+      await navigator.clipboard.writeText(recipients.join(", "));
+      setNotice({ tone: "success", text: `${recipients.length} address${recipients.length === 1 ? "" : "es"} copied.` });
+    } catch { setNotice({ tone: "error", text: "The addresses could not be copied." }); }
   };
 
   const progress = totals ? Math.min(100, (totals.total / DIRECTORY_TARGET) * 100) : 0;
@@ -323,7 +394,10 @@ export default function ProspectGenerationPage() {
         <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
           <h2 className="font-bold text-[#07133B]">Directory <span className="text-sm font-semibold text-slate-400">({estimated ? "about " : ""}{total.toLocaleString()})</span></h2>
           <div className="flex flex-wrap gap-2">
-            <input value={filters.q} onChange={(event) => setFilter("q", event.target.value)} placeholder="Search name, domain, industry" className="h-10 w-56 rounded-xl border border-slate-200 px-3 text-sm outline-none focus:border-[#0A4FE8]" />
+            <div className="relative">
+              <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search name, domain, industry" className="h-10 w-56 rounded-xl border border-slate-200 pl-3 pr-9 text-sm outline-none focus:border-[#0A4FE8]" />
+              {listLoading && search ? <Loader2 className="absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 animate-spin text-slate-400" /> : null}
+            </div>
             <Select value={sort} onChange={setSort} options={[["score", "Best deal score"], ["name_asc", "Name A to Z"], ["name_desc", "Name Z to A"], ["founded_new", "Newest founded"], ["founded_old", "Oldest founded"], ["staff_desc", "Most staff"], ["staff_asc", "Fewest staff"], ["countries", "Most countries"], ["newest", "Recently added"]]} />
             <Select value={String(pageSize)} onChange={(value) => { setPage(0); setPageSize(Number(value)); }} options={PAGE_SIZES.map((size) => [String(size), `${size} per page`] as [string, string])} />
             <button onClick={() => setShowFilters((current) => !current)} className="inline-flex min-h-10 items-center gap-2 rounded-xl border border-slate-200 px-3 text-sm font-semibold text-slate-700 hover:border-[#0A4FE8]"><SlidersHorizontal className="h-4 w-4" /> Filters{activeFilterCount ? ` (${activeFilterCount})` : ""}</button>
@@ -368,11 +442,11 @@ export default function ProspectGenerationPage() {
           <Labelled label="Review state"><Select full value={filters.review} onChange={(value) => setFilter("review", value)} options={[["", "Any review"], ["new", "New"], ["shortlisted", "Shortlisted"], ["promoted", "Promoted"], ["rejected", "Rejected"]]} /></Labelled>
           <Labelled label="Founded between"><div className="flex gap-2"><input type="number" value={filters.founded_from} onChange={(event) => setFilter("founded_from", event.target.value)} placeholder="From" className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm outline-none focus:border-[#0A4FE8]" /><input type="number" value={filters.founded_to} onChange={(event) => setFilter("founded_to", event.target.value)} placeholder="To" className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm outline-none focus:border-[#0A4FE8]" /></div></Labelled>
           <Labelled label="Number of staff"><div className="flex gap-2"><input type="number" value={filters.staff_from} onChange={(event) => setFilter("staff_from", event.target.value)} placeholder="Min" className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm outline-none focus:border-[#0A4FE8]" /><input type="number" value={filters.staff_to} onChange={(event) => setFilter("staff_to", event.target.value)} placeholder="Max" className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm outline-none focus:border-[#0A4FE8]" /></div></Labelled>
-          <div className="flex items-end"><button onClick={() => { setPage(0); setFilters({ ...EMPTY_FILTERS }); }} className="min-h-10 rounded-xl border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-700 hover:border-[#0A4FE8]">Clear filters</button></div>
+          <div className="flex items-end"><button onClick={() => { setPage(0); setSearch(""); setFilters({ ...EMPTY_FILTERS }); }} className="min-h-10 rounded-xl border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-700 hover:border-[#0A4FE8]">Clear filters</button></div>
         </div>}
 
-        {loading ? <p className="inline-flex items-center gap-2 text-sm text-slate-500"><Loader2 className="h-4 w-4 animate-spin" /> Loading companies</p>
-          : companies.length === 0 ? <p className="rounded-2xl border border-dashed border-slate-200 p-8 text-center text-sm text-slate-500">No companies match this view yet. Add a list above to start building toward {DIRECTORY_TARGET.toLocaleString()}.</p>
+        {loading || (listLoading && companies.length === 0) ? <p className="inline-flex items-center gap-2 text-sm text-slate-500"><Loader2 className="h-4 w-4 animate-spin" /> {filters.q ? `Searching for ${filters.q}` : "Loading companies"}</p>
+          : companies.length === 0 ? <p className="rounded-2xl border border-dashed border-slate-200 p-8 text-center text-sm text-slate-500">{filters.q ? `No company matches "${filters.q}" in this view. Try clearing the filters or a shorter word.` : `No companies match this view yet. Add a list above to start building toward ${DIRECTORY_TARGET.toLocaleString()}.`}</p>
             : <ul className="space-y-3">
               {companies.map((company) => (
                 <li key={company.id} className="rounded-2xl border border-slate-200 p-4">
@@ -431,11 +505,32 @@ export default function ProspectGenerationPage() {
                         {!company.emails?.length && !company.socials?.length && <li className="text-slate-500">None found publicly.</li>}
                       </ul>
                     </div>
+                    {company.brand_consistency?.length > 0 && <div>
+                      <p className="flex items-center gap-1.5 text-xs font-semibold text-slate-600"><Palette className="h-3.5 w-3.5 text-[#0A4FE8]" /> Brand consistency, website against social</p>
+                      <ul className="mt-2 space-y-2">{company.brand_consistency.map((entry, index) => <li key={index} className="rounded-xl bg-slate-50 p-3 text-sm">
+                        <p className="font-semibold text-[#07133B]">{entry.area} <span className={`ml-1 rounded-full px-2 py-0.5 text-[11px] ${entry.status === "consistent" ? "bg-emerald-50 text-emerald-700" : entry.status === "differs" ? "bg-amber-50 text-amber-700" : "bg-slate-100 text-slate-600"}`}>{entry.status}</span></p>
+                        <p className="mt-1 text-slate-600">{entry.detail}</p>
+                        {entry.evidence?.length > 0 && <p className="mt-1 flex flex-wrap gap-2">{entry.evidence.map((link) => <a key={link} href={link} target="_blank" rel="noopener noreferrer" className="text-xs font-semibold text-[#0A4FE8]">view</a>)}</p>}
+                      </li>)}</ul>
+                    </div>}
+                    {company.domain_variants?.length > 0 && <div>
+                      <p className="flex items-center gap-1.5 text-xs font-semibold text-slate-600"><Server className="h-3.5 w-3.5 text-[#0A4FE8]" /> Domain configuration</p>
+                      <ul className="mt-2 space-y-1 text-sm text-slate-600">{company.domain_variants.map((entry) => <li key={entry.host}>
+                        <span className={`mr-1.5 inline-block h-2 w-2 rounded-full ${entry.ok ? "bg-emerald-500" : "bg-rose-500"}`} />
+                        <span className="font-semibold text-[#07133B]">{entry.host}</span> {entry.note}
+                      </li>)}</ul>
+                      {(company.dns_contacts || []).length > 0 && <ul className="mt-2 space-y-1 text-sm text-slate-600">{company.dns_contacts.map((entry, index) => <li key={index}><span className="font-semibold text-[#07133B]">{entry.value}</span> {entry.detail}</li>)}</ul>}
+                    </div>}
                     <ListBlock title="Local competitors" items={(company.competitors_local || []).map((entry) => `${entry.name}${entry.note ? `: ${entry.note}` : ""}`)} />
                     <ListBlock title="Global competitors" items={(company.competitors_global || []).map((entry) => `${entry.name}${entry.note ? `: ${entry.note}` : ""}`)} />
                     {company.outreach_email && <div className="lg:col-span-2">
                       <p className="text-xs font-semibold text-slate-600">Suggested first email{company.outreach_subject ? ` - ${company.outreach_subject}` : ""}</p>
                       <p className="mt-1 whitespace-pre-wrap rounded-xl bg-slate-50 p-3 text-sm text-slate-700">{company.outreach_email}</p>
+                      <div className="mt-2 flex flex-wrap items-center gap-2">
+                        <button onClick={() => composeEmail(company)} className="inline-flex min-h-9 items-center gap-2 rounded-xl bg-[#0A4FE8] px-3 text-xs font-semibold text-white"><Send className="h-3.5 w-3.5" /> Compose email</button>
+                        <button onClick={() => copyRecipients(company)} className="inline-flex min-h-9 items-center gap-2 rounded-xl border border-slate-200 px-3 text-xs font-semibold text-slate-700 hover:border-[#0A4FE8]"><Mail className="h-3.5 w-3.5" /> Copy recipients</button>
+                        <span className="text-xs text-slate-500">{recipientsFor(company).length} address{recipientsFor(company).length === 1 ? "" : "es"} found: {recipientsFor(company).join(", ") || "none"}</span>
+                      </div>
                       <p className="mt-2 text-xs text-slate-400">Review every claim against the sources before sending.</p>
                     </div>}
                     {company.sources?.length > 0 && <div className="lg:col-span-2">

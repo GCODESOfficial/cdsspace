@@ -335,10 +335,10 @@ export async function POST(req: NextRequest) {
       if (!displayName || !categories.includes(category) || !statuses.includes(status)) {
         return NextResponse.json({ ok: false, error: "Name, category, or status is invalid." }, { status: 400 });
       }
-      const values = [category, displayName, str(body.company_name, 180) || null, publicUrl(body.website) || null, publicUrl(body.social_url) || null, str(body.email, 320).toLowerCase() || null, str(body.phone, 60) || null, str(body.location, 180) || null, str(body.notes, 4000) || null, str(body.next_action, 1000) || null, str(body.follow_up_at, 40) || null, status, session.email];
+      const values = [category, displayName, str(body.company_name, 180) || null, publicUrl(body.website) || null, publicUrl(body.social_url) || null, str(body.email, 320).toLowerCase() || null, str(body.phone, 60) || null, str(body.location, 180) || null, str(body.notes, 4000) || null, str(body.next_action, 1000) || null, str(body.follow_up_at, 40) || null, status, session.email, typeof body.research_brief === "string" ? str(body.research_brief, 40000) : null];
       const prospect = id
-        ? await glashMaybeOne<any>(`update public.deal_prospects set category=$2,display_name=$3,company_name=$4,website=$5,social_url=$6,email=$7,phone=$8,location=$9,notes=$10,next_action=$11,follow_up_at=$12::timestamptz,status=$13,updated_by=$14,updated_at=now() where id=$1 returning *`, [id, ...values])
-        : await glashMaybeOne<any>(`insert into public.deal_prospects (category,display_name,company_name,website,social_url,email,phone,location,notes,next_action,follow_up_at,status,created_by,updated_by) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11::timestamptz,$12,$13,$13) returning *`, values);
+        ? await glashMaybeOne<any>(`update public.deal_prospects set category=$2,display_name=$3,company_name=$4,website=$5,social_url=$6,email=$7,phone=$8,location=$9,notes=$10,next_action=$11,follow_up_at=$12::timestamptz,status=$13,updated_by=$14,research_brief=coalesce($15, research_brief),updated_at=now() where id=$1 returning *`, [id, ...values])
+        : await glashMaybeOne<any>(`insert into public.deal_prospects (category,display_name,company_name,website,social_url,email,phone,location,notes,next_action,follow_up_at,status,created_by,updated_by,research_brief) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11::timestamptz,$12,$13,$13,$14) returning *`, values);
       await logActivity({ action: id ? "deals.prospect.update" : "deals.prospect.create", page: "deals/prospects", resource_type: "deal_prospect", resource_id: prospect?.id, resource_label: displayName, metadata: { category, status } });
       return NextResponse.json({ ok: true, prospect }, { status: id ? 200 : 201 });
     }

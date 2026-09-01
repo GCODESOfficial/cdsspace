@@ -2,8 +2,14 @@
 // renderBirthdaySvg() returns a 1080x1080 SVG string; the API route rasterizes
 // it to PNG (via sharp) so it can be shared on WhatsApp / socials directly.
 
+import { cdsLogoHeight, cdsLogoWhite } from "./cds-logo";
+
 const CDS_BLUE = "#0A4FE8";
 const CDS_DEEP = "#0035C1";
+
+// The wordmark sits above the web address in the footer of the card. 210px on a
+// 1080px canvas reads clearly on a phone without competing with the name.
+const LOGO_WIDTH = 210;
 
 export function escapeXml(value: string): string {
   return value
@@ -33,8 +39,20 @@ function wrapText(text: string, maxChars: number, maxLines: number): string[] {
   return lines.length ? lines : [""];
 }
 
-function firstName(name: string): string {
-  return String(name || "").trim().split(/\s+/)[0] || "Friend";
+// Client names are stored with their honorific ("Mrs Dorenda Aniebiet",
+// "Chief Emeka"), and greeting someone as "Happy Birthday, Mrs" reads as a
+// mistake, so titles are skipped when reaching for the first name.
+const HONORIFICS = new Set([
+  "mr", "mrs", "ms", "miss", "mstr", "dr", "prof", "engr", "arc", "barr", "chief", "sir",
+  "lady", "madam", "ma", "alhaji", "alhaja", "hon", "rev", "pastor", "bishop", "apostle",
+  "evang", "elder", "amb", "capt", "col", "gen", "otunba", "high", "hrh", "hrm",
+]);
+
+/** The name to greet someone by, with any honorific dropped. */
+export function firstName(name: string): string {
+  const parts = String(name || "").trim().split(/\s+/).filter(Boolean);
+  const given = parts.find((part) => !HONORIFICS.has(part.replace(/\./g, "").toLowerCase()));
+  return given || parts[0] || "Friend";
 }
 
 export function defaultBirthdayMessage(name: string): string {
@@ -51,6 +69,10 @@ export function renderBirthdaySvg(name: string): string {
   const nameBlock = nameLines
     .map((line, index) => `<text x="540" y="${nameStartY + index * lineHeight}" text-anchor="middle" fill="white" font-size="${nameFont}" font-weight="800">${escapeXml(line)}</text>`)
     .join("\n    ");
+
+  // Footer: the wish, then the white wordmark, then the web address under it.
+  const logoTop = 918;
+  const addressY = logoTop + cdsLogoHeight(LOGO_WIDTH) + 40;
 
   // Confetti - deterministic positions so the image is stable across renders.
   const confetti = [
@@ -71,17 +93,41 @@ export function renderBirthdaySvg(name: string): string {
   <g font-family="Inter, Arial, Helvetica, sans-serif" text-anchor="middle">
     <text x="540" y="380" fill="rgba(255,255,255,0.82)" font-size="40" font-weight="800" letter-spacing="6">HAPPY BIRTHDAY</text>
     ${nameBlock}
-    <text x="540" y="820" fill="rgba(255,255,255,0.9)" font-size="34" font-weight="500">Wishing you a wonderful year ahead</text>
-    <text x="540" y="990" fill="rgba(255,255,255,0.9)" font-size="34" font-weight="800">CDS Space</text>
-    <text x="540" y="1030" fill="rgba(255,255,255,0.6)" font-size="26" font-weight="500">cdsspace.pro</text>
+    <text x="540" y="800" fill="rgba(255,255,255,0.9)" font-size="34" font-weight="500">Wishing you a wonderful year ahead</text>
+    <text x="540" y="872" fill="white" font-size="38" font-weight="700">Happy Birthday from all of us at CDS Space</text>
+    <text x="540" y="${Math.round(addressY)}" fill="rgba(255,255,255,0.6)" font-size="26" font-weight="500">cdsspace.pro</text>
   </g>
+  ${cdsLogoWhite(540 - LOGO_WIDTH / 2, logoTop, LOGO_WIDTH)}
 </svg>`;
 }
 
+/**
+ * A stored birthday as a "YYYY-MM-DD" string.
+ *
+ * The column is a Postgres `date`, and the driver hands those back as a Date
+ * object rather than a string, so treating the value as text threw and every
+ * caller in the request failed. Both forms are accepted here.
+ */
+function birthdayText(birthday: BirthdayInput): string {
+  if (!birthday) return "";
+  if (birthday instanceof Date) {
+    return Number.isNaN(birthday.getTime())
+      ? ""
+      // Local parts, not toISOString(): a date read at 00:00 in a zone ahead of
+      // UTC would otherwise shift back a day and celebrate on the wrong date.
+      : `${birthday.getFullYear()}-${String(birthday.getMonth() + 1).padStart(2, "0")}-${String(birthday.getDate()).padStart(2, "0")}`;
+  }
+  return String(birthday);
+}
+
+/** A birthday as stored: a date string, or the Date the driver returns. */
+export type BirthdayInput = string | Date | null | undefined;
+
 /** The next calendar occurrence of a birthday, ignoring the stored birth year. */
-export function nextBirthdayOccurrence(birthday: string | null, today = new Date()): Date | null {
-  if (!birthday) return null;
-  const parts = birthday.slice(0, 10).split("-").map(Number);
+export function nextBirthdayOccurrence(birthday: BirthdayInput, today = new Date()): Date | null {
+  const text = birthdayText(birthday);
+  if (!text) return null;
+  const parts = text.slice(0, 10).split("-").map(Number);
   if (parts.length < 3 || Number.isNaN(parts[1]) || Number.isNaN(parts[2])) return null;
   const [, month, day] = parts;
   const year = today.getFullYear();
@@ -92,13 +138,13 @@ export function nextBirthdayOccurrence(birthday: string | null, today = new Date
 }
 
 /** Year of the birthday occurrence the current reminder is referring to. */
-export function nextBirthdayYear(birthday: string | null, today = new Date()): number | null {
+export function nextBirthdayYear(birthday: BirthdayInput, today = new Date()): number | null {
   return nextBirthdayOccurrence(birthday, today)?.getFullYear() ?? null;
 }
 
 /** True when the team has already recorded wishes for the upcoming occurrence. */
 export function birthdayWishedForNextOccurrence(
-  birthday: string | null,
+  birthday: BirthdayInput,
   wishedForYear: number | null | undefined,
   today = new Date(),
 ): boolean {
@@ -110,7 +156,7 @@ export function birthdayWishedForNextOccurrence(
  * Days until the client's next birthday (0 = today), computed on month/day so
  * it works regardless of the stored year. Returns null if no birthday.
  */
-export function daysUntilBirthday(birthday: string | null, today = new Date()): number | null {
+export function daysUntilBirthday(birthday: BirthdayInput, today = new Date()): number | null {
   const next = nextBirthdayOccurrence(birthday, today);
   if (!next) return null;
   const todayMidnight = new Date(today.getFullYear(), today.getMonth(), today.getDate());
