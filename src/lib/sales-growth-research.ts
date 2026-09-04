@@ -1,6 +1,7 @@
 import "server-only";
 
 import dns from "node:dns/promises";
+import { gunzipSync } from "node:zlib";
 import net from "node:net";
 
 export interface WebSearchResult {
@@ -359,17 +360,37 @@ export async function fetchPublicPage(input: string): Promise<{ url: string; tit
 export async function fetchPublicText(input: string, maxBytes = 4_000_000): Promise<string> {
   const url = await assertPublicUrl(input);
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 15_000);
+  const timer = setTimeout(() => controller.abort(), 20_000);
   try {
     const response = await fetch(url, {
       signal: controller.signal,
-      headers: { "User-Agent": researchUserAgent(), "Accept": "application/xml,text/xml,text/html,text/plain" },
+      headers: {
+        "User-Agent": researchUserAgent(),
+        // Some sitemap hosts answer 406 to a narrow Accept, so this stays broad.
+        "Accept": "application/xml,text/xml,application/gzip,text/html,text/plain,*/*",
+        "Referer": `${url.protocol}//${url.host}/`,
+      },
     });
     if (!response.ok) throw new Error(`Source responded ${response.status}.`);
     const type = response.headers.get("content-type") || "";
+    const buffer = Buffer.from(await response.arrayBuffer());
+
+    // Large sitemaps are routinely published gzipped, as sitemap.xml.gz. The
+    // body arrives compressed because the compression is the file, not a
+    // transfer encoding, so it is unpacked here rather than by fetch.
+    const gzipped = (buffer[0] === 0x1f && buffer[1] === 0x8b)
+      || /gzip|x-gzip/i.test(type)
+      || /\.gz($|\?)/i.test(url.pathname);
+    if (gzipped) {
+      try {
+        return gunzipSync(buffer).toString("utf8").slice(0, maxBytes);
+      } catch {
+        throw new Error("The compressed source could not be unpacked.");
+      }
+    }
+
     if (!/(xml|html|text|json)/i.test(type)) throw new Error("Source did not return a text document.");
-    const body = await response.text();
-    return body.slice(0, maxBytes);
+    return buffer.toString("utf8").slice(0, maxBytes);
   } finally {
     clearTimeout(timer);
   }

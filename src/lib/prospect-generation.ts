@@ -324,7 +324,9 @@ async function harvestFromSitemap(sitemapUrl: string, defaults: { country?: stri
   const candidates: CompanyCandidate[] = [];
   let read = 1;
 
-  const pages = isIndex ? locations.slice(0, 10) : [];
+  // A sitemap index points at child sitemaps, often gzipped and often the only
+  // place a directory lists its companies.
+  const pages = isIndex ? locations.slice(0, 20) : [];
   for (const page of pages) {
     try {
       const child = await fetchPublicText(page);
@@ -336,7 +338,7 @@ async function harvestFromSitemap(sitemapUrl: string, defaults: { country?: stri
   }
 
   for (const location of locations) {
-    if (/\.xml($|\?)/i.test(location)) continue;
+    if (/\.xml(\.gz)?($|\?)/i.test(location)) continue;
     const slug = location.replace(/\/$/, "").split("/").pop() || "";
     if (!slug || slug.length < 3) continue;
     const name = slug.replace(/[-_]+/g, " ").replace(/\.(html?|php|aspx?)$/i, "").replace(/\b\w/g, (letter) => letter.toUpperCase());

@@ -8,6 +8,7 @@ import { dedupeCandidates, harvestFromUrl, parseCompanyInput, type CompanyCandid
 import { mergeCandidates, runRegistryImport } from "@/lib/prospect-import";
 import { enrichCompany } from "@/lib/prospect-enrichment";
 import { DIRECTORY_TARGET, SIZE_BANDS, companyNameKey, normalizeCountry, sizeBandFor } from "@/lib/prospect-directory";
+import { PROSPECT_ISSUES, isProspectIssue } from "@/lib/prospect-issues";
 import { registryCatalogue, registryFor } from "@/lib/prospect-registries";
 import { browserConfigured, browserSetupHint } from "@/lib/prospect-browser";
 import { logActivity } from "@/lib/activity-log";
@@ -99,7 +100,7 @@ async function companyFilters(params: URLSearchParams) {
   const status = str(params.get("status"), 20);
   const review = str(params.get("review"), 20);
   const priority = str(params.get("priority"), 20);
-  const websiteStatus = str(params.get("website_status"), 20);
+  const websiteStatus = str(params.get("website_status"), 60);
   const activity = str(params.get("activity"), 20);
   const country = str(params.get("country"), 60);
   const industry = str(params.get("industry"), 60);
@@ -116,7 +117,13 @@ async function companyFilters(params: URLSearchParams) {
   if (status) add((index) => `enrichment_status = $${index}`, status);
   if (review) add((index) => `review_status = $${index}`, review);
   if (priority) add((index) => `priority = $${index}`, priority);
-  if (websiteStatus) add((index) => `website_status = $${index}`, websiteStatus);
+  // Accepts one state or a comma separated set, so the "Website needs work"
+  // card can filter to precisely the states it counts.
+  if (websiteStatus) {
+    const states = websiteStatus.split(",").map((value) => value.trim()).filter(Boolean);
+    if (states.length > 1) add((index) => `website_status = any($${index}::text[])`, states);
+    else add((index) => `website_status = $${index}`, states[0]);
+  }
   if (activity) add((index) => `activity_status = $${index}`, activity);
   if (industry) add((index) => `industry ilike $${index}`, `%${industry}%`);
   if (SIZE_BANDS.some((band) => band.value === sizeBand)) add((index) => `size_band = $${index}`, sizeBand);
@@ -133,6 +140,24 @@ async function companyFilters(params: URLSearchParams) {
   if (hasWebsite === true) conditions.push("website is not null");
   if (hasWebsite === false) conditions.push("website is null");
   if (/^[a-z]$/i.test(letter)) add((index) => `name_key like $${index}`, `${letter.toLowerCase()}%`);
+
+  // Issue filters. Several selected means "has all of these", which is how a
+  // person reads two switches held down together.
+  const issues = (params.get("issues") || params.get("issue") || "")
+    .split(",")
+    .map((value) => value.trim())
+    .filter(isProspectIssue);
+  if (issues.length) add((index) => `issues @> $${index}::text[]`, Array.from(new Set(issues)));
+
+  // A decision maker we can actually write to, which is what the summary card
+  // above the list counts.
+  if (boolValue(params.get("reachable_decision_maker")) === true) {
+    conditions.push(`exists (
+      select 1 from public.prospect_company_contacts pcc
+       where pcc.company_id = prospect_companies.id
+         and pcc.seniority = 'decision_maker' and pcc.email is not null
+    )`);
+  }
 
   // Search matches every word typed, in any order, anywhere inside the name,
   // the normalised name, the alternate names, the domain or the industry. So
@@ -244,7 +269,7 @@ export async function GET(req: NextRequest) {
       const [extras] = await glashQuery<any>(`select
         (select count(*)::bigint from public.prospect_companies where country_count > 1) multi_country,
         (select count(distinct lower(country))::int from public.prospect_company_countries) countries_covered,
-        (select count(*)::bigint from public.prospect_company_contacts where seniority = 'decision_maker' and email is not null) reachable_decision_makers`);
+        (select count(distinct company_id)::bigint from public.prospect_company_contacts where seniority = 'decision_maker' and email is not null) reachable_decision_makers`);
       const batches = await glashQuery<any>(`select * from public.prospect_import_batches order by created_at desc limit 30`);
       const topCountries = await glashQuery<any>(
         `select country, count(*)::int companies from public.prospect_company_countries group by country order by companies desc limit 25`,
@@ -484,7 +509,7 @@ export async function POST(req: NextRequest) {
                employee_range=$9, employee_count=$10, size_band=$11, founded_year=$12,
                is_public=$13, stock_exchanges=$14::jsonb, ticker=$15, is_startup=$16,
                activity_status=$17, activity_evidence=$18,
-               website_status=$19, website_score=$20, website_findings=$21::jsonb,
+               website_status=$19, website_score=$20, website_findings=$21::jsonb, issues=$41::text[],
                brand_consistency=$38::jsonb, domain_variants=$39::jsonb, dns_contacts=$40::jsonb,
                socials=$22::jsonb, emails=$23::jsonb, phones=$24::jsonb,
                brief=$25, pain_points=$26::jsonb, how_we_help=$27::jsonb, service_fit=$28::jsonb,
@@ -506,6 +531,7 @@ export async function POST(req: NextRequest) {
               result.outreach_angle, result.outreach_subject, result.outreach_email,
               result.deal_score, result.priority, JSON.stringify(result.sources), actor,
               JSON.stringify(result.brand_consistency), JSON.stringify(result.domain_variants), JSON.stringify(result.dns_contacts),
+              result.issues,
             ],
           );
 

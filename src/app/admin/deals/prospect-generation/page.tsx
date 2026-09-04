@@ -4,11 +4,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import {
-  Building2, ChevronDown, ChevronUp, Chrome, Download, ExternalLink, EyeOff, Globe, Landmark, Library, Link2, Loader2,
+  AlertTriangle, Building2, ChevronDown, ChevronUp, Chrome, Download, ExternalLink, EyeOff, Globe, Landmark, Library, Link2, Loader2,
   Mail, MapPin, Palette, Play, Plus, RefreshCw, Search, Send, Server, SlidersHorizontal, Square, Target, Trash2, TrendingUp, Users, X,
 } from "lucide-react";
 import { appConfirm } from "@/lib/app-notify";
 import { DIRECTORY_TARGET, SIZE_BANDS, STOCK_EXCHANGES } from "@/lib/prospect-directory";
+import { PROSPECT_ISSUES, issueLabel } from "@/lib/prospect-issues";
 
 type Contact = { id: string; full_name: string; job_title: string | null; seniority: string; email: string | null; email_confidence: string; linkedin_url: string | null; source_url: string | null };
 type Company = {
@@ -17,7 +18,7 @@ type Company = {
   industry: string | null; employee_range: string | null; employee_count: number | null; size_band: string | null; founded_year: number | null;
   is_public: boolean | null; stock_exchanges: string[]; ticker: string | null; is_startup: boolean | null;
   activity_status: string; activity_evidence: string | null;
-  website_status: string; website_score: number | null; website_findings: string[];
+  website_status: string; website_score: number | null; website_findings: string[]; issues: string[];
   brand_consistency: Array<{ area: string; status: string; detail: string; evidence: string[] }>;
   domain_variants: Array<{ host: string; url: string; status: number | null; ok: boolean; redirectsTo: string | null; note: string }>;
   dns_contacts: Array<{ kind: string; value: string; detail: string }>;
@@ -52,7 +53,7 @@ const EMPTY_FILTERS = {
   q: "", country: "", industry: "", size_band: "", status: "", review: "", priority: "",
   website_status: "", activity: "", is_public: "", is_startup: "", multi_country: "",
   founded_from: "", founded_to: "", staff_from: "", staff_to: "", exchange: "", letter: "",
-  has_website: "", hide_inactive: "",
+  has_website: "", hide_inactive: "", issues: "", reachable_decision_maker: "",
 };
 
 const ACTIVITY_TONE: Record<string, string> = { active: "bg-emerald-50 text-emerald-700 border-emerald-200", dormant: "bg-amber-50 text-amber-700 border-amber-200", inactive: "bg-rose-50 text-rose-700 border-rose-200", unknown: "bg-slate-50 text-slate-600 border-slate-200" };
@@ -182,6 +183,27 @@ export default function ProspectGenerationPage() {
   };
 
   const setFilter = (key: keyof typeof EMPTY_FILTERS, value: string) => { setPage(0); setFilters((current) => ({ ...current, [key]: value })); };
+
+  const activeIssues = filters.issues ? filters.issues.split(",").filter(Boolean) : [];
+  const toggleIssue = (key: string) => {
+    const next = activeIssues.includes(key) ? activeIssues.filter((entry) => entry !== key) : [...activeIssues, key];
+    setFilter("issues", next.join(","));
+  };
+
+  /**
+   * A summary card is a saved view of the list below it. Clicking one replaces
+   * the current filters with the ones that produce exactly the number on the
+   * card, rather than adding to whatever was already set.
+   */
+  const applyCardView = (view: Partial<typeof EMPTY_FILTERS>) => {
+    setPage(0);
+    const next = { ...EMPTY_FILTERS, ...view };
+    // Clicking the same card again returns to the unfiltered directory.
+    const same = (Object.keys(EMPTY_FILTERS) as Array<keyof typeof EMPTY_FILTERS>).every((key) => filters[key] === next[key]);
+    setFilters(same ? { ...EMPTY_FILTERS } : next);
+    setSearch("");
+    if (typeof document !== "undefined") document.getElementById("prospect-directory")?.scrollIntoView({ behavior: "smooth", block: "start" });
+  };
 
   const submitImport = async (event: React.FormEvent) => {
     event.preventDefault(); setBusy("import"); setNotice(null);
@@ -379,12 +401,12 @@ export default function ProspectGenerationPage() {
         </div>
         <div className="mt-4 h-2 w-full overflow-hidden rounded-full bg-slate-100"><div className="h-full rounded-full bg-[#0A4FE8] transition-all" style={{ width: `${Math.max(progress, totals?.total ? 0.4 : 0)}%` }} /></div>
         <div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-6">
-          <Stat label="Awaiting research" value={totals?.queued} icon={RefreshCw} />
-          <Stat label="Confirmed trading" value={totals?.active_companies} icon={TrendingUp} />
-          <Stat label="Website needs work" value={totals?.needs_website} icon={Globe} />
-          <Stat label="Reachable decision makers" value={totals?.reachable_decision_makers} icon={Mail} />
-          <Stat label="In several countries" value={totals?.multi_country} icon={MapPin} />
-          <Stat label="On the checklist" value={totals?.promoted} icon={Users} />
+          <Stat label="Awaiting research" value={totals?.queued} icon={RefreshCw} onClick={() => applyCardView({ status: "queued" })} />
+          <Stat label="Confirmed trading" value={totals?.active_companies} icon={TrendingUp} onClick={() => applyCardView({ activity: "active" })} />
+          <Stat label="Website needs work" value={totals?.needs_website} icon={Globe} onClick={() => applyCardView({ website_status: "outdated,missing,broken" })} />
+          <Stat label="Reachable decision makers" value={totals?.reachable_decision_makers} icon={Mail} onClick={() => applyCardView({ reachable_decision_maker: "true" })} />
+          <Stat label="In several countries" value={totals?.multi_country} icon={MapPin} onClick={() => applyCardView({ multi_country: "true" })} />
+          <Stat label="On the checklist" value={totals?.promoted} icon={Users} onClick={() => applyCardView({ review: "promoted" })} />
         </div>
       </section>
 
@@ -471,7 +493,7 @@ export default function ProspectGenerationPage() {
         </div>
       </section>
 
-      <section className="rounded-[24px] border border-slate-200 bg-white p-5 shadow-sm sm:p-7">
+      <section id="prospect-directory" className="rounded-[24px] border border-slate-200 bg-white p-5 shadow-sm sm:p-7">
         <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
           <h2 className="font-bold text-[#07133B]">Directory <span className="text-sm font-semibold text-slate-400">({estimated ? "about " : ""}{total.toLocaleString()})</span></h2>
           <div className="flex flex-wrap gap-2">
@@ -498,6 +520,34 @@ export default function ProspectGenerationPage() {
             icon={Globe}
             label="Only with a website"
           />
+        </div>
+
+        {/* The issues we sell against. Holding two down narrows to companies
+            that have both, which is how a person reads two pressed buttons. */}
+        <div className="mb-4">
+          <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-400">Issues to fix</p>
+          <div className="flex flex-wrap items-center gap-2">
+            {PROSPECT_ISSUES.map((issue) => {
+              const active = activeIssues.includes(issue.key);
+              return (
+                <button
+                  key={issue.key}
+                  type="button"
+                  onClick={() => toggleIssue(issue.key)}
+                  aria-pressed={active}
+                  title={issue.blurb}
+                  className={`inline-flex min-h-10 items-center gap-2 rounded-xl border px-3 text-sm font-semibold ${active ? "border-[#0A4FE8] bg-[#0A4FE8] text-white" : "border-slate-200 text-slate-700 hover:border-[#0A4FE8]"}`}
+                >
+                  <AlertTriangle className="h-4 w-4" /> {issue.label}
+                </button>
+              );
+            })}
+            {activeIssues.length > 0 && (
+              <button type="button" onClick={() => setFilter("issues", "")} className="text-xs font-bold text-[#0A4FE8] hover:underline">
+                Clear issues
+              </button>
+            )}
+          </div>
         </div>
 
         <div className="mb-4 flex flex-wrap gap-1">
@@ -542,6 +592,11 @@ export default function ProspectGenerationPage() {
                         {company.is_public && <span className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-semibold text-slate-600"><Landmark className="h-3 w-3" /> {company.stock_exchanges?.length ? `${company.stock_exchanges.join(", ")}${company.ticker ? `: ${company.ticker}` : ""}` : "Publicly traded"}</span>}
                         {company.is_startup && <span className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-semibold text-slate-600">Startup</span>}
                         {company.review_status === "promoted" && <span className="rounded-full bg-emerald-50 px-2.5 py-1 text-[11px] font-semibold text-emerald-700">On checklist</span>}
+                        {(company.issues || []).map((issue) => (
+                          <span key={issue} className="inline-flex items-center gap-1 rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-[11px] font-semibold text-amber-800">
+                            <AlertTriangle className="h-3 w-3" /> {issueLabel(issue)}
+                          </span>
+                        ))}
                         {company.enrichment_status === "queued" && <span className="rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-semibold text-slate-600">Queued</span>}
                         {company.enrichment_status === "failed" && <span className="rounded-full bg-rose-50 px-2.5 py-1 text-[11px] font-semibold text-rose-700">Research failed</span>}
                       </div>
@@ -645,11 +700,25 @@ export default function ProspectGenerationPage() {
   );
 }
 
-function Stat({ label, value, icon: Icon }: { label: string; value: number | undefined; icon: React.ComponentType<{ className?: string }> }) {
-  return <div className="rounded-2xl border border-slate-200 p-4">
+function Stat({ label, value, icon: Icon, onClick }: {
+  label: string;
+  value: number | undefined;
+  icon: React.ComponentType<{ className?: string }>;
+  onClick?: () => void;
+}) {
+  const body = <>
     <div className="flex items-center gap-2 text-xs font-semibold text-slate-500"><Icon className="h-4 w-4 text-[#0A4FE8]" /> {label}</div>
     <p className="mt-1.5 text-2xl font-bold text-[#07133B]">{(value || 0).toLocaleString()}</p>
-  </div>;
+  </>;
+  if (!onClick) return <div className="rounded-2xl border border-slate-200 p-4">{body}</div>;
+  return <button
+    type="button"
+    onClick={onClick}
+    title={`Show ${label.toLowerCase()} in the directory`}
+    className="rounded-2xl border border-slate-200 p-4 text-left transition hover:border-[#0A4FE8] hover:bg-blue-50/40 focus:outline-none focus-visible:ring-2 focus-visible:ring-[#0A4FE8]"
+  >
+    {body}
+  </button>;
 }
 
 function Toggle({ active, onClick, icon: Icon, label }: { active: boolean; onClick: () => void; icon: React.ComponentType<{ className?: string }>; label: string }) {

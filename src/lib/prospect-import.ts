@@ -1,7 +1,7 @@
 import "server-only";
 
 import { glashMaybeOne, glashQuery } from "@/lib/glashdb/postgres";
-import { dedupeCandidates, type CompanyCandidate } from "@/lib/prospect-generation";
+import { dedupeCandidates, harvestFromUrl, type CompanyCandidate } from "@/lib/prospect-generation";
 import { normalizeCountry, sizeBandFor } from "@/lib/prospect-directory";
 import { registryFor } from "@/lib/prospect-registries";
 
@@ -168,6 +168,37 @@ export async function mergeCandidates(
   return { created: createdIds.length, merged: entries.length - createdIds.length, countriesAdded };
 }
 
+
+/**
+ * Imports a directory, listing page, or sitemap by URL, the same way the admin
+ * page does, so long crawls can be run from a terminal instead of a browser tab.
+ */
+export async function runUrlImport(input: {
+  url: string;
+  actor: string;
+  country?: string | null;
+  maxPages?: number;
+  render?: boolean;
+  label?: string;
+}) {
+  const harvest = await harvestFromUrl(input.url, {
+    country: input.country || null,
+    maxPages: input.maxPages || 5,
+    render: input.render,
+  });
+  const entries = dedupeCandidates(harvest.candidates);
+  const batch = await glashMaybeOne<any>(
+    `insert into public.prospect_import_batches (label,source_kind,source_url,raw_input,status,discovered_count,created_by)
+     values ($1,'url',$2,'','parsed',$3,$4) returning *`,
+    [input.label || harvest.title || harvest.sourceUrl, harvest.sourceUrl, entries.length, input.actor],
+  );
+  const result = await mergeCandidates(entries, batch.id, input.actor);
+  await glashQuery(
+    `update public.prospect_import_batches set created_count=$2, duplicate_count=$3, updated_at=now() where id=$1`,
+    [batch.id, result.created, result.merged],
+  );
+  return { ...result, discovered: entries.length, warnings: harvest.warnings, pagesRead: harvest.pagesRead };
+}
 
 export interface RegistryRunResult {
   batchId: string;

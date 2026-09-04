@@ -11,9 +11,10 @@
  *   npm run populate-prospects -- --list
  *   npm run populate-prospects -- --registry estonia_ariregister --minutes 10
  *   npm run populate-prospects -- --all --minutes 30
+ *   npm run populate-prospects -- --url https://example.com/sitemap.xml --country Qatar
  */
 
-import { runRegistryImport } from "@/lib/prospect-import";
+import { runRegistryImport, runUrlImport } from "@/lib/prospect-import";
 import { REGISTRIES, registryCatalogue, registryFor } from "@/lib/prospect-registries";
 import { glashQuery } from "@/lib/glashdb/postgres";
 
@@ -72,6 +73,26 @@ async function main() {
   }
 
   const actor = argument("actor") || "populate-script";
+
+  // Directory and sitemap imports by URL, for crawls too long for a browser tab.
+  const url = argument("url");
+  if (url) {
+    const before = await directoryTotal();
+    console.log(`Directory holds ${before.toLocaleString()} companies.\nImporting ${url}\n`);
+    const result = await runUrlImport({
+      url,
+      actor,
+      country: argument("country") || null,
+      maxPages: Number(argument("pages") || 5),
+      render: flag("render"),
+      label: argument("label"),
+    });
+    for (const warning of result.warnings) console.log(`  note: ${warning}`);
+    console.log(`  read ${result.pagesRead} page(s), found ${result.discovered.toLocaleString()} companies`);
+    console.log(`  +${result.created.toLocaleString()} new, ${result.merged.toLocaleString()} merged as duplicates`);
+    console.log(`\nDirectory now holds ${(await directoryTotal()).toLocaleString()} companies.`);
+    return;
+  }
   const minutes = Number(argument("minutes") || 10);
   const deadline = Date.now() + Math.max(1, minutes) * 60_000;
 

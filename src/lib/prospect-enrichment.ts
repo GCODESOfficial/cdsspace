@@ -6,6 +6,7 @@ import { fetchPublicPage, isSocialHost, normalizeDomain, researchPublicSite, sea
 import { detectListing, looksLikeStartup, normalizeCountry, sizeBandFor, type SizeBand } from "@/lib/prospect-directory";
 import { isExcludedDomain } from "@/lib/prospect-exclusions";
 import { assessBrandConsistency, checkDomainVariants, domainVariantFinding, type BrandFinding, type DomainVariant } from "@/lib/prospect-brand";
+import { EMPTY_WEBSITE_SIGNALS, detectProspectIssues, type ProspectIssue, type WebsiteSignals } from "@/lib/prospect-issues";
 import { likelyMailboxes, traceDomainContacts, type DnsContact } from "@/lib/prospect-dns";
 
 export type ActivityStatus = "unknown" | "active" | "dormant" | "inactive";
@@ -43,6 +44,8 @@ export interface EnrichedCompany {
   website_status: WebsiteStatus;
   website_score: number | null;
   website_findings: string[];
+  /** The five issues the directory filters on, from the signals above. */
+  issues: ProspectIssue[];
   brand_consistency: BrandFinding[];
   domain_variants: DomainVariant[];
   dns_contacts: DnsContact[];
@@ -108,33 +111,68 @@ function seniorityFor(title: string): EnrichedContact["seniority"] {
  * markup, so a low score is evidence we can quote back in outreach rather than
  * an opinion. Lower score means a more outdated site, which is a stronger lead.
  */
-function assessWebsite(html: string, research: SiteResearch | null): { status: WebsiteStatus; score: number; findings: string[] } {
+function assessWebsite(html: string, research: SiteResearch | null): { status: WebsiteStatus; score: number; findings: string[]; signals: WebsiteSignals } {
   const findings: string[] = [];
   let score = 100;
   const penalise = (points: number, finding: string) => { score -= points; findings.push(finding); };
+  // Each signal is recorded as well as narrated: the issue filters read these,
+  // so they never depend on how a finding happens to be worded.
+  const signals: WebsiteSignals = { ...EMPTY_WEBSITE_SIGNALS };
 
-  if (!/<meta[^>]+name=["']viewport["']/i.test(html)) penalise(22, "No responsive viewport meta tag, so the site is unlikely to adapt to mobile screens.");
-  if (/<table[^>]*>[\s\S]{0,4000}?<table/i.test(html) && !/<main|<section|<article/i.test(html)) penalise(18, "Layout appears to be built with nested tables rather than modern layout elements.");
-  if (/<(font|center|marquee|frameset|blink)\b/i.test(html)) penalise(20, "Deprecated HTML elements (font, center, marquee, or frames) are still in use.");
-  if (/\bbgcolor=|\balign=["']?(left|right|center)/i.test(html)) penalise(8, "Presentational HTML attributes are used in place of CSS.");
-  if (/jquery[.-](1|2)\.\d+/i.test(html)) penalise(12, "The site loads a long-unsupported jQuery 1.x or 2.x build.");
-  if (/\.swf\b|application\/x-shockwave-flash/i.test(html)) penalise(25, "Flash content is still referenced, which no browser has supported since 2020.");
-  if (!/<!doctype html>/i.test(html.slice(0, 400))) penalise(10, "The page does not declare a modern HTML5 doctype.");
+  if (!/<meta[^>]+name=["']viewport["']/i.test(html)) {
+    signals.noViewport = true;
+    penalise(22, "No responsive viewport meta tag, so the site is unlikely to adapt to mobile screens.");
+  }
+  if (/<table[^>]*>[\s\S]{0,4000}?<table/i.test(html) && !/<main|<section|<article/i.test(html)) {
+    signals.tableLayout = true;
+    penalise(18, "Layout appears to be built with nested tables rather than modern layout elements.");
+  }
+  if (/<(font|center|marquee|frameset|blink)\b/i.test(html)) {
+    signals.deprecatedElements = true;
+    penalise(20, "Deprecated HTML elements (font, center, marquee, or frames) are still in use.");
+  }
+  if (/\bbgcolor=|\balign=["']?(left|right|center)/i.test(html)) {
+    signals.presentationalAttributes = true;
+    penalise(8, "Presentational HTML attributes are used in place of CSS.");
+  }
+  if (/jquery[.-](1|2)\.\d+/i.test(html)) {
+    signals.endOfLifeLibraries = true;
+    penalise(12, "The site loads a long-unsupported jQuery 1.x or 2.x build.");
+  }
+  if (/\.swf\b|application\/x-shockwave-flash/i.test(html)) {
+    signals.flash = true;
+    penalise(25, "Flash content is still referenced, which no browser has supported since 2020.");
+  }
+  if (!/<!doctype html>/i.test(html.slice(0, 400))) {
+    signals.noDoctype = true;
+    penalise(10, "The page does not declare a modern HTML5 doctype.");
+  }
   if (!research?.description) penalise(8, "No meta description is published, which weakens search and social previews.");
-  if (/bootstrap[.-]?3\.|bootstrap[.-]?2\./i.test(html)) penalise(8, "An end-of-life Bootstrap 2 or 3 build is loaded.");
+  if (/bootstrap[.-]?3\.|bootstrap[.-]?2\./i.test(html)) {
+    signals.endOfLifeLibraries = true;
+    penalise(8, "An end-of-life Bootstrap 2 or 3 build is loaded.");
+  }
   if (/https?:\/\/(?:www\.)?twitter\.com\//i.test(html)) penalise(5, "The site still links to twitter.com rather than X, a sign the footer has not been maintained.");
-  if (!/<img[^>]+(srcset|loading=["']lazy["'])/i.test(html) && (html.match(/<img\b/gi) || []).length > 6) penalise(6, "Images are served without responsive srcset or lazy loading.");
+  if (!/<img[^>]+(srcset|loading=["']lazy["'])/i.test(html) && (html.match(/<img\b/gi) || []).length > 6) {
+    signals.imagesNotResponsive = true;
+    penalise(6, "Images are served without responsive srcset or lazy loading.");
+  }
 
-  const years = Array.from(html.matchAll(/(?:©|&copy;|copyright)[^0-9]{0,20}((?:19|20)\d{2})/gi)).map((match) => Number(match[1]));
+  const years = Array.from(html.matchAll(/(?:\u00a9|&copy;|copyright)[^0-9]{0,20}((?:19|20)\d{2})/gi)).map((match) => Number(match[1]));
   const latestYear = years.length ? Math.max(...years) : 0;
   const thisYear = new Date().getFullYear();
-  if (latestYear && thisYear - latestYear >= 3) penalise(18, `The copyright notice still reads ${latestYear}, suggesting the site has not been updated in ${thisYear - latestYear} years.`);
-  else if (latestYear && thisYear - latestYear === 2) penalise(8, `The copyright notice reads ${latestYear}.`);
+  if (latestYear && thisYear - latestYear >= 3) {
+    signals.staleCopyrightYears = thisYear - latestYear;
+    penalise(18, `The copyright notice still reads ${latestYear}, suggesting the site has not been updated in ${thisYear - latestYear} years.`);
+  } else if (latestYear && thisYear - latestYear === 2) {
+    signals.staleCopyrightYears = 2;
+    penalise(8, `The copyright notice reads ${latestYear}.`);
+  }
 
   score = Math.max(0, Math.min(100, score));
   const status: WebsiteStatus = score < 45 ? "outdated" : score < 70 ? "dated" : "modern";
   if (!findings.length) findings.push("No dated markup signals were detected on the homepage; confirm design quality by eye before quoting this.");
-  return { status, score, findings };
+  return { status, score, findings, signals };
 }
 
 /** Recent public mentions are the cheapest proxy for "is this company still trading". */
@@ -493,6 +531,7 @@ export async function enrichCompany(input: {
     : {
         status: (website ? "broken" : "missing") as WebsiteStatus,
         score: website ? 15 : 0,
+        signals: { ...EMPTY_WEBSITE_SIGNALS },
         findings: [website
           ? "The website did not return a usable page when checked, so customers may be hitting the same failure."
           : "No public website could be found for this company."],
@@ -670,6 +709,14 @@ export async function enrichCompany(input: {
     website_status: websiteAssessment.status,
     website_score: websiteAssessment.score,
     website_findings: websiteAssessment.findings,
+    issues: detectProspectIssues({
+      websiteStatus: websiteAssessment.status,
+      websiteScore: websiteAssessment.score,
+      reachable,
+      signals: websiteAssessment.signals,
+      brandFindings: brandConsistency,
+      socialCount: socialLinks.length,
+    }),
     brand_consistency: brandConsistency,
     domain_variants: domainVariants,
     dns_contacts: dnsContacts,
