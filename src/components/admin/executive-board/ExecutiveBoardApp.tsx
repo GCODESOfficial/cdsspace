@@ -11,9 +11,9 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import {
-  Check, ChevronDown, ChevronRight, Copy, Download, FileText, Folder,
-  FolderPlus, Landmark, Link2, Loader2, Lock, Pencil, Plus, Rocket, ShieldCheck,
-  Target as TargetIcon, Trash2, Unlock, Upload, Wallet, X,
+  Check, ChevronDown, ChevronRight, Copy, Download, ExternalLink, FileText, Folder,
+  FolderPlus, Landmark, Link2, Loader2, Lock, Paperclip, Pencil, Plus, Rocket, ScrollText,
+  Search, ShieldCheck, Target as TargetIcon, Trash2, Unlock, Upload, Wallet, X,
 } from "lucide-react";
 import {
   BUDGET_CATEGORIES, BUDGET_STATUSES, KIND_LABELS, MODEL_STATUSES, STATUS_LABELS,
@@ -256,6 +256,9 @@ function Modal({ title, onClose, children }: { title: string; onClose: () => voi
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-center overflow-y-auto bg-black/40 p-0 backdrop-blur-sm sm:items-center sm:p-4" onClick={onClose}>
       <div
+        role="dialog"
+        aria-modal="true"
+        aria-label={title}
         onClick={(event) => event.stopPropagation()}
         className="max-h-[calc(100dvh-1rem)] w-full overflow-y-auto rounded-t-3xl bg-white p-5 sm:max-h-[90vh] sm:w-[min(40rem,100%)] sm:rounded-3xl sm:p-6"
       >
@@ -458,7 +461,11 @@ function Budgets({ board, busy, run }: { board: Board; busy: string; run: Run })
             <Field label="Owner"><input className={inputClass} value={draft.owner || ""} onChange={(e) => setDraft({ ...draft, owner: e.target.value })} placeholder="Who owns this" /></Field>
             <Field label="Starts"><input type="date" className={inputClass} value={draft.period_start || ""} onChange={(e) => setDraft({ ...draft, period_start: e.target.value })} /></Field>
             <Field label="Ends"><input type="date" className={inputClass} value={draft.period_end || ""} onChange={(e) => setDraft({ ...draft, period_end: e.target.value })} /></Field>
-            <Field label="Currency"><input className={inputClass} maxLength={3} value={draft.currency || "USD"} onChange={(e) => setDraft({ ...draft, currency: e.target.value.toUpperCase() })} /></Field>
+            <Field label="Currency">
+              <select className={inputClass} value={draft.currency || "USD"} onChange={(e) => setDraft({ ...draft, currency: e.target.value })}>
+                {BOARD_VIEW_CURRENCIES.map((code) => <option key={code} value={code}>{code}</option>)}
+              </select>
+            </Field>
             <Field label="Planned"><input type="number" step="0.01" className={inputClass} value={String(draft.planned_amount ?? 0)} onChange={(e) => setDraft({ ...draft, planned_amount: Number(e.target.value) })} /></Field>
             <Field label="Actual"><input type="number" step="0.01" className={inputClass} value={String(draft.actual_amount ?? 0)} onChange={(e) => setDraft({ ...draft, actual_amount: Number(e.target.value) })} /></Field>
             <div className="sm:col-span-2"><Field label="Notes"><textarea rows={3} className={areaClass} value={draft.notes || ""} onChange={(e) => setDraft({ ...draft, notes: e.target.value })} /></Field></div>
@@ -790,6 +797,14 @@ function Models({ board, busy, run }: { board: Board; busy: string; run: Run }) 
 
 /* -------------------------------- Vault -------------------------------- */
 
+const SOURCE_LABELS: Record<string, string> = {
+  cdoc: "cDoc",
+  protected_doc: "Protected document",
+  legal_doc: "Legal document",
+  link: "External link",
+  upload: "Uploaded file",
+};
+
 function Vault({ board, busy, run, reload, setNotice }: {
   board: Board; busy: string; run: Run; reload: () => Promise<void>;
   setNotice: (value: { tone: "success" | "error"; text: string } | null) => void;
@@ -799,6 +814,13 @@ function Vault({ board, busy, run, reload, setNotice }: {
   const [fileDraft, setFileDraft] = useState<(Partial<VaultFile> & { password?: string; clear_password?: boolean }) | null>(null);
   const [uploading, setUploading] = useState(false);
   const [upload, setUpload] = useState<{ file: File | null; title: string; kind: string; description: string; password: string } | null>(null);
+  const [attach, setAttach] = useState<{
+    tab: "cdoc" | "protected_doc" | "legal_doc" | "link";
+    source_id: string; link_url: string; title: string; kind: string; description: string; password: string;
+  } | null>(null);
+  const [attachable, setAttachable] = useState<{ cdocs: any[]; protectedDocs: any[]; legalDocs: any[] } | null>(null);
+  const [attachSearch, setAttachSearch] = useState("");
+  const [attaching, setAttaching] = useState(false);
   const [share, setShare] = useState<{ file_id?: string; folder_id?: string; name: string; password: string; recipient_email: string; note: string; expires_in_days: string; max_downloads: string } | null>(null);
   const [shareUrl, setShareUrl] = useState("");
   const [copied, setCopied] = useState(false);
@@ -819,6 +841,52 @@ function Vault({ board, busy, run, reload, setNotice }: {
   }, [current, board.folders]);
 
   const sharesFor = (fileId: string) => board.shares.filter((s) => s.file_id === fileId && shareIsLive(s));
+
+  // The picker lists what already exists in the system, so a document is
+  // referenced rather than copied into the vault a second time.
+  useEffect(() => {
+    if (!attach || attach.tab === "link") return;
+    let cancelled = false;
+    const timer = window.setTimeout(async () => {
+      try {
+        const response = await fetch(`/api/admin/executive-board/vault?resource=attachable&q=${encodeURIComponent(attachSearch)}`, { cache: "no-store" });
+        const json = await response.json().catch(() => ({}));
+        if (!cancelled && json.ok) setAttachable({ cdocs: json.cdocs || [], protectedDocs: json.protectedDocs || [], legalDocs: json.legalDocs || [] });
+      } catch { /* the picker simply stays empty */ }
+    }, 250);
+    return () => { cancelled = true; window.clearTimeout(timer); };
+  }, [attach, attachSearch]);
+
+  const doAttach = async () => {
+    if (!attach) return;
+    setAttaching(true); setNotice(null);
+    try {
+      const response = await fetch("/api/admin/executive-board/vault", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "attach_document",
+          source_kind: attach.tab,
+          source_id: attach.source_id || undefined,
+          link_url: attach.link_url || undefined,
+          title: attach.title,
+          kind: attach.kind,
+          description: attach.description,
+          password: attach.password || undefined,
+          folder_id: folderId || undefined,
+        }),
+      });
+      const json = await response.json().catch(() => ({}));
+      if (!response.ok || !json.ok) throw new Error(json.error || "The document could not be attached.");
+      setAttach(null); setAttachSearch("");
+      await reload();
+      setNotice({ tone: "success", text: "Document attached." });
+    } catch (error) {
+      setNotice({ tone: "error", text: error instanceof Error ? error.message : "The document could not be attached." });
+    } finally {
+      setAttaching(false);
+    }
+  };
 
   const doUpload = async () => {
     if (!upload?.file) return;
@@ -875,6 +943,9 @@ function Vault({ board, busy, run, reload, setNotice }: {
           <button type="button" onClick={() => setFolderDraft({ parent_id: folderId, name: "" })} className="inline-flex h-10 items-center gap-2 rounded-xl border border-slate-200 px-3.5 text-sm font-bold text-slate-600 hover:bg-slate-50">
             <FolderPlus className="h-4 w-4" /> New folder
           </button>
+          <button type="button" onClick={() => { setAttach({ tab: "cdoc", source_id: "", link_url: "", title: "", kind: "attachment", description: "", password: "" }); setAttachSearch(""); }} className="inline-flex h-10 items-center gap-2 rounded-xl border border-slate-200 px-3.5 text-sm font-bold text-slate-600 hover:bg-slate-50">
+            <Paperclip className="h-4 w-4" /> Attach document
+          </button>
           <button type="button" onClick={() => setUpload({ file: null, title: "", kind: "attachment", description: "", password: "" })} className="inline-flex h-10 items-center gap-2 rounded-xl bg-[#0A4FE8] px-4 text-sm font-bold text-white">
             <Upload className="h-4 w-4" /> Upload file
           </button>
@@ -914,7 +985,12 @@ function Vault({ board, busy, run, reload, setNotice }: {
             return (
               <Card key={file.id} className="flex flex-wrap items-center justify-between gap-3">
                 <div className="flex min-w-0 flex-1 items-center gap-3">
-                  <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-slate-100 text-slate-500"><FileText className="h-5 w-5" /></span>
+                  <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-slate-100 text-slate-500">
+                    {file.source_kind === "link" ? <ExternalLink className="h-5 w-5" />
+                      : file.source_kind === "cdoc" ? <ScrollText className="h-5 w-5" />
+                        : file.source_kind && file.source_kind !== "upload" ? <Paperclip className="h-5 w-5" />
+                          : <FileText className="h-5 w-5" />}
+                  </span>
                   <div className="min-w-0">
                     <div className="flex flex-wrap items-center gap-2">
                       <span className="truncate font-bold text-[#07133B]">{file.title}</span>
@@ -926,11 +1002,24 @@ function Vault({ board, busy, run, reload, setNotice }: {
                           : <span className="inline-flex items-center gap-1 text-[11px] font-bold text-slate-300"><Unlock className="h-3 w-3" /> Open</span>}
                       {live.length > 0 && <span className="text-[11px] font-bold text-[#0A4FE8]">{live.length} live link{live.length === 1 ? "" : "s"}</span>}
                     </div>
-                    <p className="truncate text-xs text-slate-400">{file.file_name} · {formatBytes(file.file_size_bytes)}</p>
+                    <p className="truncate text-xs text-slate-400">
+                      {file.source_kind === "link" ? file.link_url
+                        : file.source_kind && file.source_kind !== "upload"
+                          ? `${SOURCE_LABELS[file.source_kind]} · opens where it lives`
+                          : `${file.file_name} · ${formatBytes(file.file_size_bytes)}`}
+                    </p>
                   </div>
                 </div>
                 <div className="flex shrink-0 gap-1">
-                  <a href={`/api/admin/executive-board/vault?file=${file.id}`} className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100" aria-label="Download"><Download className="h-4 w-4" /></a>
+                  <a
+                    href={`/api/admin/executive-board/vault?file=${file.id}`}
+                    target={file.source_kind && file.source_kind !== "upload" ? "_blank" : undefined}
+                    rel={file.source_kind && file.source_kind !== "upload" ? "noopener noreferrer" : undefined}
+                    className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100"
+                    aria-label={file.source_kind && file.source_kind !== "upload" ? "Open" : "Download"}
+                  >
+                    {file.source_kind && file.source_kind !== "upload" ? <ExternalLink className="h-4 w-4" /> : <Download className="h-4 w-4" />}
+                  </a>
                   <button type="button" onClick={() => setShare({ file_id: file.id, name: file.title, password: "", recipient_email: "", note: "", expires_in_days: "7", max_downloads: "" })} className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100" aria-label="Share"><Link2 className="h-4 w-4" /></button>
                   <button type="button" onClick={() => setFileDraft(file)} className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100" aria-label="Edit"><Pencil className="h-4 w-4" /></button>
                   <button type="button" onClick={() => run("/api/admin/executive-board/vault", { action: "delete_file", id: file.id }, "vault", "File removed.")} className="rounded-lg p-1.5 text-slate-400 hover:bg-rose-50 hover:text-rose-600" aria-label="Delete"><Trash2 className="h-4 w-4" /></button>
@@ -1001,12 +1090,127 @@ function Vault({ board, busy, run, reload, setNotice }: {
         </Modal>
       )}
 
+      {/* ----- Attach existing document, cDoc, or external link ----- */}
+      {attach && (
+        <Modal title="Attach document" onClose={() => setAttach(null)}>
+          <div className="space-y-3">
+            <div className="flex flex-wrap gap-1 rounded-xl border border-slate-200 p-1">
+              {([
+                ["cdoc", "cDoc", ScrollText],
+                ["protected_doc", "Protected doc", ShieldCheck],
+                ["legal_doc", "Legal", Landmark],
+                ["link", "External link", ExternalLink],
+              ] as const).map(([tab, label, Icon]) => (
+                <button
+                  key={tab}
+                  type="button"
+                  onClick={() => setAttach({ ...attach, tab, source_id: "", title: "" })}
+                  className={`inline-flex h-9 flex-1 items-center justify-center gap-1.5 rounded-lg px-2 text-xs font-bold ${attach.tab === tab ? "bg-[#0A4FE8] text-white" : "text-slate-600 hover:bg-slate-50"}`}
+                >
+                  <Icon className="h-3.5 w-3.5" /> {label}
+                </button>
+              ))}
+            </div>
+
+            {attach.tab === "link" ? (
+              <Field label="Document link">
+                <input
+                  className={inputClass}
+                  value={attach.link_url}
+                  onChange={(e) => setAttach({ ...attach, link_url: e.target.value })}
+                  placeholder="https://drive.google.com/file/..."
+                />
+                <p className="mt-1 text-xs text-slate-400">The vault keeps the link, not a copy, so it always opens the current version.</p>
+              </Field>
+            ) : (
+              <Field label="Choose a document">
+                <div className="relative">
+                  <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-300" />
+                  <input
+                    className={`${inputClass} pl-9`}
+                    value={attachSearch}
+                    onChange={(e) => setAttachSearch(e.target.value)}
+                    placeholder="Search by title"
+                  />
+                </div>
+                <div className="mt-2 max-h-56 space-y-1 overflow-y-auto rounded-xl border border-slate-200 p-1">
+                  {(() => {
+                    const rows = attach.tab === "cdoc" ? attachable?.cdocs
+                      : attach.tab === "protected_doc" ? attachable?.protectedDocs
+                        : attachable?.legalDocs;
+                    if (!rows) return <p className="px-2 py-3 text-xs text-slate-400">Loading documents.</p>;
+                    if (!rows.length) return <p className="px-2 py-3 text-xs text-slate-400">Nothing here yet to attach.</p>;
+                    return rows.map((row: any) => (
+                      <button
+                        key={row.id}
+                        type="button"
+                        onClick={() => setAttach({ ...attach, source_id: String(row.id), title: attach.title || row.title })}
+                        className={`flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm ${String(row.id) === attach.source_id ? "bg-[#0A4FE8]/10 text-[#07133B]" : "hover:bg-slate-50"}`}
+                      >
+                        <FileText className="h-4 w-4 shrink-0 text-slate-400" />
+                        <span className="min-w-0 flex-1">
+                          <span className="block truncate font-semibold">{row.title}</span>
+                          <span className="block truncate text-xs text-slate-400">
+                            {row.department || row.description || row.slug || ""}
+                          </span>
+                        </span>
+                        {String(row.id) === attach.source_id && <Check className="h-4 w-4 shrink-0 text-[#0A4FE8]" />}
+                      </button>
+                    ));
+                  })()}
+                </div>
+              </Field>
+            )}
+
+            <Field label="Title"><input className={inputClass} value={attach.title} onChange={(e) => setAttach({ ...attach, title: e.target.value })} placeholder="Shown in the vault" /></Field>
+            <Field label="Kind">
+              <select className={inputClass} value={attach.kind} onChange={(e) => setAttach({ ...attach, kind: e.target.value })}>
+                {VAULT_KINDS.map((k) => <option key={k} value={k}>{KIND_LABELS[k]}</option>)}
+              </select>
+            </Field>
+            <Field label="Description"><textarea rows={2} className={areaClass} value={attach.description} onChange={(e) => setAttach({ ...attach, description: e.target.value })} /></Field>
+            <Field label="Password (optional)">
+              <input type="password" className={inputClass} value={attach.password} onChange={(e) => setAttach({ ...attach, password: e.target.value })} placeholder="Needed to open this entry from a share link" />
+            </Field>
+            {folderId && <p className="text-xs text-slate-400">Attaching into {current?.name}.</p>}
+            {attach.tab !== "link" && (
+              <p className="text-xs text-slate-400">A document held inside CDS Space opens for signed-in staff. Share links cannot carry it out of the building, so use an uploaded copy or an external link for anyone outside.</p>
+            )}
+          </div>
+          <button
+            type="button"
+            onClick={doAttach}
+            disabled={attaching || (attach.tab === "link" ? !attach.link_url.trim() : !attach.source_id)}
+            className="mt-5 inline-flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-[#0A4FE8] text-sm font-bold text-white disabled:opacity-50"
+          >
+            {attaching ? <Loader2 className="h-4 w-4 animate-spin" /> : <Paperclip className="h-4 w-4" />} Attach
+          </button>
+        </Modal>
+      )}
+
       {/* ----- Upload modal ----- */}
       {upload && (
         <Modal title="Upload file" onClose={() => setUpload(null)}>
           <div className="space-y-3">
             <Field label="File">
-              <input type="file" onChange={(e) => { const chosen = e.target.files?.[0] || null; setUpload({ ...upload, file: chosen, title: upload.title || (chosen?.name ?? "") }); }} className="w-full text-sm" />
+              <label className="flex cursor-pointer items-center gap-3 rounded-xl border border-dashed border-slate-300 px-3 py-3 transition hover:border-[#0A4FE8] hover:bg-[#0A4FE8]/[0.03]">
+                <input
+                  type="file"
+                  className="sr-only"
+                  onChange={(e) => { const chosen = e.target.files?.[0] || null; setUpload({ ...upload, file: chosen, title: upload.title || (chosen?.name ?? "") }); }}
+                />
+                <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-[#0A4FE8]/10 text-[#0A4FE8]">
+                  <Upload className="h-4 w-4" />
+                </span>
+                <span className="min-w-0 flex-1">
+                  <span className="block text-sm font-semibold text-slate-700">
+                    {upload.file ? "Change file" : "Choose a file"}
+                  </span>
+                  <span className="block truncate text-xs text-slate-400">
+                    {upload.file ? `${upload.file.name} - ${formatBytes(upload.file.size)}` : "No file chosen yet"}
+                  </span>
+                </span>
+              </label>
             </Field>
             <Field label="Title"><input className={inputClass} value={upload.title} onChange={(e) => setUpload({ ...upload, title: e.target.value })} /></Field>
             <Field label="Kind">

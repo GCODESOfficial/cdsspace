@@ -53,7 +53,7 @@ async function loadBoard() {
     glashQuery<any>(`select * from public.executive_revenue_steps order by position asc, created_at asc limit 2000`),
     glashQuery<any>(`select * from public.executive_targets order by due_on asc nulls last, created_at desc limit 500`),
     glashQuery<any>(`select id, parent_id, name, description, password_hash, created_at from public.executive_vault_folders order by name asc limit 500`),
-    glashQuery<any>(`select id, folder_id, title, description, kind, file_name, file_mime, file_size_bytes, password_hash, created_at from public.executive_vault_files order by created_at desc limit 1000`),
+    glashQuery<any>(`select id, folder_id, title, description, kind, file_name, file_mime, file_size_bytes, password_hash, created_at, source_kind, source_id, link_url from public.executive_vault_files order by created_at desc limit 1000`),
     glashQuery<any>(`select * from public.executive_vault_shares order by created_at desc limit 500`),
   ]);
 

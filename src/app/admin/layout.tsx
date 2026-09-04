@@ -10,6 +10,7 @@ import { Loader2, Menu } from 'lucide-react';
 import AdminActivityLayer from '@/components/admin/AdminActivityLayer';
 import { DashboardAutoSave } from '@/components/autosave/DashboardAutoSave';
 import AdminNotificationBell from '@/components/notifications/admin-notification-bell';
+import { ViewAsProvider, useViewAs } from '@/components/admin/view-as';
 
 interface SessionData {
   authenticated: boolean;
@@ -17,7 +18,19 @@ interface SessionData {
   permissions: string[];
 }
 
+/**
+ * The provider sits outside the layout body so the body itself can read the
+ * preview and gate routes with it.
+ */
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
+  return (
+    <ViewAsProvider>
+      <AdminLayoutBody>{children}</AdminLayoutBody>
+    </ViewAsProvider>
+  );
+}
+
+function AdminLayoutBody({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const pathname = usePathname();
   const [isChecking, setIsChecking] = useState(true);
@@ -30,6 +43,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
   // Desktop rail starts collapsed by default; the user's choice is remembered.
   const [sidebarCollapsed, setSidebarCollapsed] = useState(true);
   const hasEstablishedSession = useRef(false);
+  const { viewingAs } = useViewAs();
 
   const isLoginPage = pathname === '/admin/login';
 
@@ -76,18 +90,25 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
         hasEstablishedSession.current = true;
         setIsAuthed(true);
 
+        // While a super admin previews another admin, the route guard answers
+        // with that person's permissions too. Otherwise the sidebar would hide
+        // a page the super admin could still open by typing the address, and
+        // the preview would not show what the other person actually reaches.
+        const effectiveRole = viewingAs ? "sub_admin" : data.role;
+        const effectivePermissions = viewingAs ? viewingAs.permissions : data.permissions;
+
         let routeDenied = false;
-        if (data.role !== "super_admin" && pathname !== "/admin") {
+        if (effectiveRole !== "super_admin" && pathname !== "/admin") {
           const requiredPerm = getPermissionForRoute(pathname || "");
 
           // Sub-admins page is super-admin only. `team_members.promote`
           // also unlocks role management for delegated admins.
           if (pathname === "/admin/sub-admins") {
             routeDenied = !(
-              data.permissions.includes("all") ||
-              data.permissions.includes("team_members.promote")
+              effectivePermissions.includes("all") ||
+              effectivePermissions.includes("team_members.promote")
             );
-          } else if (requiredPerm && !hasPermission(data.permissions, requiredPerm)) {
+          } else if (requiredPerm && !hasPermission(effectivePermissions, requiredPerm)) {
             routeDenied = true;
           }
         }
@@ -103,7 +124,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
     return () => {
       cancelled = true;
     };
-  }, [pathname, router, isLoginPage, authCheckVersion]);
+  }, [pathname, router, isLoginPage, authCheckVersion, viewingAs]);
 
   if (isChecking && !isAuthed) {
     return (
@@ -196,7 +217,11 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
                 </svg>
               </div>
               <h2 className="text-xl font-bold text-[#0D1B39] mb-2">Access Denied</h2>
-              <p className="text-gray-400 text-sm">You don&apos;t have permission to view this page.</p>
+              <p className="text-gray-400 text-sm">
+                {viewingAs
+                  ? `${viewingAs.name} cannot open this page. You are previewing their access, not your own.`
+                  : "You don't have permission to view this page."}
+              </p>
               <button
                 onClick={() => router.push("/admin")}
                 className="mt-6 px-5 py-2.5 bg-[#0A4FE8] text-white text-sm font-medium rounded-xl hover:bg-[#083EC0] transition"

@@ -131,6 +131,10 @@ export interface VaultFile {
   file_name: string;
   file_mime: string | null;
   file_size_bytes: number;
+  /** Where the content lives: an upload, a referenced document, or a link. */
+  source_kind: "upload" | "cdoc" | "protected_doc" | "legal_doc" | "link";
+  source_id: string | null;
+  link_url: string | null;
   has_password: boolean;
   /** True when the file has no password of its own but its folder does. */
   inherits_password: boolean;

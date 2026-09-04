@@ -8,8 +8,29 @@ type SavedField = { value: string; checked?: boolean };
 const FIELD_SELECTOR = "input, textarea, select";
 const SENSITIVE = /(password|passcode|otp|token|secret|card|cvv|cvc|pin|bank|account.?number)/i;
 
+// Anything that opens on top of the page: a modal, drawer, sheet or popover.
+// These are where "new X" forms live, and a new form always opens blank, so
+// this safety net must neither read from them nor write into them.
+const OVERLAY_SELECTOR = [
+  '[role="dialog"]',
+  '[role="alertdialog"]',
+  '[aria-modal="true"]',
+  "dialog",
+  ".layer-modal",
+  ".layer-overlay",
+  ".layer-popover",
+  "[data-overlay]",
+  "[data-modal]",
+].join(", ");
+
+// A page can still be fetching when it mounts, so restoring has to survive a
+// late first paint. It must not survive long enough to catch a form the user
+// opens deliberately: that is a new document, and it starts empty.
+const RESTORE_WINDOW_MS = 3000;
+
 function eligible(element: HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement) {
   if (element.closest('[data-autosave="off"]')) return false;
+  if (element.closest(OVERLAY_SELECTOR)) return false;
   if (element instanceof HTMLInputElement && ["password", "file", "hidden", "submit", "button", "reset"].includes(element.type)) return false;
   const identity = [element.name, element.id, element.getAttribute("autocomplete"), element.getAttribute("aria-label")].filter(Boolean).join(" ");
   return !SENSITIVE.test(identity);
@@ -45,11 +66,18 @@ export function DashboardAutoSave({ scope }: { scope: "client" | "team" | "admin
     const storageKey = `cds.dashboard.autosave.v1:${scope}:${pathname}`;
     let saveTimer = 0;
 
+    // One restore per arrival on the page. Once the page has painted its own
+    // fields the safety net is done; everything that appears afterwards is
+    // something the user opened, and that starts empty.
+    let restored = false;
+
     const restore = () => {
+      if (restored) return;
       let saved: Record<string, SavedField> = {};
       try { saved = JSON.parse(window.localStorage.getItem(storageKey) || "{}"); } catch { saved = {}; }
       const currentFields = fields();
       if (!currentFields.length) return;
+      restored = true;
       currentFields.forEach((element, index) => {
         if (element.dataset.autosaveRestored === storageKey) return;
         const entry = saved[keyFor(element, index)];
@@ -79,7 +107,20 @@ export function DashboardAutoSave({ scope }: { scope: "client" | "team" | "admin
       }, 500);
     };
 
-    const observer = new MutationObserver(() => window.setTimeout(restore, 50));
+    // Restoring is tied to arriving on the page, not to the DOM changing later.
+    // Watching every mutation meant that opening a "New revenue model" or "New
+    // invoice" form refilled it with the last thing typed on that page, which
+    // is the opposite of what a new document should do.
+    const openedAt = Date.now();
+    const observer = new MutationObserver(() => {
+      // Stop watching as soon as the page has been restored, or once the grace
+      // period for a slow first paint has passed.
+      if (restored || Date.now() - openedAt > RESTORE_WINDOW_MS) {
+        observer.disconnect();
+        return;
+      }
+      window.setTimeout(restore, 50);
+    });
     observer.observe(document.body, { childList: true, subtree: true });
     const restoreTimer = window.setTimeout(restore, 250);
     document.addEventListener("input", save, true);

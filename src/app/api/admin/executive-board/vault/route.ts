@@ -28,6 +28,40 @@ function safeName(name: string) {
   return (name || "file").replace(/[^a-zA-Z0-9._-]+/g, "_").slice(0, 120);
 }
 
+/** Only http and https links are stored, and never a private network address. */
+function externalLink(value: unknown) {
+  const input = str(value, 2000);
+  if (!input) return "";
+  try {
+    const url = new URL(/^https?:\/\//i.test(input) ? input : `https://${input}`);
+    if (!["http:", "https:"].includes(url.protocol)) return "";
+    const host = url.hostname.toLowerCase();
+    if (host === "localhost" || host.endsWith(".local") || /^(10\.|127\.|192\.168\.|169\.254\.|172\.(1[6-9]|2\d|3[01])\.)/.test(host)) return "";
+    return url.toString();
+  } catch {
+    return "";
+  }
+}
+
+const SOURCE_KINDS = ["cdoc", "protected_doc", "legal_doc", "link"] as const;
+
+/** Where a referenced document actually lives, and what to call it. */
+async function resolveSource(sourceKind: string, sourceId: string) {
+  if (sourceKind === "cdoc") {
+    const row = await glashMaybeOne<any>(`select id, title, slug from public.team_cdocs where id=$1 and is_archived is not true`, [sourceId]);
+    return row ? { title: row.title, name: `${row.title}.cdoc`, mime: "text/html", url: `/team/cdocs/${row.id}` } : null;
+  }
+  if (sourceKind === "protected_doc") {
+    const row = await glashMaybeOne<any>(`select id, title, file_url, file_mime, file_size_bytes from public.team_protected_documents where id=$1`, [sourceId]);
+    return row ? { title: row.title, name: row.title, mime: row.file_mime || null, url: row.file_url || `/team/protect-docs`, size: Number(row.file_size_bytes) || 0 } : null;
+  }
+  if (sourceKind === "legal_doc") {
+    const row = await glashMaybeOne<any>(`select id, title, slug from public.legal_documents where id::text=$1`, [sourceId]);
+    return row ? { title: row.title, name: row.title, mime: "text/html", url: `/legal/${row.slug}` } : null;
+  }
+  return null;
+}
+
 function siteUrl() {
   return (process.env.NEXT_PUBLIC_SITE_URL || "https://cdsspace.pro").replace(/\/$/, "");
 }
@@ -123,6 +157,69 @@ export async function POST(req: NextRequest) {
   const actor = session.email;
 
   try {
+    if (action === "attach_document") {
+      const sourceKind = str(body.source_kind, 20);
+      if (!(SOURCE_KINDS as readonly string[]).includes(sourceKind)) {
+        return NextResponse.json({ ok: false, error: "Choose a document or a link to attach." }, { status: 400 });
+      }
+      const kind = str(body.kind, 40);
+      const password = str(body.password, 200);
+      const folderId = uuid(body.folder_id) || null;
+
+      let title = str(body.title, 200);
+      let sourceId: string | null = null;
+      let linkUrl: string | null = null;
+      let fileName: string | null = null;
+      let fileMime: string | null = null;
+      let fileSize = 0;
+
+      if (sourceKind === "link") {
+        linkUrl = externalLink(body.link_url);
+        if (!linkUrl) return NextResponse.json({ ok: false, error: "Enter a valid public http or https link." }, { status: 400 });
+        title = title || new URL(linkUrl).hostname;
+        fileName = title;
+      } else {
+        sourceId = uuid(body.source_id);
+        if (!sourceId) return NextResponse.json({ ok: false, error: "Choose a document to attach." }, { status: 400 });
+        const resolved = await resolveSource(sourceKind, sourceId);
+        if (!resolved) return NextResponse.json({ ok: false, error: "That document could not be found." }, { status: 404 });
+        title = title || resolved.title;
+        fileName = resolved.name;
+        fileMime = resolved.mime;
+        fileSize = (resolved as any).size || 0;
+      }
+
+      const row = await glashMaybeOne<any>(
+        `insert into public.executive_vault_files
+           (folder_id,title,description,kind,source_kind,source_id,link_url,storage_path,file_name,file_mime,file_size_bytes,password_hash,created_by)
+         values ($1,$2,$3,$4,$5,$6,$7,null,$8,$9,$10,$11,$12) returning id`,
+        [
+          folderId,
+          title,
+          str(body.description, 2000) || null,
+          (VAULT_KINDS as readonly string[]).includes(kind) ? kind : "attachment",
+          sourceKind,
+          sourceId,
+          linkUrl,
+          fileName,
+          fileMime,
+          fileSize,
+          password ? await hashDocPassword(password) : null,
+          actor,
+        ],
+      );
+
+      await logActivity({
+        action: "executive_board.vault.attach",
+        page: "executive-board/vault",
+        resource_type: "executive_vault_file",
+        resource_id: row?.id,
+        resource_label: title,
+        metadata: { source_kind: sourceKind, protected: !!password },
+      });
+      return NextResponse.json({ ok: true, id: row?.id }, { status: 201 });
+    }
+
     if (action === "save_folder") {
       const id = uuid(body.id);
       const name = str(body.name, 160);
@@ -336,14 +433,52 @@ export async function POST(req: NextRequest) {
 export async function GET(req: NextRequest) {
   const { denied } = await requireAdmin(req, "executive_board.vault_view");
   if (denied) return denied;
-  const id = uuid(new URL(req.url).searchParams.get("file"));
+  const params = new URL(req.url).searchParams;
+
+  // The picker: everything already in the system that can be attached.
+  if (str(params.get("resource"), 40) === "attachable") {
+    const search = str(params.get("q"), 120);
+    const like = `%${search}%`;
+    const [cdocs, protectedDocs, legalDocs] = await Promise.all([
+      glashQuery<any>(
+        `select id, title, department, updated_at from public.team_cdocs
+         where is_archived is not true ${search ? "and title ilike $1" : ""}
+         order by updated_at desc nulls last limit 60`,
+        search ? [like] : [],
+      ),
+      glashQuery<any>(
+        `select id, title, description, file_mime, file_size_bytes, created_at from public.team_protected_documents
+         ${search ? "where title ilike $1" : ""}
+         order by created_at desc limit 60`,
+        search ? [like] : [],
+      ),
+      glashQuery<any>(
+        `select id, title, slug, updated_at from public.legal_documents
+         ${search ? "where title ilike $1" : ""}
+         order by updated_at desc nulls last limit 60`,
+        search ? [like] : [],
+      ),
+    ]);
+    return NextResponse.json({ ok: true, cdocs, protectedDocs, legalDocs });
+  }
+
+  const id = uuid(params.get("file"));
   if (!id) return NextResponse.json({ ok: false, error: "File is invalid." }, { status: 400 });
 
   const file = await glashMaybeOne<any>(
-    `select storage_path, file_name, file_mime from public.executive_vault_files where id=$1`,
+    `select storage_path, file_name, file_mime, source_kind, source_id, link_url from public.executive_vault_files where id=$1`,
     [id],
   );
   if (!file) return NextResponse.json({ ok: false, error: "File not found." }, { status: 404 });
+
+  // An attached entry is a reference, not a copy, so opening it sends the reader
+  // to where the document actually lives rather than serving stale bytes.
+  if (file.source_kind && file.source_kind !== "upload") {
+    if (file.source_kind === "link" && file.link_url) return NextResponse.redirect(file.link_url);
+    const resolved = file.source_id ? await resolveSource(file.source_kind, file.source_id) : null;
+    if (!resolved) return NextResponse.json({ ok: false, error: "The attached document is no longer available." }, { status: 404 });
+    return NextResponse.redirect(resolved.url.startsWith("http") ? resolved.url : `${siteUrl()}${resolved.url}`);
+  }
 
   const storage = (getSupabaseAdmin() as any).storage;
   const { data, error } = await storage.from(BUCKET).download(file.storage_path);

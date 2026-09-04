@@ -4,43 +4,78 @@ import { useEffect } from "react";
 import { appToast } from "@/lib/app-notify";
 
 /**
- * Blanket "that went through" confirmation for database writes.
+ * Confirmation for the handful of writes that are a milestone for the user.
  *
- * Every mutating call to our own API is confirmed to the user, so no write
- * lands silently. This is a safety net, not a replacement: a screen that
- * already reports its own result keeps doing so, and the fallback stays quiet
- * (see `alreadyAnnounced`), because two popups for one action is worse than
- * none.
+ * This used to confirm every mutating call to our own API and stay quiet for a
+ * denylist. That inverted the cost: a chat message, a reaction, a read receipt
+ * and a filter change all read as "Done. Saved.", so the confirmation stopped
+ * carrying information. It is now an allowlist: submitting a form, creating a
+ * project, adding a team member - the completions worth interrupting for. A
+ * screen that reports its own result still wins (see `alreadyAnnounced`).
  *
- * Patching fetch is deliberate. The alternative is editing every mutation call
- * site in the app and re-editing each new one, which is exactly the kind of
- * coverage gap that left writes unconfirmed in the first place.
+ * Patching fetch is still deliberate: it keeps the rule in one readable list
+ * instead of scattered across call sites.
  */
-
-const WRITE_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
 
 /**
- * Endpoints that write but are not a user-initiated task. Confirming these
- * would fire popups at the user for things they never asked for.
+ * Surfaces that never warrant a floating confirmation, whatever they call.
+ * Conversation and meeting screens are continuous activity - the message
+ * appearing in the thread IS the confirmation.
  */
-const QUIET_PATHS = [
-  "/api/auth",            // sign in and out already navigate
-  "/api/geo",
-  "/api/currency",
-  "/api/analytics",
-  "/api/track",
-  "/api/proposals",       // view tracking on public links
-  "/api/translate",
-  "/api/notifications",   // background polling
-  "/api/cron",
-  "/api/cmeet",           // signaling: every ICE candidate is a POST
-  "/api/upload",          // uploads report their own progress
-  "/api/admin/executive-board/vault", // upload and share flows report inline
+const QUIET_SURFACES = [
+  "/chat",
+  "/messages",
+  "/cmeet",
+  "/meetings",
+  "/notifications",
 ];
 
 /**
- * Header a caller can set to stay silent. For writes the user did not ask for -
- * autosave being the obvious one - where a confirmation is pure noise.
+ * The writes worth confirming, by API path prefix. Everything not listed here
+ * stays silent, so adding a new endpoint is an explicit decision rather than
+ * an accident. `methods` defaults to POST alone: creating and submitting are
+ * the milestone, editing a field of something that already exists is not.
+ */
+type MajorWrite = { prefix: string; methods?: string[]; wording?: string };
+
+const MAJOR_WRITES: MajorWrite[] = [
+  // Submissions from clients and the public.
+  { prefix: "/api/consultation", wording: "Your request has been submitted." },
+  { prefix: "/api/career/apply", wording: "Application submitted." },
+  { prefix: "/api/forms/applications", wording: "Application submitted." },
+  { prefix: "/api/requests", wording: "Request submitted." },
+  { prefix: "/api/submit", wording: "Submitted." },
+  { prefix: "/api/client/brand-brief", wording: "Brief submitted." },
+  { prefix: "/api/brand-brief", wording: "Brief submitted." },
+  { prefix: "/api/csign", wording: "Document signed." },
+  { prefix: "/api/subscription", wording: "Subscription confirmed." },
+
+  // Projects and the work that hangs off them.
+  { prefix: "/api/admin/finance/projects", methods: ["POST", "DELETE"], wording: "Project created." },
+  { prefix: "/api/admin/brand-briefs", wording: "Created." },
+  { prefix: "/api/create/projects", wording: "Project created." },
+
+  // People: team members, contractors, admins, clients.
+  { prefix: "/api/admin/team-members", methods: ["POST", "DELETE"], wording: "Team member added." },
+  { prefix: "/api/admin/team-invites", wording: "Invitation sent." },
+  { prefix: "/api/admin/sub-admins/invite", wording: "Invitation sent." },
+  { prefix: "/api/admin/finance/contractor-invites", wording: "Invitation sent." },
+  { prefix: "/api/admin/finance/contractors", methods: ["POST", "DELETE"], wording: "Contractor added." },
+  { prefix: "/api/admin/clients", methods: ["POST", "DELETE"], wording: "Client created." },
+  { prefix: "/api/admin/departments", methods: ["POST", "DELETE"], wording: "Department created." },
+  { prefix: "/api/admin/roles", methods: ["POST", "DELETE"], wording: "Role created." },
+
+  // Money.
+  { prefix: "/api/admin/finance/invoices", wording: "Invoice created." },
+  { prefix: "/api/admin/finance/quotations", wording: "Quotation created." },
+  { prefix: "/api/admin/finance/payroll/runs", wording: "Payroll run created." },
+  { prefix: "/api/finance/invoice", wording: "Payment submitted." },
+  { prefix: "/api/admin/orders", methods: ["POST", "DELETE"], wording: "Order created." },
+];
+
+/**
+ * Header a caller can set to stay silent, for a write the user did not ask for
+ * - autosave being the obvious one - where a confirmation is pure noise.
  */
 const SILENT_HEADER = "x-cds-silent";
 
@@ -51,45 +86,28 @@ const SILENT_HEADER = "x-cds-silent";
  */
 const COMMIT_WINDOW_MS = 4000;
 
-const BRIDGE_PATH = "/api/glashdb/query";
-const BRIDGE_WRITES = new Set(["insert", "update", "upsert", "delete"]);
-
-/**
- * The browser query bridge is a POST whether it reads or writes, so the action
- * has to come from the body. Only a string body is inspected: a streamed one
- * cannot be read here without consuming the request the caller is about to send.
- */
-function bridgeAction(init?: RequestInit): string | null {
-  if (typeof init?.body !== "string") return null;
-  try {
-    const parsed = JSON.parse(init.body) as { action?: unknown };
-    return typeof parsed.action === "string" ? parsed.action : null;
-  } catch {
-    return null;
-  }
+/** The page the user is looking at, not the endpoint being called. */
+function onQuietSurface() {
+  const here = window.location.pathname;
+  return QUIET_SURFACES.some(
+    (surface) => here === surface || here.includes(`${surface}/`) || here.endsWith(surface),
+  );
 }
 
-/** Wording for the surfaces we can name from the path alone. */
-function describe(path: string, method: string) {
-  if (method === "DELETE") return "Deleted.";
-  if (path.includes("/consultation")) return "Your request has been submitted.";
-  if (path.includes("/brand-brief")) return "Brief saved.";
-  if (path.includes("/booking")) return "Session request submitted.";
-  return "Saved.";
-}
-
-function isOurWrite(url: string, method: string) {
-  if (!WRITE_METHODS.has(method)) return false;
+/** The matching rule for this call, or null when the write is not a milestone. */
+function majorWrite(url: string, method: string): MajorWrite | null {
   let path: string;
   try {
     const parsed = new URL(url, window.location.origin);
-    if (parsed.origin !== window.location.origin) return false;
+    if (parsed.origin !== window.location.origin) return null;
     path = parsed.pathname;
   } catch {
-    return false;
+    return null;
   }
-  if (!path.startsWith("/api/")) return false;
-  return !QUIET_PATHS.some((quiet) => path.startsWith(quiet));
+  const rule = MAJOR_WRITES.find((candidate) => path.startsWith(candidate.prefix));
+  if (!rule) return null;
+  const allowed = rule.methods ?? ["POST"];
+  return allowed.includes(method) ? rule : null;
 }
 
 /**
@@ -132,28 +150,22 @@ export function WriteConfirmations() {
       ).toUpperCase();
       const url = input instanceof Request ? input.url : String(input);
 
-      let path = "";
-      try { path = new URL(url, window.location.origin).pathname; } catch { path = ""; }
-
-      // Decide before awaiting: a string body is safe to read, but only now.
-      const bridge = path === BRIDGE_PATH ? bridgeAction(init) : null;
-      const silent = askedForSilence(input, init);
+      // Decide before awaiting: the surface can change while the call is in
+      // flight, and the header set is cheapest to read now.
+      const rule = majorWrite(url, method);
+      const silent = askedForSilence(input, init) || onQuietSurface();
       const userAsked = Date.now() - lastCommit <= COMMIT_WINDOW_MS;
 
       const response = await native(input, init);
 
-      const confirmable = path === BRIDGE_PATH
-        ? Boolean(bridge && BRIDGE_WRITES.has(bridge))
-        : isOurWrite(url, method);
-
-      // Quiet unless the user committed to this, is here to see it, and did
-      // not opt out. Otherwise the safety net becomes the noise.
-      if (response.ok && confirmable && userAsked && !silent && !document.hidden) {
+      // Quiet unless this is a milestone the user committed to and is here to
+      // see. Otherwise the safety net becomes the noise.
+      if (response.ok && rule && userAsked && !silent && !document.hidden) {
         // Let the caller render its own result first; only speak up if nothing did.
         window.setTimeout(() => {
           if (alreadyAnnounced()) return;
           try {
-            const wording = bridge === "delete" ? "Deleted." : describe(path, method);
+            const wording = method === "DELETE" ? "Deleted." : rule.wording || "Saved.";
             appToast({ kind: "success", title: "Done", message: wording });
           } catch {
             // A confirmation must never break the request it is confirming.

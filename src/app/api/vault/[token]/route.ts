@@ -168,7 +168,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ tok
   if (!uuidish(String(fileId))) return NextResponse.json({ ok: false, error: GONE }, { status: 404 });
 
   const file = await glashMaybeOne<any>(
-    `select id, folder_id, storage_path, file_name, file_mime, password_hash
+    `select id, folder_id, storage_path, file_name, file_mime, password_hash, source_kind, link_url
        from public.executive_vault_files where id=$1`,
     [fileId],
   );
@@ -180,6 +180,21 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ tok
   // A file inside a shared folder may set its own, stricter password.
   if (share.folder_id && file.password_hash && !(await verifyDocPassword(password, file.password_hash))) {
     return NextResponse.json({ ok: false, error: "That file has its own password." }, { status: 401 });
+  }
+
+  // An entry that only references a document elsewhere has no bytes to send.
+  // An external link is handed on; an internal document is not, because the
+  // recipient of a share link has no account here and a redirect would only
+  // expose an internal address they cannot open.
+  if (file.source_kind && file.source_kind !== "upload") {
+    if (file.source_kind === "link" && file.link_url) {
+      await glashQuery(`update public.executive_vault_shares set download_count=download_count+1 where id=$1`, [share.id]);
+      return NextResponse.redirect(file.link_url);
+    }
+    return NextResponse.json({
+      ok: false,
+      error: "This item is a reference to a document held inside CDS Space and cannot be opened from a share link. Ask the sender for the document itself.",
+    }, { status: 409 });
   }
 
   const storage = (getSupabaseAdmin() as any).storage;

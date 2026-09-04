@@ -6,6 +6,8 @@ import Image from "next/image";
 import { usePathname, useRouter } from "next/navigation";
 import { useAdminSession } from "@/hooks/use-admin-session";
 import { hasPermission } from "@/lib/admin-permissions";
+import { useViewAs } from "@/components/admin/view-as";
+import ViewAsPicker from "@/components/admin/ViewAsPicker";
 import { AnimatePresence, motion } from "framer-motion";
 import {
   Activity,
@@ -24,6 +26,7 @@ import {
   Target,
   Lock,
   ChevronDown,
+  Eye,
   Briefcase,
   Tag,
   FileText,
@@ -368,8 +371,13 @@ export default function AdminSidebar({ mobileOpen = false, onMobileClose, collap
   const newestUnreadAt = useRef<string | null>(null);
   const unreadRequestActive = useRef(false);
 
-  const permissions = session?.permissions || [];
-  const isSuperAdmin = session?.role === "super_admin";
+  const { viewingAs, setViewingAs } = useViewAs();
+  const [viewAsOpen, setViewAsOpen] = useState(false);
+  const realSuperAdmin = session?.role === "super_admin";
+  // While previewing, the sidebar is drawn from the other person's permissions
+  // and drops super admin status, so it shows exactly what they would see.
+  const permissions = viewingAs ? viewingAs.permissions : (session?.permissions || []);
+  const isSuperAdmin = realSuperAdmin && !viewingAs;
   const canViewClientMessages = isSuperAdmin || hasPermission(permissions, "messages");
 
   useEffect(() => {
@@ -540,22 +548,67 @@ export default function AdminSidebar({ mobileOpen = false, onMobileClose, collap
 
       {session && !isCollapsed && (
         <div className={mobile ? "px-4 pb-4 pt-4" : "px-6 pb-4"}>
-          <div className="inline-flex max-w-full items-center gap-1.5 rounded-lg bg-blue-50 px-3 py-1.5 text-[11px] font-semibold text-[#0A4FE8] ring-1 ring-blue-100">
-            <ShieldCheck className="w-3 h-3" />
-            <span className="truncate">{isSuperAdmin ? "CDS Space Super Admin" : session.name}</span>
-          </div>
+          {/* Only a real super admin can open the picker. For everyone else the
+              badge stays the plain label it has always been. */}
+          {realSuperAdmin ? (
+            <div className="space-y-1.5">
+              <button
+                type="button"
+                onClick={() => setViewAsOpen(true)}
+                title={viewingAs ? `Viewing as ${viewingAs.name}. Click to change or exit.` : "View the dashboard as another admin"}
+                className={`inline-flex max-w-full items-center gap-1.5 rounded-lg px-3 py-1.5 text-[11px] font-semibold ring-1 transition ${
+                  viewingAs
+                    ? "bg-amber-50 text-amber-700 ring-amber-200 hover:bg-amber-100"
+                    : "bg-blue-50 text-[#0A4FE8] ring-blue-100 hover:bg-blue-100"
+                }`}
+              >
+                {viewingAs ? <Eye className="w-3 h-3 shrink-0" /> : <ShieldCheck className="w-3 h-3 shrink-0" />}
+                <span className="truncate">{viewingAs ? `Viewing as ${viewingAs.name}` : "CDS Space Super Admin"}</span>
+                <ChevronDown className="w-3 h-3 shrink-0 opacity-70" />
+              </button>
+              {viewingAs && (
+                <button
+                  type="button"
+                  onClick={() => setViewingAs(null)}
+                  className="block text-[10.5px] font-bold text-[#0A4FE8] hover:underline"
+                >
+                  Back to super admin
+                </button>
+              )}
+            </div>
+          ) : (
+            <div className="inline-flex max-w-full items-center gap-1.5 rounded-lg bg-blue-50 px-3 py-1.5 text-[11px] font-semibold text-[#0A4FE8] ring-1 ring-blue-100">
+              <ShieldCheck className="w-3 h-3" />
+              <span className="truncate">{session.name}</span>
+            </div>
+          )}
         </div>
       )}
       {session && isCollapsed && (
         <div className="px-2 pb-3 pt-3 flex justify-center">
-          <div
-            className="flex h-9 w-9 items-center justify-center rounded-lg bg-blue-50 text-[#0A4FE8] ring-1 ring-blue-100"
-            title={isSuperAdmin ? "CDS Space Super Admin" : session.name}
-          >
-            <ShieldCheck className="w-4 h-4" />
-          </div>
+          {realSuperAdmin ? (
+            <button
+              type="button"
+              onClick={() => setViewAsOpen(true)}
+              className={`flex h-9 w-9 items-center justify-center rounded-lg ring-1 transition ${
+                viewingAs ? "bg-amber-50 text-amber-700 ring-amber-200" : "bg-blue-50 text-[#0A4FE8] ring-blue-100"
+              }`}
+              title={viewingAs ? `Viewing as ${viewingAs.name}` : "CDS Space Super Admin"}
+              aria-label={viewingAs ? `Viewing as ${viewingAs.name}` : "View as another admin"}
+            >
+              {viewingAs ? <Eye className="w-4 h-4" /> : <ShieldCheck className="w-4 h-4" />}
+            </button>
+          ) : (
+            <div
+              className="flex h-9 w-9 items-center justify-center rounded-lg bg-blue-50 text-[#0A4FE8] ring-1 ring-blue-100"
+              title={session.name}
+            >
+              <ShieldCheck className="w-4 h-4" />
+            </div>
+          )}
         </div>
       )}
+      {viewAsOpen && <ViewAsPicker onClose={() => setViewAsOpen(false)} />}
 
       <nav
         ref={mobile ? undefined : desktopNavRef}
