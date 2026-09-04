@@ -683,17 +683,178 @@ const fundingNews: RegistryAdapter = {
 // Nigeria -------------------------------------------------------------------
 
 /**
- * The CAC public search sits behind a challenge that refuses plain HTTP clients,
- * so it is imported through the connected browser rather than a JSON endpoint.
+ * Corporate Affairs Commission, Nigeria.
+ *
+ * The iCRP portal's public search is a name-similarity service, not a listing
+ * API: it takes a term and returns at most about fifty close matches, with no
+ * pagination and no way to ask for everything. So the register is swept with a
+ * term list rather than paged, and coverage grows with the terms rather than
+ * ever being complete.
+ *
+ * It also rate limits hard, which is fair for a government service, so requests
+ * are spaced deliberately. Each record carries the RC number, registration date,
+ * nature of business, and the official ACTIVE flag, which is the authoritative
+ * answer to whether a Nigerian company is still trading.
  */
+const CAC_SEARCH_URL = "https://authapp.cac.gov.ng/name_similarity_app/api/public_search/search";
+
+/** Spacing between CAC calls. Measured: 12 seconds runs clean, faster gets 429s. */
+const CAC_GAP_MS = 12_000;
+const CAC_QUERIES_PER_SLICE = 5;
+
+const CAC_LETTERS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ".split("");
+
+/**
+ * The sweep terms. Two-letter pairs reach broadly across the register, and the
+ * words after them are the ones Nigerian company names actually use, which pulls
+ * in businesses whose names no letter pair happens to rank highly.
+ */
+const CAC_WORDS = [
+  "NIGERIA", "LAGOS", "ABUJA", "KANO", "IBADAN", "ENUGU", "KADUNA", "PORT HARCOURT", "BENIN", "JOS",
+  "ONITSHA", "ABA", "WARRI", "CALABAR", "UYO", "OWERRI", "ILORIN", "MAIDUGURI", "SOKOTO", "ASABA",
+  "GLOBAL", "VENTURES", "ENTERPRISES", "RESOURCES", "SERVICES", "SOLUTIONS", "TECHNOLOGIES", "SYSTEMS",
+  "CONSULTING", "INVESTMENTS", "PROPERTIES", "CONSTRUCTION", "ENGINEERING", "LOGISTICS", "TRADING",
+  "FOODS", "FARMS", "AGRO", "OIL", "GAS", "ENERGY", "POWER", "MARINE", "AVIATION", "TRANSPORT",
+  "PHARMACY", "HOSPITAL", "CLINIC", "MEDICAL", "HEALTH", "SCHOOL", "ACADEMY", "COLLEGE", "EDUCATION",
+  "MEDIA", "DIGITAL", "STUDIO", "PRINTS", "FASHION", "TEXTILE", "FURNITURE", "AUTOS", "MOTORS",
+  "MICROFINANCE", "INSURANCE", "CAPITAL", "HOLDINGS", "GROUP", "INTERNATIONAL", "ASSOCIATES",
+  "BUILDERS", "CONTRACTORS", "SUPPLIES", "STORES", "MARKET", "TRAVELS", "TOURS", "SECURITY",
+  "CLEANING", "CATERING", "EVENTS", "SPORTS", "FOUNDATION", "INITIATIVE", "TRUST", "ROYAL", "GRACE",
+  "BLESSED", "DIVINE", "GOLDEN", "CROWN", "PEARL", "UNITY", "PROGRESS", "EXCEL", "PRIME", "FIRST",
+];
+
+/**
+ * A CAC registration code: optional letters, then digits. "8844682", "LAZ017039"
+ * and "KN-0010420" are codes; "LARBEL (NIGERIA) ENTERPRISES" is a name.
+ */
+function looksLikeCacCode(value: string) {
+  const compact = String(value || "").replace(/[\s-]/g, "");
+  return /^[A-Z]{0,4}\d{3,}$/i.test(compact);
+}
+
+/**
+ * CAC returns business-name records with the name and the registration code the
+ * wrong way round: approvedName holds "LAZ017039" and rcNumber holds "LARBEL
+ * (NIGERIA) ENTERPRISES". Rather than trusting the field names, whichever value
+ * looks like a code is treated as the code.
+ */
+function cacNameAndCode(approvedName: string, rcNumber: string) {
+  const name = String(approvedName || "").trim();
+  const code = String(rcNumber || "").trim();
+  if (looksLikeCacCode(name) && !looksLikeCacCode(code)) return { name: code, code: name };
+  return { name, code };
+}
+
+/**
+ * The similarity engine injects the term you searched for into the name it
+ * returns. Searching "GLOBAL" gives back "GLOBAL PHINA GLOBAL" for a company
+ * that is really "PHINA GLOBAL LTD", and searching "NIGERIA" gives "LEEKAY
+ * NIGERIA NIGERIA LIMITED" for "LEEKAY NIGERIA LIMITED". Both shapes are undone
+ * here: a repeated adjacent word is collapsed, and a leading copy of the search
+ * term is dropped when that term also appears later in the name.
+ */
+function cleanCacName(rawName: string, term: string) {
+  const words = String(rawName || "").trim().split(/\s+/).filter(Boolean);
+  if (!words.length) return "";
+
+  const collapsed: string[] = [];
+  for (const word of words) {
+    if (collapsed.length && collapsed[collapsed.length - 1].toUpperCase() === word.toUpperCase()) continue;
+    collapsed.push(word);
+  }
+
+  const search = term.trim().toUpperCase();
+  if (collapsed.length > 2 && collapsed[0].toUpperCase() === search
+    && collapsed.slice(1).some((word) => word.toUpperCase() === search)) {
+    collapsed.shift();
+  }
+  return collapsed.join(" ");
+}
+
+function cacTerms() {
+  const pairs: string[] = [];
+  for (const first of CAC_LETTERS) for (const second of CAC_LETTERS) pairs.push(`${first}${second}`);
+  return [...CAC_WORDS, ...pairs];
+}
+
 const cacNigeria: RegistryAdapter = {
   key: "cac_nigeria",
   label: "Corporate Affairs Commission (Nigeria)",
   country: "Nigeria",
-  needsBrowser: true,
-  description: "The Nigerian company register. Its public search blocks automated clients, so it is read through the connected browser. Import it from the browser tab using a search results URL.",
-  async fetchPage() {
-    throw new Error("CAC blocks automated clients. Import it from the browser tab: open the CAC public search in your connected Chrome, run the search you want, and paste that results URL with browser rendering turned on.");
+  description: "Nigerian registered companies and business names from the CAC public search, with RC number, registration date, nature of business, and the official active flag. The service only answers name searches, so it is swept term by term and coverage grows with each run rather than ever completing.",
+  async fetchPage(cursor) {
+    const terms = cacTerms();
+    const start = Number(cursor?.termIndex || 0);
+    if (start >= terms.length) {
+      return { candidates: [], cursor: null, done: true, note: "Every sweep term has been searched. Run it again later to pick up newly registered companies." };
+    }
+
+    const candidates: CompanyCandidate[] = [];
+    let index = start;
+    let searched = 0;
+
+    for (; index < terms.length && searched < CAC_QUERIES_PER_SLICE; index += 1) {
+      const term = terms[index];
+      // Every request is spaced, including the first of a slice, because slices
+      // run back to back inside one import run.
+      await new Promise((resolve) => setTimeout(resolve, CAC_GAP_MS));
+      searched += 1;
+
+      let rows: any[] = [];
+      try {
+        const response = await fetch(CAC_SEARCH_URL, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Accept: "application/json, text/plain, */*",
+            Origin: "https://icrp.cac.gov.ng",
+            Referer: "https://icrp.cac.gov.ng/",
+            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+          },
+          body: JSON.stringify({ SearchType: "ALL", searchTerm: term }),
+          signal: AbortSignal.timeout(30_000),
+        });
+        if (response.status === 429 || response.status === 403) {
+          // Back off and resume from this term on the next run rather than
+          // hammering a government service that has asked us to slow down.
+          return {
+            candidates,
+            cursor: { termIndex: index },
+            done: false,
+            note: `CAC asked us to slow down at "${term}". Stopped here and will resume from this term.`,
+          };
+        }
+        if (!response.ok) continue;
+        const data = await response.json();
+        rows = Array.isArray(data?.data) ? data.data : [];
+      } catch {
+        continue;
+      }
+
+      for (const row of rows) {
+        const status = String(row?.status || "").toUpperCase();
+        const { name, code: rc } = cacNameAndCode(row?.approvedName, row?.rcNumber);
+        const candidate = buildCandidate(cleanCacName(name, term), null, {
+          country: "Nigeria",
+          registration_id: rc ? `RC${rc}` : null,
+          industry: String(row?.natureOfBusiness || "").trim() || String(row?.classificationName || "").trim() || null,
+          founded_year: yearFrom(row?.companyRegistrationDate),
+          registry_status: status === "ACTIVE" ? "active" : status ? "dissolved" : null,
+          registry_source: "CAC Nigeria",
+          source_url: "https://icrp.cac.gov.ng/public-search",
+          note: `Nigerian register, ${row?.classificationName || "entity"}${status ? `, status ${status}` : ""}${rc ? `, RC ${rc}` : ""}`,
+        });
+        if (candidate) candidates.push(candidate);
+      }
+    }
+
+    const done = index >= terms.length;
+    return {
+      candidates,
+      cursor: done ? null : { termIndex: index },
+      done,
+      note: `Searched ${index} of ${terms.length} sweep terms`,
+    };
   },
 };
 

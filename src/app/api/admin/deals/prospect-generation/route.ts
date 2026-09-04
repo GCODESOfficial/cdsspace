@@ -11,6 +11,9 @@ import { DIRECTORY_TARGET, SIZE_BANDS, companyNameKey, normalizeCountry, sizeBan
 import { registryCatalogue, registryFor } from "@/lib/prospect-registries";
 import { browserConfigured, browserSetupHint } from "@/lib/prospect-browser";
 import { logActivity } from "@/lib/activity-log";
+import { huntCompanyEmails } from "@/lib/prospect-email-hunt";
+import { sendEmail } from "@/lib/email-from";
+import { brandedEmailHtml } from "@/lib/email-template";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -31,6 +34,11 @@ const EXACT_COUNT_LIMIT = 50_000;
 
 function str(value: unknown, max = 4000) {
   return typeof value === "string" ? value.trim().slice(0, max) : "";
+}
+
+/** Escapes text destined for the outreach email body. */
+function escapeHtml(value: string) {
+  return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 }
 
 function uuid(value: unknown) {
@@ -677,6 +685,125 @@ export async function POST(req: NextRequest) {
         resource_id: id, resource_label: company.company_name, metadata: { prospect_id: prospect.id },
       });
       return NextResponse.json({ prospect, company: { ...company, prospect_id: prospect.id, review_status: "promoted" } });
+    }
+
+    if (action === "find_emails") {
+      // A live crawl per click, so it is rate limited per admin rather than
+      // per company: the cost is ours, whichever company is being searched.
+      const rate = checkIntelligenceRateLimit(`prospect-email-hunt:${actor}`, 40, 60 * 60 * 1000);
+      if (!rate.allowed) return NextResponse.json({ error: "Email search limit reached for this hour. Try again shortly." }, { status: 429 });
+
+      const id = uuid(body.id);
+      if (!id) return NextResponse.json({ error: "A company is required." }, { status: 400 });
+      const company = await glashMaybeOne<any>(`select * from public.prospect_companies where id=$1`, [id]);
+      if (!company) return NextResponse.json({ error: "Company not found." }, { status: 404 });
+
+      const report = await huntCompanyEmails({
+        companyName: company.company_name,
+        domain: company.domain,
+        website: company.website,
+        country: company.country || company.hq_country,
+      });
+
+      // Merge into what enrichment already found rather than replacing it: an
+      // address discovered earlier is not invalidated by a later search.
+      const existing: Array<{ email: string; source_url: string; kind: string }> = Array.isArray(company.emails) ? company.emails : [];
+      const merged = [...existing];
+      let added = 0;
+      for (const found of report.emails) {
+        if (merged.some((entry) => String(entry.email).toLowerCase() === found.email)) continue;
+        merged.push({ email: found.email, source_url: found.source_url, kind: found.kind });
+        added += 1;
+      }
+      if (added) {
+        await glashQuery(
+          `update public.prospect_companies set emails=$2::jsonb, updated_by=$3, updated_at=now() where id=$1`,
+          [id, JSON.stringify(merged), actor],
+        );
+      }
+
+      return NextResponse.json({
+        found: report.emails,
+        added,
+        emails: merged,
+        visited: report.visited,
+        channels: report.channels,
+        exhausted: report.exhausted,
+      });
+    }
+
+    if (action === "add_email") {
+      const id = uuid(body.id);
+      const email = str(body.email, 320).trim().toLowerCase();
+      if (!id) return NextResponse.json({ error: "A company is required." }, { status: 400 });
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email)) return NextResponse.json({ error: "That is not a valid email address." }, { status: 400 });
+
+      const company = await glashMaybeOne<any>(`select * from public.prospect_companies where id=$1`, [id]);
+      if (!company) return NextResponse.json({ error: "Company not found." }, { status: 404 });
+      const existing: Array<{ email: string; source_url: string; kind: string }> = Array.isArray(company.emails) ? company.emails : [];
+      if (existing.some((entry) => String(entry.email).toLowerCase() === email)) {
+        return NextResponse.json({ emails: existing, added: 0 });
+      }
+      // Recorded as entered by hand, so nobody later mistakes it for something
+      // the research actually verified.
+      const merged = [...existing, { email, source_url: `manual:${actor}`, kind: "manual" }];
+      await glashQuery(
+        `update public.prospect_companies set emails=$2::jsonb, updated_by=$3, updated_at=now() where id=$1`,
+        [id, JSON.stringify(merged), actor],
+      );
+      return NextResponse.json({ emails: merged, added: 1 });
+    }
+
+    if (action === "send_outreach") {
+      const rate = checkIntelligenceRateLimit(`prospect-outreach:${actor}`, 120, 60 * 60 * 1000);
+      if (!rate.allowed) return NextResponse.json({ error: "Outreach limit reached for this hour. Try again shortly." }, { status: 429 });
+
+      const id = uuid(body.id);
+      if (!id) return NextResponse.json({ error: "A company is required." }, { status: 400 });
+      const company = await glashMaybeOne<any>(`select * from public.prospect_companies where id=$1`, [id]);
+      if (!company) return NextResponse.json({ error: "Company not found." }, { status: 404 });
+
+      const recipients = Array.from(new Set(
+        (Array.isArray(body.recipients) ? body.recipients : [])
+          .map((value: unknown) => str(value, 320).trim().toLowerCase())
+          .filter((value: string) => /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(value)),
+      )) as string[];
+      if (!recipients.length) return NextResponse.json({ error: "Add at least one valid email address." }, { status: 400 });
+      if (recipients.length > 10) return NextResponse.json({ error: "Send to at most 10 addresses at a time." }, { status: 400 });
+
+      const subject = str(body.subject, 300).trim();
+      const message = str(body.message, 20_000).trim();
+      if (!subject) return NextResponse.json({ error: "A subject is required." }, { status: 400 });
+      if (!message) return NextResponse.json({ error: "The email body is empty." }, { status: 400 });
+
+      const html = brandedEmailHtml(
+        message
+          .split(/\n{2,}/)
+          .map((paragraph) => `<p style="margin:0 0 14px;font-size:15px;line-height:1.65;color:#334155;">${escapeHtml(paragraph).replace(/\n/g, "<br />")}</p>`)
+          .join(""),
+        { preheader: subject.slice(0, 120) },
+      );
+
+      // One message per recipient. A shared To line would show every prospect
+      // the others we are approaching.
+      const failed: string[] = [];
+      for (const to of recipients) {
+        try {
+          await sendEmail({ to, subject, html, text: message, fromName: "CDS Space" });
+        } catch {
+          failed.push(to);
+        }
+      }
+      const sent = recipients.length - failed.length;
+      if (!sent) return NextResponse.json({ error: "The email could not be sent to any of the addresses." }, { status: 502 });
+
+      await logActivity({
+        action: "deals.prospect_generation.outreach", page: "deals/prospect-generation", resource_type: "prospect_company",
+        resource_id: id, resource_label: company.company_name,
+        metadata: { sent, failed: failed.length, recipients },
+      });
+
+      return NextResponse.json({ sent, failed });
     }
 
     if (action === "delete_company") {

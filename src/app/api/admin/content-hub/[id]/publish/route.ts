@@ -3,6 +3,7 @@ import { requireContentHub } from "@/lib/content-hub/api-auth";
 import { glashMaybeOne } from "@/lib/glashdb/postgres";
 import { listConnectionSummaries } from "@/lib/social/connections";
 import { publishContentToPlatform } from "@/lib/social/publish";
+import { sendContentNewsletter, type NewsletterResult } from "@/lib/content-newsletter";
 import { SOCIAL_PLATFORMS, type SocialPlatform } from "@/lib/social/types";
 
 export const runtime = "nodejs";
@@ -51,5 +52,18 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   }
 
   const published = results.filter((r) => r.status === "published").length;
-  return NextResponse.json({ ok: results.some((r) => r.ok), published, results });
+
+  // "Publish now" is still a publish, so the newsletter goes with it. The
+  // helper decides eligibility and claims the send, and a mail problem must
+  // not turn a successful post into an error.
+  let newsletter: NewsletterResult | { status: "error"; reason: string } = { status: "skipped", reason: "Nothing published." };
+  if (published > 0) {
+    try {
+      newsletter = await sendContentNewsletter(id);
+    } catch (error) {
+      newsletter = { status: "error", reason: error instanceof Error ? error.message : "Newsletter failed." };
+    }
+  }
+
+  return NextResponse.json({ ok: results.some((r) => r.ok), published, results, newsletter });
 }

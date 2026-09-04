@@ -10,12 +10,17 @@
  *
  * Idempotent: publishContentToPlatform skips a platform already published, and
  * items are advanced to 'published' once attempted so a re-run never double-posts.
+ *
+ * A post that carries an image also goes out as the DAILY News Letter to the
+ * client list at the same moment. sendContentNewsletter decides eligibility and
+ * claims the send itself, so calling it after every publish is safe.
  */
 import { NextRequest, NextResponse } from "next/server";
 import { glashQuery } from "@/lib/glashdb/postgres";
 import { listConnectionSummaries } from "@/lib/social/connections";
 import { publishContentToPlatform } from "@/lib/social/publish";
 import { SOCIAL_PLATFORMS, type SocialPlatform } from "@/lib/social/types";
+import { sendContentNewsletter } from "@/lib/content-newsletter";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -24,6 +29,19 @@ function authorized(req: NextRequest) {
   const secret = process.env.CRON_SECRET;
   if (!secret) return true; // no secret configured -> open (matches other crons)
   return (req.headers.get("authorization") || "") === `Bearer ${secret}`;
+}
+
+/**
+ * Mails the DAILY News Letter for a published item. Never throws: a mail
+ * problem must not stop the publishing worker or leave the queue stuck.
+ */
+async function mailClients(contentId: string): Promise<string> {
+  try {
+    const result = await sendContentNewsletter(contentId);
+    return result.status === "sent" ? `sent:${result.sent}/${(result.sent || 0) + (result.failed || 0)}` : `skipped:${result.reason || ""}`;
+  } catch (error) {
+    return `error:${error instanceof Error ? error.message.slice(0, 200) : "newsletter failed"}`;
+  }
 }
 
 export async function GET(req: NextRequest) {
@@ -39,7 +57,7 @@ export async function GET(req: NextRequest) {
       limit 25`,
   );
 
-  const summary: Array<{ id: string; published: number; failed: number; skipped: number }> = [];
+  const summary: Array<{ id: string; published: number; failed: number; skipped: number; newsletter: string }> = [];
 
   for (const item of due) {
     const targets = (item.platforms || [])
@@ -67,7 +85,8 @@ export async function GET(req: NextRequest) {
       `update public.content_items set status = 'published', published_at = coalesce(published_at, now()), updated_at = now() where id = $1`,
       [item.id],
     );
-    summary.push({ id: item.id, published, failed, skipped });
+    const newsletter = await mailClients(item.id);
+    summary.push({ id: item.id, published, failed, skipped, newsletter });
   }
 
   // Per-item, per-platform schedules set from the "Auto-schedule" control.
@@ -78,6 +97,7 @@ export async function GET(req: NextRequest) {
       limit 50`,
   );
   let scheduleFired = 0;
+  let newslettersSent = 0;
   for (const row of dueSchedules) {
     try {
       const result = await publishContentToPlatform({ contentId: row.content_id, platform: row.platform, actor: "cron:schedule", trigger: "scheduled" });
@@ -92,8 +112,19 @@ export async function GET(req: NextRequest) {
         [row.id, error instanceof Error ? error.message.slice(0, 1000) : "Publish failed."],
       );
     }
+    // The newsletter goes with the post, so it fires on the same tick. Items
+    // scheduled to several platforms call this once per platform; the first
+    // call claims the send and the rest are no-ops.
+    const newsletter = await mailClients(row.content_id);
+    if (newsletter.startsWith("sent")) newslettersSent += 1;
     scheduleFired += 1;
   }
 
-  return NextResponse.json({ ok: true, processed: summary.length, results: summary, schedules_fired: scheduleFired });
+  return NextResponse.json({
+    ok: true,
+    processed: summary.length,
+    results: summary,
+    schedules_fired: scheduleFired,
+    newsletters_sent: newslettersSent,
+  });
 }

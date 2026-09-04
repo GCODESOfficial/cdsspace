@@ -69,7 +69,7 @@ const SERVICE_NAMES = CATEGORIES.map((category) => category.name);
 
 const DECISION_TITLES = /\b(founder|co-?founder|owner|ceo|chief|cxo|coo|cmo|cto|cfo|president|managing director|md\b|director|partner|principal|head of|vp\b|vice president|general manager|proprietor)\b/i;
 const INFLUENCER_TITLES = /\b(manager|lead|marketing|brand|communications|growth|product|design|creative|digital)\b/i;
-const GENERIC_MAILBOX = /^(info|hello|contact|support|admin|sales|enquiry|enquiries|inquiries|office|mail)@/i;
+export const GENERIC_MAILBOX = /^(info|hello|contact|support|admin|sales|enquiry|enquiries|inquiries|office|mail)@/i;
 
 function clip(value: unknown, max: number) {
   return typeof value === "string" ? value.trim().replace(/\s+/g, " ").slice(0, max) : "";
@@ -312,7 +312,7 @@ const FREE_MAIL = /^(gmail|yahoo|hotmail|outlook|live|icloud|aol|protonmail|prot
  * mailbox published on the company's own site, which is how a great many small
  * businesses actually publish contact details.
  */
-function plausibleEmail(
+export function plausibleEmail(
   email: string,
   companyDomain: string | null,
   companyName: string,

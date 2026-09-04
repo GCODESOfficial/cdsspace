@@ -725,7 +725,11 @@ function Models({ board, busy, run }: { board: Board; busy: string; run: Run }) 
               </select>
             </Field>
             <Field label="Owner"><input className={inputClass} value={draft.owner || ""} onChange={(e) => setDraft({ ...draft, owner: e.target.value })} /></Field>
-            <Field label="Currency"><input className={inputClass} maxLength={3} value={draft.currency || "USD"} onChange={(e) => setDraft({ ...draft, currency: e.target.value.toUpperCase() })} /></Field>
+            <Field label="Currency">
+              <select className={inputClass} value={draft.currency || "USD"} onChange={(e) => setDraft({ ...draft, currency: e.target.value })}>
+                {BOARD_VIEW_CURRENCIES.map((code) => <option key={code} value={code}>{code}</option>)}
+              </select>
+            </Field>
             <Field label="Monthly target">
               <input
                 type="number"

@@ -5,7 +5,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import {
   Building2, ChevronDown, ChevronUp, Chrome, Download, ExternalLink, EyeOff, Globe, Landmark, Library, Link2, Loader2,
-  Mail, MapPin, Palette, Play, RefreshCw, Search, Send, Server, SlidersHorizontal, Square, Target, Trash2, TrendingUp, Users,
+  Mail, MapPin, Palette, Play, Plus, RefreshCw, Search, Send, Server, SlidersHorizontal, Square, Target, Trash2, TrendingUp, Users, X,
 } from "lucide-react";
 import { appConfirm } from "@/lib/app-notify";
 import { DIRECTORY_TARGET, SIZE_BANDS, STOCK_EXCHANGES } from "@/lib/prospect-directory";
@@ -29,6 +29,20 @@ type Company = {
   enrichment_status: string; enrichment_error: string | null; review_status: string; prospect_id: string | null;
   contacts: Contact[];
 };
+type HuntedEmail = { email: string; source_url: string; kind: string; channel: string; on_domain: boolean };
+type Compose = {
+  company: Company;
+  recipients: string[];
+  subject: string;
+  message: string;
+  manual: string;
+  hunting: boolean;
+  sending: boolean;
+  preview: boolean;
+  hunt: { found: HuntedEmail[]; added: number; visited: string[]; channels: string[] } | null;
+  error: string;
+};
+
 type Totals = { total: number; queued: number; running: number; enriched: number; failed: number; active_companies: number; needs_website: number; high_priority: number; promoted: number; multi_country: number; countries_covered: number; reachable_decision_makers: number };
 type Registry = { key: string; label: string; country: string | null; description: string; needsBrowser: boolean; ready: boolean; keyEnv: string | null };
 type RegistryRun = { registry_key: string; id: string; cursor: any; exhausted: boolean; created_count: number; last_run_at: string | null };
@@ -63,6 +77,7 @@ export default function ProspectGenerationPage() {
   const [busy, setBusy] = useState("");
   const [notice, setNotice] = useState<{ tone: "success" | "error"; text: string } | null>(null);
   const [expanded, setExpanded] = useState<string>("");
+  const [compose, setCompose] = useState<Compose | null>(null);
 
   const [registries, setRegistries] = useState<Registry[]>([]);
   const [registryRuns, setRegistryRuns] = useState<RegistryRun[]>([]);
@@ -250,14 +265,80 @@ export default function ProspectGenerationPage() {
     return Array.from(new Set(ordered.map((email) => email.toLowerCase())));
   };
 
+  // Opening the composer is never blocked by having no address: an empty
+  // recipient list is the normal starting point for a company nobody has
+  // reached yet, and the composer is where an address gets found or typed in.
   const composeEmail = (company: Company) => {
-    const recipients = recipientsFor(company);
-    if (!recipients.length) { setNotice({ tone: "error", text: `No email address was found for ${company.company_name}. Reach out through a social account instead.` }); return; }
-    const subject = company.outreach_subject || `A few notes on ${company.company_name}`;
-    const body = company.outreach_email || "";
-    // A mailto opens whichever mail client the team already uses, with every
-    // address discovered for the company already on the line.
-    window.location.href = `mailto:${encodeURIComponent(recipients[0])}?cc=${encodeURIComponent(recipients.slice(1).join(","))}&subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+    setCompose({
+      company,
+      recipients: recipientsFor(company),
+      subject: company.outreach_subject || `A few notes on ${company.company_name}`,
+      message: company.outreach_email || "",
+      manual: "",
+      hunting: false,
+      sending: false,
+      preview: false,
+      hunt: null,
+      error: "",
+    });
+  };
+
+  const patchCompose = (patch: Partial<Compose>) => setCompose((current) => (current ? { ...current, ...patch } : current));
+
+  /** Crawls the open web for this company right now, rather than reusing research. */
+  const huntEmails = async () => {
+    if (!compose) return;
+    patchCompose({ hunting: true, error: "" });
+    try {
+      const json = await post({ action: "find_emails", id: compose.company.id });
+      const found: HuntedEmail[] = json.found || [];
+      setCompose((current) => {
+        if (!current) return current;
+        // Everything found is put on the line, because the reviewer removes what
+        // does not belong far faster than they retype what does.
+        const merged = Array.from(new Set([...current.recipients, ...found.map((entry) => entry.email)]));
+        return { ...current, hunting: false, recipients: merged, hunt: { found, added: json.added || 0, visited: json.visited || [], channels: json.channels || [] } };
+      });
+      await refresh();
+    } catch (error) {
+      patchCompose({ hunting: false, error: error instanceof Error ? error.message : "The search could not be completed." });
+    }
+  };
+
+  const addManualRecipient = async () => {
+    if (!compose) return;
+    const email = compose.manual.trim().toLowerCase();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email)) { patchCompose({ error: "That is not a valid email address." }); return; }
+    if (compose.recipients.includes(email)) { patchCompose({ manual: "", error: "" }); return; }
+    patchCompose({ recipients: [...compose.recipients, email], manual: "", error: "" });
+    // Kept on the company too, so the next person to open it does not have to
+    // find the same address again.
+    try { await post({ action: "add_email", id: compose.company.id, email }); await refresh(); } catch { /* the address is still usable for this send */ }
+  };
+
+  const sendOutreach = async () => {
+    if (!compose) return;
+    if (!compose.recipients.length) { patchCompose({ error: "Add at least one address to send to." }); return; }
+    patchCompose({ sending: true, error: "" });
+    try {
+      const json = await post({
+        action: "send_outreach",
+        id: compose.company.id,
+        recipients: compose.recipients,
+        subject: compose.subject,
+        message: compose.message,
+      });
+      setCompose(null);
+      const failed = (json.failed || []).length;
+      setNotice({
+        tone: failed ? "error" : "success",
+        text: failed
+          ? `Sent to ${json.sent}, but ${failed} address${failed === 1 ? "" : "es"} could not be reached.`
+          : `Email sent to ${json.sent} address${json.sent === 1 ? "" : "es"}.`,
+      });
+    } catch (error) {
+      patchCompose({ sending: false, error: error instanceof Error ? error.message : "The email could not be sent." });
+    }
   };
 
   const copyRecipients = async (company: Company) => {
@@ -523,16 +604,18 @@ export default function ProspectGenerationPage() {
                     </div>}
                     <ListBlock title="Local competitors" items={(company.competitors_local || []).map((entry) => `${entry.name}${entry.note ? `: ${entry.note}` : ""}`)} />
                     <ListBlock title="Global competitors" items={(company.competitors_global || []).map((entry) => `${entry.name}${entry.note ? `: ${entry.note}` : ""}`)} />
-                    {company.outreach_email && <div className="lg:col-span-2">
-                      <p className="text-xs font-semibold text-slate-600">Suggested first email{company.outreach_subject ? ` - ${company.outreach_subject}` : ""}</p>
-                      <p className="mt-1 whitespace-pre-wrap rounded-xl bg-slate-50 p-3 text-sm text-slate-700">{company.outreach_email}</p>
+                    <div className="lg:col-span-2">
+                      {company.outreach_email && <>
+                        <p className="text-xs font-semibold text-slate-600">Suggested first email{company.outreach_subject ? ` - ${company.outreach_subject}` : ""}</p>
+                        <p className="mt-1 whitespace-pre-wrap rounded-xl bg-slate-50 p-3 text-sm text-slate-700">{company.outreach_email}</p>
+                      </>}
                       <div className="mt-2 flex flex-wrap items-center gap-2">
                         <button onClick={() => composeEmail(company)} className="inline-flex min-h-9 items-center gap-2 rounded-xl bg-[#0A4FE8] px-3 text-xs font-semibold text-white"><Send className="h-3.5 w-3.5" /> Compose email</button>
                         <button onClick={() => copyRecipients(company)} className="inline-flex min-h-9 items-center gap-2 rounded-xl border border-slate-200 px-3 text-xs font-semibold text-slate-700 hover:border-[#0A4FE8]"><Mail className="h-3.5 w-3.5" /> Copy recipients</button>
-                        <span className="text-xs text-slate-500">{recipientsFor(company).length} address{recipientsFor(company).length === 1 ? "" : "es"} found: {recipientsFor(company).join(", ") || "none"}</span>
+                        <span className="text-xs text-slate-500">{recipientsFor(company).length} address{recipientsFor(company).length === 1 ? "" : "es"} found: {recipientsFor(company).join(", ") || "none, search for one in the composer"}</span>
                       </div>
-                      <p className="mt-2 text-xs text-slate-400">Review every claim against the sources before sending.</p>
-                    </div>}
+                      {company.outreach_email && <p className="mt-2 text-xs text-slate-400">Review every claim against the sources before sending.</p>}
+                    </div>
                     {company.sources?.length > 0 && <div className="lg:col-span-2">
                       <p className="text-xs font-semibold text-slate-600">Sources</p>
                       <ul className="mt-1 space-y-0.5">{company.sources.slice(0, 12).map((source) => <li key={source}><a href={source} target="_blank" rel="noopener noreferrer" className="text-xs text-[#0A4FE8] break-all">{source}</a></li>)}</ul>
@@ -549,6 +632,15 @@ export default function ProspectGenerationPage() {
           <button onClick={() => setPage((current) => current + 1)} disabled={(page + 1) * pageSize >= total} className="min-h-10 rounded-xl border border-slate-200 px-4 font-semibold text-slate-700 disabled:opacity-50">Next</button>
         </div>}
       </section>
+
+      {compose && <ComposeEmailModal
+        compose={compose}
+        onClose={() => setCompose(null)}
+        onPatch={patchCompose}
+        onHunt={huntEmails}
+        onAddManual={addManualRecipient}
+        onSend={sendOutreach}
+      />}
     </main>
   );
 }
@@ -590,4 +682,172 @@ function ListBlock({ title, items, suffix }: { title: string; items: string[]; s
     {items?.length ? <ul className="mt-1 list-disc space-y-1 pl-4 text-sm leading-6 text-slate-600">{items.map((item, index) => <li key={index}>{item}</li>)}</ul> : <p className="mt-1 text-sm text-slate-500">Nothing recorded.</p>}
     {suffix && <p className="mt-1 text-xs text-slate-400">{suffix}</p>}
   </div>;
+}
+
+/**
+ * Writes and sends the first email to a company.
+ *
+ * The composer opens whether or not an address is known, because "we have no
+ * address" is a task, not a dead end. It offers the two ways out: search the
+ * open web for one now - the company's own contact and careers pages, press
+ * coverage, job posts, filings and PDF material - or type in an address that
+ * was found some other way.
+ */
+function ComposeEmailModal({
+  compose, onClose, onPatch, onHunt, onAddManual, onSend,
+}: {
+  compose: Compose;
+  onClose: () => void;
+  onPatch: (patch: Partial<Compose>) => void;
+  onHunt: () => void;
+  onAddManual: () => void;
+  onSend: () => void;
+}) {
+  const { company, recipients, hunt } = compose;
+  const busy = compose.hunting || compose.sending;
+
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => { if (event.key === "Escape" && !busy) onClose(); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose, busy]);
+
+  return (
+    <div className="fixed inset-0 z-[9998] flex items-end justify-center bg-[#040b37]/60 p-3 backdrop-blur-sm sm:items-center sm:p-6" onClick={() => { if (!busy) onClose(); }}>
+      <div className="flex max-h-[92vh] w-full max-w-2xl flex-col overflow-hidden rounded-[24px] bg-white shadow-[0_28px_60px_rgba(4,11,55,0.28)]" onClick={(event) => event.stopPropagation()}>
+        <div className="flex items-start justify-between gap-4 border-b border-slate-100 px-5 py-4">
+          <div className="min-w-0">
+            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[#0A4FE8]">Compose email</p>
+            <h2 className="truncate text-lg font-bold text-[#07133B]">{company.company_name}</h2>
+          </div>
+          <button onClick={onClose} disabled={busy} className="rounded-lg p-1 text-slate-400 hover:bg-slate-50 hover:text-slate-700 disabled:opacity-40" aria-label="Close"><X className="h-5 w-5" /></button>
+        </div>
+
+        <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-5 py-4">
+          {compose.error && <p className="rounded-xl border border-rose-200 bg-rose-50 p-3 text-sm text-rose-700">{compose.error}</p>}
+
+          <div>
+            <p className="mb-1.5 text-xs font-semibold text-slate-600">To</p>
+            {recipients.length > 0 ? (
+              <div className="flex flex-wrap gap-1.5">
+                {recipients.map((email) => {
+                  const source = hunt?.found.find((entry) => entry.email === email);
+                  return (
+                    <span key={email} className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-slate-50 py-1 pl-2.5 pr-1 text-xs text-slate-700">
+                      <span className="font-semibold">{email}</span>
+                      {source && <span className="text-slate-400">{source.channel}</span>}
+                      <button
+                        onClick={() => onPatch({ recipients: recipients.filter((value) => value !== email) })}
+                        className="rounded p-0.5 text-slate-400 hover:bg-white hover:text-rose-600"
+                        aria-label={`Remove ${email}`}
+                      ><X className="h-3 w-3" /></button>
+                    </span>
+                  );
+                })}
+              </div>
+            ) : (
+              <p className="rounded-xl border border-dashed border-slate-300 p-3 text-sm text-slate-500">
+                No address is known for this company yet. Search for one, or add one below.
+              </p>
+            )}
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            <input
+              value={compose.manual}
+              onChange={(event) => onPatch({ manual: event.target.value })}
+              onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); onAddManual(); } }}
+              type="email"
+              placeholder="Add an address by hand"
+              className="h-10 min-w-[220px] flex-1 rounded-xl border border-slate-200 px-3 text-sm outline-none focus:border-[#0A4FE8]"
+            />
+            <button onClick={onAddManual} className="inline-flex h-10 items-center gap-1.5 rounded-xl border border-slate-200 px-3 text-sm font-semibold text-slate-700 hover:border-[#0A4FE8]"><Plus className="h-4 w-4" /> Add</button>
+            <button
+              onClick={onHunt}
+              disabled={busy}
+              className="inline-flex h-10 items-center gap-2 rounded-xl border border-[#0A4FE8] px-3 text-sm font-semibold text-[#0A4FE8] hover:bg-[#0A4FE8]/5 disabled:opacity-50"
+            >
+              {compose.hunting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
+              {compose.hunting ? "Searching the web..." : "Find email addresses"}
+            </button>
+          </div>
+
+          {compose.hunting && <p className="text-xs text-slate-500">Reading the company site, press coverage, job posts, filings and PDF material. This takes up to a minute.</p>}
+
+          {hunt && !compose.hunting && (
+            <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+              <p className="text-xs font-semibold text-slate-600">
+                {hunt.found.length ? `${hunt.found.length} address${hunt.found.length === 1 ? "" : "es"} found across ${hunt.visited.length} page${hunt.visited.length === 1 ? "" : "s"}` : `Nothing found across ${hunt.visited.length} page${hunt.visited.length === 1 ? "" : "s"}`}
+                {hunt.added > 0 ? `, ${hunt.added} new and saved to this company.` : "."}
+              </p>
+              {hunt.found.length > 0 ? (
+                <ul className="mt-2 space-y-1">
+                  {hunt.found.map((entry) => (
+                    <li key={entry.email} className="flex flex-wrap items-center gap-2 text-xs text-slate-600">
+                      <span className="font-semibold text-[#07133B]">{entry.email}</span>
+                      <span className="rounded border border-slate-200 bg-white px-1.5 py-0.5 text-[11px] text-slate-500">{entry.channel}</span>
+                      {entry.on_domain && <span className="rounded border border-emerald-200 bg-emerald-50 px-1.5 py-0.5 text-[11px] text-emerald-700">own domain</span>}
+                      <a href={entry.source_url} target="_blank" rel="noopener noreferrer" className="break-all text-[#0A4FE8]">{entry.source_url}</a>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="mt-1 text-xs text-slate-500">
+                  Searched: {hunt.channels.join(", ") || "the open web"}. Try a social account instead, or add an address by hand.
+                </p>
+              )}
+            </div>
+          )}
+
+          <label className="block">
+            <span className="mb-1.5 block text-xs font-semibold text-slate-600">Subject</span>
+            <input
+              value={compose.subject}
+              onChange={(event) => onPatch({ subject: event.target.value })}
+              className="h-10 w-full rounded-xl border border-slate-200 px-3 text-sm outline-none focus:border-[#0A4FE8]"
+            />
+          </label>
+
+          <div>
+            <div className="mb-1.5 flex items-center justify-between">
+              <span className="text-xs font-semibold text-slate-600">Message</span>
+              <button onClick={() => onPatch({ preview: !compose.preview })} className="text-xs font-semibold text-[#0A4FE8]">
+                {compose.preview ? "Back to editing" : "Preview"}
+              </button>
+            </div>
+            {compose.preview ? (
+              <div className="rounded-xl border border-slate-200 bg-white p-4">
+                <p className="text-sm font-bold text-[#07133B]">{compose.subject || "(no subject)"}</p>
+                <p className="mt-1 text-xs text-slate-400">To {recipients.join(", ") || "nobody yet"}</p>
+                <div className="mt-3 whitespace-pre-wrap text-sm leading-relaxed text-slate-700">{compose.message || "(empty)"}</div>
+              </div>
+            ) : (
+              <textarea
+                rows={9}
+                value={compose.message}
+                onChange={(event) => onPatch({ message: event.target.value })}
+                className="w-full rounded-xl border border-slate-200 p-3 text-sm leading-relaxed outline-none focus:border-[#0A4FE8]"
+              />
+            )}
+            <p className="mt-1.5 text-xs text-slate-400">Sent from the CDS Space address, one message per recipient. Review every claim against the sources first.</p>
+          </div>
+        </div>
+
+        <div className="flex flex-wrap items-center justify-end gap-2 border-t border-slate-100 px-5 py-4">
+          <a
+            href={`mailto:${encodeURIComponent(recipients[0] || "")}?cc=${encodeURIComponent(recipients.slice(1).join(","))}&subject=${encodeURIComponent(compose.subject)}&body=${encodeURIComponent(compose.message)}`}
+            className="inline-flex h-11 items-center gap-2 rounded-xl border border-slate-200 px-4 text-sm font-semibold text-slate-700 hover:border-[#0A4FE8]"
+          ><Mail className="h-4 w-4" /> Open in mail app</a>
+          <button
+            onClick={onSend}
+            disabled={busy || !recipients.length || !compose.subject.trim() || !compose.message.trim()}
+            className="inline-flex h-11 items-center gap-2 rounded-xl bg-[#0A4FE8] px-5 text-sm font-bold text-white disabled:opacity-50"
+          >
+            {compose.sending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+            {compose.sending ? "Sending..." : `Send${recipients.length > 1 ? ` to ${recipients.length}` : ""}`}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
 }

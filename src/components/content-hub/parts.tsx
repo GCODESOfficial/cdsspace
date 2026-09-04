@@ -1,8 +1,9 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { Check, Copy, Download, Image as ImageIcon, Video, FileText, CheckCircle2, CalendarClock, Loader2, X, Send } from "lucide-react";
+import { Check, Copy, Download, Image as ImageIcon, Video, FileText, CheckCircle2, CalendarClock, Loader2, X, Send, Mail } from "lucide-react";
 import { STATUS_META, platformLabel, type ContentItem, type ContentStatus } from "@/lib/content-hub/shared";
+import { NEWSLETTER_TITLE, newsletterApplies } from "@/lib/content-newsletter-shared";
 
 export function StatusBadge({ status }: { status: ContentStatus }) {
   const meta = STATUS_META[status] || STATUS_META.draft;
@@ -266,6 +267,10 @@ export function PublishingPackage({
 
       {canPublish && <AutoScheduleChannels contentId={item.id} />}
 
+      {canPublish && newsletterApplies(item, media.some((m) => m.kind === "image")) && (
+        <DailyNewsletterSwitch item={item} />
+      )}
+
       {media.length > 0 && (
         <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-3">
           {media.map((m) => {
@@ -293,6 +298,72 @@ export function PublishingPackage({
           })}
         </div>
       )}
+    </div>
+  );
+}
+
+
+/**
+ * The DAILY News Letter switch.
+ *
+ * Only shown for content that carries an image, and never for Word of the Day.
+ * It is on unless someone turns it off, so an older item with no stored value
+ * reads as on, and the request is only sent when the state actually changes.
+ */
+function DailyNewsletterSwitch({ item }: { item: ContentItem }) {
+  const [on, setOn] = useState(item.newsletter_enabled !== false);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  const alreadySent = Boolean(item.newsletter_sent_at);
+
+  const toggle = async () => {
+    if (saving || alreadySent) return;
+    const next = !on;
+    setOn(next);
+    setSaving(true);
+    setError("");
+    try {
+      const res = await fetch(`/api/admin/content-hub/${item.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ newsletter_enabled: next }),
+      });
+      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || "Could not save.");
+    } catch (cause) {
+      setOn(!next);
+      setError(cause instanceof Error ? cause.message : "Could not save.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="mt-3 rounded-xl border border-blue-100 bg-blue-50/40 p-3.5">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2">
+            <Mail className="h-4 w-4 shrink-0 text-[#0A4FE8]" />
+            <p className="text-[13px] font-bold text-[#0D1B39]">{NEWSLETTER_TITLE}</p>
+          </div>
+          <p className="mt-1 text-[12px] text-gray-500">
+            {alreadySent
+              ? "This post has already gone out to the client list."
+              : "Emails this image and text to every registered client at the moment the post publishes."}
+          </p>
+        </div>
+        <button
+          type="button"
+          role="switch"
+          aria-checked={on}
+          aria-label={NEWSLETTER_TITLE}
+          onClick={toggle}
+          disabled={saving || alreadySent}
+          className={`relative mt-0.5 h-6 w-11 shrink-0 rounded-full transition disabled:opacity-60 ${on ? "bg-[#0A4FE8]" : "bg-gray-300"}`}
+        >
+          <span className={`absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-all ${on ? "left-[22px]" : "left-0.5"}`} />
+        </button>
+      </div>
+      {error && <p className="mt-2 rounded-lg bg-rose-50 px-2.5 py-1.5 text-[11.5px] font-medium text-rose-700">{error}</p>}
     </div>
   );
 }

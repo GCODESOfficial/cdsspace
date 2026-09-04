@@ -89,6 +89,9 @@ export interface ContentItem {
   created_at: string;
   updated_at: string;
   media?: ContentMedia[];
+  /** DAILY News Letter switch. Absent on older rows, which means on. */
+  newsletter_enabled?: boolean | null;
+  newsletter_sent_at?: string | null;
 }
 
 // ─────────────── Option catalogues ───────────────

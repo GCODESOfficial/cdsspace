@@ -90,6 +90,9 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     if (f in body) set(f, Number.isFinite(Number(body[f])) ? Number(body[f]) : null);
   }
   if ("scheduled_at" in body) set("scheduled_at", str(body.scheduled_at) || null);
+  // The DAILY News Letter switch. On by default at the column level, so this
+  // only ever records a deliberate change.
+  if ("newsletter_enabled" in body) set("newsletter_enabled", body.newsletter_enabled !== false);
   if ("ai_meta" in body && body.ai_meta && typeof body.ai_meta === "object") set("ai_meta", body.ai_meta);
 
   if (newStatus && ["draft", "pending", "approved", "scheduled", "published", "archived"].includes(newStatus)) {
