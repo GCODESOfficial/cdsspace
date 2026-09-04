@@ -31,6 +31,8 @@ type Company = {
   contacts: Contact[];
 };
 type HuntedEmail = { email: string; source_url: string; kind: string; channel: string; on_domain: boolean };
+type AuditFinding = { area: "ai_search" | "website" | "social" | "video"; title: string; detail: string; severity: "high" | "medium" | "low"; evidence: string };
+type AiAudit = { findings: AuditFinding[]; strengths: string[]; checked: string[]; unreachable: boolean };
 type Compose = {
   company: Company;
   recipients: string[];
@@ -41,6 +43,9 @@ type Compose = {
   sending: boolean;
   preview: boolean;
   hunt: { found: HuntedEmail[]; added: number; visited: string[]; channels: string[] } | null;
+  rewriting: boolean;
+  audit: AiAudit | null;
+  showAudit: boolean;
   error: string;
 };
 
@@ -61,6 +66,7 @@ const WEBSITE_TONE: Record<string, string> = { outdated: "bg-rose-50 text-rose-7
 const PRIORITY_TONE: Record<string, string> = { high: "bg-[#0A4FE8] text-white", medium: "bg-blue-50 text-[#0A4FE8]", low: "bg-slate-100 text-slate-600" };
 const ALPHABET = "abcdefghijklmnopqrstuvwxyz".split("");
 const PAGE_SIZES = [10, 50, 100, 200];
+const AUDIT_AREA: Record<AuditFinding["area"], string> = { ai_search: "AI search", website: "Website", social: "Social branding", video: "Video" };
 
 export default function ProspectGenerationPage() {
   const [totals, setTotals] = useState<Totals | null>(null);
@@ -301,6 +307,9 @@ export default function ProspectGenerationPage() {
       sending: false,
       preview: false,
       hunt: null,
+      rewriting: false,
+      audit: null,
+      showAudit: false,
       error: "",
     });
   };
@@ -324,6 +333,30 @@ export default function ProspectGenerationPage() {
       await refresh();
     } catch (error) {
       patchCompose({ hunting: false, error: error instanceof Error ? error.message : "The search could not be completed." });
+    }
+  };
+
+  /**
+   * Re-audits the company live - website, social branding, video, and how
+   * readable it is to AI assistants - then has the CEO's first email written
+   * from what that audit actually found.
+   */
+  const rewriteWithAi = async () => {
+    if (!compose) return;
+    patchCompose({ rewriting: true, error: "" });
+    try {
+      const json = await post({ action: "rewrite_outreach", id: compose.company.id });
+      patchCompose({
+        rewriting: false,
+        subject: json.subject || compose.subject,
+        message: json.message || compose.message,
+        audit: json.audit || null,
+        showAudit: true,
+        preview: false,
+      });
+      await refresh();
+    } catch (error) {
+      patchCompose({ rewriting: false, error: error instanceof Error ? error.message : "The email could not be rewritten." });
     }
   };
 
@@ -693,6 +726,7 @@ export default function ProspectGenerationPage() {
         onClose={() => setCompose(null)}
         onPatch={patchCompose}
         onHunt={huntEmails}
+        onRewrite={rewriteWithAi}
         onAddManual={addManualRecipient}
         onSend={sendOutreach}
       />}
@@ -763,17 +797,18 @@ function ListBlock({ title, items, suffix }: { title: string; items: string[]; s
  * was found some other way.
  */
 function ComposeEmailModal({
-  compose, onClose, onPatch, onHunt, onAddManual, onSend,
+  compose, onClose, onPatch, onHunt, onRewrite, onAddManual, onSend,
 }: {
   compose: Compose;
   onClose: () => void;
   onPatch: (patch: Partial<Compose>) => void;
   onHunt: () => void;
+  onRewrite: () => void;
   onAddManual: () => void;
   onSend: () => void;
 }) {
   const { company, recipients, hunt } = compose;
-  const busy = compose.hunting || compose.sending;
+  const busy = compose.hunting || compose.sending || compose.rewriting;
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => { if (event.key === "Escape" && !busy) onClose(); };
@@ -878,12 +913,52 @@ function ComposeEmailModal({
           </label>
 
           <div>
-            <div className="mb-1.5 flex items-center justify-between">
+            <div className="mb-1.5 flex flex-wrap items-center justify-between gap-2">
               <span className="text-xs font-semibold text-slate-600">Message</span>
-              <button onClick={() => onPatch({ preview: !compose.preview })} className="text-xs font-semibold text-[#0A4FE8]">
-                {compose.preview ? "Back to editing" : "Preview"}
-              </button>
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={onRewrite}
+                  disabled={busy}
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-[#0A4FE8] px-2.5 py-1 text-xs font-semibold text-[#0A4FE8] hover:bg-[#0A4FE8]/5 disabled:opacity-50"
+                  title="Re-audit the website, social branding, video and AI search readiness, then rewrite this email from what it finds"
+                >
+                  {compose.rewriting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
+                  {compose.rewriting ? "Auditing and writing..." : "Re-audit and rewrite with AI"}
+                </button>
+                <button onClick={() => onPatch({ preview: !compose.preview })} className="text-xs font-semibold text-[#0A4FE8]">
+                  {compose.preview ? "Back to editing" : "Preview"}
+                </button>
+              </div>
             </div>
+
+            {compose.rewriting && <p className="mb-2 text-xs text-slate-500">Re-checking the live site: markup and mobile readiness, structured data, whether AI assistants are allowed to read it, social branding consistency, and video presence. Then writing the email from what is found.</p>}
+
+            {compose.audit && !compose.rewriting && (
+              <div className="mb-2 rounded-xl border border-slate-200 bg-slate-50 p-3">
+                <button onClick={() => onPatch({ showAudit: !compose.showAudit })} className="flex w-full items-center justify-between gap-2 text-left">
+                  <span className="text-xs font-semibold text-slate-600">
+                    Audit behind this email: {compose.audit.findings.length} finding{compose.audit.findings.length === 1 ? "" : "s"}
+                    {compose.audit.strengths.length ? `, ${compose.audit.strengths.length} thing${compose.audit.strengths.length === 1 ? "" : "s"} done well` : ""}
+                  </span>
+                  {compose.showAudit ? <ChevronUp className="h-4 w-4 shrink-0 text-slate-400" /> : <ChevronDown className="h-4 w-4 shrink-0 text-slate-400" />}
+                </button>
+                {compose.showAudit && <div className="mt-2 space-y-2">
+                  {compose.audit.findings.map((finding, index) => (
+                    <div key={index} className="rounded-lg border border-slate-200 bg-white p-2.5">
+                      <p className="flex flex-wrap items-center gap-1.5 text-xs font-semibold text-[#07133B]">
+                        <span className={`rounded px-1.5 py-0.5 text-[11px] ${finding.severity === "high" ? "bg-rose-50 text-rose-700" : finding.severity === "medium" ? "bg-amber-50 text-amber-700" : "bg-slate-100 text-slate-600"}`}>{finding.severity}</span>
+                        <span className="rounded bg-blue-50 px-1.5 py-0.5 text-[11px] text-[#0A4FE8]">{AUDIT_AREA[finding.area]}</span>
+                        {finding.title}
+                      </p>
+                      <p className="mt-1 text-xs leading-relaxed text-slate-600">{finding.detail}</p>
+                      <p className="mt-1 text-[11px] break-all text-slate-400">Observed at {finding.evidence}</p>
+                    </div>
+                  ))}
+                  {compose.audit.strengths.length > 0 && <p className="text-xs text-emerald-700">Already doing well: {compose.audit.strengths.join("; ")}</p>}
+                  <p className="text-[11px] text-slate-400">Checked: {compose.audit.checked.join(", ")}. Every claim in the email above traces to one of these findings.</p>
+                </div>}
+              </div>
+            )}
             {compose.preview ? (
               <div className="rounded-xl border border-slate-200 bg-white p-4">
                 <p className="text-sm font-bold text-[#07133B]">{compose.subject || "(no subject)"}</p>
@@ -898,7 +973,7 @@ function ComposeEmailModal({
                 className="w-full rounded-xl border border-slate-200 p-3 text-sm leading-relaxed outline-none focus:border-[#0A4FE8]"
               />
             )}
-            <p className="mt-1.5 text-xs text-slate-400">Sent from the CDS Space address, one message per recipient. Review every claim against the sources first.</p>
+            <p className="mt-1.5 text-xs text-slate-400">Sent from the CDS Space address as the CEO, one message per recipient. Review every claim against the audit before sending.</p>
           </div>
         </div>
 

@@ -38,36 +38,56 @@ function safeNext(raw: string | null): string {
 }
 
 export async function GET(req: NextRequest) {
-  const next = safeNext(req.nextUrl.searchParams.get("next"));
-  const origin = getOrigin(req);
-  const redirectTo = `${origin}/auth/callback`; // MUST stay bare (no query) to match the allow-list
-
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const glash = (await createClient()) as any;
-  const { data, error } = await glash.auth.signInWithOAuth({
-    provider: "google",
-    options: { skipBrowserRedirect: true, redirectTo },
-  });
-
-  if (error || !data?.url) {
-    const url = new URL("/login", origin);
-    url.searchParams.set(
-      "error",
-      /disabled/i.test(error?.message || "") ? "google_disabled" : "google_start_failed",
-    );
-    return NextResponse.redirect(url);
+  // Anything in here can throw: the runtime config is read on first use, and
+  // signInWithOAuth calls api.glashdb.com over the network. An unhandled throw
+  // in a route handler reaches the browser as a bare nginx 500 with no way for
+  // the visitor to understand or retry, so every failure is turned into the
+  // login page carrying an error the page already knows how to explain.
+  // Resolved before the guarded block so the failure path always has somewhere
+  // to send the visitor, even when working out the origin is what failed.
+  let origin: string;
+  try {
+    origin = getOrigin(req);
+  } catch {
+    origin = (process.env.NEXT_PUBLIC_SITE_URL || "https://cdsspace.pro").replace(/\/$/, "");
   }
 
-  // Carry the post-login destination in a short-lived cookie (the URL can't hold
-  // it without breaking GlashDB's exact-match redirect allow-list).
-  const store = await cookies();
-  store.set("cds_oauth_next", next, {
-    httpOnly: true,
-    secure: origin.startsWith("https://"),
-    sameSite: "lax",
-    path: "/",
-    maxAge: 600,
-  });
+  try {
+    const next = safeNext(req.nextUrl.searchParams.get("next"));
+    const redirectTo = `${origin}/auth/callback`; // MUST stay bare (no query) to match the allow-list
 
-  return NextResponse.redirect(data.url);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const glash = (await createClient()) as any;
+    const { data, error } = await glash.auth.signInWithOAuth({
+      provider: "google",
+      options: { skipBrowserRedirect: true, redirectTo },
+    });
+
+    if (error || !data?.url) {
+      const url = new URL("/login", origin);
+      url.searchParams.set(
+        "error",
+        /disabled/i.test(error?.message || "") ? "google_disabled" : "google_start_failed",
+      );
+      return NextResponse.redirect(url);
+    }
+
+    // Carry the post-login destination in a short-lived cookie (the URL can't hold
+    // it without breaking GlashDB's exact-match redirect allow-list).
+    const store = await cookies();
+    store.set("cds_oauth_next", next, {
+      httpOnly: true,
+      secure: origin.startsWith("https://"),
+      sameSite: "lax",
+      path: "/",
+      maxAge: 600,
+    });
+
+    return NextResponse.redirect(data.url);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "";
+    const url = new URL("/login", origin);
+    url.searchParams.set("error", /disabled/i.test(message) ? "google_disabled" : "google_start_failed");
+    return NextResponse.redirect(url);
+  }
 }

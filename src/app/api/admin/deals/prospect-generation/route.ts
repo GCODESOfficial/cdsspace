@@ -13,6 +13,9 @@ import { registryCatalogue, registryFor } from "@/lib/prospect-registries";
 import { browserConfigured, browserSetupHint } from "@/lib/prospect-browser";
 import { logActivity } from "@/lib/activity-log";
 import { huntCompanyEmails } from "@/lib/prospect-email-hunt";
+import { auditForAiSearch } from "@/lib/prospect-ai-audit";
+import { chatComplete } from "@/lib/ai/openai";
+import { CATEGORIES } from "@/lib/constants";
 import { sendEmail } from "@/lib/email-from";
 import { brandedEmailHtml } from "@/lib/email-template";
 
@@ -21,6 +24,8 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 300;
 
 const PERMISSION = "deals.prospects";
+
+const SERVICE_NAMES = CATEGORIES.map((category) => category.name);
 
 // Enrichment is a live crawl, so a request handles a small slice and the page
 // keeps calling back until the queue drains. That keeps a directory of millions
@@ -711,6 +716,85 @@ export async function POST(req: NextRequest) {
         resource_id: id, resource_label: company.company_name, metadata: { prospect_id: prospect.id },
       });
       return NextResponse.json({ prospect, company: { ...company, prospect_id: prospect.id, review_status: "promoted" } });
+    }
+
+    if (action === "rewrite_outreach") {
+      // A live audit plus a model call, so it is metered per admin.
+      const rate = checkIntelligenceRateLimit(`prospect-rewrite:${actor}`, 60, 60 * 60 * 1000);
+      if (!rate.allowed) return NextResponse.json({ error: "Rewrite limit reached for this hour. Try again shortly." }, { status: 429 });
+      if (!process.env.OPENAI_API_KEY) return NextResponse.json({ error: "AI writing is not configured on this deployment." }, { status: 503 });
+
+      const id = uuid(body.id);
+      if (!id) return NextResponse.json({ error: "A company is required." }, { status: 400 });
+      const company = await glashMaybeOne<any>(`select * from public.prospect_companies where id=$1`, [id]);
+      if (!company) return NextResponse.json({ error: "Company not found." }, { status: 404 });
+
+      // The audit is re-run live rather than read from the last enrichment, so
+      // the email quotes what is true today. A site fixed last week should not
+      // be criticised for last month's markup.
+      const audit = await auditForAiSearch({
+        companyName: company.company_name,
+        website: company.website,
+        domain: company.domain,
+        socials: Array.isArray(company.socials) ? company.socials : [],
+        brandFindings: Array.isArray(company.brand_consistency) ? company.brand_consistency : [],
+      });
+
+      const senderName = str(body.sender_name, 120).trim() || process.env.PROSPECT_SENDER_NAME || session?.name || "";
+      const senderTitle = process.env.PROSPECT_SENDER_TITLE || "Founder and CEO, CDS Space";
+
+      const prompt = [
+        `Company: ${company.company_name}`,
+        company.website ? `Website: ${company.website}` : "Website: none found",
+        company.industry ? `Industry: ${company.industry}` : "",
+        company.country ? `Country: ${company.country}` : "",
+        company.employee_range ? `Size: ${company.employee_range}` : "",
+        `What we already know about them: ${str(company.brief, 1200) || "little"}`,
+        "",
+        "AUDIT FINDINGS, observed live on their properties just now. These are facts. Use them and nothing else:",
+        ...audit.findings.map((finding, index) => `${index + 1}. [${finding.severity}] [${finding.area}] ${finding.title}: ${finding.detail} (observed at ${finding.evidence})`),
+        audit.strengths.length ? `\nWhat they are already doing well: ${audit.strengths.join("; ")}` : "",
+        "",
+        `CDS Space services that could be offered: ${SERVICE_NAMES.join("; ")}`,
+        `Signature: ${senderName || "the sender"}, ${senderTitle}`,
+      ].filter(Boolean).join("\n");
+
+      const { text } = await chatComplete([
+        {
+          role: "system",
+          content: [
+            "You are the founder and CEO of CDS Space, a branding, design and digital product agency, writing a first email to a company you have never spoken to.",
+            "You are writing as the CEO, in the first person, personally. Not a sales rep, not a template, not a team. You looked at their business yourself and you are telling them what you saw.",
+            "The opening line must be audacious and specific enough that stopping reading feels like a risk. Lead with the single most costly thing the audit found, stated as a plain observation about THEIR business, naming the page or platform it was seen on. Never open with a greeting about yourself, your agency, or how you came across them.",
+            "Be direct and confident, never rude, never flattering, never desperate. Respect the reader as a peer: you are one business owner telling another something they would want to know.",
+            "Everything you assert must come from the supplied audit findings. Never invent a statistic, a client name, a revenue figure, a competitor claim, or a finding that is not listed.",
+            "Where the audit lists something they do well, acknowledge it in one clause before the problem. It proves you actually looked.",
+            "Explain the cost in terms of customers, credibility, or being absent from the answers buyers now get from AI assistants. Do not use jargon: say what it means for their business, not what the technical defect is called.",
+            "Close with one specific, low-friction next step: a short call, or an offer to send the full audit. Never ask for a meeting to 'discuss synergies' or anything that sounds like a form letter.",
+            "160 to 220 words for the body. Short paragraphs. No bullet points, no headings, no markdown.",
+            "Sign off with the sender's name and title exactly as supplied. Never write a placeholder such as [Your Name].",
+            "Write in plain professional English. Never use em dashes.",
+            "The subject line is at most 60 characters, states the specific observation, and reads like a person wrote it, never like a campaign.",
+            "Return only JSON: {subject, message}.",
+          ].join(" "),
+        },
+        { role: "user", content: prompt },
+      ], { temperature: 0.7, max_tokens: 900, response_format: { type: "json_object" } });
+
+      let written: { subject?: unknown; message?: unknown } = {};
+      try { written = JSON.parse(text); } catch { return NextResponse.json({ error: "The AI reply could not be read. Try again." }, { status: 502 }); }
+      const subject = str(written.subject, 300).trim();
+      const message = str(written.message, 20_000).trim();
+      if (!subject || !message) return NextResponse.json({ error: "The AI did not return a usable email. Try again." }, { status: 502 });
+
+      // Kept on the company so the next person to open it starts from the
+      // rewritten version rather than the original enrichment draft.
+      await glashQuery(
+        `update public.prospect_companies set outreach_subject=$2, outreach_email=$3, updated_by=$4, updated_at=now() where id=$1`,
+        [id, subject, message, actor],
+      );
+
+      return NextResponse.json({ subject, message, audit });
     }
 
     if (action === "find_emails") {
