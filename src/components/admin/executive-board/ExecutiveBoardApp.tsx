@@ -486,6 +486,14 @@ const emptyTarget = (): Partial<Target> => ({
   status: "on_track", owner: "", notes: "", model_id: null,
 });
 
+/** "September 2026" from a period_month date. */
+function monthLabel(value: string) {
+  const date = new Date(`${value.slice(0, 10)}T00:00:00Z`);
+  return Number.isNaN(date.getTime())
+    ? value
+    : date.toLocaleDateString(undefined, { month: "long", year: "numeric", timeZone: "UTC" });
+}
+
 function Targets({ board, busy, run }: { board: Board; busy: string; run: Run }) {
   const view = useBoardCurrency();
   const [draft, setDraft] = useState<Partial<Target> | null>(null);
@@ -506,7 +514,10 @@ function Targets({ board, busy, run }: { board: Board; busy: string; run: Run })
 
   return (
     <div className="space-y-4">
-      <div className="flex justify-end">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <p className="text-sm text-slate-500">
+          Every active revenue model carries a monthly target automatically. Fill in the progress; the figure and the name follow the model.
+        </p>
         <button type="button" onClick={() => setDraft(emptyTarget())} className="inline-flex h-10 items-center gap-2 rounded-xl bg-[#0A4FE8] px-4 text-sm font-bold text-white">
           <Plus className="h-4 w-4" /> New target
         </button>
@@ -521,8 +532,15 @@ function Targets({ board, busy, run }: { board: Board; busy: string; run: Run })
               <Card key={target.id}>
                 <div className="flex items-start justify-between gap-2">
                   <div className="min-w-0">
-                    <p className="truncate font-bold text-[#07133B]">{target.title}</p>
-                    <p className="truncate text-xs text-slate-400">{target.metric || "No metric"}{model ? ` · ${model.name}` : ""}</p>
+                    <p className="flex items-center gap-1.5 truncate font-bold text-[#07133B]">
+                      <span className="truncate">{target.title}</span>
+                      {target.source === "revenue_model" && <Rocket className="h-3.5 w-3.5 shrink-0 text-[#0A4FE8]" aria-label="From a revenue model" />}
+                    </p>
+                    <p className="truncate text-xs text-slate-400">
+                      {target.source === "revenue_model"
+                        ? `From revenue model${target.period_month ? ` · ${monthLabel(target.period_month)}` : ""}`
+                        : `${target.metric || "No metric"}${model ? ` · ${model.name}` : ""}`}
+                    </p>
                   </div>
                   <Badge value={target.status} />
                 </div>
@@ -546,7 +564,9 @@ function Targets({ board, busy, run }: { board: Board; busy: string; run: Run })
                   <span>{target.due_on ? `Due ${target.due_on}` : "No due date"}{target.owner ? ` · ${target.owner}` : ""}</span>
                   <span className="flex gap-1">
                     <button type="button" onClick={() => setDraft(target)} className="rounded p-1 hover:bg-slate-100" aria-label="Edit"><Pencil className="h-3.5 w-3.5" /></button>
-                    <button type="button" onClick={() => run("/api/admin/executive-board", { action: "delete_target", id: target.id }, "target", "Target removed.")} className="rounded p-1 hover:bg-rose-50 hover:text-rose-600" aria-label="Delete"><Trash2 className="h-3.5 w-3.5" /></button>
+                    {target.source !== "revenue_model" && (
+                      <button type="button" onClick={() => run("/api/admin/executive-board", { action: "delete_target", id: target.id }, "target", "Target removed.")} className="rounded p-1 hover:bg-rose-50 hover:text-rose-600" aria-label="Delete"><Trash2 className="h-3.5 w-3.5" /></button>
+                    )}
                   </span>
                 </div>
               </Card>
@@ -562,11 +582,16 @@ function Targets({ board, busy, run }: { board: Board; busy: string; run: Run })
             label="target"
             describe={(item) => item.title || ""}
           />
+          {draft.source === "revenue_model" && (
+            <p className="mb-3 rounded-xl bg-blue-50 px-3 py-2.5 text-xs text-[#07133B]">
+              This target comes from the {draft.title} revenue model{draft.period_month ? ` for ${monthLabel(draft.period_month)}` : ""}. Its name, unit and monthly figure follow the model, so edit those on the revenue model itself. Progress, status, owner and notes are yours.
+            </p>
+          )}
           <div className="grid gap-3 sm:grid-cols-2">
-            <div className="sm:col-span-2"><Field label="Title"><input className={inputClass} value={draft.title || ""} onChange={(e) => setDraft({ ...draft, title: e.target.value })} placeholder="Annual recurring revenue" /></Field></div>
-            <Field label="Metric"><input className={inputClass} value={draft.metric || ""} onChange={(e) => setDraft({ ...draft, metric: e.target.value })} placeholder="Signed retainers" /></Field>
-            <Field label="Unit"><input className={inputClass} value={draft.unit || ""} onChange={(e) => setDraft({ ...draft, unit: e.target.value })} placeholder="clients" /></Field>
-            <Field label="Target value"><input type="number" step="0.01" className={inputClass} value={String(draft.target_value ?? 0)} onChange={(e) => setDraft({ ...draft, target_value: Number(e.target.value) })} /></Field>
+            <div className="sm:col-span-2"><Field label="Title"><input className={inputClass} disabled={draft.source === "revenue_model"} value={draft.title || ""} onChange={(e) => setDraft({ ...draft, title: e.target.value })} placeholder="Annual recurring revenue" /></Field></div>
+            <Field label="Metric"><input className={inputClass} disabled={draft.source === "revenue_model"} value={draft.metric || ""} onChange={(e) => setDraft({ ...draft, metric: e.target.value })} placeholder="Signed retainers" /></Field>
+            <Field label="Unit"><input className={inputClass} disabled={draft.source === "revenue_model"} value={draft.unit || ""} onChange={(e) => setDraft({ ...draft, unit: e.target.value })} placeholder="clients" /></Field>
+            <Field label="Target value"><input type="number" step="0.01" className={inputClass} disabled={draft.source === "revenue_model"} value={String(draft.target_value ?? 0)} onChange={(e) => setDraft({ ...draft, target_value: Number(e.target.value) })} /></Field>
             <Field label="Current value"><input type="number" step="0.01" className={inputClass} value={String(draft.current_value ?? 0)} onChange={(e) => setDraft({ ...draft, current_value: Number(e.target.value) })} /></Field>
             <Field label="Due"><input type="date" className={inputClass} value={draft.due_on || ""} onChange={(e) => setDraft({ ...draft, due_on: e.target.value })} /></Field>
             <Field label="Owner"><input className={inputClass} value={draft.owner || ""} onChange={(e) => setDraft({ ...draft, owner: e.target.value })} /></Field>

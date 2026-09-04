@@ -45,6 +45,59 @@ function currency(value: unknown) {
   return /^[A-Z]{3}$/.test(code) ? code : "USD";
 }
 
+/**
+ * Mirrors every live revenue model into a target for the current month.
+ *
+ * A revenue model states what a line of business should bring in; a target is
+ * the monthly commitment to it. Rather than asking the team to retype one into
+ * the other, each active model gets a target for this month carrying its
+ * monthly value, created the first time the month is seen and refreshed
+ * thereafter.
+ *
+ * The refresh only touches the figure and the naming. Progress, status, owner
+ * and notes belong to whoever is working the target, so they are never
+ * overwritten. Retired and paused models stop generating new months but keep
+ * the months already recorded.
+ */
+async function syncRevenueModelTargets(actor: string) {
+  const start = new Date();
+  const periodMonth = `${start.getUTCFullYear()}-${String(start.getUTCMonth() + 1).padStart(2, "0")}-01`;
+  // Last day of the month, reached by stepping to day 0 of the next one.
+  const end = new Date(Date.UTC(start.getUTCFullYear(), start.getUTCMonth() + 1, 0));
+  const dueOn = end.toISOString().slice(0, 10);
+
+  await glashQuery(
+    `insert into public.executive_targets
+       (title, metric, unit, target_value, current_value, due_on, model_id, status,
+        source, period_month, created_by, updated_by)
+     select
+       m.name,
+       'Monthly revenue',
+       m.currency,
+       case when coalesce(m.target_monthly_value, 0) > 0
+            then m.target_monthly_value
+            else round(coalesce(m.target_annual_value, 0) / 12.0, 2) end,
+       0,
+       $1::date,
+       m.id,
+       'on_track',
+       'revenue_model',
+       $2::date,
+       $3,
+       $3
+     from public.executive_revenue_models m
+     where m.status in ('active', 'piloting')
+     on conflict (model_id, period_month) where source = 'revenue_model'
+     do update set
+       title = excluded.title,
+       unit = excluded.unit,
+       target_value = excluded.target_value,
+       due_on = excluded.due_on,
+       updated_at = now()`,
+    [dueOn, periodMonth, actor],
+  );
+}
+
 /** Everything the board page needs, in one round trip. */
 async function loadBoard() {
   const [budgets, models, steps, targets, folders, files, shares] = await Promise.all([
@@ -80,9 +133,16 @@ async function loadBoard() {
 }
 
 export async function GET(req: NextRequest) {
-  const { denied } = await requireAdmin(req, "executive_board.view");
+  const { session, denied } = await requireAdmin(req, "executive_board.view");
   if (denied) return denied;
   try {
+    // Kept current on read, so a new month brings its targets with it without
+    // anyone having to remember. Failing here must not take the board down.
+    try {
+      await syncRevenueModelTargets(session?.email || "system");
+    } catch {
+      // The board is still perfectly usable without this month's generated rows.
+    }
     return NextResponse.json({ ok: true, ...(await loadBoard()) });
   } catch (error) {
     return NextResponse.json(
@@ -262,6 +322,9 @@ export async function POST(req: NextRequest) {
         resource_id: row?.id,
         resource_label: name,
       });
+      // A renamed model, a changed figure, or a model becoming active should
+      // show up in this month's targets straight away.
+      await syncRevenueModelTargets(actor);
       return NextResponse.json({ ok: true, model: row });
     }
 

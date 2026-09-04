@@ -82,6 +82,10 @@ export interface Target {
   model_id: string | null;
   status: TargetStatus;
   notes: string | null;
+  /** manual when someone wrote it, revenue_model when generated from a model. */
+  source: "manual" | "revenue_model";
+  /** First day of the month a generated target covers. */
+  period_month: string | null;
   created_at: string;
   updated_at: string;
 }
