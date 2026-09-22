@@ -40,12 +40,35 @@ const contentSecurityPolicy = [
   "worker-src 'self' blob:",
   ...(productionSecurity ? ["upgrade-insecure-requests"] : []),
 ].join("; ");
+const cmeetFramePolicy = contentSecurityPolicy.replace(
+  "frame-ancestors 'self'",
+  "frame-ancestors 'self' https://cdsspace.pro https://www.cdsspace.pro https://*.cdsspace.pro",
+);
+const authenticationNoStoreHeaders = [
+  { key: "Cache-Control", value: "private, no-store, max-age=0, must-revalidate" },
+  { key: "Pragma", value: "no-cache" },
+  { key: "Expires", value: "0" },
+];
+const authenticationGatewayPaths = [
+  "/login",
+  "/signup",
+  "/forgot-password",
+  "/reset-password",
+  "/auth/:path*",
+  "/onboarding",
+  "/agreement",
+  "/admin/login",
+  "/team/login",
+  "/team/invite/:path*",
+  "/marketer/login",
+  "/screening",
+];
 
 const nextConfig: NextConfig = {
   // Allow an isolated verification build while a developer server owns .next.
   // Production and normal local development keep the standard directory.
   distDir: process.env.CDS_NEXT_DIST_DIR || ".next",
-  serverExternalPackages: ["@napi-rs/canvas"],
+  serverExternalPackages: ["@napi-rs/canvas", "ffmpeg-static"],
   turbopack: {
     root: path.resolve(__dirname),
   },
@@ -125,8 +148,28 @@ const nextConfig: NextConfig = {
     ];
 
     return [
+      ...authenticationGatewayPaths.map((source) => ({
+        source,
+        headers: authenticationNoStoreHeaders,
+      })),
       {
-        source: "/:path*",
+        // cMeet is intentionally embeddable inside the authenticated CDS
+        // dashboard call panel. Keep every other page locked to SAMEORIGIN,
+        // while trusted CDS subdomains rely on frame-ancestors for cMeet.
+        source: "/meet/:path*",
+        headers: [
+          { key: "Content-Security-Policy", value: cmeetFramePolicy },
+          { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
+          { key: "X-Content-Type-Options", value: "nosniff" },
+          { key: "Cross-Origin-Opener-Policy", value: "same-origin-allow-popups" },
+          { key: "Cross-Origin-Resource-Policy", value: "same-site" },
+          { key: "Permissions-Policy", value: "camera=(self), microphone=(self), geolocation=(self), payment=(self)" },
+          { key: "Cache-Control", value: "private, no-store, max-age=0" },
+          ...(productionSecurity ? [{ key: "Strict-Transport-Security", value: "max-age=63072000; includeSubDomains; preload" }] : []),
+        ],
+      },
+      {
+        source: "/:path((?!meet(?:/|$)).*)",
         headers: [
           {
             key: "Content-Security-Policy",

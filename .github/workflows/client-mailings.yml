@@ -1,0 +1,16 @@
+name: Scheduled client mailings
+
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch: {}
+
+jobs:
+  deliver:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deliver due client mailings
+        run: |
+          curl -fsS -X GET "https://cdsspace.pro/api/cron/client-mailings" \
+            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
+            -w "\nHTTP %{http_code}\n"

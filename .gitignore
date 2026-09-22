@@ -53,3 +53,10 @@ public/downloads/*.dmg
 
 # build output
 /.tmpbuild/
+
+# Local verification builds (npm run build into a scratch dir)
+.next-*/
+.b.txt
+
+# Debug and verification screenshots, not app source
+artifacts/

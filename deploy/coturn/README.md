@@ -1,49 +1,54 @@
-# CMeet TURN relay
+# CMeet relay configuration
 
-`src/lib/cmeet-rtc.ts` adds a TURN server to its ICE configuration when three
-public environment variables are present. Until they are, CMeet runs on STUN
-alone, which means calls connect on the same network and fail between, say, a
-phone on cellular and a laptop on office Wi-Fi.
+CMeet uses Cloudflare TURN when a direct WebRTC connection is unavailable.
+The application exchanges a private, long-lived Cloudflare key on the server
+for short-lived ICE credentials only after a participant is admitted. The
+private key is never included in browser JavaScript.
 
-## 1. Host
+## Environment
 
-Any small VPS works; a relay is bandwidth-bound, not CPU-bound. Budget roughly
-1.5 Mbps per relayed participant. Point `turn.cdsspace.pro` at its public IP.
+Create a TURN key in Cloudflare Realtime and add these server-only values to
+the local and Glash deployment environments:
 
-## 2. Certificate
+```dotenv
+CMEET_TURN_KEY_ID=your_cloudflare_turn_key_id
+CMEET_TURN_API_TOKEN=your_cloudflare_turn_api_token
+```
 
-    certbot certonly --standalone -d turn.cdsspace.pro
+Do not prefix either variable with `NEXT_PUBLIC_`. That prefix would expose the
+long-lived secret to every visitor. An optional credential lifetime can be set
+between one hour and 24 hours; CMeet defaults to 24 hours:
 
-`turns:` on 5349 needs this. It is the variant that survives firewalls which
-block UDP, so do not skip it.
+```dotenv
+CMEET_TURN_TTL_SECONDS=86400
+```
 
-## 3. Configure and run
+Restart the development server after changing `.env`. For production, sync the
+same names through Glash before deploying.
 
-Edit `turnserver.conf` and replace `REPLACE_ME_PUBLIC_IP`, `REPLACE_ME_USER`
-and `REPLACE_ME_PASSWORD`, then:
+## Application flow
 
-    docker compose up -d
+1. A participant requests admission to a cMeet room.
+2. The server confirms that the participant is staff, an invited client, or an
+   admitted waiting-room guest.
+3. `/api/cmeet/[code]/ice-servers` exchanges the private key with Cloudflare.
+4. The browser receives only temporary STUN/TURN credentials and uses them for
+   the peer connection.
+5. If Cloudflare is temporarily unavailable, cMeet attempts a direct STUN
+   connection and records a relay warning in the browser console.
 
-Open UDP/TCP 3478, 5349, and UDP 49152-65535 in the firewall.
+## Verify
 
-## 4. Point the app at it
+First test the key against Cloudflare's credential-generation endpoint without
+printing the returned username or credential. A successful response is HTTP
+`201` and contains `stun:`, `turn:`, and `turns:` URLs.
 
-Add to `.env`, using the same credentials:
+Then open the same cMeet room on two different networks, such as office Wi-Fi
+and a phone on cellular. In the browser's WebRTC internals, the selected ICE
+candidate pair should show candidate type `relay` when a direct path is not
+available. Confirm microphone audio in both directions and camera video before
+considering the relay fully verified.
 
-    NEXT_PUBLIC_TURN_URL=turn:turn.cdsspace.pro:3478
-    NEXT_PUBLIC_TURN_USERNAME=REPLACE_ME_USER
-    NEXT_PUBLIC_TURN_CREDENTIAL=REPLACE_ME_PASSWORD
-
-`buildRtcConfig()` derives the `turns:` 5349 entry automatically from a URL
-ending in `:3478`, so only the one variable is needed.
-
-These are `NEXT_PUBLIC_`, so the credential ships to every browser. That is
-inherent to long-term TURN credentials. The `denied-peer-ip` rules above are
-what stop that from becoming an open proxy into the host's network. Rotate the
-password periodically.
-
-## 5. Verify
-
-Paste the three values into https://icetest.info or Trickle ICE. You must see
-at least one candidate of type `relay`. If you only see `srflx`, TURN is not
-actually working and cross-network calls will still fail.
+The Docker Compose and Coturn configuration in this folder remain available as
+a legacy self-hosted option, but the current application integration uses the
+Cloudflare server-side credential flow described above.
