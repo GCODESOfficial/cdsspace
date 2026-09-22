@@ -308,7 +308,7 @@ export async function auditForAiSearch(input: {
       evidence: "Open web search for the company's accounts",
     });
   } else {
-    const inconsistent = input.brandFindings.filter((entry) => entry.status && entry.status !== "consistent" && entry.status !== "ok");
+    const inconsistent = input.brandFindings.filter((entry) => entry.status === "differs");
     if (inconsistent.length) {
       findings.push({
         area: "social",
@@ -318,7 +318,10 @@ export async function auditForAiSearch(input: {
         evidence: input.socials.map((entry) => entry.url).slice(0, 3).join(", "),
       });
     } else {
-      strengths.push(`Active on ${input.socials.map((entry) => entry.platform).join(", ")}`);
+      const hasVariants = input.brandFindings.some((entry) => entry.status === "variant");
+      strengths.push(hasVariants
+        ? `The website and ${input.socials.map((entry) => entry.platform).join(", ")} use the same core identity through valid brand variants`
+        : `Active on ${input.socials.map((entry) => entry.platform).join(", ")}`);
     }
   }
 

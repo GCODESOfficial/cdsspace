@@ -4,6 +4,7 @@ import { hasPermission } from "@/lib/admin-permissions";
 import { getGlashDbAdmin } from "@/lib/glashdb";
 import { glashMaybeOne } from "@/lib/glashdb/postgres";
 import { getTeamSession } from "@/lib/team-auth";
+import { absoluteApplicationUrl } from "@/lib/public-site";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -51,7 +52,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
         .maybeSingle();
       if (!ownedDocument) return NextResponse.json({ ok: false, error: "Attachment not found." }, { status: 404 });
     }
-    return NextResponse.redirect(new URL(admin ? `/admin/cdocs?doc=${attachment.source_id}` : `/team/cdocs/${attachment.source_id}`, req.url), 303);
+    return NextResponse.redirect(absoluteApplicationUrl(admin ? `/admin/cdocs?doc=${attachment.source_id}` : `/team/cdocs/${attachment.source_id}`, req), 303);
   }
   if (attachment.source_kind === "protected" && attachment.source_id) {
     if (team) {
@@ -64,7 +65,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
         .maybeSingle();
       if (!ownedDocument) return NextResponse.json({ ok: false, error: "Attachment not found." }, { status: 404 });
     }
-    return NextResponse.redirect(new URL(admin ? `/admin/protect-docs?doc=${attachment.source_id}` : `/team/protect-docs?doc=${attachment.source_id}`, req.url), 303);
+    return NextResponse.redirect(absoluteApplicationUrl(admin ? `/admin/protect-docs?doc=${attachment.source_id}` : `/team/protect-docs?doc=${attachment.source_id}`, req), 303);
   }
   if (attachment.source_kind === "upload" && attachment.storage_path) {
     const db = getGlashDbAdmin() as any;

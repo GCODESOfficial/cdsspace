@@ -1,5 +1,6 @@
 import crypto from "crypto";
 import { NextRequest, NextResponse } from "next/server";
+import { absoluteApplicationUrl } from "@/lib/public-site";
 import { getAdminSession } from "@/lib/admin-session";
 import {
   TEAM_SESSION_COOKIE,
@@ -157,7 +158,7 @@ export async function POST(req: NextRequest) {
 export async function GET(req: NextRequest) {
   const postResponse = await POST(req);
   if (!postResponse.ok) return postResponse;
-  const redirect = NextResponse.redirect(new URL("/team", req.url));
+  const redirect = NextResponse.redirect(absoluteApplicationUrl("/team", req));
   const cookie = postResponse.cookies.get(TEAM_SESSION_COOKIE);
   if (cookie) {
     redirect.cookies.set(TEAM_SESSION_COOKIE, cookie.value, sessionCookieOptions());

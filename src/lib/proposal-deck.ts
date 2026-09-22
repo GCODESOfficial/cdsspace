@@ -92,10 +92,10 @@ export const DEFAULT_PROCESS_NOTE =
 
 export const DEFAULT_KICKOFF_STEPS: DeckPoint[] = [
   { title: "Opening discussions", detail: "You share the business, the challenges, and the ambitions behind this brief." },
-  { title: "We build the big picture", detail: "Our team reviews your brand and the transformation it needs." },
+  { title: "We build the big picture", detail: "Our team reviews the project, the people it must serve, and the result it needs to produce." },
   { title: "We define the scope", detail: "We recommend the right engagement and the roadmap that fits it." },
   { title: "We assemble the team", detail: "Strategy, creative, digital, and implementation specialists are aligned." },
-  { title: "We begin the transformation", detail: "Discover, Define, Build, Deploy, Govern - with you reviewing at each output." },
+  { title: "We begin delivery", detail: "Discover, Define, Build, Deploy, Govern - with you reviewing at each output." },
 ];
 
 function text(value: unknown, max: number, fallback = "") {
@@ -128,55 +128,67 @@ function pointList(value: unknown, max: number, fallback: DeckPoint[] = []) {
 }
 
 export function emptyDeck(brandName: string, focusArea: string, title: string): ProposalDeck {
+  const cleanedFocus = focusArea.replace(/\s+/g, " ").trim();
+  const focusSentence = cleanedFocus.match(/^[^.!?]+[.!?]?/)?.[0]?.slice(0, 180) || "the agreed project";
+  const projectFocus = focusSentence.replace(/[.!?]+$/, "");
   return {
     cover: {
-      title: title || `${brandName} brand proposal`,
-      subtitle: "We build brands that grow with your business",
+      title: title || `${brandName} project proposal`,
+      subtitle: `A focused plan for ${projectFocus}`,
       prepared_for: brandName,
     },
     who_we_are: {
       heading: "Who We Are",
       body: [
         "CDS Space is a full-service branding agency. We design and build brand systems, digital products, and physical brand experiences for founders and teams whose brand needs to keep up with how fast they are scaling.",
-        `For ${brandName}, that means one team accountable for ${focusArea || "the work"} end to end, from the strategy behind it to the system that keeps it consistent afterwards.`,
+        `For ${brandName}, that means one team accountable for ${projectFocus} end to end, from defining the right outcome to delivering and embedding the work.`,
       ],
     },
     big_picture: {
       heading: "The Big Picture",
-      intro: `Where ${brandName} should be once this work is done.`,
+      intro: `What ${brandName} should be able to achieve through ${projectFocus}.`,
       outcomes: [
-        { title: "A brand people recognise", detail: "One consistent expression of the business across every place a customer meets it." },
-        { title: "A clearer commercial story", detail: "The offer is understood quickly, by the right audience, without explanation." },
-        { title: "A system that scales", detail: "New pages, campaigns, and markets ship without rebuilding the brand each time." },
+        { title: "A clear definition of success", detail: "The team shares one practical view of what this project must accomplish and for whom." },
+        { title: "A fit-for-purpose result", detail: `The work is shaped around ${brandName}'s actual priorities rather than a generic solution.` },
+        { title: "Value that lasts beyond delivery", detail: "The outputs are usable, adoptable, and supported by clear ownership and next steps." },
       ],
     },
     rewind: {
       heading: "Rewind",
       intro: "First, let us talk about the problem.",
       problems: [
-        "The message shifts depending on where a customer meets the brand.",
-        "The visual system is applied inconsistently across touchpoints.",
-        "The digital experience does not guide people to one clear action.",
+        "The purpose, audience, and success criteria need to be aligned before delivery begins.",
+        "The scope must translate the project ambition into clear, usable outputs.",
+        "Ownership, adoption, and the next stage of the work need to be designed into the engagement.",
       ],
     },
     opportunities: {
       heading: "The Opportunities",
       intro: "What is currently being left on the table, and what becomes available once this is fixed.",
       items: [
-        { title: "Conversion left on the table", detail: "Visitors who understand the offer faster act on it more often.", value: "Higher qualified enquiry rate" },
-        { title: "Trust built before the first call", detail: "A consistent brand shortens the distance between interest and commitment.", value: "Shorter sales cycle" },
-        { title: "Execution speed", detail: "A documented system removes the cost of redesigning every new asset.", value: "Lower cost per campaign" },
+        { title: "Sharper project decisions", detail: "A shared objective makes it easier to prioritise effort and avoid work that does not serve the outcome.", value: "Clearer scope" },
+        { title: "Stronger adoption", detail: "Outputs designed around the people who will use them are more likely to become part of everyday work.", value: "Practical uptake" },
+        { title: "A credible next stage", detail: "Clear handover and success criteria give the team a sound basis for measuring and extending the work.", value: "Sustainable value" },
       ],
     },
     process: {
       heading: "Our Process",
-      intro: "From business complexity to a scalable brand system.",
+      intro: `A structured path from ${projectFocus} to implementation and adoption.`,
       duration_note: DEFAULT_PROCESS_NOTE,
     },
     payoff: {
       heading: "The Payoff",
-      intro: "True value for the investment.",
-      items: [...PROCESS_PAYOFF],
+      intro: `Practical value from delivering ${projectFocus} well.`,
+      items: [
+        "A shared definition of the project's purpose and success",
+        "A scope shaped around the real organisational need",
+        "Outputs designed for the people who will use them",
+        "Clearer ownership and faster project decisions",
+        "A practical route from strategy into implementation",
+        "Consistent delivery across the agreed touchpoints",
+        "Guidance that supports adoption after handover",
+        "A credible foundation for the project's next stage",
+      ],
     },
     kickoff: {
       heading: "Kickoff",
@@ -329,3 +341,35 @@ export const PROPOSAL_ART = {
 } as const satisfies Record<string, ProposalArtSource>;
 
 export type ProposalArtKey = keyof typeof PROPOSAL_ART;
+
+/**
+ * Sets one text field inside a deck by dotted path ("big_picture.outcomes.1.title").
+ *
+ * The presentation view edits the deck in place, so it needs to write a single
+ * value without knowing the shape around it. Every level is copied rather than
+ * mutated, so React sees a new object and the autosave notices the change.
+ */
+export function setDeckValue(deck: ProposalDeck, path: string, value: string): ProposalDeck {
+  const keys = path.split(".").filter(Boolean);
+  if (!keys.length) return deck;
+
+  const write = (node: unknown, index: number): unknown => {
+    const key = keys[index];
+    const last = index === keys.length - 1;
+    if (Array.isArray(node)) {
+      const position = Number(key);
+      if (!Number.isInteger(position) || position < 0 || position >= node.length) return node;
+      const copy = node.slice();
+      copy[position] = last ? value : write(copy[position], index + 1);
+      return copy;
+    }
+    if (node && typeof node === "object") {
+      const record = node as Record<string, unknown>;
+      if (!(key in record)) return node;
+      return { ...record, [key]: last ? value : write(record[key], index + 1) };
+    }
+    return node;
+  };
+
+  return write(deck, 0) as ProposalDeck;
+}

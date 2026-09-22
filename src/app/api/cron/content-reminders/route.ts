@@ -23,6 +23,7 @@ import { brandedEmailHtml } from "@/lib/email-template";
 import { glashQuery } from "@/lib/glashdb/postgres";
 import { notifyTeamMember } from "@/lib/notify-team";
 import { processClientChatEscalations } from "@/lib/client-chat-escalation";
+import { emailAttachmentsFor } from "@/lib/email-logo";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";

@@ -5,7 +5,7 @@
 // that rule prevents both sides from creating offers simultaneously.
 //
 // Signaling messages are exchanged through our own endpoint at
-// /api/cmeet/<roomCode>/signal (SSE down, POST up). Message shapes:
+// /api/cmeet/<roomCode>/signal (cursor polls down, POST up). Message shapes:
 //   { type: "join", peerId, name, hasVideo, hasAudio }
 //   { type: "leave", peerId }
 //   { type: "offer", from, to, sdp }
@@ -13,26 +13,40 @@
 //   { type: "ice", from, to, candidate }
 //   { type: "chat", from, name, body, at }
 //
-// The caller provides a local MediaStream (mic/cam). When the local
-// stream changes (e.g. screen share replaces the video track), call
-// `replaceVideoTrack()` to swap it everywhere without renegotiation.
+// The caller provides a local MediaStream (mic/cam). Camera changes use
+// `replaceVideoTrack()`; presentations use a separately reserved sender via
+// `replaceScreenTrack()` so both remain visible without renegotiation.
 
 import { openSignalTransport, type SignalTransport } from "@/lib/cmeet-signal";
 
 export type ConnectionQuality = "good" | "fair" | "poor";
+export type CMeetHostRole = "host" | "co-host" | null;
+export type CMeetParticipantKind = "admin" | "team" | "client" | "guest";
+
+function normalizeParticipantKind(value: unknown): CMeetParticipantKind {
+  return value === "admin" || value === "team" || value === "client" ? value : "guest";
+}
 
 export type RemotePeer = {
   peerId: string;
   name: string;
+  /** Camera and microphone stream used by the participant tile/audio sink. */
   stream: MediaStream;
+  /** Dedicated presentation stream, kept separate so camera stays visible. */
+  screenStream: MediaStream;
   /** Rolling link health, sampled from getStats() every few seconds. */
   quality: ConnectionQuality;
   hasVideo: boolean;
   hasAudio: boolean;
   isSharingScreen: boolean;
   isHost: boolean;
+  hostRole: CMeetHostRole;
   memberId: string | null;
   isOwner: boolean;
+  spokenLanguage: string;
+  handRaised: boolean;
+  avatarUrl: string | null;
+  participantKind: CMeetParticipantKind;
   connection: RTCPeerConnection;
 };
 
@@ -62,6 +76,9 @@ export type CMeetEvents = {
   onHostMuteAll?: (from: string) => void;
   onHostEnd?: (from: string) => void;
   onHostKicked?: (from: string) => void;
+  onPeerJoined?: (name: string) => void;
+  onPeerLeft?: (name: string) => void;
+  onHandRaised?: (peerId: string, name: string, raised: boolean) => void;
   onPeerStateChange?: (peerId: string, state: PeerConnectionState) => void;
   onTranscript?: (msg: TranscriptMsg) => void;
   /** Fires when the loudest speaker changes. `null` means nobody is talking. */
@@ -75,14 +92,15 @@ export type CMeetEvents = {
  * shrink as the room grows or the uplink saturates and everything stutters.
  * Numbers are per-peer video bitrate ceilings. */
 const VIDEO_PROFILES: { upTo: number; maxBitrate: number; maxFramerate: number; scaleDown: number }[] = [
-  { upTo: 1, maxBitrate: 1_700_000, maxFramerate: 30, scaleDown: 1 },
-  { upTo: 3, maxBitrate: 900_000, maxFramerate: 30, scaleDown: 1 },
-  { upTo: 6, maxBitrate: 500_000, maxFramerate: 25, scaleDown: 1.5 },
-  { upTo: 99, maxBitrate: 260_000, maxFramerate: 20, scaleDown: 2 },
+  { upTo: 1, maxBitrate: 1_350_000, maxFramerate: 24, scaleDown: 1 },
+  { upTo: 3, maxBitrate: 760_000, maxFramerate: 24, scaleDown: 1 },
+  { upTo: 6, maxBitrate: 420_000, maxFramerate: 20, scaleDown: 1.5 },
+  { upTo: 10, maxBitrate: 240_000, maxFramerate: 18, scaleDown: 2 },
+  { upTo: 99, maxBitrate: 150_000, maxFramerate: 15, scaleDown: 2.5 },
 ];
 // Screen share favours sharpness over motion, so it gets its own budget.
 const SCREEN_PROFILE = { maxBitrate: 2_500_000, maxFramerate: 15, scaleDown: 1 };
-const AUDIO_MAX_BITRATE = 40_000;
+const AUDIO_MAX_BITRATE = 64_000;
 
 function profileFor(peerCount: number, sharing: boolean) {
   if (sharing) return SCREEN_PROFILE;
@@ -99,7 +117,7 @@ function tuneSdp(sdp: string): string {
   const opusPt = /a=rtpmap:(\d+) opus\/48000/i.exec(out)?.[1];
   if (opusPt) {
     const fmtp = new RegExp(`a=fmtp:${opusPt} ([^\r\n]*)`);
-    const extras = "useinbandfec=1;usedtx=1;stereo=0;maxaveragebitrate=32000;maxplaybackrate=48000";
+    const extras = "useinbandfec=1;usedtx=1;stereo=0;maxaveragebitrate=64000;maxplaybackrate=48000";
     if (fmtp.test(out)) {
       out = out.replace(fmtp, (_m, existing: string) => {
         const kept = existing
@@ -119,11 +137,10 @@ function tuneSdp(sdp: string): string {
   return out;
 }
 
-// ICE configuration. Always includes free Google STUN servers. When the
-// self-hosted TURN relay is configured (see deploy/coturn/), it's added
-// so peers behind symmetric NAT / corporate firewalls can connect too.
-// Zero third-party dependency - the TURN server runs on your own VPS.
-function buildRtcConfig(): RTCConfiguration {
+// ICE configuration. Cloudflare TURN credentials are generated server-side
+// for each admitted participant and passed into the client constructor. The
+// long-lived key must never be bundled into browser JavaScript.
+export function buildRtcConfig(relayServers: RTCIceServer[] = []): RTCConfiguration {
   const servers: RTCIceServer[] = [
     { urls: "stun:stun.l.google.com:19302" },
     { urls: "stun:stun1.l.google.com:19302" },
@@ -131,21 +148,7 @@ function buildRtcConfig(): RTCConfiguration {
     { urls: "stun:stun3.l.google.com:19302" },
     { urls: "stun:stun4.l.google.com:19302" },
   ];
-  const turnUrl = process.env.NEXT_PUBLIC_TURN_URL || "";
-  const turnUser = process.env.NEXT_PUBLIC_TURN_USERNAME || "";
-  const turnCred = process.env.NEXT_PUBLIC_TURN_CREDENTIAL || "";
-  if (turnUrl && turnUser && turnCred) {
-    servers.push({ urls: turnUrl, username: turnUser, credential: turnCred });
-    // Also add a turns: (TLS) variant on port 5349 if the base URL is
-    // on port 3478 - covers networks that block non-443 UDP.
-    if (turnUrl.includes(":3478")) {
-      servers.push({
-        urls: turnUrl.replace("turn:", "turns:").replace(":3478", ":5349"),
-        username: turnUser,
-        credential: turnCred,
-      });
-    }
-  }
+  servers.push(...relayServers);
   return {
     iceServers: servers,
     iceTransportPolicy: "all",
@@ -154,12 +157,12 @@ function buildRtcConfig(): RTCConfiguration {
     iceCandidatePoolSize: 10,
   };
 }
-const RTC_CONFIG = buildRtcConfig();
 
 export class CMeetClient {
   private transport: SignalTransport | null = null;
   private peers = new Map<string, RemotePeer>();
   private localStream: MediaStream | null = null;
+  private screenTrack: MediaStreamTrack | null = null;
   private events: CMeetEvents;
   // Queue ICE candidates that arrive before the remote description is set.
   // Adding an ICE candidate with no remote description throws in every
@@ -175,22 +178,38 @@ export class CMeetClient {
   // Perfect-negotiation bookkeeping, per peer. Without this an offer/answer
   // collision (both sides renegotiating at once - very common on ICE restart
   // or a screen-share swap) wedges the connection in `have-local-offer`.
-  private nego = new Map<string, { makingOffer: boolean; ignoreOffer: boolean; settingRemoteAnswer: boolean }>();
-  private senders = new Map<string, { audio: RTCRtpSender | null; video: RTCRtpSender | null }>();
+  private nego = new Map<string, {
+    makingOffer: boolean;
+    ignoreOffer: boolean;
+    settingRemoteAnswer: boolean;
+    initialHandshakeComplete: boolean;
+  }>();
+  private senders = new Map<string, {
+    audio: RTCRtpSender | null;
+    video: RTCRtpSender | null;
+    screen: RTCRtpSender | null;
+  }>();
   // Grace timers for `disconnected` peers - a brief blip is normal, so we wait
   // before spending an ICE restart on it.
   private recoverTimers = new Map<string, ReturnType<typeof setTimeout>>();
   private statsTimer: ReturnType<typeof setInterval> | null = null;
   private levelTimer: ReturnType<typeof setInterval> | null = null;
   private audioCtx: AudioContext | null = null;
-  private analysers = new Map<string, { analyser: AnalyserNode; buf: Uint8Array }>();
+  private analysers = new Map<string, { source: MediaStreamAudioSourceNode; analyser: AnalyserNode; buf: Uint8Array }>();
   private activeSpeaker: string | null = null;
   private lastStats = new Map<string, { lost: number; received: number }>();
+  private qualityStreaks = new Map<string, { degraded: number; healthy: number }>();
   readonly peerId: string;
   readonly roomCode: string;
   readonly name: string;
   readonly memberId: string | null;
   readonly isOwner: boolean;
+  readonly hostRole: CMeetHostRole;
+  readonly avatarUrl: string | null;
+  readonly participantKind: CMeetParticipantKind;
+  private spokenLanguage: string;
+  private handRaised = false;
+  private readonly rtcConfig: RTCConfiguration;
   private hostMemberId: string | null = null;
   private hostIsOwner = false;
 
@@ -199,7 +218,17 @@ export class CMeetClient {
     peerId: string,
     name: string,
     events: CMeetEvents = {},
-    identity: { memberId?: string | null; isOwner?: boolean; hostMemberId?: string | null; hostIsOwner?: boolean } = {},
+    identity: {
+      memberId?: string | null;
+      isOwner?: boolean;
+      hostRole?: CMeetHostRole;
+      hostMemberId?: string | null;
+      hostIsOwner?: boolean;
+      spokenLanguage?: string;
+      avatarUrl?: string | null;
+      participantKind?: CMeetParticipantKind;
+    } = {},
+    iceServers: RTCIceServer[] = [],
   ) {
     this.roomCode = roomCode;
     this.peerId = peerId;
@@ -207,8 +236,13 @@ export class CMeetClient {
     this.events = events;
     this.memberId = identity.memberId || null;
     this.isOwner = !!identity.isOwner;
+    this.hostRole = identity.hostRole || null;
     this.hostMemberId = identity.hostMemberId || null;
     this.hostIsOwner = !!identity.hostIsOwner;
+    this.spokenLanguage = identity.spokenLanguage || "auto";
+    this.avatarUrl = identity.avatarUrl || null;
+    this.participantKind = identity.participantKind || "guest";
+    this.rtcConfig = buildRtcConfig(iceServers);
   }
 
   // Is the given peer the meeting host? Uses the identity info carried on
@@ -223,9 +257,8 @@ export class CMeetClient {
   async join(localStream: MediaStream): Promise<void> {
     this.localStream = localStream;
 
-    // Open the signaling stream. The transport reconnects and resumes from its
-    // own cursor, so a mobile network hand-off cannot lose an offer; there is
-    // no subscribe handshake to time out and no retry ladder to tune here.
+    // Open signaling. The transport reconnects and resumes from its own cursor,
+    // so a mobile network hand-off cannot lose an offer or ICE candidate.
     await new Promise<void>((resolve, reject) => {
       let settled = false;
       const giveUp = setTimeout(() => {
@@ -259,8 +292,28 @@ export class CMeetClient {
       name: this.name,
       memberId: this.memberId,
       isOwner: this.isOwner,
+      hostRole: this.hostRole,
       hasVideo: this.hasTrackKind("video"),
       hasAudio: this.hasTrackKind("audio"),
+      spokenLanguage: this.spokenLanguage,
+      handRaised: this.handRaised,
+      avatarUrl: this.avatarUrl,
+      participantKind: this.participantKind,
+    });
+  }
+
+  /**
+   * A participant may publish the language they speak so listeners can label
+   * the incoming track. Their private listening/translation language never
+   * enters room signaling.
+   */
+  updateSpokenLanguage(spokenLanguage: string) {
+    this.spokenLanguage = spokenLanguage;
+    this.send({
+      type: "language-preferences",
+      from: this.peerId,
+      spokenLanguage,
+      at: Date.now(),
     });
   }
 
@@ -277,23 +330,39 @@ export class CMeetClient {
       this.transport.close();
       this.transport = null;
     }
+    this.screenTrack = null;
   }
 
   // Host: ask everyone in the room to mute their mic. Each receiver
   // disables their own audio track but can unmute themselves afterwards
   // (matches Zoom/Meet "mute all" semantics).
   hostMuteAll() {
+    if (this.hostRole !== "host") return;
     this.send({ type: "host-mute-all", from: this.peerId, name: this.name, at: Date.now() });
   }
 
+  setHandRaised(raised: boolean) {
+    this.handRaised = raised;
+    this.send({
+      type: "hand-state",
+      from: this.peerId,
+      name: this.name,
+      raised,
+      at: Date.now(),
+    });
+  }
+
   // Host: end the meeting for everyone. Receivers leave automatically.
-  hostEnd() {
+  async hostEnd() {
+    if (this.hostRole !== "host") return;
     this.send({ type: "host-end", from: this.peerId, name: this.name, at: Date.now() });
+    await this.transport?.flush();
   }
 
   // Host: remove a specific participant from the meeting. Takes a set of
   // peer IDs so the caller can kick every open tab the user has.
   hostKick(targetPeerIds: string[]) {
+    if (this.hostRole !== "host") return;
     // Broadcast the kick so the target's tab leaves gracefully...
     this.send({
       type: "host-kick",
@@ -352,7 +421,11 @@ export class CMeetClient {
   // Replace the outgoing video track on every peer connection without
   // renegotiation. Used for screen-share toggle and cam/mic changes.
   async replaceVideoTrack(newTrack: MediaStreamTrack | null, opts: { sharing?: boolean } = {}) {
-    if (newTrack) newTrack.contentHint = opts.sharing ? "detail" : "motion";
+    if (opts.sharing) {
+      await this.replaceScreenTrack(newTrack, { sharing: true });
+      return;
+    }
+    if (newTrack) newTrack.contentHint = "motion";
     await Promise.all(Array.from(this.peers.keys()).map(async peerId => {
       // Prefer the transceiver sender captured at setup: it exists even while
       // no track is attached, so a camera can be restored without an m-line
@@ -370,12 +443,24 @@ export class CMeetClient {
       if (existingVideo) this.localStream.removeTrack(existingVideo);
       if (newTrack) this.localStream.addTrack(newTrack);
     }
+    this.applyEncodings();
+  }
+
+  /**
+   * Publish a presentation beside the camera instead of replacing it. Every
+   * connection reserves a second video m-line at join time, so starting and
+   * stopping a share remains a quick replaceTrack operation.
+   */
+  async replaceScreenTrack(newTrack: MediaStreamTrack | null, opts: { sharing?: boolean } = {}) {
+    if (newTrack) newTrack.contentHint = "detail";
+    this.screenTrack = newTrack;
+    await Promise.all(Array.from(this.senders.values()).map(async (senders) => {
+      if (senders.screen) await senders.screen.replaceTrack(newTrack);
+    }));
     if (typeof opts.sharing === "boolean") {
       this.iAmSharing = opts.sharing;
       this.send({ type: "screen-state", from: this.peerId, sharing: opts.sharing });
     }
-    // Re-apply the encoding ceiling: screen share and camera have very
-    // different bitrate/framerate needs.
     this.applyEncodings();
   }
 
@@ -408,6 +493,97 @@ export class CMeetClient {
     this.events.onRemoteUpdate?.(Array.from(this.peers.values()));
   }
 
+  /**
+   * Attach a negotiated receiver track to the stable stream consumed by the
+   * React tiles and audio elements. WebRTC permits an empty `event.streams`,
+   * and some Chromium builds can expose a live receiver before dispatching
+   * `ontrack`, so this is also called after remote SDP is committed.
+   */
+  private attachRemoteTracks(peerId: string, tracks: MediaStreamTrack[], screen = false) {
+    const peer = this.peers.get(peerId);
+    if (!peer) return;
+
+    let changed = false;
+    for (const track of tracks) {
+      if (!track || track.readyState === "ended") continue;
+      const destination = track.kind === "video" && screen ? peer.screenStream : peer.stream;
+      if (!destination.getTracks().some(existing => existing.id === track.id)) {
+        destination.addTrack(track);
+        changed = true;
+      }
+      if (track.kind === "audio") {
+        peer.hasAudio = true;
+        this.watchAudioLevel(peerId, peer.stream);
+      } else if (track.kind === "video") {
+        peer.hasVideo = true;
+      }
+      track.onended = () => {
+        try { destination.removeTrack(track); } catch { /* already removed */ }
+        if (track.kind === "audio") peer.hasAudio = peer.stream.getAudioTracks().some(t => t.readyState === "live");
+        if (track.kind === "video" && !screen) peer.hasVideo = peer.stream.getVideoTracks().some(t => t.readyState === "live");
+        this.emitRemotes();
+      };
+    }
+    if (changed) this.emitRemotes();
+  }
+
+  private syncReceiverTracks(peerId: string) {
+    const peer = this.peers.get(peerId);
+    if (!peer) return;
+    const videoTransceivers = peer.connection.getTransceivers()
+      .filter(tx => tx.receiver.track.kind === "video");
+    peer.connection.getTransceivers().forEach((tx) => {
+      const isScreen = tx.receiver.track.kind === "video" && videoTransceivers.indexOf(tx) === 1;
+      this.attachRemoteTracks(peerId, [tx.receiver.track], isScreen);
+    });
+  }
+
+  /**
+   * A peer answering an offer must publish through the transceivers created by
+   * that offer. Creating a second set before applying the offer leaves the
+   * answerer's camera and microphone on unnegotiated m-lines in Chromium,
+   * producing a one-way call. Bind our current local tracks before createAnswer
+   * so the negotiated audio and video sections are send/receive on both sides.
+   */
+  private async bindAnswerSenders(peerId: string, pc: RTCPeerConnection) {
+    const transceivers = pc.getTransceivers();
+    const localStream = this.localStream;
+    const audioTrack = localStream?.getAudioTracks()[0] || null;
+    const videoTrack = localStream?.getVideoTracks()[0] || null;
+    if (videoTrack && !videoTrack.contentHint) videoTrack.contentHint = this.iAmSharing ? "detail" : "motion";
+
+    // `stopped` is implemented by current browsers but is still missing from
+    // some TypeScript DOM library versions used by this project.
+    const isStopped = (tx: RTCRtpTransceiver) =>
+      Boolean((tx as RTCRtpTransceiver & { readonly stopped?: boolean }).stopped);
+    const audioTx = transceivers.find(tx => !isStopped(tx) && tx.receiver.track.kind === "audio") || null;
+    const videoTransceivers = transceivers.filter(tx => !isStopped(tx) && tx.receiver.track.kind === "video");
+    const videoTx = videoTransceivers[0] || null;
+    const screenTx = videoTransceivers[1] || null;
+    if (audioTx) {
+      audioTx.direction = "sendrecv";
+      await audioTx.sender.replaceTrack(audioTrack);
+      if (localStream && "setStreams" in audioTx.sender) audioTx.sender.setStreams(localStream);
+    }
+    if (videoTx) {
+      videoTx.direction = "sendrecv";
+      await videoTx.sender.replaceTrack(videoTrack);
+      if (localStream && "setStreams" in videoTx.sender) videoTx.sender.setStreams(localStream);
+    }
+    if (screenTx) {
+      screenTx.direction = "sendrecv";
+      await screenTx.sender.replaceTrack(this.screenTrack);
+      if (this.screenTrack && "setStreams" in screenTx.sender) {
+        screenTx.sender.setStreams(new MediaStream([this.screenTrack]));
+      }
+    }
+    this.senders.set(peerId, {
+      audio: audioTx?.sender || null,
+      video: videoTx?.sender || null,
+      screen: screenTx?.sender || null,
+    });
+  }
+
   private async flushPendingIce(peerId: string, pc: RTCPeerConnection) {
     const q = this.pendingIce.get(peerId);
     if (!q || q.length === 0) return;
@@ -434,29 +610,45 @@ export class CMeetClient {
           name: this.name,
           memberId: this.memberId,
           isOwner: this.isOwner,
+          hostRole: this.hostRole,
           hasVideo: this.hasTrackKind("video"),
           hasAudio: this.hasTrackKind("audio"),
+          spokenLanguage: this.spokenLanguage,
+          handRaised: this.handRaised,
+          avatarUrl: this.avatarUrl,
+          participantKind: this.participantKind,
           to: msg.peerId,
         });
         const identity = {
           memberId: msg.memberId || null,
           isOwner: !!msg.isOwner,
+          hostRole: msg.hostRole === "host" || msg.hostRole === "co-host" ? msg.hostRole : null,
           hasVideo: !!msg.hasVideo,
           hasAudio: !!msg.hasAudio,
+          spokenLanguage: String(msg.spokenLanguage || "auto"),
+          handRaised: !!msg.handRaised,
+          avatarUrl: typeof msg.avatarUrl === "string" ? msg.avatarUrl.slice(0, 2048) : null,
+          participantKind: normalizeParticipantKind(msg.participantKind),
         };
         if (this.peerId > msg.peerId) {
           await this.ensureConnection(msg.peerId, msg.name, /* initiator */ true, identity);
         } else {
           await this.ensureConnection(msg.peerId, msg.name, /* initiator */ false, identity);
         }
+        this.events.onPeerJoined?.(msg.name || "Someone");
         break;
       }
       case "join-ack": {
         const identity = {
           memberId: msg.memberId || null,
           isOwner: !!msg.isOwner,
+          hostRole: msg.hostRole === "host" || msg.hostRole === "co-host" ? msg.hostRole : null,
           hasVideo: !!msg.hasVideo,
           hasAudio: !!msg.hasAudio,
+          spokenLanguage: String(msg.spokenLanguage || "auto"),
+          handRaised: !!msg.handRaised,
+          avatarUrl: typeof msg.avatarUrl === "string" ? msg.avatarUrl.slice(0, 2048) : null,
+          participantKind: normalizeParticipantKind(msg.participantKind),
         };
         if (this.peerId > msg.peerId) {
           await this.ensureConnection(msg.peerId, msg.name, true, identity);
@@ -484,11 +676,22 @@ export class CMeetClient {
         } else {
           await pc.setRemoteDescription({ type: "offer", sdp: msg.sdp });
         }
+        this.syncReceiverTracks(msg.from);
+        await this.bindAnswerSenders(msg.from, pc);
         await this.flushPendingIce(msg.from, pc);
         const answer = await pc.createAnswer();
-        await pc.setLocalDescription(answer);
+        await pc.setLocalDescription({ type: "answer", sdp: tuneSdp(answer.sdp || "") });
+        if (st) st.initialHandshakeComplete = true;
         this.applyEncodings();
-        this.send({ type: "answer", from: this.peerId, to: msg.from, sdp: tuneSdp(answer.sdp || "") });
+        this.send({
+          type: "answer",
+          from: this.peerId,
+          to: msg.from,
+          // Signal exactly the description committed locally. Sending a tuned
+          // answer while retaining a different local description can produce
+          // asymmetric codec parameters and one-way audio on strict browsers.
+          sdp: pc.localDescription?.sdp || answer.sdp || "",
+        });
         // If we were already sharing when this peer joined, let them know
         // so they render our tile as the big rectangle from the start.
         if (this.iAmSharing) {
@@ -506,11 +709,16 @@ export class CMeetClient {
           if (st) st.settingRemoteAnswer = true;
           try {
             await peer.connection.setRemoteDescription({ type: "answer", sdp: msg.sdp });
+            this.syncReceiverTracks(msg.from);
+            if (st) st.initialHandshakeComplete = true;
           } finally {
             if (st) st.settingRemoteAnswer = false;
           }
           await this.flushPendingIce(msg.from, peer.connection);
           this.applyEncodings();
+          if (this.iAmSharing) {
+            this.send({ type: "screen-state", from: this.peerId, sharing: true, to: msg.from });
+          }
         }
         break;
       }
@@ -540,6 +748,7 @@ export class CMeetClient {
       }
       case "leave": {
         const p = this.peers.get(msg.peerId);
+        const peerName = p?.name || "Someone";
         if (p) { try { p.connection.close(); } catch { /* noop */ } }
         this.peers.delete(msg.peerId);
         this.sharingPeers.delete(msg.peerId);
@@ -547,6 +756,7 @@ export class CMeetClient {
         this.cleanupPeerState(msg.peerId);
         this.applyEncodings();
         this.emitRemotes();
+        if (p) this.events.onPeerLeft?.(peerName);
         break;
       }
       case "chat": {
@@ -560,7 +770,27 @@ export class CMeetClient {
         });
         break;
       }
+      case "language-preferences": {
+        const peer = this.peers.get(msg.from);
+        if (peer) {
+          peer.spokenLanguage = String(msg.spokenLanguage || "auto");
+          this.emitRemotes();
+        }
+        break;
+      }
+      case "hand-state": {
+        const peer = this.peers.get(msg.from);
+        if (!peer) break;
+        const raised = !!msg.raised;
+        if (peer.handRaised === raised) break;
+        peer.handRaised = raised;
+        this.emitRemotes();
+        this.events.onHandRaised?.(peer.peerId, peer.name, raised);
+        break;
+      }
       case "host-mute-all": {
+        const peer = this.peers.get(msg.from);
+        if (!peer || peer.hostRole !== "host") break;
         this.events.onHostMuteAll?.(msg.name || msg.from);
         break;
       }
@@ -584,16 +814,48 @@ export class CMeetClient {
     peerId: string,
     name: string,
     initiator: boolean,
-    identity: { memberId: string | null; isOwner: boolean; hasVideo?: boolean; hasAudio?: boolean } = { memberId: null, isOwner: false },
+    identity: {
+      memberId: string | null;
+      isOwner: boolean;
+      hostRole?: CMeetHostRole;
+      hasVideo?: boolean;
+      hasAudio?: boolean;
+      spokenLanguage?: string;
+      handRaised?: boolean;
+      avatarUrl?: string | null;
+      participantKind?: CMeetParticipantKind;
+    } = { memberId: null, isOwner: false, hostRole: null },
   ): Promise<RTCPeerConnection> {
     let entry = this.peers.get(peerId);
-    if (entry) return entry.connection;
+    if (entry) {
+      entry.name = name || entry.name;
+      entry.memberId = identity.memberId ?? entry.memberId;
+      entry.isOwner = identity.isOwner ?? entry.isOwner;
+      entry.hasVideo = identity.hasVideo ?? entry.hasVideo;
+      entry.hasAudio = identity.hasAudio ?? entry.hasAudio;
+      entry.spokenLanguage = identity.spokenLanguage || entry.spokenLanguage;
+      entry.handRaised = identity.handRaised ?? entry.handRaised;
+      entry.avatarUrl = identity.avatarUrl ?? entry.avatarUrl;
+      entry.participantKind = identity.participantKind || entry.participantKind;
+      if (identity.hostRole) {
+        entry.hostRole = identity.hostRole;
+        entry.isHost = true;
+      }
+      this.emitRemotes();
+      return entry.connection;
+    }
 
-    const pc = new RTCPeerConnection(RTC_CONFIG);
+    const pc = new RTCPeerConnection(this.rtcConfig);
     const remoteStream = new MediaStream();
+    const remoteScreenStream = new MediaStream();
     // The impolite peer (the one that creates the first offer) wins collisions.
     const polite = !initiator;
-    const state = { makingOffer: false, ignoreOffer: false, settingRemoteAnswer: false };
+    const state = {
+      makingOffer: false,
+      ignoreOffer: false,
+      settingRemoteAnswer: false,
+      initialHandshakeComplete: false,
+    };
     this.nego.set(peerId, state);
 
     pc.onicecandidate = e => {
@@ -602,29 +864,40 @@ export class CMeetClient {
       }
     };
     pc.ontrack = e => {
-      e.streams[0]?.getTracks().forEach(t => {
-        if (!remoteStream.getTracks().find(rt => rt.id === t.id)) remoteStream.addTrack(t);
-      });
-      // A track ending (peer turned the camera off) should repaint the tile.
-      e.track.onended = () => {
-        try { remoteStream.removeTrack(e.track); } catch { /* noop */ }
-        this.emitRemotes();
-      };
-      if (e.track.kind === "audio") this.watchAudioLevel(peerId, remoteStream);
-      this.emitRemotes();
+      // Safari/iOS and a few embedded WebRTC implementations legally deliver
+      // a transceiver track without populating RTCTrackEvent.streams. The old
+      // code only copied tracks from streams[0], so those browsers negotiated
+      // successfully but rendered a black tile and played no audio. Treat the
+      // event track as authoritative. Adding the whole companion stream for
+      // every event can duplicate tracks in Chromium.
+      const videoTransceivers = pc.getTransceivers().filter(tx => tx.receiver.track.kind === "video");
+      const isScreen = e.track.kind === "video" && videoTransceivers.indexOf(e.transceiver) === 1;
+      this.attachRemoteTracks(peerId, [e.track], isScreen);
     };
-    // Renegotiate whenever the set of tracks changes (camera restored after a
-    // screen share, mic added late, ICE restart).
-    pc.onnegotiationneeded = async () => {
+    const negotiate = async () => {
       const st = this.nego.get(peerId);
-      if (!st) return;
+      if (!st || st.makingOffer || pc.signalingState !== "stable") return;
       try {
         st.makingOffer = true;
-        await pc.setLocalDescription();
-        this.send({ type: "offer", from: this.peerId, to: peerId, name: this.name, polite: !polite, sdp: tuneSdp(pc.localDescription?.sdp || "") });
-      } catch { /* noop */ } finally {
+        const offer = await pc.createOffer();
+        await pc.setLocalDescription({ type: "offer", sdp: tuneSdp(offer.sdp || "") });
+        this.send({ type: "offer", from: this.peerId, to: peerId, name: this.name, polite: !polite, sdp: pc.localDescription?.sdp || offer.sdp || "" });
+      } catch (error) {
+        this.events.onError?.(`Could not negotiate media with ${name || "a participant"}: ${String(error)}`);
+      } finally {
         st.makingOffer = false;
       }
+    };
+    // Adding the initial transceivers fires `negotiationneeded` on both peers.
+    // Only the deterministic initiator may act, and only for the initial
+    // handshake. The responder's queued event can otherwise run just after it
+    // sets its answer and emit a second offer, wedging both peers before media
+    // starts. Camera, mic and screen-share changes all use replaceTrack, while
+    // ICE recovery creates its offer explicitly, so no later automatic offer
+    // is required.
+    pc.onnegotiationneeded = () => {
+      if (!initiator || state.initialHandshakeComplete) return;
+      void negotiate();
     };
     pc.oniceconnectionstatechange = () => {
       if (pc.iceConnectionState === "failed") this.iceRestart(peerId).catch(() => { /* noop */ });
@@ -655,29 +928,44 @@ export class CMeetClient {
     // Use explicit transceivers so a sender exists even before a track does -
     // that keeps m-line order stable across renegotiation and lets us swap a
     // camera in later without a fresh offer/answer round trip.
-    const audioTrack = this.localStream?.getAudioTracks()[0] || null;
-    const videoTrack = this.localStream?.getVideoTracks()[0] || null;
-    if (videoTrack && !videoTrack.contentHint) videoTrack.contentHint = this.iAmSharing ? "detail" : "motion";
-    const audioTx = pc.addTransceiver(audioTrack || "audio", {
-      direction: "sendrecv",
-      streams: this.localStream ? [this.localStream] : [],
-      sendEncodings: [{ maxBitrate: AUDIO_MAX_BITRATE }],
-    });
-    const videoTx = pc.addTransceiver(videoTrack || "video", {
-      direction: "sendrecv",
-      streams: this.localStream ? [this.localStream] : [],
-    });
-    this.senders.set(peerId, { audio: audioTx.sender, video: videoTx.sender });
+    if (initiator) {
+      const audioTrack = this.localStream?.getAudioTracks()[0] || null;
+      const videoTrack = this.localStream?.getVideoTracks()[0] || null;
+      if (videoTrack && !videoTrack.contentHint) videoTrack.contentHint = this.iAmSharing ? "detail" : "motion";
+      const audioTx = pc.addTransceiver(audioTrack || "audio", {
+        direction: "sendrecv",
+        streams: this.localStream ? [this.localStream] : [],
+        sendEncodings: [{ maxBitrate: AUDIO_MAX_BITRATE }],
+      });
+      const videoTx = pc.addTransceiver(videoTrack || "video", {
+        direction: "sendrecv",
+        streams: this.localStream ? [this.localStream] : [],
+      });
+      const screenTx = pc.addTransceiver(this.screenTrack || "video", {
+        direction: "sendrecv",
+        streams: this.screenTrack ? [new MediaStream([this.screenTrack])] : [],
+      });
+      this.senders.set(peerId, { audio: audioTx.sender, video: videoTx.sender, screen: screenTx.sender });
+    } else {
+      // The incoming offer supplies the responder's transceivers. They are
+      // populated in bindAnswerSenders before its SDP answer is created.
+      this.senders.set(peerId, { audio: null, video: null, screen: null });
+    }
 
     entry = {
-      peerId, name, stream: remoteStream,
+      peerId, name, stream: remoteStream, screenStream: remoteScreenStream,
       quality: "good",
       hasVideo: identity.hasVideo !== false,
       hasAudio: identity.hasAudio !== false,
       isSharingScreen: this.sharingPeers.has(peerId),
       memberId: identity.memberId,
       isOwner: identity.isOwner,
-      isHost: this.isPeerHost(identity.memberId, identity.isOwner),
+      spokenLanguage: identity.spokenLanguage || "auto",
+      handRaised: !!identity.handRaised,
+      avatarUrl: identity.avatarUrl || null,
+      participantKind: identity.participantKind || "guest",
+      isHost: !!identity.hostRole || this.isPeerHost(identity.memberId, identity.isOwner),
+      hostRole: identity.hostRole || (this.isPeerHost(identity.memberId, identity.isOwner) ? "host" : null),
       connection: pc,
     };
     this.peers.set(peerId, entry);
@@ -686,9 +974,7 @@ export class CMeetClient {
     this.startMonitors();
 
     if (initiator) {
-      const offer = await pc.createOffer();
-      await pc.setLocalDescription(offer);
-      this.send({ type: "offer", from: this.peerId, to: peerId, name: this.name, polite: !polite, sdp: tuneSdp(offer.sdp || "") });
+      await negotiate();
     }
 
     return pc;
@@ -698,7 +984,7 @@ export class CMeetClient {
 
   /** Push the current bitrate/framerate ceiling onto every video sender. */
   private applyEncodings() {
-    const profile = profileFor(this.peers.size, this.iAmSharing);
+    const profile = profileFor(this.peers.size, false);
     for (const [, s] of this.senders) {
       const sender = s.video;
       if (!sender) continue;
@@ -713,6 +999,18 @@ export class CMeetClient {
         params.degradationPreference = this.iAmSharing ? "maintain-resolution" : "balanced";
         void sender.setParameters(params);
       } catch { /* not supported everywhere - safe to skip */ }
+
+      if (s.screen) {
+        try {
+          const params = s.screen.getParameters();
+          if (!params.encodings || !params.encodings.length) params.encodings = [{}];
+          params.encodings[0].maxBitrate = SCREEN_PROFILE.maxBitrate;
+          params.encodings[0].maxFramerate = SCREEN_PROFILE.maxFramerate;
+          params.encodings[0].scaleResolutionDownBy = SCREEN_PROFILE.scaleDown;
+          params.degradationPreference = "maintain-resolution";
+          void s.screen.setParameters(params);
+        } catch { /* optional browser optimization */ }
+      }
     }
   }
 
@@ -736,14 +1034,24 @@ export class CMeetClient {
       try {
         const report = await peer.connection.getStats();
         let lost = 0, received = 0, rtt = 0, jitter = 0;
+        let selectedPairId = "";
         report.forEach((stat: any) => {
           if (stat.type === "inbound-rtp" && !stat.isRemote) {
             lost += Number(stat.packetsLost || 0);
             received += Number(stat.packetsReceived || 0);
             jitter = Math.max(jitter, Number(stat.jitter || 0));
           }
-          if (stat.type === "candidate-pair" && stat.state === "succeeded" && stat.currentRoundTripTime != null) {
-            rtt = Math.max(rtt, Number(stat.currentRoundTripTime));
+          if (stat.type === "transport" && stat.selectedCandidatePairId) {
+            selectedPairId = String(stat.selectedCandidatePairId);
+          }
+        });
+        // Only the selected route describes the live call. The old maximum
+        // across every succeeded candidate included stale probe routes and
+        // labelled strong connections as weak indefinitely.
+        report.forEach((stat: any) => {
+          if (stat.type !== "candidate-pair" || stat.state !== "succeeded") return;
+          if (stat.id === selectedPairId || (!selectedPairId && (stat.selected || stat.nominated))) {
+            rtt = Number(stat.currentRoundTripTime || 0);
           }
         });
         // Loss is cumulative, so compare against the previous sample.
@@ -752,13 +1060,29 @@ export class CMeetClient {
         const dRecv = Math.max(0, received - prev.received);
         this.lastStats.set(peerId, { lost, received });
         const lossRate = dRecv + dLost > 0 ? dLost / (dRecv + dLost) : 0;
-        const quality: ConnectionQuality =
-          lossRate > 0.08 || rtt > 0.5 || jitter > 0.15 ? "poor"
-            : lossRate > 0.03 || rtt > 0.3 || jitter > 0.05 ? "fair"
+        // Ignore tiny startup samples: one lost packet out of three is not a
+        // meaningful network measurement. Require consecutive bad samples so
+        // a single Wi-Fi handoff does not flash a misleading warning.
+        const enoughPackets = dRecv + dLost >= 20;
+        const measured: ConnectionQuality =
+          (enoughPackets && lossRate > 0.15) || rtt > 1.2 || jitter > 0.15 ? "poor"
+            : (enoughPackets && lossRate > 0.07) || rtt > 0.65 || jitter > 0.075 ? "fair"
               : "good";
-        if (peer.quality !== quality) {
-          peer.quality = quality;
-          this.events.onQuality?.(peerId, quality);
+        const streak = this.qualityStreaks.get(peerId) || { degraded: 0, healthy: 0 };
+        if (measured === "good") {
+          streak.healthy += 1;
+          streak.degraded = 0;
+        } else {
+          streak.degraded += 1;
+          streak.healthy = 0;
+        }
+        this.qualityStreaks.set(peerId, streak);
+        const next = measured === "good"
+          ? (streak.healthy >= 2 ? "good" : peer.quality)
+          : (streak.degraded >= 2 ? measured : peer.quality);
+        if (peer.quality !== next) {
+          peer.quality = next;
+          this.events.onQuality?.(peerId, next);
           this.emitRemotes();
         }
       } catch { /* noop */ }
@@ -777,7 +1101,7 @@ export class CMeetClient {
       analyser.fftSize = 512;
       analyser.smoothingTimeConstant = 0.5;
       source.connect(analyser);
-      this.analysers.set(peerId, { analyser, buf: new Uint8Array(analyser.frequencyBinCount) });
+      this.analysers.set(peerId, { source, analyser, buf: new Uint8Array(analyser.frequencyBinCount) });
     } catch { /* audio metering is a nicety, never fatal */ }
   }
 
@@ -806,8 +1130,14 @@ export class CMeetClient {
     if (timer) { clearTimeout(timer); this.recoverTimers.delete(peerId); }
     this.nego.delete(peerId);
     this.senders.delete(peerId);
-    this.analysers.delete(peerId);
+    const meter = this.analysers.get(peerId);
+    if (meter) {
+      try { meter.source.disconnect(); } catch { /* already disconnected */ }
+      try { meter.analyser.disconnect(); } catch { /* already disconnected */ }
+      this.analysers.delete(peerId);
+    }
     this.lastStats.delete(peerId);
+    this.qualityStreaks.delete(peerId);
     if (this.activeSpeaker === peerId) {
       this.activeSpeaker = null;
       this.events.onActiveSpeaker?.(null);
@@ -820,8 +1150,8 @@ export class CMeetClient {
     if (peer.connection.signalingState !== "stable") return;
     try {
       const offer = await peer.connection.createOffer({ iceRestart: true });
-      await peer.connection.setLocalDescription(offer);
-      this.send({ type: "offer", from: this.peerId, to: peerId, name: this.name, polite: true, sdp: tuneSdp(offer.sdp || "") });
+      await peer.connection.setLocalDescription({ type: "offer", sdp: tuneSdp(offer.sdp || "") });
+      this.send({ type: "offer", from: this.peerId, to: peerId, name: this.name, polite: true, sdp: peer.connection.localDescription?.sdp || offer.sdp || "" });
     } catch {
       /* ignore - will try again on next failure */
     }

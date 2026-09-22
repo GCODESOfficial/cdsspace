@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getChatViewer } from "@/lib/team-chat-auth";
+import { getChatViewer, viewerMemberId } from "@/lib/team-chat-auth";
 import { canViewTeamThread, getViewerReactionKey } from "@/lib/team-chat-server";
 import { glashQuery } from "@/lib/glashdb/postgres";
 
@@ -18,12 +18,13 @@ export async function POST(req: Request) {
 
   const timestamp = typing === false ? null : new Date().toISOString();
   try {
-    if (viewer.kind === "team") {
+    const memberId = viewerMemberId(viewer);
+    if (memberId) {
       await glashQuery(
         `update public.team_chat_participants
          set last_typing_at = $3::timestamptz, last_seen_at = coalesce(last_seen_at, now())
          where thread_id = $1 and team_member_id = $2::uuid`,
-        [threadId, viewer.session.id, timestamp],
+        [threadId, memberId, timestamp],
       );
     } else {
       await glashQuery(

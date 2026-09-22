@@ -4,6 +4,8 @@ import { supabaseAdmin } from "@/lib/supabase";
 import { getTeamSession } from "@/lib/team-auth";
 import { getAdminSession } from "@/lib/admin-session";
 import { closeStaleCmeets } from "@/lib/cmeet-autoclose";
+import { buildCMeetPath } from "@/lib/cmeet-links";
+import { agendaItemsToText, normalizeCMeetAgendaItems } from "@/lib/cmeet-agenda";
 
 export const runtime = "nodejs";
 
@@ -60,6 +62,12 @@ export async function POST(req: Request) {
   if (!title?.trim()) return NextResponse.json({ ok: false, error: "Title is required" }, { status: 400 });
 
   const db = supabaseAdmin as any;
+  const agendaItems = normalizeCMeetAgendaItems(body.agenda_items ?? agenda);
+  // Creating the call makes this actor its host. Team-to-team and personal
+  // calls therefore do not need a second admin approval.
+  const requiresApproval = false;
+  const now = new Date().toISOString();
+  const creatorMemberId = team?.id || (admin?.role === "sub_admin" ? admin.memberId || null : null);
   let room_code = generateRoomCode();
   for (let attempt = 0; attempt < 5; attempt++) {
     const { data: dup } = await db.from("team_meetings").select("id").eq("room_code", room_code).maybeSingle();
@@ -72,23 +80,38 @@ export async function POST(req: Request) {
     .insert({
       room_code,
       title: title.trim(),
-      agenda: agenda?.trim() || null,
+      agenda: agendaItems.length ? agendaItemsToText(agendaItems) : null,
       scheduled_for: scheduled_for || null,
-      created_by: team?.id || null,
+      created_by: creatorMemberId,
       created_by_admin: !!admin,
-      status: "scheduled",
+      status: requiresApproval ? "pending_approval" : scheduled_for ? "scheduled" : "live",
+      started_at: requiresApproval || scheduled_for ? null : now,
+      approval_status: requiresApproval ? "pending" : "approved",
+      approval_requested_at: requiresApproval ? now : null,
+      approved_at: requiresApproval ? null : now,
+      approved_by_email: admin?.email || null,
     })
-    .select("id, room_code")
+    .select("id, room_code, title, scheduled_for, status, approval_status")
     .single();
 
   if (error) return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
 
+  if (agendaItems.length) {
+    const { error: agendaError } = await db.from("team_meeting_agenda_items").insert(
+      agendaItems.map((agendaTitle, position) => ({ meeting_id: meeting.id, title: agendaTitle, position })),
+    );
+    if (agendaError) {
+      await db.from("team_meetings").delete().eq("id", meeting.id);
+      return NextResponse.json({ ok: false, error: "The meeting agenda could not be saved." }, { status: 500 });
+    }
+  }
+
   // Creator is automatically a participant (if team member)
   const participantRows: { meeting_id: string; team_member_id: string }[] = [];
-  if (team) participantRows.push({ meeting_id: meeting.id, team_member_id: team.id });
+  if (creatorMemberId) participantRows.push({ meeting_id: meeting.id, team_member_id: creatorMemberId });
   if (Array.isArray(participant_ids)) {
     for (const pid of participant_ids) {
-      if (pid && pid !== team?.id) participantRows.push({ meeting_id: meeting.id, team_member_id: pid });
+      if (pid && pid !== creatorMemberId) participantRows.push({ meeting_id: meeting.id, team_member_id: pid });
     }
   }
   if (participantRows.length > 0) {
@@ -96,21 +119,21 @@ export async function POST(req: Request) {
   }
 
   // Fire cmeet_invite notifications
-  if (Array.isArray(participant_ids) && participant_ids.length > 0) {
+  if (!requiresApproval && Array.isArray(participant_ids) && participant_ids.length > 0) {
     const notifs = participant_ids
-      .filter((pid: string) => pid && pid !== team?.id)
+      .filter((pid: string) => pid && pid !== creatorMemberId)
       .map((pid: string) => ({
         recipient_id: pid,
         kind: "cmeet_invite",
         title: `You've been invited to: ${title.trim()}`,
         body: scheduled_for ? `Scheduled for ${new Date(scheduled_for).toLocaleString()}` : "Time not set",
-        link: `/team/cmeet/${meeting.room_code}`,
-        actor_member_id: team?.id || null,
+        link: buildCMeetPath(meeting.room_code, title.trim()),
+        actor_member_id: creatorMemberId,
         actor_is_admin: !!admin,
         meeting_id: meeting.id,
       }));
     if (notifs.length > 0) await db.from("team_notifications").insert(notifs);
   }
 
-  return NextResponse.json({ ok: true, id: meeting.id, room_code: meeting.room_code });
+  return NextResponse.json({ ok: true, id: meeting.id, room_code: meeting.room_code, requires_approval: requiresApproval });
 }

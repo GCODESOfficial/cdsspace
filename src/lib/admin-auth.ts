@@ -3,6 +3,7 @@ import { createClient } from "@/lib/supabase/server";
 import { supabaseAdmin } from "@/lib/supabase";
 import { readClientDashboardSessionUser } from "@/lib/client-dashboard-session";
 import { verifyAdminCookie } from "@/lib/admin-session-cookie";
+import { getSuperAdminProfileId } from "@/lib/super-admin-profile";
 
 /**
  * Read the cookie-based admin session set by POST /api/admin-login.
@@ -43,16 +44,10 @@ export async function verifyAdmin() {
       .maybeSingle();
 
     let id = profile?.id as string | undefined;
-    // Sub-admins may not have a profiles row - attribute their sends to the
-    // super-admin profile so the FK holds and UI labels them as admin.
-    if (!id) {
-      const { data: superAdminProfile } = await supabaseAdmin
-        .from("profiles")
-        .select("id")
-        .eq("email", "ceo@cdsspace.pro")
-        .maybeSingle();
-      id = superAdminProfile?.id as string | undefined;
-    }
+    // Environment-authenticated admins may not have a profile under their
+    // login email. Use the canonical notification profile so FK-backed admin
+    // actions and the super-admin bell still resolve to the same identity.
+    if (!id) id = (await getSuperAdminProfileId()) || undefined;
 
     return {
       id: id || cookieSession.email,

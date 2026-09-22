@@ -84,7 +84,16 @@ export async function GET(
         };
       }
     }
-    order = { ...order, profiles: resolvedProfile };
+    let workflowBoardId: string | null = null;
+    if (orderType === "design_request" && order.task_id && order.workflow_type === "taskboard") {
+      const { data: task } = await supabaseAdmin
+        .from("task_board_tasks")
+        .select("board_id")
+        .eq("id", order.task_id)
+        .maybeSingle();
+      workflowBoardId = task?.board_id || null;
+    }
+    order = { ...order, profiles: resolvedProfile, workflow_board_id: workflowBoardId };
 
     // Fetch status_updates history for this order
     const { data: statusUpdates, error: statusError } = await supabaseAdmin

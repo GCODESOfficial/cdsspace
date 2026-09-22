@@ -23,6 +23,12 @@ import { createGmailApiTransport, gmailApiCredsFromEnv, verifyGmailApi } from "@
 import { EMAIL_LOGO_CID, emailLogoAttachment } from "@/lib/email-logo";
 import { glashQuery } from "@/lib/glashdb/postgres";
 
+declare global {
+  // Reuse a warm HTTPS/SMTP transport for one-off transactional messages.
+  // Batch callers still create and own their explicit transport.
+  var cdsImmediateEmailTransport: ReturnType<typeof createEmailTransport> | undefined;
+}
+
 export const EMAIL_FROM = process.env.EMAIL_FROM || "support@cdsspace.pro";
 
 /** Build a From header with a display name, e.g. `"CDS Space" <support@cdsspace.pro>`. */
@@ -128,8 +134,10 @@ export const EMAIL_MODE: "gmail_api" | "resend" | "smtp" = gmailApiCredsFromEnv(
  */
 export async function sendEmail(input: SendEmailInput): Promise<void> {
   const threadCategory = input.threadCategory || input.digestCategory;
-  const queueEnabled = process.env.EMAIL_NOTIFICATION_QUEUE !== "off"
-    && process.env.EMAIL_DIGEST !== "off";
+  // Immediate delivery is the default. The durable queue remains available as
+  // an explicit operational choice, but ordinary user-facing messages no
+  // longer wait for a later digest/cron worker.
+  const queueEnabled = process.env.EMAIL_NOTIFICATION_QUEUE === "on";
 
   // Threaded notifications are queued so each event can be delivered and
   // retried independently while retaining its full template and action button.
@@ -165,15 +173,17 @@ export async function sendEmail(input: SendEmailInput): Promise<void> {
   }
 
   const from = emailFrom(input.fromName || "CDS Space");
-  const transporter = input.transporter ?? createEmailTransport();
+  const transporter = input.transporter
+    ?? globalThis.cdsImmediateEmailTransport
+    ?? createEmailTransport();
+  if (!input.transporter) globalThis.cdsImmediateEmailTransport = transporter;
   // Attach the branded logo inline only when the html references its cid (i.e.
   // it went through brandedEmailHtml), so plain emails stay lightweight.
   const attachments = [
     ...(input.html?.includes(`cid:${EMAIL_LOGO_CID}`) ? [emailLogoAttachment()] : []),
     ...(input.attachments || []),
   ];
-  try {
-    await transporter.sendMail({
+  await transporter.sendMail({
       from,
       to: input.to,
       subject: input.subject,
@@ -185,11 +195,7 @@ export async function sendEmail(input: SendEmailInput): Promise<void> {
       references: input.references,
       inReplyTo: input.inReplyTo,
       date: input.date,
-    });
-  } finally {
-    // Only close transports we created here; leave a shared/batch one open.
-    if (!input.transporter) transporter.close();
-  }
+  });
 }
 
 /**

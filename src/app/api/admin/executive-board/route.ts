@@ -6,6 +6,9 @@ import { logActivity } from "@/lib/activity-log";
 import {
   BUDGET_CATEGORIES,
   BUDGET_STATUSES,
+  EXPANSION_BUDGET_PRIORITIES,
+  EXPANSION_BUDGET_STATUSES,
+  EXPANSION_BUDGET_TYPES,
   MODEL_STATUSES,
   STEP_STATUSES,
   TARGET_STATUSES,
@@ -28,6 +31,10 @@ function money(value: unknown) {
   if (!Number.isFinite(amount)) return 0;
   // Keep it inside numeric(16,2) so a bad paste cannot blow up the insert.
   return Math.max(-99_999_999_999_999, Math.min(99_999_999_999_999, Math.round(amount * 100) / 100));
+}
+
+function nonNegativeMoney(value: unknown) {
+  return Math.max(0, money(value));
 }
 
 function isoDate(value: unknown) {
@@ -99,9 +106,17 @@ async function syncRevenueModelTargets(actor: string) {
 }
 
 /** Everything the board page needs, in one round trip. */
-async function loadBoard() {
-  const [budgets, models, steps, targets, folders, files, shares] = await Promise.all([
+async function loadBoard(draftActorId: string) {
+  const [budgets, expansionBudgets, expansionDrafts, models, steps, targets, folders, files, shares] = await Promise.all([
     glashQuery<any>(`select * from public.executive_budgets order by period_start desc nulls last, created_at desc limit 500`),
+    glashQuery<any>(`select * from public.executive_expansion_budgets order by target_start asc, created_at desc limit 500`),
+    glashQuery<any>(
+      `select payload, updated_at
+         from public.executive_expansion_budget_drafts
+        where actor_id=$1
+        limit 1`,
+      [draftActorId],
+    ),
     glashQuery<any>(`select * from public.executive_revenue_models order by position asc, created_at asc limit 200`),
     glashQuery<any>(`select * from public.executive_revenue_steps order by position asc, created_at asc limit 2000`),
     glashQuery<any>(`select * from public.executive_targets order by due_on asc nulls last, created_at desc limit 500`),
@@ -115,6 +130,8 @@ async function loadBoard() {
 
   return {
     budgets,
+    expansionBudgets,
+    expansionDraft: expansionDrafts[0] ?? null,
     models: models.map((model) => ({
       ...model,
       steps: steps.filter((step) => step.model_id === model.id),
@@ -143,7 +160,8 @@ export async function GET(req: NextRequest) {
     } catch {
       // The board is still perfectly usable without this month's generated rows.
     }
-    return NextResponse.json({ ok: true, ...(await loadBoard()) });
+    const draftActorId = session?.memberId || session?.email.toLowerCase() || "system";
+    return NextResponse.json({ ok: true, ...(await loadBoard(draftActorId)) });
   } catch (error) {
     return NextResponse.json(
       { ok: false, error: error instanceof Error ? error.message : "Could not load the Executive Board." },
@@ -157,18 +175,128 @@ export async function POST(req: NextRequest) {
   const action = str(body.action, 60);
 
   // Money and plans are separately permissioned from the document vault.
-  const permission = action.includes("budget")
-    ? "executive_board.budgets"
-    : action.includes("target")
-      ? "executive_board.targets"
-      : action.includes("model") || action.includes("step")
-        ? "executive_board.models"
-        : "executive_board.view";
+  const permission = action.includes("expansion_budget")
+    ? "executive_board.expansion_budgets"
+    : action.includes("budget")
+      ? "executive_board.budgets"
+      : action.includes("target")
+        ? "executive_board.targets"
+        : action.includes("model") || action.includes("step")
+          ? "executive_board.models"
+          : "executive_board.view";
   const { session, denied } = await requireAdmin(req, permission);
   if (denied || !session) return denied || NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
   const actor = session.email;
+  const draftActorId = session.memberId || session.email.toLowerCase();
 
   try {
+    /* ---------------- Expansion budgets ---------------- */
+    if (action === "save_expansion_budget_draft") {
+      const payload = body.payload;
+      if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+        return NextResponse.json({ ok: false, error: "A valid expansion budget draft is required." }, { status: 400 });
+      }
+      const serialized = JSON.stringify(payload);
+      if (serialized.length > 30_000) {
+        return NextResponse.json({ ok: false, error: "The expansion budget draft is too large." }, { status: 413 });
+      }
+      const saved = await glashMaybeOne<any>(
+        `insert into public.executive_expansion_budget_drafts (actor_id, actor_name, payload)
+         values ($1,$2,$3::jsonb)
+         on conflict (actor_id) do update
+           set actor_name=excluded.actor_name, payload=excluded.payload, updated_at=now()
+         returning updated_at`,
+        [draftActorId, session.name || session.email, serialized],
+      );
+      return NextResponse.json({ ok: true, updated_at: saved?.updated_at });
+    }
+
+    if (action === "delete_expansion_budget_draft") {
+      await glashQuery(`delete from public.executive_expansion_budget_drafts where actor_id=$1`, [draftActorId]);
+      return NextResponse.json({ ok: true });
+    }
+
+    if (action === "save_expansion_budget") {
+      const id = uuid(body.id);
+      const title = str(body.title, 200);
+      const targetStart = isoDate(body.target_start);
+      const targetEnd = isoDate(body.target_end);
+      if (!title) return NextResponse.json({ ok: false, error: "An expansion budget needs a title." }, { status: 400 });
+      if (!targetStart) return NextResponse.json({ ok: false, error: "Choose the planned start date." }, { status: 400 });
+      if (targetEnd && targetEnd < targetStart) {
+        return NextResponse.json({ ok: false, error: "The target end date cannot be before the start date." }, { status: 400 });
+      }
+      const values = [
+        title,
+        pick(body.expansion_type, EXPANSION_BUDGET_TYPES, "new_market"),
+        str(body.location, 240) || null,
+        str(body.rationale, 4000) || null,
+        targetStart,
+        targetEnd,
+        currency(body.currency),
+        nonNegativeMoney(body.estimated_amount),
+        nonNegativeMoney(body.contingency_amount),
+        nonNegativeMoney(body.committed_amount),
+        str(body.funding_source, 500) || null,
+        str(body.owner, 160) || null,
+        pick(body.priority, EXPANSION_BUDGET_PRIORITIES, "medium"),
+        pick(body.status, EXPANSION_BUDGET_STATUSES, "idea"),
+        str(body.expected_outcome, 4000) || null,
+        str(body.notes, 4000) || null,
+        actor,
+      ];
+      const row = id
+        ? await glashMaybeOne<any>(
+            `update public.executive_expansion_budgets
+                set title=$1, expansion_type=$2, location=$3, rationale=$4, target_start=$5,
+                    target_end=$6, currency=$7, estimated_amount=$8, contingency_amount=$9,
+                    committed_amount=$10, funding_source=$11, owner=$12, priority=$13,
+                    status=$14, expected_outcome=$15, notes=$16, updated_by=$17, updated_at=now()
+              where id=$18 returning *`,
+            [...values, id],
+          )
+        : await glashMaybeOne<any>(
+            `insert into public.executive_expansion_budgets
+               (title,expansion_type,location,rationale,target_start,target_end,currency,estimated_amount,
+                contingency_amount,committed_amount,funding_source,owner,priority,status,expected_outcome,
+                notes,created_by,updated_by)
+             values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$17)
+             returning *`,
+            values,
+          );
+      if (!row) return NextResponse.json({ ok: false, error: "Expansion budget not found." }, { status: 404 });
+      await glashQuery(`delete from public.executive_expansion_budget_drafts where actor_id=$1`, [draftActorId]);
+      await logActivity({
+        action: id ? "executive_board.expansion_budget.update" : "executive_board.expansion_budget.create",
+        page: "executive-board/expansion-budgets",
+        resource_type: "executive_expansion_budget",
+        resource_id: row.id,
+        resource_label: title,
+        metadata: {
+          target_start: targetStart,
+          status: row.status,
+          priority: row.priority,
+          forecast: `${row.currency} ${Number(row.estimated_amount || 0) + Number(row.contingency_amount || 0)}`,
+        },
+      });
+      return NextResponse.json({ ok: true, expansionBudget: row });
+    }
+
+    if (action === "delete_expansion_budget") {
+      const id = uuid(body.id);
+      if (!id) return NextResponse.json({ ok: false, error: "Expansion budget is invalid." }, { status: 400 });
+      const existing = await glashMaybeOne<any>(`select title from public.executive_expansion_budgets where id=$1`, [id]);
+      await glashQuery(`delete from public.executive_expansion_budgets where id=$1`, [id]);
+      await logActivity({
+        action: "executive_board.expansion_budget.delete",
+        page: "executive-board/expansion-budgets",
+        resource_type: "executive_expansion_budget",
+        resource_id: id,
+        resource_label: existing?.title || id,
+      });
+      return NextResponse.json({ ok: true });
+    }
+
     /* ---------------- Budgets ---------------- */
     if (action === "save_budget") {
       const id = uuid(body.id);

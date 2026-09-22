@@ -2,6 +2,8 @@ import "server-only";
 
 import { glashMaybeOne, glashQuery } from "@/lib/glashdb/postgres";
 import { brandedEmailHtml } from "@/lib/email-template";
+import { collectAuditReport, type AuditReportPayload } from "@/lib/audit-report";
+import { buildDailyInsights, type DailyInsights } from "@/lib/daily-report-insights";
 
 /**
  * End-of-day platform report for CDS Space leadership.
@@ -63,6 +65,10 @@ const PULSE_TABLES = ["admin_activity_log", "task_board_activity", "content_item
 export interface MetricResult extends Metric { today: number; yesterday: number; deltaPct: number | null }
 
 export interface DailyReport {
+  /** The Audit & Report figures for this day, so the email and that page agree. */
+  audit: AuditReportPayload;
+  previousAudit: AuditReportPayload | null;
+  insights: DailyInsights;
   /** Lagos calendar date the report covers, YYYY-MM-DD. */
   day: string;
   dateLabel: string;
@@ -195,22 +201,41 @@ function deltaPct(today: number, yesterday: number): number | null {
 
 const HEADLINE_KEYS = ["signups", "tasks", "content_published", "inflows"];
 
+/**
+ * The Lagos day as an absolute UTC window, which is what the audit collector
+ * takes. Lagos is UTC+1 with no daylight saving, so the day runs 23:00 the
+ * evening before to 22:59:59 on the day itself, in UTC.
+ */
+function lagosWindow(day: string) {
+  const start = new Date(`${day}T00:00:00.000+01:00`);
+  const end = new Date(`${day}T23:59:59.999+01:00`);
+  return { from: day, to: day, fromIso: start.toISOString(), toIso: end.toISOString() };
+}
+
 export async function collectDailyReport(day: string = resolveReportDay()): Promise<DailyReport> {
-  const [metrics, hourly, trend] = await Promise.all([
+  const previousDay = shiftDay(day, -1);
+  const [metrics, hourly, trend, audit, previousAudit] = await Promise.all([
     Promise.all(METRICS.map(async (m) => {
       const { today, yesterday } = await runMetric(m, day);
       return { ...m, today, yesterday, deltaPct: deltaPct(today, yesterday) };
     })),
     collectHourly(day),
     Promise.all(HEADLINE_KEYS.map((k) => collectSeries(METRICS.find((m) => m.key === k)!, day))),
+    // Exactly what the Audit & Report page would show for this one day.
+    collectAuditReport(lagosWindow(day)),
+    collectAuditReport(lagosWindow(previousDay)).catch(() => null),
   ]);
+
   return {
     day,
     dateLabel: formatDayLabel(day),
-    previousLabel: formatDayLabel(shiftDay(day, -1)),
+    previousLabel: formatDayLabel(previousDay),
     metrics,
     hourly,
     trend,
+    audit,
+    previousAudit,
+    insights: buildDailyInsights({ today: audit, previous: previousAudit, metrics }),
   };
 }
 
@@ -357,6 +382,115 @@ function moversChart(metrics: MetricResult[], previousLabel: string): string {
 }
 
 /** Build the branded HTML report. */
+/** The eight tiles from the Audit & Report page, in the same order and wording. */
+function auditTiles(report: DailyReport): string {
+  const previous = report.previousAudit?.stats;
+  const tiles: Array<[string, number, number | undefined]> = [
+    ["Tracked events", report.audit.stats.totalTrackedEvents, previous?.totalTrackedEvents],
+    ["Logins", report.audit.stats.logins, previous?.logins],
+    ["Messages", report.audit.stats.messages, previous?.messages],
+    ["Invoices created", report.audit.stats.invoices, previous?.invoices],
+    ["Works & requests", report.audit.stats.works, previous?.works],
+    ["Active actors", report.audit.stats.activeActors, previous?.activeActors],
+    ["Client accounts", report.audit.stats.clients, previous?.clients],
+    ["Team members added", report.audit.stats.teamMembers, previous?.teamMembers],
+  ];
+  const cell = ([label, value, was]: [string, number, number | undefined]) => `
+    <td width="25%" style="padding:5px;">
+      <div style="background:#F5F8FF;border:1px solid #e6eaf2;border-radius:12px;padding:12px;text-align:center;">
+        <div style="font-size:22px;font-weight:900;color:#0D1B39;">${value.toLocaleString()}</div>
+        <div style="font-size:9px;color:#667085;font-weight:700;text-transform:uppercase;letter-spacing:.04em;margin:4px 0 2px;">${label}</div>
+        ${deltaBadge(was === undefined ? null : deltaPct(value, was))}
+      </div>
+    </td>`;
+  return `
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+      <tr>${tiles.slice(0, 4).map(cell).join("")}</tr>
+      <tr>${tiles.slice(4).map(cell).join("")}</tr>
+    </table>`;
+}
+
+/** The Activity Mix donut, as a stacked bar with the same category labels. */
+function activityMix(report: DailyReport): string {
+  const rows = report.audit.categoryBreakdown;
+  if (!rows.length) return "";
+  const total = rows.reduce((sum, row) => sum + row.count, 0) || 1;
+  const tones = ["#0A4FE8", "#1BA05E", "#E4572E", "#7A3FF2", "#F0A400", "#0FA3B1", "#98A2B3"];
+  const segments = rows.map((row, index) => `
+    <td width="${Math.max(2, Math.round((row.count / total) * 100))}%" style="padding:0 1px;">
+      <div style="height:12px;background:${tones[index % tones.length]};border-radius:3px;"></div>
+    </td>`).join("");
+  const legend = rows.map((row, index) => `
+    <tr>
+      <td style="padding:5px 0;font-size:12px;color:#0D1B39;">
+        <span style="display:inline-block;width:9px;height:9px;border-radius:9px;background:${tones[index % tones.length]};margin-right:7px;"></span>${row.category}
+      </td>
+      <td align="right" style="padding:5px 0;font-size:12px;font-weight:800;color:#0D1B39;">${row.count.toLocaleString()}</td>
+    </tr>`).join("");
+  return `
+    <div style="margin-top:22px;">
+      <div style="font-size:11px;font-weight:800;letter-spacing:.1em;text-transform:uppercase;color:${BLUE};">Activity mix</div>
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-top:8px;"><tr>${segments}</tr></table>
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-top:6px;">${legend}</table>
+    </div>`;
+}
+
+/** Top actors, matching the Audit page's list. */
+function topActors(report: DailyReport): string {
+  const actors = report.audit.actors.slice(0, 6);
+  if (!actors.length) return "";
+  const rows = actors.map((actor) => `
+    <tr>
+      <td style="padding:8px 0;border-bottom:1px solid #eef1f7;font-size:13px;color:#0D1B39;font-weight:600;">
+        ${actor.name}
+        <span style="color:#98A2B3;font-weight:500;font-size:11px;"> &middot; ${actor.isAdmin ? "Admin" : actor.kind === "team" ? "Team" : "System"}</span>
+      </td>
+      <td align="right" style="padding:8px 0;border-bottom:1px solid #eef1f7;font-size:13px;font-weight:800;color:#0D1B39;">${actor.events.toLocaleString()}</td>
+    </tr>`).join("");
+  return `
+    <div style="margin-top:22px;">
+      <div style="font-size:11px;font-weight:800;letter-spacing:.1em;text-transform:uppercase;color:${BLUE};">Top actors</div>
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0">${rows}</table>
+    </div>`;
+}
+
+/** The read of the day: verdict, what to fix, what went well, who to thank. */
+function narrative(report: DailyReport): string {
+  const { insights } = report;
+  const list = (items: typeof insights.wins, tone: { bg: string; border: string; label: string }) => items.length
+    ? `<div style="margin-top:14px;">
+         <div style="font-size:11px;font-weight:800;letter-spacing:.1em;text-transform:uppercase;color:${tone.border};">${tone.label}</div>
+         ${items.map((item) => `
+           <div style="margin-top:8px;background:${tone.bg};border-left:3px solid ${tone.border};border-radius:8px;padding:11px 13px;">
+             <div style="font-size:13px;font-weight:700;color:#0D1B39;">${item.headline}</div>
+             <div style="font-size:12px;color:#3A4A6B;margin-top:4px;line-height:1.55;">${item.action}</div>
+             <div style="font-size:11px;color:#98A2B3;margin-top:5px;">${item.evidence}</div>
+           </div>`).join("")}
+       </div>`
+    : "";
+
+  const people = insights.recognise.length
+    ? `<div style="margin-top:14px;">
+         <div style="font-size:11px;font-weight:800;letter-spacing:.1em;text-transform:uppercase;color:#0a8f3c;">Worth recognising</div>
+         ${insights.recognise.map((person) => `
+           <div style="margin-top:7px;font-size:13px;color:#0D1B39;">
+             <strong>${person.name}</strong>
+             <span style="color:#98A2B3;font-size:11px;"> &middot; ${person.role} &middot; ${person.events.toLocaleString()} events</span>
+             <div style="font-size:12px;color:#3A4A6B;margin-top:2px;">${person.note}</div>
+           </div>`).join("")}
+       </div>`
+    : "";
+
+  return `
+    <div style="margin-top:20px;background:#F5F8FF;border:1px solid #e6eaf2;border-radius:14px;padding:16px 18px;">
+      <div style="font-size:11px;font-weight:800;letter-spacing:.1em;text-transform:uppercase;color:${BLUE};">The read on today</div>
+      <p style="margin:6px 0 0;font-size:14px;line-height:1.6;color:#0D1B39;font-weight:600;">${insights.verdict}</p>
+      ${list(insights.concerns, { bg: "#FFF6F6", border: "#d1293d", label: "Needs attention" })}
+      ${list(insights.wins, { bg: "#F3FBF5", border: "#0a8f3c", label: "Going well" })}
+      ${people}
+    </div>`;
+}
+
 export function renderDailyReportHtml(report: DailyReport): string {
   const { metrics, dateLabel, previousLabel } = report;
   const groups = Array.from(new Set(metrics.map((m) => m.group)));
@@ -399,7 +533,14 @@ export function renderDailyReportHtml(report: DailyReport): string {
 
   const body = `
     <p style="margin:0 0 4px 0;font-size:14px;color:#0D1B39;font-weight:700;">Platform report - ${dateLabel}</p>
-    <p style="margin:0 0 16px 0;color:#667085;font-size:13px;">Everything that happened across CDS Space on ${dateLabel}, compared with ${previousLabel}.</p>
+    <p style="margin:0 0 16px 0;color:#667085;font-size:13px;">Everything that happened across CDS Space on ${dateLabel}, compared with ${previousLabel}. The figures below are the same ones on the Audit &amp; Report page for this day.</p>
+    ${auditTiles(report)}
+    ${narrative(report)}
+    ${activityMix(report)}
+    ${topActors(report)}
+    <div style="margin-top:26px;padding-top:18px;border-top:1px solid #eef1f7;">
+      <div style="font-size:11px;font-weight:800;letter-spacing:.1em;text-transform:uppercase;color:${BLUE};">The detail behind it</div>
+    </div>
     <table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr>${tiles}</tr></table>
     ${legend}
     ${hourlyChart(report.hourly)}
@@ -413,6 +554,18 @@ export function renderDailyReportHtml(report: DailyReport): string {
 }
 
 export function renderDailyReportText(report: DailyReport): string {
-  return `CDS Space daily report - ${report.dateLabel}\n\n`
-    + report.metrics.map((m) => `${m.label}: ${Math.round(m.today).toLocaleString()} (previous day ${Math.round(m.yesterday).toLocaleString()}${m.deltaPct === null ? "" : `, ${m.deltaPct >= 0 ? "+" : ""}${m.deltaPct}%`})`).join("\n");
+  const { insights, audit } = report;
+  const block = (title: string, lines: string[]) => lines.length ? `\n${title}\n${lines.map((line) => `- ${line}`).join("\n")}\n` : "";
+  return [
+    `CDS Space daily report - ${report.dateLabel}`,
+    "",
+    insights.verdict,
+    "",
+    `Tracked events ${audit.stats.totalTrackedEvents.toLocaleString()} | Logins ${audit.stats.logins.toLocaleString()} | Messages ${audit.stats.messages.toLocaleString()} | Invoices ${audit.stats.invoices.toLocaleString()} | Works ${audit.stats.works.toLocaleString()} | Active actors ${audit.stats.activeActors.toLocaleString()}`,
+    block("NEEDS ATTENTION", insights.concerns.map((item) => `${item.headline}. ${item.action} (${item.evidence})`)),
+    block("GOING WELL", insights.wins.map((item) => `${item.headline}. ${item.action} (${item.evidence})`)),
+    block("WORTH RECOGNISING", insights.recognise.map((person) => `${person.name} (${person.role}) - ${person.events.toLocaleString()} events. ${person.note}`)),
+    "\nTHE DETAIL",
+    report.metrics.map((m) => `${m.label}: ${Math.round(m.today).toLocaleString()} (previous day ${Math.round(m.yesterday).toLocaleString()}${m.deltaPct === null ? "" : `, ${m.deltaPct >= 0 ? "+" : ""}${m.deltaPct}%`})`).join("\n"),
+  ].join("\n");
 }

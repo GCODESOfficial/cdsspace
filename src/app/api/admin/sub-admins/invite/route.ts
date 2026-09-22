@@ -5,6 +5,7 @@ import { brandedEmailHtml } from "@/lib/email-template";
 import { emailAttachmentsFor } from "@/lib/email-logo";
 import { getSupabaseAdmin } from "@/lib/supabase";
 import { getAdminSession } from "@/app/api/admin-check/route";
+import { publicSiteOrigin } from "@/lib/public-site";
 
 export const runtime = "nodejs";
 
@@ -15,6 +16,7 @@ function hashToken(token: string) {
 }
 
 function siteUrl() {
+    if (process.env.NODE_ENV === "production") return publicSiteOrigin();
     const fromEnv = process.env.NEXT_PUBLIC_SITE_URL;
     if (fromEnv) return fromEnv.replace(/\/$/, "");
     if (process.env.VERCEL_URL) return `https://${process.env.VERCEL_URL}`;

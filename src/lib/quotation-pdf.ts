@@ -11,7 +11,9 @@ import {
     formatFinanceDate,
 } from "./finance/types";
 
-const CURRENCY_SYMBOLS: Record<string, string> = { NGN: "N", USD: "$", GBP: "GBP ", EUR: "EUR ", RWF: "FRw ", CNY: "CNY ", AED: "AED " };
+// NGN is written as its code: the PDF fonts cannot draw ₦, and a bare "N"
+// reads as a typo. Matches the Executive Board documents.
+const CURRENCY_SYMBOLS: Record<string, string> = { NGN: "NGN ", USD: "$", GBP: "GBP ", EUR: "EUR ", RWF: "RWF ", CNY: "CNY ", AED: "AED " };
 
 function fmtMoney(n: number | string | null | undefined, currency: string) {
     const v = Number(n || 0);
@@ -226,7 +228,9 @@ export async function exportQuotationToPdf(
 
     const col = {
         name: margin + 12,
-        qty: margin + innerWidth * 0.55,
+        // Sits left enough that a full "NGN 850,000.00" unit price keeps a
+        // clear gap from the quantity instead of reading as one figure.
+        qty: margin + innerWidth * 0.49,
         unit: margin + innerWidth * 0.72,
         total: margin + innerWidth - 12,
     };
@@ -242,8 +246,8 @@ export async function exportQuotationToPdf(
     y += 26;
 
     items.forEach((it, i) => {
-        const nameLines = doc.splitTextToSize(it.name || "-", innerWidth * 0.52);
-        const descLines = it.description ? doc.splitTextToSize(it.description, innerWidth * 0.52) : [];
+        const nameLines = doc.splitTextToSize(it.name || "-", innerWidth * 0.4);
+        const descLines = it.description ? doc.splitTextToSize(it.description, innerWidth * 0.4) : [];
         const rowHeight = Math.max(28, nameLines.length * 14 + descLines.length * 11 + (descLines.length ? 6 : 14));
         ensureSpace(rowHeight + 2);
         if (i % 2 === 1) {

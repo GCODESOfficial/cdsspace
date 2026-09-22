@@ -37,10 +37,55 @@ export const LEAVE_TYPES = [
   "annual",
   "sick",
   "emergency",
-  "compassionate",
-  "public_holiday",
-  "unpaid",
 ] as const;
+export type LeaveType = typeof LEAVE_TYPES[number];
+
+export const ANNUAL_LEAVE_MAX_WORKING_DAYS = 5;
+
+export function leaveWorkingDays(startDate: string, endDate: string) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(startDate) || !/^\d{4}-\d{2}-\d{2}$/.test(endDate)) return 0;
+  const cursor = new Date(`${startDate}T12:00:00+01:00`);
+  const stop = new Date(`${endDate}T12:00:00+01:00`);
+  if (!Number.isFinite(cursor.getTime()) || !Number.isFinite(stop.getTime()) || cursor > stop) return 0;
+
+  let count = 0;
+  while (cursor <= stop) {
+    const date = cursor.toISOString().slice(0, 10);
+    if (isWorkDay(date)) count += 1;
+    cursor.setUTCDate(cursor.getUTCDate() + 1);
+  }
+  return count;
+}
+
+export function annualLeaveLatestEndDate(startDate: string) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(startDate)) return "";
+  const cursor = new Date(`${startDate}T12:00:00+01:00`);
+  if (!Number.isFinite(cursor.getTime())) return "";
+
+  let workingDays = 0;
+  while (workingDays < ANNUAL_LEAVE_MAX_WORKING_DAYS) {
+    const date = cursor.toISOString().slice(0, 10);
+    if (isWorkDay(date)) workingDays += 1;
+    if (workingDays < ANNUAL_LEAVE_MAX_WORKING_DAYS) cursor.setUTCDate(cursor.getUTCDate() + 1);
+  }
+  return cursor.toISOString().slice(0, 10);
+}
+
+export function validateLeavePeriod(leaveType: string, startDate: string, endDate: string) {
+  if (!(LEAVE_TYPES as readonly string[]).includes(leaveType)) {
+    return "Choose annual, sick, or emergency leave.";
+  }
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(startDate) || !/^\d{4}-\d{2}-\d{2}$/.test(endDate)) {
+    return "Choose a valid start and end date.";
+  }
+  if (startDate > endDate) return "The leave end date cannot be before the start date.";
+  const workingDays = leaveWorkingDays(startDate, endDate);
+  if (workingDays < 1) return "Leave must include at least one working day.";
+  if (leaveType === "annual" && workingDays > ANNUAL_LEAVE_MAX_WORKING_DAYS) {
+    return `Annual leave cannot exceed ${ANNUAL_LEAVE_MAX_WORKING_DAYS} working days.`;
+  }
+  return null;
+}
 
 export type AttendanceStatus = "early" | "on_time" | "late" | "half_day" | "absent" | "approved_leave";
 

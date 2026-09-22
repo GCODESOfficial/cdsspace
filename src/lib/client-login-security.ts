@@ -453,21 +453,25 @@ export async function sendClientSignupVerification(input: {
   email: string;
   name?: string | null;
   actionLink: string;
+  code: string;
 }) {
   const firstName = String(input.name || "client").trim().split(/\s+/)[0] || "client";
   const safeLink = escapeHtml(input.actionLink);
+  const code = escapeHtml(input.code);
   const html = brandedEmailHtml(
     `<h1 style="margin:0 0 14px;color:#0D1B39;font-size:24px;line-height:1.25;">Verify your email address</h1>
      <p style="margin:0 0 16px;">Hello ${escapeHtml(firstName)},</p>
-     <p style="margin:0 0 18px;">Confirm that you own this email address before CDS Space creates and activates your client profile.</p>
+     <p style="margin:0 0 18px;">Enter this code on the CDS Space sign-up page to confirm you own this email address and activate your account.</p>
+     <div style="margin:0 0 18px;border-radius:12px;background:#F2F5FC;padding:16px;text-align:center;font-family:Menlo,Consolas,monospace;font-size:32px;font-weight:700;letter-spacing:10px;color:#0D1B39;">${code}</div>
+     <p style="margin:0 0 18px;color:#69738D;font-size:13px;line-height:1.6;">The code expires in 30 minutes. Opened this on another device? Use the button instead.</p>
      <a href="${safeLink}" style="display:inline-block;border-radius:10px;background:#0A4FE8;padding:12px 20px;color:#FFFFFF;text-decoration:none;font-size:14px;font-weight:700;">Verify email and activate account</a>
-     <p style="margin:20px 0 0;color:#69738D;font-size:13px;line-height:1.6;">If you did not request this account, ignore this email. No active CDS Space client profile will be created.</p>`,
-    { eyebrow: "Account verification", preheader: "Verify your email before your CDS Space account is activated." },
+     <p style="margin:20px 0 0;color:#69738D;font-size:13px;line-height:1.6;">If you did not request this account, ignore this email. CDS Space will never ask you for this code by phone or chat.</p>`,
+    { eyebrow: "Account verification", preheader: `Your CDS Space verification code is ${input.code}.` },
   );
   await sendEmail({
     to: input.email,
-    subject: "Verify your CDS Space email address",
-    text: `Verify your email and activate your CDS Space account: ${input.actionLink}\n\nIf you did not request this account, ignore this email.`,
+    subject: `${input.code} is your CDS Space verification code`,
+    text: `Your CDS Space verification code is ${input.code}. It expires in 30 minutes.\n\nOr verify with this link: ${input.actionLink}\n\nIf you did not request this account, ignore this email.`,
     html,
     fromName: "CDS Space Security",
   });

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getAdminSessionAsync } from "@/app/api/admin-check/route";
 import { hasPermission } from "@/lib/admin-permissions";
 import { isLegalSlug } from "@/lib/legal/default-content";
+import { buildLegalPdf, legalPdfFileName } from "@/lib/legal/pdf";
 import { loadLegalDocument } from "@/lib/legal/server";
 
 export const runtime = "nodejs";
@@ -25,6 +26,18 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ slug
     if (!isLegalSlug(slug)) return NextResponse.json({ error: "Unknown document" }, { status: 404 });
 
     const doc = await loadLegalDocument(slug);
+
+    if (req.nextUrl.searchParams.get("format") === "pdf") {
+        const pdf = buildLegalPdf(doc);
+        return new NextResponse(new Uint8Array(pdf), {
+            status: 200,
+            headers: {
+                "Content-Type": "application/pdf",
+                "Content-Disposition": `attachment; filename="${legalPdfFileName(doc)}"`,
+                "Cache-Control": "private, no-store",
+            },
+        });
+    }
 
     // html-to-docx has no TypeScript types bundled, and different versions
     // export as default vs named. Resolve either shape.

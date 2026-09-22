@@ -1,5 +1,6 @@
 import "server-only";
 import { createHmac, timingSafeEqual } from "crypto";
+import { sessionRequiresDailyLogout } from "@/lib/team-session-policy";
 
 /**
  * Signed admin_session cookie.
@@ -51,7 +52,12 @@ export function verifyAdminCookie<T = Record<string, unknown>>(raw: string | und
     const a = Buffer.from(sig, "hex");
     const b = Buffer.from(mac(b64), "hex");
     if (a.length !== b.length || !timingSafeEqual(a, b)) return null;
-    return JSON.parse(Buffer.from(b64, "base64url").toString("utf8")) as T;
+    const parsed = JSON.parse(Buffer.from(b64, "base64url").toString("utf8")) as T & {
+      role?: string;
+      issuedAt?: string;
+    };
+    if (parsed.role === "sub_admin" && sessionRequiresDailyLogout(parsed.issuedAt)) return null;
+    return parsed as T;
   } catch {
     return null;
   }

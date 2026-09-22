@@ -4,6 +4,8 @@ export const SUBSCRIPTION_PLAN_IDS = ["startup", "scaleup", "supreme"] as const;
 
 export type SubscriptionPlanId = (typeof SUBSCRIPTION_PLAN_IDS)[number];
 
+export const SUPREME_MAX_DESIGNS = 40;
+
 export interface SubscriptionPlanDefinition {
   id: SubscriptionPlanId;
   name: string;
@@ -49,7 +51,7 @@ export const SUBSCRIPTION_PLANS: readonly SubscriptionPlanDefinition[] = [
     name: "Supreme",
     description: "Flexible design capacity purchased by the quantity you need.",
     features: [
-      "Choose the exact design quantity",
+      "Choose up to 40 designs monthly",
       "12-hour priority turnaround",
       "Unlimited revisions",
       "Dedicated designer",
@@ -83,7 +85,7 @@ export function subscriptionPlan(planId: SubscriptionPlanId) {
 export function normalizedDesignQuantity(planId: SubscriptionPlanId, value: unknown) {
   if (planId !== "supreme") return 1;
   const quantity = Number(value);
-  return Number.isInteger(quantity) && quantity >= 1 && quantity <= 1000 ? quantity : null;
+  return Number.isInteger(quantity) && quantity >= 1 && quantity <= SUPREME_MAX_DESIGNS ? quantity : null;
 }
 
 export function calculateSubscriptionAmount(

@@ -1,4 +1,8 @@
 import { NextResponse, type NextRequest } from "next/server";
+import {
+  applicationRateProfile,
+  clientNetworkFromHeaders,
+} from "@/lib/security/request-guard-core.mjs";
 
 const UNSAFE_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
 const SERVER_TO_SERVER_PATHS = [
@@ -32,13 +36,6 @@ function requestFingerprint(value: string) {
   return (hash >>> 0).toString(36);
 }
 
-function clientNetwork(request: NextRequest) {
-  return request.headers.get("cf-connecting-ip")
-    || request.headers.get("x-real-ip")
-    || request.headers.get("x-forwarded-for")?.split(",")[0]?.trim()
-    || "unknown";
-}
-
 function pruneRequestBuckets(now: number) {
   if (requestBuckets.size < MAX_REQUEST_BUCKETS) return;
   for (const [key, bucket] of requestBuckets) {
@@ -53,33 +50,13 @@ function pruneRequestBuckets(now: number) {
   }
 }
 
-function rateProfile(request: NextRequest) {
-  const pathname = request.nextUrl.pathname;
-  const method = request.method.toUpperCase();
-  if (pathname === "/api/security/bot-challenge") {
-    return { name: "bot-challenge", capacity: 20, refillPerSecond: 1 / 15 };
-  }
-  if (
-    pathname.startsWith("/api/auth/")
-    || pathname === "/api/admin-login"
-    || pathname === "/api/team/login"
-  ) {
-    return { name: "authentication", capacity: 30, refillPerSecond: 0.5 };
-  }
-  if (pathname.startsWith("/api/")) {
-    return UNSAFE_METHODS.has(method)
-      ? { name: "api-mutation", capacity: 45, refillPerSecond: 1 }
-      : { name: "api-read", capacity: 120, refillPerSecond: 3 };
-  }
-  return { name: "page", capacity: 300, refillPerSecond: 5 };
-}
-
 function exceedsApplicationRate(request: NextRequest) {
   if (isServerToServerPath(request.nextUrl.pathname)) return false;
   const now = Date.now();
+  const profile = applicationRateProfile(request.nextUrl.pathname, request.method);
+  if (!profile) return false;
   pruneRequestBuckets(now);
-  const profile = rateProfile(request);
-  const key = `${profile.name}:${requestFingerprint(clientNetwork(request))}`;
+  const key = `${profile.name}:${requestFingerprint(clientNetworkFromHeaders(request.headers))}`;
   const current = requestBuckets.get(key) || {
     tokens: profile.capacity,
     lastRefill: now,
@@ -164,6 +141,15 @@ function productionHostAllowed(request: NextRequest) {
 function mutationOriginAllowed(request: NextRequest, origin: string) {
   const parsed = new URL(origin);
   if (process.env.NODE_ENV !== "production") {
+    return parsed.origin === new URL(effectiveOrigin(request)).origin;
+  }
+
+  // A locally-run production build is the closest browser regression test for
+  // camera, microphone and WebRTC behavior. Keep the same-origin requirement,
+  // but permit HTTP only when both sides are the exact loopback/private host;
+  // public production hosts continue to require HTTPS below.
+  const host = requestHost(request);
+  if (isInternalHost(host)) {
     return parsed.origin === new URL(effectiveOrigin(request)).origin;
   }
 

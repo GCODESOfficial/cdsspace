@@ -1,8 +1,9 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { NextRequest, NextResponse } from "next/server";
-import { getChatViewer } from "@/lib/team-chat-auth";
+import { getChatViewer, viewerMemberId } from "@/lib/team-chat-auth";
 import { glashMaybeOne, glashQuery } from "@/lib/glashdb/postgres";
 import { lagosDate } from "@/lib/timebook";
+import { enforceDailyTeamSessionCutoff } from "@/lib/team-session-cutoff";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -12,6 +13,7 @@ export async function GET(req: NextRequest) {
   if (!viewer) {
     return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
   }
+  await enforceDailyTeamSessionCutoff().catch(() => undefined);
 
   // When a threadId is supplied (used by the @-mention picker), scope the list
   // to the members of that specific chat group. Groups, direct chats and
@@ -43,14 +45,14 @@ export async function GET(req: NextRequest) {
        m.role_title,
        m.department,
        case
-         when e.current_status = 'on_break' then 'break'
          when exists (
            select 1
            from public.team_device_sessions s
            where s.team_member_id = m.id
              and s.revoked_at is null
              and s.expires_at > now()
-         ) then 'online'
+             and s.last_seen_at >= now() - interval '5 minutes'
+         ) then case when e.current_status = 'on_break' then 'break' else 'online' end
          else 'offline'
        end as status
      from public.team_members m
@@ -63,14 +65,14 @@ export async function GET(req: NextRequest) {
        ))
      order by
        case
-         when e.current_status = 'on_break' then 1
          when exists (
            select 1
            from public.team_device_sessions s
            where s.team_member_id = m.id
              and s.revoked_at is null
              and s.expires_at > now()
-         ) then 0
+             and s.last_seen_at >= now() - interval '5 minutes'
+         ) then case when e.current_status = 'on_break' then 1 else 0 end
          else 2
        end,
        m.full_name asc`,
@@ -79,13 +81,14 @@ export async function GET(req: NextRequest) {
 
   const list = data || [];
   
-  // Prepend a virtual "Admin" account at the top
+  // The virtual account represents only the true super admin. Delegated
+  // admins remain ordinary named team-member identities in chat.
   const adminAccount = {
     id: "admin",
-    full_name: "Admin",
+    full_name: "Super admin",
     avatar_url: null,
     username: "admin",
-    role_title: "System Administrator",
+    role_title: "Super admin",
     department: "Support",
     status: "online",
   };
@@ -93,8 +96,9 @@ export async function GET(req: NextRequest) {
   const withAdmin = includeAdmin ? [adminAccount, ...list] : list;
 
   // Filter out the current user if they are a team member
-  const filtered = viewer.kind === "team"
-    ? withAdmin.filter((m: any) => m.id !== viewer.session.id)
+  const memberId = viewerMemberId(viewer);
+  const filtered = memberId
+    ? withAdmin.filter((m: any) => m.id !== memberId)
     : withAdmin;
 
   return NextResponse.json({ ok: true, members: filtered });

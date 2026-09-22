@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { emailFrom, createEmailTransport } from "@/lib/email-from";
 import { brandedEmailHtml } from "@/lib/email-template";
+import { emailAttachmentsFor } from "@/lib/email-logo";
 
 export async function POST(req: Request) {
   const formData = await req.json();

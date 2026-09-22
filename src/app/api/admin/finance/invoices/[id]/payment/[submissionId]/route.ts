@@ -4,6 +4,7 @@ import { financeDb, requireFinanceAdminAsync } from "@/lib/finance/api-auth";
 import { emailInvoiceReceipt } from "@/lib/finance/receipt-server";
 import { logActivity } from "@/lib/activity-log";
 import { deliverInvoicePaymentConfirmation } from "@/lib/finance/payment-confirmation";
+import { recordInvoicePayment } from "@/lib/finance/invoice-payments";
 
 export async function PATCH(request: NextRequest, { params }: { params: Promise<{ id: string; submissionId: string }> }) {
   const denied = await requireFinanceAdminAsync(request, "finance_invoices.mark_paid");
@@ -23,6 +24,9 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
     .maybeSingle();
   if (!submission) return NextResponse.json({ error: "Payment submission not found." }, { status: 404 });
   if (submission.status !== "pending") return NextResponse.json({ error: "This submission has already been reviewed." }, { status: 409 });
+  if (action === "confirm" && submission.method === "paystack") {
+    return NextResponse.json({ error: "Paystack payments are confirmed automatically after provider verification." }, { status: 409 });
+  }
 
   const reviewer = session?.name || session?.email || "Finance admin";
   if (action === "reject") {
@@ -32,14 +36,30 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
     return NextResponse.json({ submission: data });
   }
 
-  const { data: invoice, error: invoiceError } = await db.from("finance_invoices").update({ status: "paid" }).eq("id", id).select("*").single();
-  if (invoiceError) return NextResponse.json({ error: invoiceError.message }, { status: 500 });
-  // The paid-invoice database trigger confirms the pending submission and
-  // issues the receipt. Add the human reviewer afterwards for the audit trail.
+  let paymentResult;
+  try {
+    paymentResult = await recordInvoicePayment({
+      invoiceId: id,
+      amount: Number(submission.amount),
+      currency: submission.currency,
+      paidOn: new Date().toISOString().slice(0, 10),
+      paymentMethod: submission.method,
+      paymentReference: submission.transfer_reference,
+      sourceType: "payment_submission",
+      sourceId: submission.id,
+      notes: note,
+      recordedBy: reviewer,
+    });
+  } catch (error) {
+    return NextResponse.json({ error: error instanceof Error ? error.message : "Payment could not be recorded." }, { status: 400 });
+  }
+  const invoice = paymentResult.invoice;
   await db.from("invoice_payment_submissions").update({ status: "confirmed", reviewed_at: new Date().toISOString(), reviewed_by: reviewer, admin_note: note, updated_at: new Date().toISOString() }).eq("id", submissionId);
-  await emailInvoiceReceipt(db, id).catch(() => null);
-  await deliverInvoicePaymentConfirmation(db, id).catch(() => null);
+  if (invoice.status === "paid") {
+    await emailInvoiceReceipt(db, id).catch(() => null);
+    await deliverInvoicePaymentConfirmation(db, id).catch(() => null);
+  }
   const { data: receipt } = await db.from("finance_receipts").select("*").eq("invoice_id", id).maybeSingle();
-  await logActivity({ action: "invoice.payment_confirmed", page: "finance/invoices", resource_type: "invoice", resource_id: id, resource_label: invoice.invoice_number, metadata: { submission_id: submissionId, reviewed_by: reviewer } });
-  return NextResponse.json({ invoice, receipt: receipt ? { ...receipt, invoice_number: invoice.invoice_number } : null });
+  await logActivity({ action: invoice.status === "paid" ? "invoice.payment_confirmed" : "invoice.part_payment_confirmed", page: "finance/invoices", resource_type: "invoice", resource_id: id, resource_label: String(invoice.invoice_number || "Invoice"), metadata: { submission_id: submissionId, reviewed_by: reviewer, amount: submission.amount, balance_due: invoice.balance_due } });
+  return NextResponse.json({ invoice, payment: paymentResult.payment, receipt: receipt ? { ...receipt, invoice_number: invoice.invoice_number } : null });
 }

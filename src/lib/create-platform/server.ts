@@ -4,7 +4,9 @@ import QRCode from "qrcode";
 import { glashMaybeOne, glashQuery } from "@/lib/glashdb/postgres";
 import { getReadyEngineChain, processQueuedJob } from "./engines";
 import {
+  CREATE_STORAGE_LIMIT_BYTES,
   DEFAULT_CREATE_TOOLS,
+  type CreateAdvertBanner,
   type CreateCreditAccount,
   type CreateCreation,
   type CreateDashboardData,
@@ -14,6 +16,7 @@ import {
   type CreateTool,
 } from "@/lib/create-platform/catalog";
 import type { CreateActor } from "@/lib/create-platform/session";
+import { runLiveBrandNameCheck } from "@/lib/create-platform/brand-name-checker";
 
 type DbTool = {
   id?: string;
@@ -35,6 +38,86 @@ type DbTool = {
   output_formats: string[];
   admin_notes?: string | null;
 };
+
+function advertBannerFromDb(row: Record<string, unknown> | null): CreateAdvertBanner | null {
+  if (!row) return null;
+  return {
+    imageUrl: typeof row.image_url === "string" ? row.image_url : null,
+    altText: String(row.alt_text || "CDS Space Create promotion"),
+    targetUrl: typeof row.target_url === "string" ? row.target_url : null,
+    isActive: Boolean(row.is_active),
+    width:
+      row.image_width != null && Number.isFinite(Number(row.image_width))
+        ? Number(row.image_width)
+        : null,
+    height:
+      row.image_height != null && Number.isFinite(Number(row.image_height))
+        ? Number(row.image_height)
+        : null,
+    updatedAt: typeof row.updated_at === "string" ? row.updated_at : null,
+  };
+}
+
+export async function loadCreateAdvertBanner(): Promise<CreateAdvertBanner | null> {
+  try {
+    const row = await glashMaybeOne<Record<string, unknown>>(
+      `select image_url, alt_text, target_url, is_active, image_width, image_height, updated_at
+         from public.create_advert_banner
+        where id = 1`,
+    );
+    return advertBannerFromDb(row);
+  } catch {
+    return null;
+  }
+}
+
+function safeAdvertTarget(value: unknown) {
+  const target = cleanText(value, 1200);
+  if (!target) return null;
+  if (target.startsWith("/") && !target.startsWith("//")) return target;
+  try {
+    const url = new URL(target);
+    return url.protocol === "https:" || url.protocol === "http:" ? url.toString() : null;
+  } catch {
+    return null;
+  }
+}
+
+export async function upsertCreateAdvertBanner(input: {
+  imageUrl?: unknown; storagePath?: unknown; altText?: unknown; targetUrl?: unknown;
+  isActive?: unknown; width?: unknown; height?: unknown; updatedBy?: unknown;
+}) {
+  const imageUrl = cleanText(input.imageUrl, 2000) || null;
+  const storagePath = cleanText(input.storagePath, 1000) || null;
+  const row = await glashMaybeOne<Record<string, unknown>>(
+    `insert into public.create_advert_banner
+      (id, image_url, storage_path, alt_text, target_url, is_active, image_width, image_height, updated_by, updated_at)
+     values (1, $1, $2, $3, $4, $5, $6, $7, $8, now())
+     on conflict (id) do update set
+       image_url = coalesce(excluded.image_url, public.create_advert_banner.image_url),
+       storage_path = coalesce(excluded.storage_path, public.create_advert_banner.storage_path),
+       alt_text = excluded.alt_text,
+       target_url = excluded.target_url,
+       is_active = excluded.is_active,
+       image_width = coalesce(excluded.image_width, public.create_advert_banner.image_width),
+       image_height = coalesce(excluded.image_height, public.create_advert_banner.image_height),
+       updated_by = excluded.updated_by,
+       updated_at = now()
+     returning image_url, alt_text, target_url, is_active, image_width, image_height, updated_at`,
+    [
+      imageUrl,
+      storagePath,
+      cleanText(input.altText, 180) || "CDS Space Create promotion",
+      safeAdvertTarget(input.targetUrl),
+      input.isActive === true,
+      Number.isFinite(Number(input.width)) ? Math.max(1, Number(input.width)) : null,
+      Number.isFinite(Number(input.height)) ? Math.max(1, Number(input.height)) : null,
+      cleanText(input.updatedBy, 320) || null,
+    ],
+  );
+  if (!row) throw new Error("Could not save the Create advert banner.");
+  return advertBannerFromDb(row);
+}
 
 function toolFromDb(row: DbTool): CreateTool {
   return {
@@ -121,26 +204,49 @@ function providerReady(tool: CreateTool) {
   return !tool.requiresProvider || Boolean(tool.providerKey && process.env[tool.providerKey]);
 }
 
+async function ownedProjectId(actor: CreateActor, value: unknown) {
+  const candidate = typeof value === "string" && validUuid(value) ? value : "";
+  if (!candidate) return null;
+  const project = await glashMaybeOne<{ id: string }>(
+    `select id from public.create_projects
+      where id = $3::uuid and owner_kind = $1 and owner_id = $2 and archived_at is null`,
+    [actor.kind, actor.id, candidate],
+  );
+  if (!project) throw new Error("The selected project is not available in this workspace.");
+  return project.id;
+}
+
+async function readCreateToolsFromDatabase(): Promise<CreateTool[]> {
+  const rows = await glashQuery<DbTool>(
+    `select id, slug, name, short_description, category, stage, status, role_access,
+            credit_cost, requires_provider, provider_key, is_beta, is_new, is_featured,
+            supports_simple_mode, supports_pro_mode, output_formats, admin_notes
+       from public.create_tools
+      order by is_featured desc, category asc, name asc`,
+  );
+  if (!rows.length) return DEFAULT_CREATE_TOOLS;
+
+  const fromDb = rows.map(toolFromDb);
+  const seen = new Set(fromDb.map((tool) => tool.slug));
+  return [
+    ...fromDb,
+    ...DEFAULT_CREATE_TOOLS.filter((tool) => !seen.has(tool.slug)),
+  ];
+}
+
 export async function loadCreateTools(): Promise<CreateTool[]> {
   try {
-    const rows = await glashQuery<DbTool>(
-      `select id, slug, name, short_description, category, stage, status, role_access,
-              credit_cost, requires_provider, provider_key, is_beta, is_new, is_featured,
-              supports_simple_mode, supports_pro_mode, output_formats, admin_notes
-         from public.create_tools
-        order by is_featured desc, category asc, name asc`,
-    );
-    if (!rows.length) return DEFAULT_CREATE_TOOLS;
-
-    const fromDb = rows.map(toolFromDb);
-    const seen = new Set(fromDb.map((tool) => tool.slug));
-    return [
-      ...fromDb,
-      ...DEFAULT_CREATE_TOOLS.filter((tool) => !seen.has(tool.slug)),
-    ];
+    return await readCreateToolsFromDatabase();
   } catch {
+    // Keep Create available during a transient read outage. The admin settings
+    // screen deliberately uses the strict reader below so it never presents
+    // seeded defaults as though they were the saved management state.
     return DEFAULT_CREATE_TOOLS;
   }
+}
+
+export async function loadCreateToolsForAdmin(): Promise<CreateTool[]> {
+  return readCreateToolsFromDatabase();
 }
 
 export async function getCreateTool(slug: string) {
@@ -160,7 +266,7 @@ export async function ensureCreateCreditAccount(actor: CreateActor): Promise<Cre
     return {
       monthlyCreditLimit: Number(row?.monthly_credit_limit || defaultCredits(actor.kind)),
       creditsUsed: Number(row?.credits_used || 0),
-      storageLimitBytes: Number(row?.storage_limit_bytes || 10_737_418_240),
+      storageLimitBytes: Number(row?.storage_limit_bytes || CREATE_STORAGE_LIMIT_BYTES),
       storageUsedBytes: Number(row?.storage_used_bytes || 0),
       resetAt: typeof row?.reset_at === "string" ? row.reset_at : null,
     };
@@ -168,7 +274,7 @@ export async function ensureCreateCreditAccount(actor: CreateActor): Promise<Cre
     return {
       monthlyCreditLimit: defaultCredits(actor.kind),
       creditsUsed: 0,
-      storageLimitBytes: 10_737_418_240,
+      storageLimitBytes: CREATE_STORAGE_LIMIT_BYTES,
       storageUsedBytes: 0,
       resetAt: null,
     };
@@ -176,13 +282,15 @@ export async function ensureCreateCreditAccount(actor: CreateActor): Promise<Cre
 }
 
 export async function loadCreateDashboardData(actor: CreateActor): Promise<CreateDashboardData> {
-  const [tools, creditAccount] = await Promise.all([
+  // One wave, not two. The tool catalogue and the credit account used to be
+  // awaited before the other five reads started, so every open paid for two
+  // database round trips in a row when none of these depend on each other.
+  const toolsAndCredits = Promise.all([
     loadCreateTools(),
     ensureCreateCreditAccount(actor),
+    loadCreateAdvertBanner(),
   ]);
-
-  try {
-    const [favoriteRows, creationRows, projectRows, templateRows, analyticsRow] = await Promise.all([
+  const dashboardReads = Promise.all([
       glashQuery<{ tool_slug: string }>(
         `select tool_slug from public.create_tool_favorites where owner_kind = $1 and owner_id = $2`,
         actorParams(actor),
@@ -228,9 +336,14 @@ export async function loadCreateDashboardData(actor: CreateActor): Promise<Creat
         actorParams(actor),
       ),
     ]);
+  const [tools, creditAccount, advertBanner] = await toolsAndCredits;
+
+  try {
+    const [favoriteRows, creationRows, projectRows, templateRows, analyticsRow] = await dashboardReads;
 
     return {
       tools,
+      advertBanner,
       favoriteToolSlugs: favoriteRows.map((row) => row.tool_slug),
       recentCreations: creationRows.map(creationFromDb),
       projects: projectRows.map(projectFromDb),
@@ -250,6 +363,7 @@ export async function loadCreateDashboardData(actor: CreateActor): Promise<Creat
   } catch {
     return {
       tools,
+      advertBanner,
       favoriteToolSlugs: [],
       recentCreations: [],
       projects: [],
@@ -422,7 +536,9 @@ export async function runCreateTool(actor: CreateActor, tool: CreateTool, input:
   if (tool.status === "disabled") {
     throw new Error("This CREATE tool is currently disabled.");
   }
-  const projectId = validUuid(String(input.projectId || "")) ? String(input.projectId) : null;
+  // A UUID alone is not authority: the project must belong to this exact
+  // server-derived workspace before it may be attached to a creation.
+  const projectId = await ownedProjectId(actor, input.projectId);
 
   const inProcess = IN_PROCESS_SLUGS.has(tool.slug);
   const providerRequired = async () => {
@@ -496,7 +612,7 @@ export async function runCreateTool(actor: CreateActor, tool: CreateTool, input:
   await consumeCredits(actor, tool.creditCost);
   const result = await generateLocalResult(tool, input, actor);
   const creation = await saveCreation(actor, tool, {
-    title: result.title,
+    title: result.title || titleForTool(tool, input),
     status: "ready",
     inputSummary: summarizeInput(input),
     output: result.output,
@@ -510,9 +626,10 @@ export async function runCreateTool(actor: CreateActor, tool: CreateTool, input:
 }
 
 /** Fast text tools that use the OpenAI brain inline when it is ready, else fall back to a local template. */
-const ENGINE_SYNC_SLUGS = new Set(["brand-name-checker", "logo-ideator"]);
+const ENGINE_SYNC_SLUGS = new Set(["logo-ideator"]);
 
 async function generateLocalResult(tool: CreateTool, input: Record<string, unknown>, actor: CreateActor) {
+  if (tool.slug === "brand-name-checker") return runLiveBrandNameCheck(input);
   if (ENGINE_SYNC_SLUGS.has(tool.slug)) {
     const outcome = await processQueuedJob({ toolSlug: tool.slug, input });
     if (outcome.ok) {
@@ -529,8 +646,6 @@ async function generateLocalResult(tool: CreateTool, input: Record<string, unkno
   switch (tool.slug) {
     case "barcode-generator":
       return generateBarcode(input);
-    case "brand-name-checker":
-      return generateBrandNameReport(input);
     case "logo-ideator":
       return generateLogoIdeation(input);
     case "social-media-designer":
@@ -1184,7 +1299,7 @@ function validUuid(value: string) {
 }
 
 export async function loadCreateAdminData() {
-  const tools = await loadCreateTools();
+  const [tools, advertBanner] = await Promise.all([loadCreateToolsForAdmin(), loadCreateAdvertBanner()]);
   try {
     const [stats, topTools, daily] = await Promise.all([
       glashMaybeOne<Record<string, unknown>>(
@@ -1210,10 +1325,11 @@ export async function loadCreateAdminData() {
           order by 1 desc`,
       ),
     ]);
-    return { tools, stats, topTools, daily };
+    return { tools, advertBanner, stats, topTools, daily };
   } catch {
     return {
       tools,
+      advertBanner,
       stats: { tools: tools.length, creations: 0, events: 0, credits_used: 0, storage_used_bytes: 0 },
       topTools: [],
       daily: [],
@@ -1232,6 +1348,10 @@ export async function upsertCreateTool(input: Record<string, unknown>) {
   const roleAccess = Array.isArray(input.roleAccess)
     ? input.roleAccess.filter((role): role is CreateRole => role === "client" || role === "team" || role === "admin")
     : ["client", "team", "admin"] as CreateRole[];
+  const creditCost = Number(input.creditCost);
+  if (!Number.isInteger(creditCost) || creditCost < 0 || creditCost > 100000) {
+    throw new Error("Credit cost must be a whole number between 0 and 100,000.");
+  }
   const row = await glashMaybeOne<DbTool>(
     `insert into public.create_tools
       (slug, name, short_description, category, stage, status, role_access, credit_cost,
@@ -1266,7 +1386,7 @@ export async function upsertCreateTool(input: Record<string, unknown>) {
       ["phase_1", "phase_2", "phase_3"].includes(cleanText(input.stage, 20)) ? cleanText(input.stage, 20) : "phase_1",
       status,
       roleAccess.length ? roleAccess : ["client", "team", "admin"],
-      Math.max(0, Number(input.creditCost || 0)),
+      creditCost,
       input.requiresProvider === true,
       cleanText(input.providerKey, 80) || null,
       input.isBeta === true,
@@ -1280,4 +1400,26 @@ export async function upsertCreateTool(input: Record<string, unknown>) {
   );
   if (!row) throw new Error("Could not save CREATE tool.");
   return toolFromDb(row);
+}
+
+export async function updateCreateToolStatus(slugValue: unknown, statusValue: unknown) {
+  const slug = slugify(cleanText(slugValue, 80));
+  const status = cleanText(statusValue, 20);
+  if (!slug) throw new Error("Select a valid Create tool.");
+  if (status !== "active" && status !== "maintenance" && status !== "disabled") {
+    throw new Error("Select a valid tool status.");
+  }
+  const row = await glashMaybeOne<DbTool>(
+    `update public.create_tools
+        set status = $2
+      where slug = $1
+      returning id, slug, name, short_description, category, stage, status, role_access,
+                credit_cost, requires_provider, provider_key, is_beta, is_new, is_featured,
+                supports_simple_mode, supports_pro_mode, output_formats, admin_notes`,
+    [slug, status],
+  );
+  if (!row) throw new Error("The selected Create tool does not exist.");
+  const saved = toolFromDb(row);
+  if (saved.status !== status) throw new Error("The tool status could not be verified after saving.");
+  return saved;
 }

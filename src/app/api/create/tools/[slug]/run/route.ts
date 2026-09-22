@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getCreateActor } from "@/lib/create-platform/session";
+import { getCreateActorFromRequest } from "@/lib/create-platform/session";
 import { getCreateTool, runCreateTool } from "@/lib/create-platform/server";
 
 export const runtime = "nodejs";
@@ -49,7 +49,7 @@ function sanitizeRunBody(raw: unknown): Record<string, unknown> {
 }
 
 export async function POST(req: NextRequest, { params }: { params: Promise<{ slug: string }> }) {
-  const actor = await getCreateActor();
+  const actor = await getCreateActorFromRequest(req);
   if (!actor) return NextResponse.json({ error: "Sign in to use CREATE." }, { status: 401 });
   if (actor.accessLocked) {
     return NextResponse.json({ error: "CREATE is not available on client accounts yet." }, { status: 403 });

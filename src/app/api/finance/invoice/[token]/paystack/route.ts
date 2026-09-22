@@ -1,16 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { financeDb } from "@/lib/finance/api-auth";
 import { getPaystackStatus, newPaystackInvoiceReference, paystackRequest } from "@/lib/paystack";
+import { applicationOrigin } from "@/lib/public-site";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 function siteOrigin(request: NextRequest) {
-  const configured = process.env.NEXT_PUBLIC_SITE_URL?.trim();
-  if (configured) {
-    try { return new URL(configured).origin; } catch { /* use request origin */ }
-  }
-  return request.nextUrl.origin;
+  return applicationOrigin(request);
 }
 
 export async function POST(request: NextRequest, { params }: { params: Promise<{ token: string }> }) {
@@ -28,6 +25,8 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   }
   const email = String(invoice.client_email || "").trim().toLowerCase();
   if (!email) return NextResponse.json({ error: "A client email is required for Paystack checkout." }, { status: 400 });
+  const outstanding = Math.max(Number(invoice.total || 0) - Number(invoice.amount_paid || 0), 0);
+  if (outstanding <= 0) return NextResponse.json({ error: "This invoice has no outstanding balance." }, { status: 409 });
 
   const reference = newPaystackInvoiceReference();
   const { data: existingSubmission } = await db.from("invoice_payment_submissions").select("id").eq("invoice_id", invoice.id).eq("status", "pending").maybeSingle();
@@ -36,7 +35,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     user_id: invoice.user_id || null,
     method: "paystack",
     status: "pending",
-    amount: Number(invoice.total),
+    amount: outstanding,
     currency: invoice.currency,
     payer_name: invoice.client_name || null,
     payer_email: email,
@@ -58,7 +57,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       method: "POST",
       body: JSON.stringify({
         email,
-        amount: String(Math.round(Number(invoice.total) * 100)),
+        amount: String(Math.round(outstanding * 100)),
         currency: invoice.currency,
         reference,
         callback_url: callback.toString(),

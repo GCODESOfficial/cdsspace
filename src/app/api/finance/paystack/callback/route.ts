@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { finalizePaystackInvoicePayment } from "@/lib/paystack";
+import { absoluteApplicationUrl } from "@/lib/public-site";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -7,7 +8,7 @@ export const dynamic = "force-dynamic";
 export async function GET(request: NextRequest) {
   const reference = request.nextUrl.searchParams.get("reference")?.trim() || "";
   const token = request.nextUrl.searchParams.get("invoice")?.trim() || "";
-  const target = new URL(`/invoice/${encodeURIComponent(token)}`, request.nextUrl.origin);
+  const target = absoluteApplicationUrl(`/invoice/${encodeURIComponent(token)}`, request);
   try {
     if (!reference || !token) throw new Error("Missing payment reference.");
     const result = await finalizePaystackInvoicePayment(reference);

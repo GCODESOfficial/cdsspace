@@ -1,6 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { NextResponse } from "next/server";
-import { getChatViewer } from "@/lib/team-chat-auth";
+import { getChatViewer, viewerIsSuperAdmin, viewerMemberId } from "@/lib/team-chat-auth";
 import { canViewTeamThread, getViewerReactionKey } from "@/lib/team-chat-server";
 import { glashQuery } from "@/lib/glashdb/postgres";
 import { verifyAdmin, verifyUser } from "@/lib/admin-auth";
@@ -54,7 +54,7 @@ export async function GET(req: Request) {
       return NextResponse.json({ ok: false, error: "Forbidden" }, { status: 403 });
     }
     threadIds = [threadId];
-  } else if (viewer.kind === "admin") {
+  } else if (viewerIsSuperAdmin(viewer)) {
     const rows = await glashQuery<{ id: string }>(
       `select id
        from public.team_chat_threads
@@ -73,7 +73,7 @@ export async function GET(req: Request) {
           or t.kind = 'admin_broadcast'
           or t.kind = 'department'
           or t.visibility = 'public'`,
-      [viewer.session.id],
+      [viewerMemberId(viewer)],
     );
     threadIds = rows.map((row) => row.id);
   }

@@ -12,8 +12,10 @@ import {
   normalizedDesignQuantity,
   PAYSTACK_SUBSCRIPTION_CURRENCIES,
   SUBSCRIPTION_PRICE_COLUMNS,
+  SUPREME_MAX_DESIGNS,
   subscriptionPlan,
 } from "@/lib/subscription-plans";
+import { applicationOrigin } from "@/lib/public-site";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -21,11 +23,7 @@ export const dynamic = "force-dynamic";
 type PaymentMethod = "invoice" | "paystack";
 
 function siteOrigin(request: NextRequest) {
-  const configured = process.env.NEXT_PUBLIC_SITE_URL?.trim();
-  if (configured) {
-    try { return new URL(configured).origin; } catch { /* use the request origin */ }
-  }
-  return request.nextUrl.origin;
+  return applicationOrigin(request);
 }
 
 function escapeHtml(value: unknown) {
@@ -142,7 +140,7 @@ export async function POST(request: NextRequest) {
 
     const quantity = normalizedDesignQuantity(planId, body.design_quantity);
     if (!quantity) {
-      return NextResponse.json({ error: "Supreme design quantity must be between 1 and 1,000." }, { status: 400 });
+      return NextResponse.json({ error: `Supreme design quantity must be between 1 and ${SUPREME_MAX_DESIGNS}.` }, { status: 400 });
     }
 
     const currency = clientCurrencyOrDefault(auth.account.profile.billing_currency);

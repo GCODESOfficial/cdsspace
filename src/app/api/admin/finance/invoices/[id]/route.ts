@@ -1,12 +1,14 @@
+import crypto from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { financeDb, requireFinanceAdminAsync } from "@/lib/finance/api-auth";
 import { isMissingInvoiceExtensionColumn, stripInvoiceExtensionFields } from "@/lib/finance/invoice-schema-fallback";
 import { logActivity } from "@/lib/activity-log";
 import { recordResourceVersion } from "@/lib/admin-versioning";
 import { resolveClientBillingCurrency } from "@/lib/client-billing-server";
-import { CURRENCIES } from "@/lib/finance/types";
+import { CURRENCIES, formatMoney } from "@/lib/finance/types";
 import { emailInvoiceReceipt } from "@/lib/finance/receipt-server";
 import { deliverInvoicePaymentConfirmation } from "@/lib/finance/payment-confirmation";
+import { recordInvoicePayment } from "@/lib/finance/invoice-payments";
 import { getAdminSessionAsync } from "@/app/api/admin-check/route";
 
 async function getInvoiceSnapshot(sb: any, id: string) {
@@ -46,6 +48,12 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     .select("*")
     .eq("invoice_id", id)
     .order("submitted_at", { ascending: false });
+  const { data: payments } = await sb
+    .from("finance_invoice_payments")
+    .select("id, amount, currency, paid_on, payment_method, payment_reference, source_type, notes, recorded_by, created_at")
+    .eq("invoice_id", id)
+    .order("paid_on", { ascending: false })
+    .order("created_at", { ascending: false });
   const submissionsWithProof = await Promise.all((paymentSubmissions ?? []).map(async (submission: Record<string, any>) => {
     let proofUrl: string | null = null;
     if (submission.proof_storage_path) {
@@ -68,6 +76,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     items: items ?? [],
     bannerOrder: bannerOrder ?? null,
     paymentSubmissions: submissionsWithProof,
+    payments: payments ?? [],
     paymentReminders: paymentReminders ?? [],
     receipt: receipt ? { ...receipt, invoice_number: invoice.invoice_number } : null,
   });
@@ -76,6 +85,11 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const body = await req.json();
+  const isAutosave = req.headers.get("x-cds-silent") === "1";
+  const isFinalSave = body?.finalize === true && !isAutosave;
+  if (body?.status === "partially_paid" && body?.payment_amount === undefined) {
+    return NextResponse.json({ error: "Partially paid is calculated from recorded payments. Use Record payment instead." }, { status: 400 });
+  }
   if (body?.restore === true) {
     const session = await getAdminSessionAsync(req);
     if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -86,8 +100,8 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     await logActivity({ action: "invoice.restore", page: "finance/invoices", resource_type: "invoice", resource_id: id, resource_label: `${data.invoice_number} · ${data.client_name}` });
     return NextResponse.json({ invoice: data });
   }
-  const bodyKeys = Object.keys(body ?? {});
-  const permissionKey = bodyKeys.length === 1 && body.status === "paid"
+  const isPaymentUpdate = body.status === "paid" || body.payment_amount !== undefined;
+  const permissionKey = isPaymentUpdate
     ? "finance_invoices.mark_paid"
     : "finance_invoices.edit";
   const denied = await requireFinanceAdminAsync(req, permissionKey); if (denied) return denied;
@@ -102,6 +116,56 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   const sb = financeDb();
   const before = await getInvoiceSnapshot(sb, id);
   if (!before.invoice) return NextResponse.json({ error: "Invoice not found" }, { status: 404 });
+
+  if (isPaymentUpdate) {
+    const outstanding = Math.max(Number(before.invoice.total || 0) - Number(before.invoice.amount_paid || 0), 0);
+    const amount = body.payment_amount === undefined ? outstanding : Number(body.payment_amount);
+    if (!Number.isFinite(amount) || amount <= 0) {
+      return NextResponse.json({ error: "Enter a payment amount greater than zero." }, { status: 400 });
+    }
+    if (amount > outstanding + 0.01) {
+      return NextResponse.json({ error: `Payment cannot exceed the outstanding balance of ${formatMoney(outstanding, before.invoice.currency)}.` }, { status: 400 });
+    }
+    const session = await getAdminSessionAsync(req);
+    try {
+      const result = await recordInvoicePayment({
+        invoiceId: id,
+        amount,
+        currency: before.invoice.currency,
+        paidOn: body.paid_on || null,
+        paymentMethod: body.payment_method || "bank_transfer",
+        paymentReference: body.payment_reference || null,
+        sourceType: "manual",
+        sourceId: body.idempotency_key || crypto.randomUUID(),
+        notes: body.payment_note || null,
+        recordedBy: session?.name || session?.email || "Finance admin",
+      });
+      const fullyPaid = result.invoice.status === "paid";
+      await logActivity({
+        action: fullyPaid ? "invoice.mark_paid" : "invoice.part_payment",
+        page: "finance/invoices",
+        resource_type: "invoice",
+        resource_id: id,
+        resource_label: `${before.invoice.invoice_number} · ${before.invoice.client_name}`,
+        metadata: {
+          amount,
+          currency: before.invoice.currency,
+          amount_paid: result.invoice.amount_paid,
+          balance_due: result.invoice.balance_due,
+          payment_percentage: result.invoice.payment_percentage,
+          method: body.payment_method || "bank_transfer",
+          reference: body.payment_reference || null,
+        },
+      });
+      if (fullyPaid && before.invoice.status !== "paid") {
+        await emailInvoiceReceipt(sb, id).catch(() => null);
+        await deliverInvoicePaymentConfirmation(sb, id).catch(() => null);
+      }
+      return NextResponse.json({ invoice: result.invoice, payment: result.payment, fully_paid: fullyPaid });
+    } catch (error) {
+      return NextResponse.json({ error: error instanceof Error ? error.message : "Payment could not be recorded." }, { status: 400 });
+    }
+  }
 
   if ("delivery_period" in body) {
     const { data: linkedBanner } = await sb
@@ -124,6 +188,9 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       body.client_email ?? before.invoice.client_email,
       requestedCurrency,
     );
+    if (Number(before.invoice.amount_paid || 0) > 0 && String(patch.currency) !== String(before.invoice.currency)) {
+      return NextResponse.json({ error: "The invoice currency cannot change after a payment has been recorded." }, { status: 409 });
+    }
   }
 
   // Recalculate totals if items are provided
@@ -138,6 +205,25 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     patch.total = total;
   }
 
+  if (patch.total !== undefined && Number(patch.total) + 0.01 < Number(before.invoice.amount_paid || 0)) {
+    return NextResponse.json({ error: `The invoice total cannot be lower than the ${formatMoney(before.invoice.amount_paid, before.invoice.currency)} already paid.` }, { status: 409 });
+  }
+
+  if (isFinalSave || patch.status === "sent") {
+    const finalItems = Array.isArray(body.items) ? body.items : before.items;
+    const finalClientName = String(patch.client_name ?? before.invoice.client_name ?? "").trim();
+    const finalTotal = Number(patch.total ?? before.invoice.total ?? 0);
+    if (!finalClientName) {
+      return NextResponse.json({ error: "Client name is required before the invoice can be saved." }, { status: 400 });
+    }
+    if (!finalItems.length || finalItems.some((item: any) => !String(item.name || "").trim() || Number(item.quantity) <= 0)) {
+      return NextResponse.json({ error: "Add at least one complete invoice item before saving." }, { status: 400 });
+    }
+    if (finalTotal <= 0) {
+      return NextResponse.json({ error: "Add a positive invoice amount before saving or marking it sent." }, { status: 400 });
+    }
+  }
+
   let { data, error } = await sb.from("finance_invoices").update(patch).eq("id", id).select().single();
   if (error && isMissingInvoiceExtensionColumn(error)) {
     const fallbackPatch = stripInvoiceExtensionFields(patch);
@@ -149,9 +235,25 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   }
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
+  const restoreInvoiceHeader = async () => {
+    const rollback: Record<string, unknown> = {};
+    for (const key of [...allowed, "subtotal", "tax_amount", "total"]) {
+      if (key in before.invoice) rollback[key] = before.invoice[key];
+    }
+    let { error: rollbackError } = await sb.from("finance_invoices").update(rollback).eq("id", id);
+    if (rollbackError && isMissingInvoiceExtensionColumn(rollbackError)) {
+      ({ error: rollbackError } = await sb.from("finance_invoices").update(stripInvoiceExtensionFields(rollback)).eq("id", id));
+    }
+    if (rollbackError) console.error("[finance/invoices] failed to restore invoice header:", rollbackError.message);
+  };
+
   // Update items if provided
   if (body.items && Array.isArray(body.items)) {
-    await sb.from("finance_invoice_items").delete().eq("invoice_id", id);
+    const { error: deleteItemsError } = await sb.from("finance_invoice_items").delete().eq("invoice_id", id);
+    if (deleteItemsError) {
+      await restoreInvoiceHeader();
+      return NextResponse.json({ error: deleteItemsError.message }, { status: 500 });
+    }
     const itemRows = body.items.map((it: any, idx: number) => ({
       invoice_id: id,
       name: it.name,
@@ -161,7 +263,22 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       total: Number(it.quantity) * Number(it.unit_price),
       position: idx,
     }));
-    await sb.from("finance_invoice_items").insert(itemRows);
+    const { error: insertItemsError } = await sb.from("finance_invoice_items").insert(itemRows);
+    if (insertItemsError) {
+      if (before.items.length > 0) {
+        await sb.from("finance_invoice_items").insert(before.items.map((item: any, idx: number) => ({
+          invoice_id: id,
+          name: item.name,
+          description: item.description || null,
+          quantity: Number(item.quantity),
+          unit_price: Number(item.unit_price),
+          total: Number(item.total ?? Number(item.quantity) * Number(item.unit_price)),
+          position: Number.isFinite(Number(item.position)) ? Number(item.position) : idx,
+        })));
+      }
+      await restoreInvoiceHeader();
+      return NextResponse.json({ error: insertItemsError.message }, { status: 500 });
+    }
   }
 
   const { data: afterItems } = await sb
@@ -172,16 +289,39 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 
   const action = patch.status === "paid"
     ? "invoice.mark_paid"
+    : isAutosave
+      ? "invoice.draft_saved"
+    : isFinalSave && before.invoice.status === "draft"
+      ? "invoice.create"
     : patch.status === "sent"
       ? "invoice.send"
       : "invoice.update";
+  const activityMetadata = isFinalSave
+    ? {
+        "Invoice": data?.invoice_number,
+        "Client": data?.client_name,
+        "Client email": data?.client_email,
+        "Client address": data?.client_address,
+        "Issue date": data?.issue_date,
+        "Due date": data?.due_date,
+        "Line items": afterItems?.length ?? 0,
+        "Items": (afterItems ?? []).map((item: any) => `${item.name} × ${item.quantity} (${formatMoney(item.total, data?.currency)})`).join("; "),
+        "Subtotal": formatMoney(data?.subtotal, data?.currency),
+        "Discount": formatMoney(data?.discount, data?.currency),
+        "Tax": formatMoney(data?.tax_amount, data?.currency),
+        "Total": formatMoney(data?.total, data?.currency),
+        "Currency": data?.currency,
+        "Status": data?.status,
+        "Payment terms": data?.payment_terms,
+      }
+    : { patch };
   await logActivity({
     action,
     page: "finance/invoices",
     resource_type: "invoice",
     resource_id: id,
     resource_label: `${data?.invoice_number || id} · ${data?.client_name || ""}`.trim(),
-    metadata: { patch },
+    metadata: activityMetadata,
   });
   await recordResourceVersion({
     action,
@@ -191,7 +331,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     resource_label: `${data?.invoice_number || id} · ${data?.client_name || ""}`.trim(),
     before_data: before,
     after_data: { invoice: data, items: afterItems ?? before.items },
-    metadata: { patch },
+    metadata: activityMetadata,
   });
 
   // Receipt email - best effort and sent only once after the database trigger

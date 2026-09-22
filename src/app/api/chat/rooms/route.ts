@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { verifyUser } from "@/lib/admin-auth";
 import { getClientChatAdminActor } from "@/lib/client-chat-admin";
 import { supabaseAdmin } from "@/lib/supabase";
+import { dealTagsForEmails, type DealClientTag } from "@/lib/deal-client-tags";
 
 export const dynamic = "force-dynamic";
 
@@ -14,6 +15,8 @@ type RoomRow = {
   client?: { id: string; email: string; full_name: string | null; avatar_url: string | null } | null;
   whatsapp?: { phone: string; display_name: string | null; wa_name: string | null; linked_client_id: string | null } | null;
   meta?: { platform: "facebook" | "instagram"; external_user_id: string; display_name: string | null; username: string | null; linked_client_id: string | null } | null;
+  /** Admin-only. Never returned on the client branch below. */
+  deal?: DealClientTag | null;
 };
 
 type ClientProfileLite = NonNullable<RoomRow["client"]>;
@@ -164,11 +167,28 @@ export async function GET() {
         return room;
       });
 
-      hydrated.sort(
+      // The Deals workspace and this inbox meet on the client's email, so a
+      // conversation carries what stage that person's deal is at. Admin branch
+      // only: the client branch below never sees a tag. A failure here is not
+      // worth losing the inbox over, so the tag simply goes missing.
+      let tagged = hydrated;
+      try {
+        const tags = await dealTagsForEmails(hydrated.map((room) => room.client?.email));
+        if (tags.size) {
+          tagged = hydrated.map((room) => {
+            const tag = room.client?.email ? tags.get(room.client.email.trim().toLowerCase()) : undefined;
+            return tag ? { ...room, deal: tag } : room;
+          });
+        }
+      } catch {
+        tagged = hydrated;
+      }
+
+      tagged.sort(
         (a, b) => new Date(b.lastMessageAt).getTime() - new Date(a.lastMessageAt).getTime(),
       );
 
-      return NextResponse.json({ rooms: hydrated });
+      return NextResponse.json({ rooms: tagged });
     }
 
     // Client: still just their own internal room.

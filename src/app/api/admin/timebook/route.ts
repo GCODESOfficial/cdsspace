@@ -15,8 +15,10 @@ import {
   isEarlyLogout,
   isWorkDay,
   lagosDate,
+  leaveWorkingDays,
   officeRequiredFor,
   overtimeMinutes,
+  validateLeavePeriod,
   workMinutes,
   type AttendanceStatus,
   type WorkMode,
@@ -66,6 +68,29 @@ function eachDate(start: string, end: string) {
     cursor.setUTCDate(cursor.getUTCDate() + 1);
   }
   return dates;
+}
+
+async function recordApprovedLeaveDays(leave: {
+  team_member_id: string;
+  leave_type: string;
+  start_date: unknown;
+  end_date: unknown;
+}) {
+  const days = eachDate(dateKey(leave.start_date), dateKey(leave.end_date)).filter((day) => isWorkDay(day));
+  await Promise.all(days.map((day) => glashQuery(
+    `insert into public.team_time_entries
+      (team_member_id, work_date, work_mode, attendance_status, current_status, office_required, flags, scores, notes)
+     values ($1,$2,'approved_leave','approved_leave','offline',false,'{}'::text[],$3::jsonb,$4)
+     on conflict (team_member_id, work_date) do update set
+       work_mode = excluded.work_mode,
+       attendance_status = excluded.attendance_status,
+       current_status = excluded.current_status,
+       office_required = false,
+       flags = '{}'::text[],
+       scores = excluded.scores,
+       notes = excluded.notes`,
+    [leave.team_member_id, day, JSON.stringify(attendanceScores("approved_leave", 0, 0)), `${leave.leave_type} leave approved`],
+  )));
 }
 
 async function requireTimebookAdmin() {
@@ -176,6 +201,8 @@ export async function GET(req: NextRequest) {
     office,
     stats,
     actor: session?.name,
+    actor_role: session?.role,
+    can_generate_bypass: session?.role === "super_admin",
   });
 }
 
@@ -210,8 +237,8 @@ export async function POST(req: NextRequest) {
   }
 
   if (action === "generate_bypass_code") {
-    if (session?.role !== "super_admin" && !hasPermission(session?.permissions ?? [], "timebook.manage_bypass")) {
-      return NextResponse.json({ ok: false, error: "You need the Manage Bypass Codes permission to generate bypass codes." }, { status: 403 });
+    if (session?.role !== "super_admin") {
+      return NextResponse.json({ ok: false, error: "Only the super admin can generate geofence bypass codes." }, { status: 403 });
     }
     const code = generateBypassCode();
     // Bypass codes live at most 365 days (min 5 minutes). Callers may pass
@@ -314,6 +341,85 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: true, profile });
   }
 
+  if (action === "grant_leave") {
+    if (session?.role !== "super_admin") {
+      return NextResponse.json({ ok: false, error: "Only the super admin can grant leave directly." }, { status: 403 });
+    }
+
+    const memberId = String(body.member_id || "");
+    const leaveType = String(body.leave_type || "");
+    const startDate = String(body.start_date || "");
+    const endDate = String(body.end_date || "");
+    if (!memberId) {
+      return NextResponse.json({ ok: false, error: "Choose a team member." }, { status: 400 });
+    }
+    const validationError = validateLeavePeriod(leaveType, startDate, endDate);
+    if (validationError) {
+      return NextResponse.json({ ok: false, error: validationError }, { status: 400 });
+    }
+
+    const member = await glashMaybeOne<{ id: string; full_name: string | null; email: string | null; department: string | null }>(
+      "select id, full_name, email, department from public.team_members where id = $1 and is_active = true limit 1",
+      [memberId],
+    );
+    if (!member) return NextResponse.json({ ok: false, error: "Active team member not found." }, { status: 404 });
+
+    const overlapping = await glashMaybeOne<{ id: string }>(
+      `select id from public.team_leave_requests
+       where team_member_id = $1 and status = 'approved' and start_date <= $2 and end_date >= $3
+       limit 1`,
+      [memberId, endDate, startDate],
+    );
+    if (overlapping) {
+      return NextResponse.json({ ok: false, error: "This team member already has approved leave during those dates." }, { status: 409 });
+    }
+
+    const reason = String(body.reason || "").trim();
+    const leave = await glashOne<any>(
+      `insert into public.team_leave_requests
+        (team_member_id, leave_type, start_date, end_date, reason, status, reviewed_by, reviewed_at, review_note)
+       values ($1,$2,$3,$4,$5,'approved',$6,now(),$7)
+       returning *`,
+      [
+        memberId,
+        leaveType,
+        startDate,
+        endDate,
+        reason || null,
+        session?.email ?? session?.name ?? null,
+        "Granted directly by the super admin",
+      ],
+    );
+    await recordApprovedLeaveDays(leave);
+
+    await glashQuery(
+      `insert into public.team_notifications (recipient_id, kind, title, body, link, actor_is_admin)
+       values ($1, 'leave_approved', $2, $3, '/team/timebook', true)`,
+      [
+        memberId,
+        `Leave granted: ${formatWorkMode(leaveType)}`,
+        `${startDate} to ${endDate}${reason ? ` · ${reason}` : ""}`,
+      ],
+    ).catch(() => {});
+
+    await logActivity({
+      action: "timebook.leave_granted",
+      page: "timebook",
+      resource_type: "leave_request",
+      resource_id: leave.id,
+      resource_label: `${leaveType} · ${startDate} to ${endDate}`,
+      metadata: { team_member_id: memberId, working_days: leaveWorkingDays(startDate, endDate) },
+    });
+
+    return NextResponse.json({
+      ok: true,
+      leave_request: {
+        ...leave,
+        team_members: { full_name: member.full_name, email: member.email, department: member.department },
+      },
+    });
+  }
+
   if (action === "review_leave") {
     const leaveId = body.leave_id;
     const status = body.status === "approved" ? "approved" : body.status === "rejected" ? "rejected" : null;
@@ -322,6 +428,16 @@ export async function POST(req: NextRequest) {
     }
     const leave = await glashMaybeOne<any>("select * from public.team_leave_requests where id = $1 limit 1", [leaveId]);
     if (!leave) return NextResponse.json({ ok: false, error: "Leave request not found." }, { status: 404 });
+    if (status === "approved") {
+      const validationError = validateLeavePeriod(
+        String(leave.leave_type || ""),
+        dateKey(leave.start_date),
+        dateKey(leave.end_date),
+      );
+      if (validationError) {
+        return NextResponse.json({ ok: false, error: validationError }, { status: 400 });
+      }
+    }
 
     const data = await glashOne(
       `update public.team_leave_requests
@@ -332,21 +448,7 @@ export async function POST(req: NextRequest) {
     );
 
     if (status === "approved") {
-      const days = eachDate(dateKey(leave.start_date), dateKey(leave.end_date)).filter((day) => isWorkDay(day));
-      await Promise.all(days.map((day) => glashQuery(
-        `insert into public.team_time_entries
-          (team_member_id, work_date, work_mode, attendance_status, current_status, office_required, flags, scores, notes)
-         values ($1,$2,'approved_leave','approved_leave','offline',false,'{}'::text[],$3::jsonb,$4)
-         on conflict (team_member_id, work_date) do update set
-           work_mode = excluded.work_mode,
-           attendance_status = excluded.attendance_status,
-           current_status = excluded.current_status,
-           office_required = false,
-           flags = '{}'::text[],
-           scores = excluded.scores,
-           notes = excluded.notes`,
-        [leave.team_member_id, day, JSON.stringify(attendanceScores("approved_leave", 0, 0)), `${leave.leave_type} leave approved`],
-      )));
+      await recordApprovedLeaveDays(leave);
     }
 
     // Notify the team member - in-app + email - with the full decision details.

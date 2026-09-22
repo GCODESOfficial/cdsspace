@@ -54,7 +54,9 @@ export async function GET(req: NextRequest) {
   const results = await Promise.allSettled(
     RECIPIENTS.map((to) => sendEmail({
       to,
-      subject: `CDS Space daily report - ${report.dateLabel}`,
+      // The subject carries the day's shape so the inbox is readable without
+      // opening anything.
+      subject: `CDS Space daily report - ${report.dateLabel} (${report.insights.summary})`,
       html,
       text,
       fromName: "CDS Space Reports",
@@ -64,5 +66,11 @@ export async function GET(req: NextRequest) {
   const failed = results.length - sent;
   if (failed) console.error(`[daily-report] ${failed} recipient(s) failed`);
 
-  return NextResponse.json({ ok: true, day, date: report.dateLabel, recipients: RECIPIENTS.length, sent, failed, metrics: report.metrics.length });
+  return NextResponse.json({
+    ok: true, day, date: report.dateLabel, recipients: RECIPIENTS.length, sent, failed,
+    metrics: report.metrics.length,
+    trackedEvents: report.audit.stats.totalTrackedEvents,
+    concerns: report.insights.concerns.length,
+    wins: report.insights.wins.length,
+  });
 }

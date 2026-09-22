@@ -4,6 +4,7 @@ import { getClientChatAdminActor, type ClientChatAdminActor } from "@/lib/client
 import { glashMaybeOne, glashQuery } from "@/lib/glashdb/postgres";
 import { buildMessages } from "@/lib/ai/prompts";
 import { chatComplete } from "@/lib/ai/openai";
+import { purgeChatAttachment } from "@/lib/chat-storage";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -129,6 +130,14 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     } else if (action === "delete") {
       const ownsMessage = actingAdmin ? true : message.sender_id === user?.user.id;
       if (!ownsMessage) return NextResponse.json({ ok: false, error: "You cannot delete this message" }, { status: 403 });
+      if (actingAdmin?.role === "super_admin") {
+        await purgeChatAttachment(message.file_url).catch(() => undefined);
+        await glashQuery(`delete from public.chat_message_pins where message_id = $1`, [id]);
+        await glashQuery(`delete from public.chat_message_bookmarks where message_id = $1`, [id]);
+        await glashQuery(`delete from public.team_chat_audit_logs where resource_type = 'chat_message' and resource_id = $1`, [id]);
+        await glashQuery(`delete from public.chat_messages where id = $1`, [id]);
+        return NextResponse.json({ ok: true, hardDeleted: true, messageId: id });
+      }
       await glashQuery(`update public.chat_messages set deleted_at = now(), message = '', file_url = null where id = $1`, [id]);
     } else if (action === "translate") {
       const language = String(body?.language || "English").trim().slice(0, 60);

@@ -243,6 +243,97 @@ interface BrandCardProps {
     domainPath?: string;     // kept for back-compat; footer always shows cdsspace.pro
 }
 
+interface SolidBlueCardProps {
+    title: string;
+    description?: string;
+    eyebrow?: string;
+    /** Keep the home and cMeet cards limited to their requested copy. */
+    showDomain?: boolean;
+}
+
+/**
+ * Clean CDS Space metadata card for primary routes and cMeet invitations.
+ * The full canvas deliberately uses the product's solid primary blue: no
+ * background artwork or gradient is applied, so previews remain crisp at
+ * small sizes in WhatsApp, LinkedIn, X, and other link unfurlers.
+ */
+export function renderSolidBlueCard({
+    title,
+    description,
+    eyebrow,
+    showDomain = true,
+}: SolidBlueCardProps): ReactElement {
+    const logoDataUri = getCdsLogoDataUri();
+    const titleSize = title.length > 54 ? 58 : title.length > 38 ? 68 : title.length > 24 ? 78 : 92;
+
+    return (
+        <div
+            style={{
+                width: OG_SIZE.width,
+                height: OG_SIZE.height,
+                position: "relative",
+                display: "flex",
+                flexDirection: "column",
+                justifyContent: "space-between",
+                padding: "65px 72px",
+                color: "#ffffff",
+                background: "#0A4FE8",
+                fontFamily: "Inter, system-ui, -apple-system, sans-serif",
+            }}
+        >
+            <div
+                style={{
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                }}
+            >
+                <LogoLockup logoDataUri={logoDataUri} />
+                {eyebrow ? <StatusPill label={eyebrow} /> : <div style={{ display: "flex" }} />}
+            </div>
+
+            <div
+                style={{
+                    display: "flex",
+                    flexDirection: "column",
+                    maxWidth: 1040,
+                }}
+            >
+                <div
+                    style={{
+                        display: "flex",
+                        color: "#ffffff",
+                        fontSize: titleSize,
+                        fontWeight: 800,
+                        letterSpacing: -1.5,
+                        lineHeight: 1.04,
+                    }}
+                >
+                    {title}
+                </div>
+                {description ? (
+                    <div
+                        style={{
+                            display: "flex",
+                            maxWidth: 920,
+                            marginTop: 20,
+                            color: "#ffffff",
+                            fontSize: 27,
+                            fontWeight: 500,
+                            lineHeight: 1.35,
+                            opacity: 0.86,
+                        }}
+                    >
+                        {description}
+                    </div>
+                ) : null}
+            </div>
+
+            {showDomain ? <FooterDomain /> : <div style={{ display: "flex", height: 30 }} />}
+        </div>
+    );
+}
+
 /**
  * Marketing / dashboard pages. Title + one-line subtitle on the brand plate.
  */

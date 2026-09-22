@@ -3,6 +3,7 @@ import { v4 as uuidv4 } from "uuid";
 import { getSupabaseAdmin } from "@/lib/supabase";
 import { assertCleanBuffer } from "@/lib/upload-security";
 import { ADMIN_FEATURE_PERMISSION_KEYS, notifyAdminFeatureEvent } from "@/lib/admin-feature-notifications";
+import { queueAdminAlert } from "@/lib/admin-alerts";
 
 export async function POST(req: NextRequest) {
   try {
@@ -128,6 +129,29 @@ export async function POST(req: NextRequest) {
         Proposal: proposal ? (proposal.title || proposal.brand_name) : null,
         Reference: consultation?.id,
       },
+    });
+
+    // The desk is told the moment the booking lands, separately from the
+    // permission-routed notification above, which rides the digest queue.
+    queueAdminAlert({
+      kind: "consultation",
+      subject: company ? `${full_name} (${company})` : full_name,
+      details: [
+        ["Email", email],
+        ["WhatsApp", whatsapp],
+        ["Company", company],
+        ["Location", location],
+        ["To discuss", topics.join(", ")],
+        ["Preferred days", preferred_days.join(", ")],
+        ["Preferred times", preferred_times.join(", ")],
+        ["How they heard", how_heard],
+        ["Against proposal", proposal ? (proposal.title || proposal.brand_name) : null],
+        ["Reference", consultation?.id],
+      ],
+      body: message,
+      actionPath: "/admin/consultations",
+      actionLabel: "Open consultations",
+      replyTo: email,
     });
 
     return NextResponse.json({ ok: true });

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAdminSession, getAdminSessionAsync } from "@/app/api/admin-check/route";
 import { getPermissionForRoute, hasPermission } from "@/lib/admin-permissions";
+import { canSeeClientIdentity } from "@/lib/client-identity";
 import { getSupabaseAdmin } from "@/lib/supabase";
 
 /**
@@ -31,6 +32,20 @@ export function requireFinanceAdmin(req: NextRequest) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
   return null;
+}
+
+/**
+ * Whether the caller may be shown client names and contact details.
+ *
+ * Separate from the route guard because it answers a different question: the
+ * guard decides whether the page opens at all, this decides how much of what
+ * is on it the reader is allowed to see.
+ */
+export async function callerSeesClientIdentity(req: NextRequest) {
+  const session = await getAdminSessionAsync(req);
+  if (!session) return false;
+  if (session.role === "super_admin") return true;
+  return canSeeClientIdentity(session.permissions);
 }
 
 /**

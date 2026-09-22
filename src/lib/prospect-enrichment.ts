@@ -8,6 +8,14 @@ import { isExcludedDomain } from "@/lib/prospect-exclusions";
 import { assessBrandConsistency, checkDomainVariants, domainVariantFinding, type BrandFinding, type DomainVariant } from "@/lib/prospect-brand";
 import { EMPTY_WEBSITE_SIGNALS, detectProspectIssues, type ProspectIssue, type WebsiteSignals } from "@/lib/prospect-issues";
 import { likelyMailboxes, traceDomainContacts, type DnsContact } from "@/lib/prospect-dns";
+import {
+  competitorIdentity,
+  competitorsFromSearch,
+  sanitizeCompetitors,
+  type CompetitorSearchResult,
+  type CompetitorType,
+  type ProspectCompetitor,
+} from "@/lib/prospect-competitors";
 
 export type ActivityStatus = "unknown" | "active" | "dormant" | "inactive";
 export type WebsiteStatus = "unknown" | "missing" | "broken" | "outdated" | "dated" | "modern";
@@ -57,8 +65,8 @@ export interface EnrichedCompany {
   pain_points: string[];
   how_we_help: string[];
   service_fit: Array<{ service: string; reason: string }>;
-  competitors_local: Array<{ name: string; url: string; note: string }>;
-  competitors_global: Array<{ name: string; url: string; note: string }>;
+  competitors_local: ProspectCompetitor[];
+  competitors_global: ProspectCompetitor[];
   outreach_angle: string;
   outreach_subject: string;
   outreach_email: string;
@@ -152,7 +160,8 @@ function assessWebsite(html: string, research: SiteResearch | null): { status: W
     signals.endOfLifeLibraries = true;
     penalise(8, "An end-of-life Bootstrap 2 or 3 build is loaded.");
   }
-  if (/https?:\/\/(?:www\.)?twitter\.com\//i.test(html)) penalise(5, "The site still links to twitter.com rather than X, a sign the footer has not been maintained.");
+  // twitter.com links still resolve to X and remain common in official share
+  // widgets. The hostname alone is not evidence of an unmaintained website.
   if (!/<img[^>]+(srcset|loading=["']lazy["'])/i.test(html) && (html.match(/<img\b/gi) || []).length > 6) {
     signals.imagesNotResponsive = true;
     penalise(6, "Images are served without responsive srcset or lazy loading.");
@@ -225,8 +234,8 @@ async function synthesise(input: {
   websiteFindings: string[];
   activityEvidence: string;
   mentions: Array<{ title: string; url: string; description: string }>;
-  localResults: Array<{ title: string; url: string; description: string }>;
-  globalResults: Array<{ title: string; url: string; description: string }>;
+  localResults: CompetitorSearchResult[];
+  globalResults: CompetitorSearchResult[];
   contacts: EnrichedContact[];
   country: string | null;
   listing: { is_public: boolean; exchanges: string[]; ticker: string | null };
@@ -246,8 +255,8 @@ async function synthesise(input: {
     pain_points: [...input.websiteFindings, ...input.brandFindings, input.domainNotes, input.mailNotes].filter(Boolean).slice(0, 6),
     how_we_help: ["Review the brand and digital experience against the findings above, then propose the smallest change that removes the biggest friction."],
     service_fit: [{ service: "UX/UI Design & Website Development", reason: "The public website is the clearest observable gap." }],
-    competitors_local: input.localResults.slice(0, 5).map((entry) => ({ name: entry.title, url: entry.url, note: entry.description })),
-    competitors_global: input.globalResults.slice(0, 5).map((entry) => ({ name: entry.title, url: entry.url, note: entry.description })),
+    competitors_local: competitorsFromSearch(input.localResults, { companyName: input.companyName, website: input.website }, 6),
+    competitors_global: competitorsFromSearch(input.globalResults, { companyName: input.companyName, website: input.website }, 6),
     outreach_angle: "Lead with the specific website findings rather than a generic pitch.",
     outreach_subject: `A few notes on ${input.companyName}'s website`,
     outreach_email: "",
@@ -269,8 +278,8 @@ async function synthesise(input: {
     `Stock listing signals read from the site: ${input.listing.is_public ? `${input.listing.exchanges.join(", ") || "investor relations pages present"}${input.listing.ticker ? ` ticker ${input.listing.ticker}` : ""}` : "none found"}`,
     `Named people found publicly: ${input.contacts.map((contact) => `${contact.full_name} (${contact.job_title || "title unknown"})`).join("; ") || "none"}`,
     `Public mentions: ${input.mentions.map((entry) => `${entry.title} - ${entry.description}`).join(" | ").slice(0, 2500)}`,
-    `Possible local competitors from search: ${input.localResults.map((entry) => `${entry.title} (${entry.url})`).join("; ").slice(0, 1500)}`,
-    `Possible global competitors from search: ${input.globalResults.map((entry) => `${entry.title} (${entry.url})`).join("; ").slice(0, 1500)}`,
+    `Possible local-market competitors from search: ${input.localResults.map((entry) => `[${entry.type}] ${entry.title} (${entry.url}) - ${entry.description}`).join("; ").slice(0, 4000)}`,
+    `Possible global competitors from search: ${input.globalResults.map((entry) => `[${entry.type}] ${entry.title} (${entry.url}) - ${entry.description}`).join("; ").slice(0, 4000)}`,
     `CDS Space services: ${SERVICE_NAMES.join("; ")}`,
   ].filter(Boolean).join("\n");
 
@@ -287,8 +296,11 @@ async function synthesise(input: {
       "Order the pain points by how much they cost the business, worst first, and return between three and six of them where the evidence supports it.",
       "Each how_we_help entry pairs with the pain point at the same position: say concretely what CDS Space would do, what the company would have at the end, and roughly how quickly.",
           "Every service you recommend must be chosen from the supplied CDS Space service list, verbatim.",
+          "Competitors must be real, separately named companies supported by the supplied search evidence. Never return the target company, one of its own pages, a subsidiary using the same brand, a news article, jobs or careers page, login or portal, directory, comparison site, social network, or generic page title as a competitor.",
+          "A company qualifies as a competitor because it can threaten adoption of the target company's offer, not merely because it appears in the same country or industry. Direct means it sells a substantially similar core product or service to the same customers and use case. Indirect means a different product, service, substitute, or delivery model satisfies the same customer job or reduces the need for the target offer. For example, Pepsi is a direct competitor to Coca-Cola while bottled water is an indirect substitute.",
+          "Geography is a separate scope. A local competitor credibly serves the target company's stated country or market. A global competitor competes internationally or across borders. Either scope can contain direct and indirect competitors. Use official company website URLs, keep companies unique across both lists, and return an empty array when evidence is insufficient.",
           "Write in plain professional English. Do not use em dashes.",
-          "Return only JSON matching: {brief, industry, country, city, countries[], employee_range, employee_count, founded_year, pain_points[], how_we_help[], service_fit[{service, reason}], competitors_local[{name,url,note}], competitors_global[{name,url,note}], outreach_angle, outreach_subject, outreach_email, contact_titles[{full_name, seniority}]}.",
+          "Return only JSON matching: {brief, industry, country, city, countries[], employee_range, employee_count, founded_year, pain_points[], how_we_help[], service_fit[{service, reason}], competitors_local[{name,url,note,type}], competitors_global[{name,url,note,type}], outreach_angle, outreach_subject, outreach_email, contact_titles[{full_name, seniority}]}.",
       "countries lists every country the evidence shows the company operates, is registered, or has an office in, including the head office country. Use full country names. Return an empty array when the evidence names none.",
       "employee_count is a whole number staff estimate and must be 0 unless the evidence states or clearly implies a headcount.",
           "contact_titles classifies only the named people supplied, with seniority one of decision_maker, influencer, operational, unknown.",
@@ -312,8 +324,8 @@ async function synthesise(input: {
       how_we_help: list(parsed.how_we_help, 8, 1200).length ? list(parsed.how_we_help, 8, 1200) : fallback.how_we_help,
       service_fit: objectList<{ service: string; reason: string }>(parsed.service_fit, { service: 120, reason: 500 }, 6)
         .filter((entry) => SERVICE_NAMES.includes(entry.service)),
-      competitors_local: objectList<{ name: string; url: string; note: string }>(parsed.competitors_local, { name: 160, url: 500, note: 400 }, 8),
-      competitors_global: objectList<{ name: string; url: string; note: string }>(parsed.competitors_global, { name: 160, url: 500, note: 400 }, 8),
+      competitors_local: objectList<{ name: string; url: string; note: string; type: string }>(parsed.competitors_local, { name: 160, url: 500, note: 500, type: 20 }, 8),
+      competitors_global: objectList<{ name: string; url: string; note: string; type: string }>(parsed.competitors_global, { name: 160, url: 500, note: 500, type: 20 }, 8),
       outreach_angle: clip(parsed.outreach_angle, 1000) || fallback.outreach_angle,
       outreach_subject: clip(parsed.outreach_subject, 200) || fallback.outreach_subject,
       outreach_email: clip(parsed.outreach_email, 4000),
@@ -458,8 +470,9 @@ async function resolveWebsite(companyName: string, country: string | null) {
 
 /**
  * Full public-source research pass for one company: confirm it is still trading,
- * grade the website, collect socials, emails, and decision makers, map local and
- * global competitors, and turn all of it into an outreach-ready record.
+ * grade the website, collect socials, emails, and decision makers, classify
+ * local and global competitors as direct or indirect, and produce an
+ * outreach-ready record.
  */
 export async function enrichCompany(input: {
   company_name: string;
@@ -519,11 +532,18 @@ export async function enrichCompany(input: {
   }
 
   const searchName = `"${input.company_name}"`;
-  const [mentions, localResults, globalResults] = await Promise.all([
+  const market = [input.country, input.industry].filter(Boolean).join(" ");
+  const siteExclusion = domain ? `-site:${normalizeDomain(domain)}` : "";
+  const [mentions, localDirect, localIndirect, globalDirect, globalIndirect] = await Promise.all([
     searchOpenWeb(`${searchName} ${new Date().getFullYear()} news`, 8),
-    searchOpenWeb(`${searchName} competitors ${input.country || ""} ${input.industry || ""}`.trim(), 8),
-    searchOpenWeb(`${input.industry || input.company_name} leading global companies competitors`, 8),
+    searchOpenWeb(`${searchName} direct competitors serving ${market} same products services customers ${siteExclusion}`.trim(), 10),
+    searchOpenWeb(`${searchName} indirect competitor substitute businesses serving ${market} same customer need ${siteExclusion}`.trim(), 10),
+    searchOpenWeb(`${searchName} global direct competitors same products services ${input.industry || ""} ${siteExclusion}`.trim(), 10),
+    searchOpenWeb(`${searchName} global indirect competitors substitute companies same customer need ${input.industry || ""} ${siteExclusion}`.trim(), 10),
   ]);
+  const withType = (type: CompetitorType) => (entry: { title: string; url: string; description: string; domain: string }): CompetitorSearchResult => ({ ...entry, type });
+  const localResults = [...localDirect.map(withType("direct")), ...localIndirect.map(withType("indirect"))];
+  const globalResults = [...globalDirect.map(withType("direct")), ...globalIndirect.map(withType("indirect"))];
   sources.push(...mentions.slice(0, 5).map((entry) => entry.url));
 
   const websiteAssessment = website && reachable
@@ -625,7 +645,7 @@ export async function enrichCompany(input: {
     contacts,
     country: input.country,
     listing,
-    brandFindings: brandConsistency.filter((entry) => entry.status !== "consistent").map((entry) => `${entry.area}: ${entry.detail}`),
+    brandFindings: brandConsistency.filter((entry) => entry.status === "differs" || entry.status === "missing").map((entry) => `${entry.area}: ${entry.detail}`),
     domainNotes: variantFinding || domainVariants.map((entry) => `${entry.host} ${entry.note}`).join("; "),
     mailNotes: dnsContacts.map((entry) => entry.detail).join(" "),
   });
@@ -681,12 +701,19 @@ export async function enrichCompany(input: {
     ...synthesis.countries.map((entry) => normalizeCountry(entry)),
   ].filter(Boolean) as string[]));
 
-  const competitorsLocal = synthesis.competitors_local.length
-    ? synthesis.competitors_local
-    : localResults.slice(0, 5).map((entry) => ({ name: entry.title, url: entry.url, note: entry.description }));
-  const competitorsGlobal = synthesis.competitors_global.length
-    ? synthesis.competitors_global
-    : globalResults.slice(0, 5).map((entry) => ({ name: entry.title, url: entry.url, note: entry.description }));
+  const competitorTarget = { companyName: input.company_name, domain, website };
+  const competitorsLocal = sanitizeCompetitors(
+    synthesis.competitors_local.length ? synthesis.competitors_local : competitorsFromSearch(localResults, competitorTarget),
+    competitorTarget,
+    "direct",
+  );
+  const competitorsGlobal = sanitizeCompetitors(
+    synthesis.competitors_global.length ? synthesis.competitors_global : competitorsFromSearch(globalResults, competitorTarget),
+    competitorTarget,
+    "direct",
+    8,
+    competitorsLocal.map(competitorIdentity),
+  );
 
   return {
     company_name: input.company_name,
@@ -735,7 +762,12 @@ export async function enrichCompany(input: {
     outreach_email: synthesis.outreach_email,
     deal_score: dealScore,
     priority: dealScore >= 70 ? "high" : dealScore >= 45 ? "medium" : "low",
-    sources: Array.from(new Set([...sources, ...socialLinks.map((entry) => entry.url)])).slice(0, 30),
+    sources: Array.from(new Set([
+      ...sources,
+      ...socialLinks.map((entry) => entry.url),
+      ...competitorsLocal.map((entry) => entry.url),
+      ...competitorsGlobal.map((entry) => entry.url),
+    ])).slice(0, 30),
     contacts: contacts.slice(0, 25),
   };
 }

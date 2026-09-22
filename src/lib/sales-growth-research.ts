@@ -294,11 +294,9 @@ export async function researchPublicSite(input: string, deep = false): Promise<S
   const description = extractMeta(rootHtml, "description") || extractMeta(rootHtml, "og:description");
   const text = pages.map((page) => `${page.url}\n${stripHtml(page.html)}`).join("\n\n").slice(0, 24_000);
   const brandSignals: string[] = [];
-  if (/twitter[-_ ]?(?:bird|logo|icon)|(?:bird|logo|icon)[-_ ]?twitter|fa-twitter/i.test(rootHtml)) {
-    brandSignals.push("The website markup references a legacy Twitter logo or bird asset; visually confirm it before citing this finding.");
-  } else if (/https?:\/\/(?:www\.)?twitter\.com\//i.test(rootHtml)) {
-    brandSignals.push("The website still links to twitter.com; confirm whether the visible icon and naming have been updated to X.");
-  }
+  // A twitter.com URL or legacy icon class is not a reliable brand or site-age
+  // signal. Those links still resolve to X and icon class names often survive a
+  // visual asset update, so cross-channel identity is assessed from the images.
   if (!description) brandSignals.push("The homepage does not expose a standard meta description.");
   if (!title) brandSignals.push("The homepage does not expose a clear page title.");
   const rootText = stripHtml(rootHtml);

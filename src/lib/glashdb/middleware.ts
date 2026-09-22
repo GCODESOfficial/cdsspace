@@ -17,6 +17,7 @@ import {
   verifyMarketerDashboardSession,
 } from "@/lib/marketer-dashboard-session";
 import { dashboardSessionCookieOptions } from "@/lib/dashboard-session";
+import { absoluteApplicationUrl } from "@/lib/public-site";
 
 function getSafeNextPath(next?: string | null) {
   return next?.startsWith("/") && !next.startsWith("//") ? next : "/dashboard";
@@ -79,7 +80,10 @@ export async function updateSession(request: NextRequest) {
     Boolean(legacyClientDashboardDestination(request.nextUrl.pathname)) ||
     request.nextUrl.pathname.startsWith("/agreement") ||
     request.nextUrl.pathname.startsWith("/onboarding");
-  const isMarketerLogin = pathname === "/marketer/login";
+  // Metadata images are fetched directly by social crawlers without a portal
+  // session. Keep the marketer login card public alongside the login page.
+  const isMarketerLogin =
+    pathname === "/marketer/login" || pathname.startsWith("/marketer/login/opengraph-image");
   const isMarketerRoute = pathname === "/marketer" || pathname.startsWith("/marketer/");
   const isProtectedMarketerRoute = isMarketerRoute && !isMarketerLogin;
 
@@ -93,7 +97,7 @@ export async function updateSession(request: NextRequest) {
 
   if (isProtectedMarketerRoute && !hasMarketerIdentity) {
     if (user?.user_metadata?.account_type !== "brand_marketer") {
-      return redirectWithRefreshedCookies(new URL("/marketer/login", request.url));
+      return redirectWithRefreshedCookies(absoluteApplicationUrl("/marketer/login", request));
     }
     response.cookies.set(
       MARKETER_DASHBOARD_SESSION_COOKIE,
@@ -103,15 +107,15 @@ export async function updateSession(request: NextRequest) {
   }
 
   if (isMarketerLogin && hasMarketerIdentity) {
-    return redirectWithRefreshedCookies(new URL("/marketer", request.url));
+    return redirectWithRefreshedCookies(absoluteApplicationUrl("/marketer", request));
   }
 
   if (isDashboardRoute && user?.user_metadata?.account_type === "brand_marketer") {
-    return redirectWithRefreshedCookies(new URL("/marketer", request.url));
+    return redirectWithRefreshedCookies(absoluteApplicationUrl("/marketer", request));
   }
 
   if (isDashboardRoute && !hasClientIdentity) {
-    const loginUrl = new URL("/login", request.url);
+    const loginUrl = absoluteApplicationUrl("/login", request);
     loginUrl.searchParams.set("next", requestedClientPath);
     return redirectWithRefreshedCookies(loginUrl);
   }
@@ -122,7 +126,7 @@ export async function updateSession(request: NextRequest) {
     hasClientIdentity
   ) {
     const rawNext = getSafeNextPath(request.nextUrl.searchParams.get("next"));
-    const redirectResponse = redirectWithRefreshedCookies(new URL(rawNext, request.url));
+    const redirectResponse = redirectWithRefreshedCookies(absoluteApplicationUrl(rawNext, request));
     return redirectResponse;
   }
 

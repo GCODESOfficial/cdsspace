@@ -82,17 +82,15 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ slu
 
     // Pull the first H1 as title when present; strip it from the body so it
     // doesn't duplicate the page title. Keep everything else as-is.
-    let title: string | null = null;
-    html = html.replace(/<h1[^>]*>([\s\S]*?)<\/h1>/i, (_m, inner) => {
-        title = String(inner).replace(/<[^>]+>/g, "").trim();
-        return "";
-    });
+    const titleMatch = html.match(/<h1[^>]*>([\s\S]*?)<\/h1>/i);
+    const importedTitle = titleMatch?.[1] ? String(titleMatch[1]).replace(/<[^>]+>/g, "").trim() : "";
+    html = html.replace(/<h1[^>]*>[\s\S]*?<\/h1>/i, "");
 
     const current = await loadLegalDocument(slug);
 
     const doc = await upsertLegalDocument({
         slug,
-        title: title && title.length > 0 ? title : current.title,
+        title: importedTitle || current.title,
         subtitle: current.subtitle,
         content: html,
         effectiveDate: new Date().toISOString().slice(0, 10),

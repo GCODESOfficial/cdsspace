@@ -1,20 +1,23 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getCreateActor } from "@/lib/create-platform/session";
+import { getCreateActorFromRequest } from "@/lib/create-platform/session";
 import { deleteCreateCreation, duplicateCreateCreation, listCreateCreations } from "@/lib/create-platform/server";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 // Lightweight poll used by the UI to refresh processing creations.
-export async function GET() {
-  const actor = await getCreateActor();
+export async function GET(req: NextRequest) {
+  const actor = await getCreateActorFromRequest(req);
   if (!actor) return NextResponse.json({ error: "Sign in to use CREATE." }, { status: 401 });
   const creations = await listCreateCreations(actor);
-  return NextResponse.json({ ok: true, creations });
+  return NextResponse.json(
+    { ok: true, creations },
+    { headers: { "Cache-Control": "private, no-store, max-age=0", Vary: "Cookie" } },
+  );
 }
 
 export async function POST(req: NextRequest) {
-  const actor = await getCreateActor();
+  const actor = await getCreateActorFromRequest(req);
   if (!actor) return NextResponse.json({ error: "Sign in to use CREATE." }, { status: 401 });
   const body = await req.json().catch(() => ({})) as Record<string, unknown>;
   const action = typeof body.action === "string" ? body.action : "";

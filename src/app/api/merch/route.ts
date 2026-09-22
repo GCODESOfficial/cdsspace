@@ -7,6 +7,7 @@ import { merchPrice, normalizeMerchPrices, type MerchProduct } from "@/lib/merch
 import { bannerPickupLocationLabel, bannerPrice, selectBannerDeliveryZone, type BannerDeliveryZone, type BannerPickupLocation } from "@/lib/banner-commerce";
 import { normalizeInternationalPhoneNumber } from "@/lib/phone-number";
 import { notifySuperAdmin } from "@/lib/notify-admin";
+import { queueAdminAlert } from "@/lib/admin-alerts";
 
 export const dynamic = "force-dynamic";
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -135,6 +136,23 @@ export async function POST(request: Request) {
       const { data: order, error: orderError } = await supabaseAdmin.from("merch_orders").insert({ ...baseOrder, quotation_id: quotation.id, amount: 0, subtotal: 0, total: 0, status: "AWAITING_QUOTE", pricing_snapshot: { currency, pricing_status: "pending_review" } }).select().single();
       if (orderError) { await supabaseAdmin.from("finance_quotations").delete().eq("id", quotation.id); throw orderError; }
       await notifySuperAdmin({ type: "status_change", title: "Merch order needs pricing", message: `${quotationNumber} for ${clientName} is ready for review.`, link: `/admin/finance/quotations/${quotation.id}` });
+      queueAdminAlert({
+        kind: "order",
+        subject: `${clientName}: ${product.name} (awaiting quote)`,
+        details: [
+          ["Order", displayId],
+          ["Client", clientName],
+          ["Email", profile.email],
+          ["Product", product.name],
+          ["Quantity", quantity],
+          ["Artwork", executionMode === "create" ? "CDS Space design requested" : "Client supplied"],
+          ["Quotation", quotationNumber],
+          ["Status", "Awaiting pricing"],
+        ],
+        actionPath: `/admin/finance/quotations/${quotation.id}`,
+        actionLabel: "Price this order",
+        ...(profile.email ? { replyTo: profile.email } : {}),
+      });
       if (UUID.test(String(body.draftId || ""))) await supabaseAdmin.from("merch_orders").delete().eq("id", body.draftId).eq("user_id", session.user.id).eq("status", "DRAFT");
       return NextResponse.json({ order, quotation: { id: quotation.id, quotation_number: quotationNumber, public_token: quotation.public_token } });
     }
@@ -170,6 +188,23 @@ export async function POST(request: Request) {
       supabaseAdmin.from("notifications").insert({ user_id: session.user.id, type: "new_order", title: "Merch invoice ready", message: `${displayId} is ready for payment. Production becomes active as soon as payment is confirmed.`, link: "/dashboard/invoices", is_read: false }),
       notifySuperAdmin({ type: "status_change", title: "New merch order", message: `${displayId} from ${clientName} is awaiting payment.`, link: `/admin/orders/${order.id}` }),
     ]);
+    queueAdminAlert({
+      kind: "order",
+      subject: `${clientName}: ${product.name}`,
+      details: [
+        ["Order", displayId],
+        ["Client", clientName],
+        ["Email", profile.email],
+        ["Product", product.name],
+        ["Quantity", quantity],
+        ["Total", `${currency} ${total.toLocaleString()}`],
+        ["Invoice", invoice.invoice_number],
+        ["Status", "Awaiting payment"],
+      ],
+      actionPath: `/admin/orders/${order.id}`,
+      actionLabel: "Open the order",
+      ...(profile.email ? { replyTo: profile.email } : {}),
+    });
     if (UUID.test(String(body.draftId || ""))) await supabaseAdmin.from("merch_orders").delete().eq("id", body.draftId).eq("user_id", session.user.id).eq("status", "DRAFT");
     return NextResponse.json({ order, invoice: { id: invoice.id, invoice_number: invoice.invoice_number, public_token: invoice.public_token } });
   } catch (error) {

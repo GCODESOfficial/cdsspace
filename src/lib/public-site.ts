@@ -23,3 +23,33 @@ export function absolutePublicUrl(path: string) {
   const safePath = path.startsWith("/") ? path : `/${path}`;
   return new URL(safePath, `${publicSiteOrigin()}/`).toString();
 }
+
+type RequestOriginSource = {
+  headers: Headers;
+  nextUrl: {
+    host: string;
+    protocol: string;
+  };
+};
+
+/**
+ * Origin for browser redirects and provider callbacks.
+ *
+ * Production must always use the configured/canonical public host because the
+ * application server can receive an internal `localhost:3000` URL from the
+ * deployment proxy. Local development still follows the browser-facing host.
+ */
+export function applicationOrigin(request: RequestOriginSource) {
+  if (process.env.NODE_ENV === "production") return publicSiteOrigin();
+
+  const forwardedHost = request.headers.get("x-forwarded-host")?.split(",")[0]?.trim();
+  const host = forwardedHost || request.headers.get("host") || request.nextUrl.host;
+  const forwardedProtocol = request.headers.get("x-forwarded-proto")?.split(",")[0]?.trim();
+  const protocol = forwardedProtocol || request.nextUrl.protocol.replace(":", "") || "http";
+  return `${protocol}://${host}`;
+}
+
+export function absoluteApplicationUrl(path: string, request: RequestOriginSource) {
+  const safePath = path.startsWith("/") ? path : `/${path}`;
+  return new URL(safePath, `${applicationOrigin(request)}/`);
+}

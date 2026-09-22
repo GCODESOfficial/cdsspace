@@ -2,6 +2,10 @@ import { NextRequest, NextResponse } from "next/server";
 import { createRouteClient } from "@/lib/glashdb/server";
 import { getVerifiedAuthUser } from "@/lib/glashdb/auth-user";
 import { finalizeClientOAuthSignIn } from "@/lib/client-oauth";
+import {
+  clearClientOAuthLinkCookie,
+  completeClientOAuthLinkAttempt,
+} from "@/lib/auth/client-account-connections";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -42,6 +46,15 @@ export async function POST(request: NextRequest) {
   }
 
   try {
+    const linkAttempt = await completeClientOAuthLinkAttempt(request, user, "google");
+    if (linkAttempt) {
+      return applyCookies(clearOAuthDestination(clearClientOAuthLinkCookie(
+        NextResponse.json(
+          { ok: true, next: linkAttempt.next, email: user.email || "", connection: linkAttempt.ok ? "connected" : "failed" },
+          { headers: { "Cache-Control": "no-store" } },
+        ),
+      )));
+    }
     const response = await finalizeClientOAuthSignIn({
       auth: glash.auth,
       user,

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { glashMaybeOne } from "@/lib/glashdb/postgres";
 import { clientDashboardPath } from "@/lib/client-routes";
 import { finalizePaystackCardSetup } from "@/lib/paystack";
+import { absoluteApplicationUrl } from "@/lib/public-site";
 
 export const dynamic = "force-dynamic";
 
@@ -14,7 +15,7 @@ function settingsUrl(request: NextRequest, publicUserId: string | null, state: s
   const path = publicUserId
     ? clientDashboardPath(publicUserId, "/dashboard/settings")
     : "/dashboard/settings";
-  const url = new URL(path, request.nextUrl.origin);
+  const url = absoluteApplicationUrl(path, request);
   url.searchParams.set("payment", state);
   return url;
 }

@@ -1,4 +1,4 @@
-import { Pool, type QueryResultRow } from "pg";
+import { Pool, type PoolClient, type QueryResultRow } from "pg";
 import { getGlashDbDatabaseUrl, getGlashDbDirectUrl } from "@/lib/glashdb/env";
 
 declare global {
@@ -46,7 +46,35 @@ globalThis.glashPostgresFallbackPool = fallbackPool;
 
 function isConnectionFailure(error: unknown) {
   const code = String((error as { code?: unknown } | null)?.code || "");
-  return ["ENOTFOUND", "ECONNREFUSED", "ETIMEDOUT", "EHOSTUNREACH", "ECONNRESET", "57P01", "57P02", "57P03"].includes(code);
+  // PostgreSQL class 08 is a connection exception. 53300 is the common
+  // "too many connections" response from a direct endpoint, where retrying
+  // through the pooled DATABASE_URL is exactly the safe recovery path.
+  return code.startsWith("08") || [
+    "ENOTFOUND", "ECONNREFUSED", "ETIMEDOUT", "EHOSTUNREACH", "ECONNRESET", "EPIPE",
+    "53300", "57P01", "57P02", "57P03",
+  ].includes(code);
+}
+
+/**
+ * Acquire a transaction-capable client without making authentication and
+ * session handoffs depend solely on the direct database endpoint. The direct
+ * endpoint can reject short connection bursts even while the pooled endpoint
+ * remains healthy.
+ */
+export async function getGlashPoolClient(): Promise<PoolClient> {
+  const now = Date.now();
+  const directCoolingDown = directUrl !== databaseUrl
+    && Number(globalThis.glashPostgresDirectUnavailableUntil || 0) > now;
+
+  if (directCoolingDown) return fallbackPool.connect();
+
+  try {
+    return await glashPool.connect();
+  } catch (error) {
+    if (directUrl === databaseUrl || !isConnectionFailure(error)) throw error;
+    globalThis.glashPostgresDirectUnavailableUntil = Date.now() + 60_000;
+    return fallbackPool.connect();
+  }
 }
 
 export async function glashQuery<T extends QueryResultRow = QueryResultRow>(

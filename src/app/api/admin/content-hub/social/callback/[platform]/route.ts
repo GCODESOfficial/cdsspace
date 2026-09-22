@@ -6,6 +6,7 @@ import { saveConnection } from "@/lib/social/connections";
 import { getProvider } from "@/lib/social/providers";
 import { SOCIAL_LABELS, SOCIAL_PLATFORMS, type SocialPlatform } from "@/lib/social/types";
 import { callbackRedirectUri } from "@/app/api/admin/content-hub/social/route";
+import { completeDirectLinkedInLogin } from "@/lib/auth/linkedin-login";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -24,6 +25,14 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ plat
   const { platform: raw } = await params;
   const platform = (SOCIAL_PLATFORMS as string[]).includes(raw) ? (raw as SocialPlatform) : null;
   if (!platform) return back("error", raw, "Unknown platform");
+
+  // LinkedIn login shares this already-approved callback URL with the admin
+  // social-channel connection flow. Its own HttpOnly state cookie disambiguates
+  // the request before the admin permission check below.
+  if (platform === "linkedin") {
+    const loginResponse = await completeDirectLinkedInLogin(req);
+    if (loginResponse) return loginResponse;
+  }
 
   // Only an authenticated content-hub admin may complete a connection.
   const { session, deny } = await requireContentHub("content_hub.schedule");

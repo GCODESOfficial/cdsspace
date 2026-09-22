@@ -18,6 +18,7 @@
 import { emailFrom, createEmailTransport, EMAIL_MODE } from "@/lib/email-from";
 import { brandedEmailHtml } from "@/lib/email-template";
 import { glashQuery, glashMaybeOne } from "@/lib/glashdb/postgres";
+import { emailAttachmentsFor } from "@/lib/email-logo";
 
 /** Marker name used to find/reuse the admin↔member announcement DM thread. */
 const TEAM_ANNOUNCEMENT_THREAD_NAME = "CDS Space";

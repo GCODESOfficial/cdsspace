@@ -5,6 +5,7 @@ import {
   hydrateTeamMessages,
   TEAM_CHAT_MESSAGE_COLUMNS,
 } from "@/lib/team-chat-server";
+import { resolveChatSticker } from "@/lib/chat-sticker-server";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -47,11 +48,12 @@ export async function POST(req: Request) {
   const payload = await req.json().catch(() => ({}));
   const threadId = String(payload.threadId || "");
   const body = typeof payload.body === "string" ? payload.body.trim() : "";
-  const attachmentUrl = typeof payload.attachmentUrl === "string" ? payload.attachmentUrl : null;
+  const sticker = await resolveChatSticker(db, payload.stickerKey);
+  const attachmentUrl = sticker?.attachmentUrl || (typeof payload.attachmentUrl === "string" ? payload.attachmentUrl : null);
   const replyToMessageId = typeof payload.replyToMessageId === "string" && payload.replyToMessageId
     ? payload.replyToMessageId
     : null;
-  if (!threadId || (!body && !attachmentUrl)) {
+  if (!threadId || (!body && !attachmentUrl && !sticker)) {
     return NextResponse.json({ ok: false, error: "A thread and message are required" }, { status: 400 });
   }
 
@@ -81,12 +83,14 @@ export async function POST(req: Request) {
       sender_is_admin: false,
       body: body || null,
       attachment_url: attachmentUrl,
-      message_type: attachmentUrl ? "file" : "text",
+      sticker_key: sticker?.stickerKey || null,
+      message_type: sticker ? "sticker" : attachmentUrl ? "file" : "text",
+      metadata: sticker?.metadata || {},
       delivery_status: "sent",
       sent_at: new Date().toISOString(),
       file_name: typeof payload.fileName === "string" ? payload.fileName : null,
       file_size_bytes: Number.isFinite(Number(payload.fileSizeBytes)) ? Number(payload.fileSizeBytes) : null,
-      mime_type: typeof payload.mimeType === "string" ? payload.mimeType : null,
+      mime_type: sticker?.mimeType || (typeof payload.mimeType === "string" ? payload.mimeType : null),
       reply_to_message_id: replyToMessageId,
     })
     .select(TEAM_CHAT_MESSAGE_COLUMNS)

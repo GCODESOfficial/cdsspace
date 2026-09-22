@@ -68,7 +68,10 @@ function uploadExtension(file: unknown) {
   const candidate = file as { name?: unknown } | null;
   const name = typeof candidate?.name === "string" ? candidate.name.trim().toLowerCase() : "";
   const dot = name.lastIndexOf(".");
-  return dot >= 0 && dot < name.length - 1 ? name.slice(dot + 1).replace(/[^a-z0-9]/g, "") : "";
+  // A leading dot marks a hidden file (".DS_Store", "._Brief"), not an
+  // extension; reading past it turned "._Welcome Message" into a bogus
+  // ".welcomemessage" type in the rejection message.
+  return dot > 0 && dot < name.length - 1 ? name.slice(dot + 1).replace(/[^a-z0-9]/g, "") : "";
 }
 
 function startsWithAscii(buffer: Buffer, value: string, offset = 0) {

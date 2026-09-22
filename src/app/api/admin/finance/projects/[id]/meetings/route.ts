@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { financeDb, requireFinanceAdminAsync } from "@/lib/finance/api-auth";
+import { normalizeCMeetAgendaItems } from "@/lib/cmeet-agenda";
 
 /**
  * Project meetings.
@@ -61,6 +62,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     const body = await req.json().catch(() => ({}));
     const title = body?.title?.toString().trim();
     const agenda = body?.agenda?.toString().trim() || null;
+    const agendaItems = normalizeCMeetAgendaItems(body?.agenda_items ?? agenda);
     const scheduledFor: string | null = body?.scheduled_for
         ? new Date(body.scheduled_for).toISOString()
         : null;
@@ -79,11 +81,19 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
             status: immediate ? "live" : "scheduled",
             started_at: immediate ? new Date().toISOString() : null,
             created_by_admin: true,
+            approval_status: "approved",
+            approved_at: new Date().toISOString(),
             project_id: id,
         })
         .select()
         .single();
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+
+    if (agendaItems.length) {
+        await sb.from("team_meeting_agenda_items").insert(
+            agendaItems.map((agendaTitle, position) => ({ meeting_id: meeting.id, title: agendaTitle, position })),
+        );
+    }
 
     const participantIds = await resolveParticipants(sb, id);
     if (participantIds.length) {

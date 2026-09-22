@@ -9,6 +9,7 @@ import {
   getClientDelivery,
 } from "@/lib/client-deliveries-server";
 import {
+  isIgnoredDeliveryPath,
   MAX_DELIVERY_FILE_BYTES,
   MAX_DELIVERY_UPLOAD_CHUNK_BYTES,
 } from "@/lib/client-deliveries";
@@ -82,6 +83,12 @@ function validateMetadata(input: ReturnType<typeof readUploadMetadata>) {
   }
   if (!input.fileName || !input.relativePath) {
     throw new DeliveryWorkflowError("The upload is missing its file name or folder path.");
+  }
+  // The file picker already drops macOS/Windows metadata (._Name, .DS_Store,
+  // __MACOSX); this names the real cause if one arrives some other way,
+  // instead of a misleading "file type not allowed".
+  if (isIgnoredDeliveryPath(input.relativePath)) {
+    throw new DeliveryWorkflowError(`${input.relativePath} is system metadata, not a deliverable. It is skipped automatically - refresh the page and add the folder again.`);
   }
   if (!input.fileSize || input.fileSize > MAX_DELIVERY_FILE_BYTES) {
     throw new DeliveryWorkflowError("Each client delivery file must be 50MB or smaller.", 413);

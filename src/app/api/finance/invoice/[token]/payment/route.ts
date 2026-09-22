@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { financeDb } from "@/lib/finance/api-auth";
 import { assertSafeUpload, UploadSecurityError } from "@/lib/upload-security";
-import { notifySuperAdmin } from "@/lib/notify-admin";
+import { ADMIN_FEATURE_PERMISSION_KEYS, notifyAdminFeatureEvent } from "@/lib/admin-feature-notifications";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -34,6 +34,10 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     const transferReference = String(form.get("reference") || "").trim().slice(0, 120) || null;
     const payerName = String(form.get("payerName") || invoice.client_name || "").trim().slice(0, 160) || null;
     const payerEmail = String(invoice.client_email || form.get("payerEmail") || "").trim().toLowerCase().slice(0, 254) || null;
+    const outstanding = Math.max(Number(invoice.total || 0) - Number(invoice.amount_paid || 0), 0);
+    const amount = Number(form.get("amount") || outstanding);
+    if (!Number.isFinite(amount) || amount <= 0) return NextResponse.json({ error: "Enter the amount transferred." }, { status: 400 });
+    if (amount > outstanding + 0.01) return NextResponse.json({ error: "The transfer amount cannot exceed the outstanding invoice balance." }, { status: 400 });
     if (payerEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(payerEmail)) {
       return NextResponse.json({ error: "Enter a valid payer email address." }, { status: 400 });
     }
@@ -73,7 +77,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       user_id: invoice.user_id || null,
       method: "bank_transfer",
       status: "pending",
-      amount: Number(invoice.total),
+      amount,
       currency: invoice.currency,
       payer_name: payerName,
       payer_email: payerEmail,
@@ -90,11 +94,20 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
 
     const submission = { ...result.data };
     delete submission.proof_storage_path;
-    void notifySuperAdmin({
-      type: "status_change",
-      title: "Payment confirmation submitted",
-      message: `${invoice.client_name || "A client"} submitted a bank transfer for ${invoice.invoice_number}${proof ? " with proof attached" : ""}.`,
+    if (!existing) await notifyAdminFeatureEvent({
+      permissionKeys: ADMIN_FEATURE_PERMISSION_KEYS.invoices,
+      departmentNames: ["Finance"],
+      title: `Payment submitted · ${invoice.invoice_number}`,
+      body: `${invoice.client_name || "A client"} submitted a ${invoice.currency} ${amount.toLocaleString("en-NG", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} bank-transfer confirmation for ${invoice.invoice_number}${proof ? " with proof attached" : ""}. Verify the transfer before updating the invoice balance.`,
       link: `/admin/finance/invoices/${invoice.id}`,
+      teamLink: "/team",
+      eyebrow: "Finance · Payment review",
+      details: {
+        Invoice: invoice.invoice_number,
+        Client: invoice.client_name || "Client",
+        Amount: `${invoice.currency} ${amount.toLocaleString("en-NG", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
+        Reference: transferReference,
+      },
     });
     return NextResponse.json({ ok: true, submission });
   } catch (error) {

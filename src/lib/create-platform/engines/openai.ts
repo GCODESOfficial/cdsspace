@@ -1,6 +1,6 @@
 import { CreateEngineImpl, EngineFailed, EngineResult, EngineRunContext, EngineUnavailable, firstImageDataUrl } from "./types";
 
-const TEXT_TOOLS = new Set(["brand-name-checker", "logo-ideator"]);
+const TEXT_TOOLS = new Set(["logo-ideator"]);
 const IMAGE_TOOLS = new Set(["illustration-generator"]);
 const EDIT_TOOLS = new Set(["background-remover"]);
 

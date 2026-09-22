@@ -5,6 +5,7 @@ import { glashMaybeOne, glashQuery } from "@/lib/glashdb/postgres";
 import { getSupabaseAdmin } from "@/lib/supabase";
 import { emailInvoiceReceipt } from "@/lib/finance/receipt-server";
 import { deliverInvoicePaymentConfirmation } from "@/lib/finance/payment-confirmation";
+import { recordInvoicePayment } from "@/lib/finance/invoice-payments";
 
 const PAYSTACK_API = "https://api.paystack.co";
 const SUPPORTED_SETUP_CURRENCIES = new Set(["NGN", "GHS", "ZAR", "KES", "USD"]);
@@ -276,6 +277,7 @@ export async function removeClientPaymentMethod(userId: string) {
 interface PaystackInvoiceRow {
   submission_id: string;
   submission_status: string;
+  submission_amount: number;
   invoice_id: string;
   invoice_number: string;
   public_token: string;
@@ -297,6 +299,7 @@ export async function finalizePaystackInvoicePayment(reference: string, supplied
   const record = await glashMaybeOne<PaystackInvoiceRow>(
     `select submission.id as submission_id,
             submission.status as submission_status,
+            submission.amount as submission_amount,
             invoice.id as invoice_id,
             invoice.invoice_number,
             invoice.public_token,
@@ -317,7 +320,7 @@ export async function finalizePaystackInvoicePayment(reference: string, supplied
   }
 
   const transaction = suppliedTransaction || await verifiedTransaction(reference);
-  const expectedMinorAmount = Math.round(Number(record.total) * 100);
+  const expectedMinorAmount = Math.round(Number(record.submission_amount) * 100);
   const responseEmail = String(transaction?.customer?.email || "").trim().toLowerCase();
   const expectedEmail = String(record.client_email || "").trim().toLowerCase();
   const valid = Boolean(
@@ -330,12 +333,17 @@ export async function finalizePaystackInvoicePayment(reference: string, supplied
   );
   if (!valid) throw new Error("The Paystack transaction did not match this invoice.");
 
-  await glashQuery(
-    `update public.finance_invoices
-        set status = 'paid'
-      where id = $1 and status not in ('paid', 'cancelled')`,
-    [record.invoice_id],
-  );
+  const paymentResult = await recordInvoicePayment({
+    invoiceId: record.invoice_id,
+    amount: Number(record.submission_amount),
+    currency: record.currency,
+    paymentMethod: "paystack",
+    paymentReference: reference,
+    sourceType: "payment_submission",
+    sourceId: record.submission_id,
+    notes: "Verified Paystack invoice payment",
+    recordedBy: "Paystack verification",
+  });
   await glashQuery(
     `update public.invoice_payment_submissions
         set status = 'confirmed', reviewed_at = coalesce(reviewed_at, now()),
@@ -343,6 +351,6 @@ export async function finalizePaystackInvoicePayment(reference: string, supplied
       where id = $1 and status = 'pending'`,
     [record.submission_id],
   );
-  await deliverPaystackInvoiceConfirmation(record.invoice_id);
+  if (paymentResult.invoice.status === "paid") await deliverPaystackInvoiceConfirmation(record.invoice_id);
   return record;
 }

@@ -5,6 +5,7 @@ import { generateInvoiceNumber, generateQuotationNumber, randomToken } from "@/l
 import { normalizeClientBillingCurrency } from "@/lib/client-billing";
 import { bannerMaterialPrice, bannerMaterialPrices, bannerPickupLocationLabel, bannerPrice, customBannerSizeLabel, normalizeBannerDimensionUnit, selectBannerDeliveryZone, type BannerDeliveryZone, type BannerMaterial, type BannerPickupLocation, type BannerProduct } from "@/lib/banner-commerce";
 import { notifySuperAdmin } from "@/lib/notify-admin";
+import { queueAdminAlert } from "@/lib/admin-alerts";
 import { normalizeInternationalPhoneNumber } from "@/lib/phone-number";
 
 export const dynamic = "force-dynamic";
@@ -362,6 +363,18 @@ export async function POST(request: Request) {
                     link: `/admin/finance/quotations/${quotation.id}`,
                 }),
             ]);
+            queueAdminAlert({
+                kind: "order",
+                subject: `${clientName}: custom banner (awaiting quote)`,
+                details: [
+                    ["Order", displayId],
+                    ["Client", clientName],
+                    ["Quotation", quotationNumber],
+                    ["Status", "Awaiting pricing"],
+                ],
+                actionPath: `/admin/finance/quotations/${quotation.id}`,
+                actionLabel: "Price this order",
+            });
 
             if (typeof draftId === "string" && UUID_PATTERN.test(draftId)) {
                 await supabaseAdmin!.from("banner_requests").delete().eq("id", draftId).eq("user_id", user.id).eq("status", "DRAFT");
@@ -627,6 +640,24 @@ export async function POST(request: Request) {
         if (typeof draftId === "string" && UUID_PATTERN.test(draftId)) {
             await supabaseAdmin!.from("banner_requests").delete().eq("id", draftId).eq("user_id", user.id).eq("status", "DRAFT");
         }
+
+        queueAdminAlert({
+            kind: "order",
+            subject: `${invoice.client_name}: ${product.name}`,
+            details: [
+                ["Order", displayId],
+                ["Client", invoice.client_name],
+                ["Email", invoice.client_email],
+                ["Product", product.name],
+                ["Material", material],
+                ["Quantity", requestedQuantity],
+                ["Total", `${currency} ${Number(invoice.total || 0).toLocaleString()}`],
+                ["Invoice", invoice.invoice_number],
+                ["Status", "Awaiting payment"],
+            ],
+            actionPath: `/admin/orders/${newBanner.id}`,
+            actionLabel: "Open the order",
+        });
 
         return NextResponse.json({ banner: newBanner, invoice: { id: invoice.id, public_token: invoice.public_token, invoice_number: invoice.invoice_number } });
     } catch (error) {

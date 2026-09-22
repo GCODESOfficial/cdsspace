@@ -1,6 +1,7 @@
 import { cookies } from "next/headers";
 import crypto from "crypto";
 import { glashMaybeOne, glashQuery } from "@/lib/glashdb/postgres";
+import { sessionRequiresDailyLogout } from "@/lib/team-session-policy";
 
 export const TEAM_SESSION_COOKIE = "team_session";
 const SESSION_DAYS = 30;
@@ -70,11 +71,13 @@ export async function getTeamSessionFromToken(token: string | undefined | null):
     permissions: string[] | null;
     language: string | null;
     session_expires_at: string | null;
+    session_created_at: string;
     is_active: boolean;
     device_type: TeamDeviceType | null;
   }>(
     `select m.id, m.full_name, m.email, m.email_verified_at, m.username, m.avatar_url, m.role_title, m.department,
-      m.is_sub_admin, m.permissions, m.language, s.expires_at as session_expires_at, m.is_active,
+      m.is_sub_admin, m.permissions, m.language, s.expires_at as session_expires_at,
+      s.created_at as session_created_at, m.is_active,
       s.device_type
      from public.team_device_sessions s
      join public.team_members m on m.id = s.team_member_id
@@ -100,6 +103,17 @@ export async function getTeamSessionFromToken(token: string | undefined | null):
   }
 
   if (!data || !data.is_active) return null;
+  if (sessionRequiresDailyLogout(data.session_created_at)) {
+    await glashQuery(
+      "update public.team_device_sessions set revoked_at = now(), revoke_reason = 'daily_1815_cutoff' where session_token = $1 and revoked_at is null",
+      [token],
+    ).catch(() => []);
+    await glashQuery(
+      "update public.team_members set session_token = null, session_expires_at = null where session_token = $1",
+      [token],
+    ).catch(() => []);
+    return null;
+  }
   if (data.session_expires_at && new Date(data.session_expires_at) < new Date()) {
     await glashQuery(
       "update public.team_device_sessions set revoked_at = now(), revoke_reason = 'expired' where session_token = $1",
@@ -154,24 +168,14 @@ async function getLegacyTeamSessionFromToken(token: string): Promise<TeamSession
   );
 
   if (!data || !data.is_active) return null;
-  if (data.session_expires_at && new Date(data.session_expires_at) < new Date()) {
-    await glashQuery("update public.team_members set session_token = null where id = $1", [data.id]).catch(() => []);
-    return null;
-  }
-
-  return {
-    id: data.id,
-    full_name: data.full_name,
-    email: data.email,
-    email_verified_at: data.email_verified_at,
-    username: data.username,
-    avatar_url: data.avatar_url,
-    role_title: data.role_title,
-    department: data.department,
-    is_sub_admin: !!data.is_sub_admin,
-    permissions: data.permissions || [],
-    language: data.language ?? "en",
-  };
+  // Legacy sessions have no trustworthy issue timestamp, so they cannot
+  // prove that the member deliberately signed in after the latest cutoff.
+  // Clear them and require the normal login flow to issue a device session.
+  await glashQuery(
+    "update public.team_members set session_token = null, session_expires_at = null where id = $1",
+    [data.id],
+  ).catch(() => []);
+  return null;
 }
 
 /** Server-only: read the currently logged-in team member from the session cookie. */

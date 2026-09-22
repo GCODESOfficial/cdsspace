@@ -11,9 +11,36 @@ export const dynamic = "force-dynamic";
 
 const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL?.replace(/\/$/, "") || "https://cdsspace.pro";
 
+interface InvoiceEmailItem {
+  name: string | null;
+  description: string | null;
+  quantity: number | string | null;
+  unit_price: number | string | null;
+  total: number | string | null;
+  position: number | null;
+}
+
 /** A branded pill CTA button for the email body. */
 function cta(href: string, label: string) {
-  return `<p style="text-align:center;margin:24px 0;"><a href="${href}" style="display:inline-block;background:linear-gradient(146deg,#0035C1,#0575FF);color:#fff;text-decoration:none;padding:14px 28px;border-radius:999px;font-weight:700;">${label}</a></p>`;
+  return `<p style="text-align:center;margin:24px 0;"><a href="${href}" style="display:inline-block;background:#0A4FE8;color:#fff;text-decoration:none;padding:14px 28px;border-radius:999px;font-weight:700;">${label}</a></p>`;
+}
+
+function escapeHtml(value: unknown) {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+}
+
+function formatDate(value: unknown) {
+  const text = String(value || "").trim();
+  if (!text) return "Not set";
+  const parsed = new Date(`${text.slice(0, 10)}T00:00:00`);
+  return Number.isNaN(parsed.getTime())
+    ? text
+    : parsed.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
 }
 
 /**
@@ -44,30 +71,96 @@ export async function POST(req: NextRequest) {
 
   try {
     if (kind === "invoice") {
-      const { data: inv } = await sb
+      const { data: inv, error: invoiceError } = await sb
         .from("finance_invoices")
-        .select("invoice_number, client_name, client_email, total, currency, public_token")
+        .select("invoice_number, client_name, client_email, client_address, subtotal, tax_rate, tax_amount, discount, total, currency, issue_date, due_date, notes, payment_terms, status, public_token")
         .eq("id", id)
         .maybeSingle();
+      if (invoiceError) throw invoiceError;
       if (!inv) return NextResponse.json({ error: "Invoice not found" }, { status: 404 });
+      if (inv.status === "cancelled") {
+        return NextResponse.json({ error: "A cancelled invoice cannot be sent." }, { status: 409 });
+      }
+
+      const { data: items, error: itemsError } = await sb
+        .from("finance_invoice_items")
+        .select("name, description, quantity, unit_price, total, position")
+        .eq("invoice_id", id)
+        .order("position");
+      if (itemsError) throw itemsError;
+
       const to = toOverride || inv.client_email;
       if (!to) return NextResponse.json({ error: "No recipient - add a client email or provide one." }, { status: 400 });
+      const validItems = ((items ?? []) as InvoiceEmailItem[]).filter((item) => String(item.name || "").trim() && Number(item.quantity) > 0);
+      if (!String(inv.client_name || "").trim() || validItems.length === 0 || Number(inv.total) <= 0) {
+        return NextResponse.json(
+          { error: "Complete and save the client, line items, and a positive total before sending this invoice." },
+          { status: 409 },
+        );
+      }
 
       const url = `${SITE_URL}/invoice/${inv.public_token}`;
+      const itemRows = validItems.map((item) => `
+        <tr>
+          <td style="padding:10px 8px;border-bottom:1px solid #E8EDF5;color:#0D1B39;vertical-align:top;">
+            <strong>${escapeHtml(item.name)}</strong>
+            ${item.description ? `<br><span style="font-size:12px;color:#69738D;">${escapeHtml(item.description)}</span>` : ""}
+          </td>
+          <td style="padding:10px 8px;border-bottom:1px solid #E8EDF5;text-align:center;color:#475569;vertical-align:top;">${escapeHtml(item.quantity)}</td>
+          <td style="padding:10px 8px;border-bottom:1px solid #E8EDF5;text-align:right;color:#475569;vertical-align:top;">${escapeHtml(formatMoney(item.unit_price, inv.currency))}</td>
+          <td style="padding:10px 8px;border-bottom:1px solid #E8EDF5;text-align:right;color:#0D1B39;font-weight:700;vertical-align:top;">${escapeHtml(formatMoney(item.total, inv.currency))}</td>
+        </tr>`).join("");
+      const discountRow = Number(inv.discount) > 0
+        ? `<tr><td style="padding:5px 0;color:#69738D;">Discount</td><td style="padding:5px 0;text-align:right;color:#0D1B39;">-${escapeHtml(formatMoney(inv.discount, inv.currency))}</td></tr>`
+        : "";
+      const taxRow = Number(inv.tax_amount) > 0
+        ? `<tr><td style="padding:5px 0;color:#69738D;">Tax (${escapeHtml(inv.tax_rate)}%)</td><td style="padding:5px 0;text-align:right;color:#0D1B39;">${escapeHtml(formatMoney(inv.tax_amount, inv.currency))}</td></tr>`
+        : "";
       const html = brandedEmailHtml(
         `
-        <h2 style="margin:0 0 12px;color:#0D1B39;">Invoice ${inv.invoice_number}</h2>
-        <p>Hi ${inv.client_name || "there"},</p>
-        <p>Please find your invoice for <strong>${formatMoney(inv.total, inv.currency)}</strong>. You can view the full breakdown and payment details at the link below.</p>
+        <h2 style="margin:0 0 12px;color:#0D1B39;">Invoice ${escapeHtml(inv.invoice_number)}</h2>
+        <p>Hi ${escapeHtml(inv.client_name || "there")},</p>
+        <p>Please find the completed invoice details below.</p>
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:18px 0;border:1px solid #E8EDF5;border-radius:12px;border-collapse:separate;border-spacing:0;overflow:hidden;background:#F8FAFD;">
+          <tr>
+            <td style="padding:12px;color:#69738D;font-size:13px;vertical-align:top;">Issued<br><strong style="color:#0D1B39;">${escapeHtml(formatDate(inv.issue_date))}</strong></td>
+            <td style="padding:12px;color:#69738D;font-size:13px;vertical-align:top;">Due<br><strong style="color:#0D1B39;">${escapeHtml(formatDate(inv.due_date))}</strong></td>
+          </tr>
+          <tr>
+            <td colspan="2" style="padding:0 12px 12px;color:#69738D;font-size:13px;vertical-align:top;">Bill to<br><strong style="color:#0D1B39;">${escapeHtml(inv.client_name)}</strong>${inv.client_address ? `<br>${escapeHtml(inv.client_address)}` : ""}</td>
+          </tr>
+        </table>
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:18px 0;border-collapse:collapse;font-size:13px;">
+          <thead><tr style="background:#F1F5F9;color:#475569;"><th style="padding:9px 8px;text-align:left;">Item</th><th style="padding:9px 8px;text-align:center;">Qty</th><th style="padding:9px 8px;text-align:right;">Rate</th><th style="padding:9px 8px;text-align:right;">Amount</th></tr></thead>
+          <tbody>${itemRows}</tbody>
+        </table>
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 18px;font-size:13px;">
+          <tr><td style="padding:5px 0;color:#69738D;">Subtotal</td><td style="padding:5px 0;text-align:right;color:#0D1B39;">${escapeHtml(formatMoney(inv.subtotal, inv.currency))}</td></tr>
+          ${discountRow}${taxRow}
+          <tr><td style="padding:9px 0 0;color:#0D1B39;font-size:16px;font-weight:700;border-top:1px solid #E8EDF5;">Total</td><td style="padding:9px 0 0;text-align:right;color:#0D1B39;font-size:16px;font-weight:700;border-top:1px solid #E8EDF5;">${escapeHtml(formatMoney(inv.total, inv.currency))}</td></tr>
+        </table>
+        ${inv.notes ? `<p style="font-size:13px;color:#475569;"><strong>Notes:</strong><br>${escapeHtml(inv.notes)}</p>` : ""}
+        ${inv.payment_terms ? `<p style="font-size:13px;color:#475569;"><strong>Payment terms:</strong><br>${escapeHtml(inv.payment_terms)}</p>` : ""}
         ${cta(url, "View invoice")}
         <p style="font-size:13px;color:#6b7280;margin-bottom:6px;">Bank transfer details:</p>
-        <pre style="font-size:13px;color:#374151;background:#f8fafc;padding:12px;border-radius:8px;white-space:pre-wrap;font-family:inherit;margin:0;">${invoiceBankDetailsText()}</pre>
+        <pre style="font-size:13px;color:#374151;background:#f8fafc;padding:12px;border-radius:8px;white-space:pre-wrap;font-family:inherit;margin:0;">${escapeHtml(invoiceBankDetailsText())}</pre>
       `,
         { eyebrow: "Invoice", preheader: `Invoice ${inv.invoice_number} - ${formatMoney(inv.total, inv.currency)}` },
       );
       await sendEmail({ to, subject: `Invoice ${inv.invoice_number} from CDS Space`, html });
-      await logActivity({ action: "invoice.email", page: "finance/invoices", resource_type: "invoice", resource_id: id, resource_label: `${inv.invoice_number} → ${to}` });
-      return NextResponse.json({ ok: true, to });
+      if (inv.status === "draft") {
+        const { error: statusError } = await sb.from("finance_invoices").update({ status: "sent" }).eq("id", id);
+        if (statusError) console.error("[finance/share] invoice email sent but status update failed:", statusError.message);
+      }
+      await logActivity({
+        action: "invoice.email",
+        page: "finance/invoices",
+        resource_type: "invoice",
+        resource_id: id,
+        resource_label: `${inv.invoice_number} → ${to}`,
+        metadata: { total: inv.total, currency: inv.currency, item_count: validItems.length },
+      });
+      return NextResponse.json({ ok: true, to, status: inv.status === "draft" ? "sent" : inv.status });
     }
 
     if (kind === "quotation") {

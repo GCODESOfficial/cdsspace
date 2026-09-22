@@ -2,6 +2,7 @@
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase";
 import { getToolActor } from "@/lib/team-tools-auth";
+import { buildCMeetPath } from "@/lib/cmeet-links";
 
 export const runtime = "nodejs";
 
@@ -38,7 +39,7 @@ export async function POST(req: Request, ctx: { params: Promise<{ code: string }
       ? (actor as any).full_name || (actor as any).username || "A teammate"
       : "CDS Space Admin";
 
-  const link = `/meet/${code}`;
+  const link = buildCMeetPath(code, meeting?.title);
   const title =
     meeting?.title ? `${actorName} tagged you in “${meeting.title}”` : `${actorName} tagged you in a meeting`;
 

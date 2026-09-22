@@ -5,8 +5,11 @@ import { glashMaybeOne, glashQuery } from "@/lib/glashdb/postgres";
 import { getSupabaseAdmin } from "@/lib/supabase";
 import { assertTrustedMutationOrigin } from "@/lib/intelligence/security";
 import { checkIntelligenceRateLimit } from "@/lib/intelligence/rate-limit";
-import { researchPublicSite, searchOpenWeb } from "@/lib/sales-growth-research";
-import { buildDealBrandAudit, buildDealProposalContent, buildProposalDeck, buildProposalEmailOpening, type DealProposalContent } from "@/lib/deals-ai";
+import { fetchPublicPage, researchPublicSite, searchOpenWeb } from "@/lib/sales-growth-research";
+import { AUDIT_TOUCHPOINTS, buildDealBrandAudit, buildDealProposalContent, buildProposalDeck, buildProposalEmailOpening, proposalRewriteSpec, rewriteProposalField, type DealAuditContent, type DealProposalContent } from "@/lib/deals-ai";
+import { assessBrandConsistency, type BrandFinding } from "@/lib/prospect-brand";
+import { buildPipeline, recordProspectEvent } from "@/lib/deal-pipeline";
+import { sweepSocialPresence } from "@/lib/deal-audit-social";
 import { normalizeDeck, PROPOSAL_STAGES, type ProposalDeck } from "@/lib/proposal-deck";
 import { brandedEmailHtml } from "@/lib/email-template";
 import { sendEmail, verifyEmailReady } from "@/lib/email-from";
@@ -33,6 +36,49 @@ function publicUrl(value: unknown) {
     return ["http:", "https:"].includes(url.protocol) && url.hostname ? url.toString() : "";
   } catch {
     return "";
+  }
+}
+
+function socialPlatform(url: string) {
+  try {
+    const host = new URL(url).hostname.toLowerCase();
+    if (host.includes("linkedin")) return "linkedin";
+    if (host.includes("facebook")) return "facebook";
+    if (host === "x.com" || host.endsWith(".x.com") || host.includes("twitter")) return "x";
+    if (host.includes("instagram")) return "instagram";
+    if (host.includes("youtube")) return "youtube";
+    if (host.includes("tiktok")) return "tiktok";
+  } catch {
+    /* The URL was already validated by publicUrl. */
+  }
+  return "social";
+}
+
+function auditSocials(value: unknown, singleUrl = "") {
+  const output: Array<{ platform: string; url: string }> = [];
+  for (const raw of Array.isArray(value) ? value : []) {
+    const item = raw && typeof raw === "object" ? raw as Record<string, unknown> : {};
+    const url = publicUrl(item.url);
+    if (!url || output.some((entry) => entry.url === url)) continue;
+    output.push({ platform: str(item.platform, 40) || socialPlatform(url), url });
+  }
+  const url = publicUrl(singleUrl);
+  if (url && !output.some((entry) => entry.url === url)) output.push({ platform: socialPlatform(url), url });
+  return output.slice(0, 8);
+}
+
+async function inspectBrandIdentity(brandName: string, targetUrl: string, socials: Array<{ platform: string; url: string }>): Promise<BrandFinding[]> {
+  if (!socials.length) return [];
+  try {
+    const page = await fetchPublicPage(targetUrl);
+    return await assessBrandConsistency({
+      companyName: brandName,
+      siteHtml: page.html,
+      siteUrl: page.url,
+      socials,
+    });
+  } catch {
+    return [];
   }
 }
 
@@ -110,31 +156,132 @@ async function signedProposalRows() {
   }));
 }
 
+/**
+ * What a proposal starts from when it is raised off an existing record.
+ *
+ * A directory company, a brand audit and a checklist entry each already carry
+ * the brand, the site and the reason we are writing, so the create form's
+ * fields are read off them rather than retyped. Anything the caller passes by
+ * hand still wins; this only fills the gaps.
+ */
+async function proposalSeed(body: Record<string, unknown>) {
+  const empty = {
+    brand_name: "", target_url: "", social_url: "", focus_area: "",
+    recipient_email: "", prospect_id: null as string | null, audit_id: null as string | null,
+  };
+
+  const companyId = uuid(body.company_id);
+  if (companyId) {
+    const company = await glashMaybeOne<any>(`select * from public.prospect_companies where id=$1`, [companyId]);
+    if (!company) return { error: "That company is no longer in the directory.", status: 404 } as const;
+    const lead = await glashMaybeOne<any>(
+      `select email from public.prospect_company_contacts
+        where company_id=$1 and email is not null
+        order by case when seniority='decision_maker' then 0 else 1 end limit 1`,
+      [companyId],
+    );
+    // The focus is the research talking: what is wrong, and what we would do.
+    const focus = [
+      company.outreach_angle || "",
+      (company.pain_points || []).length ? `What is holding them back: ${(company.pain_points || []).slice(0, 4).join("; ")}.` : "",
+      (company.how_we_help || []).length ? `Where CDS Space helps: ${(company.how_we_help || []).slice(0, 4).join("; ")}.` : "",
+      (company.website_findings || []).length ? `On the website: ${(company.website_findings || []).slice(0, 3).join("; ")}.` : "",
+    ].filter(Boolean).join("\n\n");
+    return {
+      ...empty,
+      brand_name: company.company_name || "",
+      target_url: publicUrl(company.website),
+      social_url: publicUrl(company.socials?.[0]?.url),
+      focus_area: str(focus, 1200) || `Brand, website and communication work for ${company.company_name}.`,
+      recipient_email: str(lead?.email || company.emails?.[0]?.email || "", 320).toLowerCase(),
+      prospect_id: company.prospect_id || null,
+    };
+  }
+
+  const auditId = uuid(body.audit_id);
+  if (auditId) {
+    const audit = await glashMaybeOne<any>(`select * from public.deal_brand_audits where id=$1`, [auditId]);
+    if (!audit) return { error: "That brand audit no longer exists.", status: 404 } as const;
+    const content = audit.content || {};
+    // The audit already argued the case, so the proposal opens from its own
+    // summary and the actions it ranked first.
+    const focus = [
+      content.summary || "",
+      (content.recommendations || []).length
+        ? `Priorities from the audit: ${[...(content.recommendations || [])].sort((a: any, b: any) => a.priority - b.priority).slice(0, 3).map((item: any) => item.title).join("; ")}.`
+        : "",
+      (content.touchpoints || []).filter((entry: any) => entry.state === "weak" || entry.state === "missing").length
+        ? `Weakest touchpoints: ${(content.touchpoints || []).filter((entry: any) => entry.state === "weak" || entry.state === "missing").map((entry: any) => entry.label).join(", ")}.`
+        : "",
+    ].filter(Boolean).join("\n\n");
+    return {
+      ...empty,
+      brand_name: audit.brand_name || "",
+      target_url: publicUrl(audit.target_url),
+      social_url: publicUrl(audit.social_url),
+      focus_area: str(focus, 1200) || `Acting on the brand audit for ${audit.brand_name}.`,
+      prospect_id: audit.prospect_id || null,
+      audit_id: audit.id,
+    };
+  }
+
+  const fromProspect = uuid(body.from_prospect_id);
+  if (fromProspect) {
+    const prospect = await glashMaybeOne<any>(`select * from public.deal_prospects where id=$1`, [fromProspect]);
+    if (!prospect) return { error: "That prospect is no longer on the checklist.", status: 404 } as const;
+    const focus = [prospect.next_action || "", prospect.notes || ""].map((value) => String(value || "").trim()).filter(Boolean).join("\n\n")
+      || String(prospect.research_brief || "").trim().slice(0, 900);
+    return {
+      ...empty,
+      brand_name: prospect.company_name || prospect.display_name || "",
+      target_url: publicUrl(prospect.website),
+      social_url: publicUrl(prospect.social_url),
+      focus_area: str(focus, 1200) || `Brand and communication work for ${prospect.company_name || prospect.display_name}.`,
+      recipient_email: str(prospect.email || "", 320).toLowerCase(),
+      prospect_id: prospect.id,
+    };
+  }
+
+  return empty;
+}
+
 export async function GET(req: NextRequest) {
   const resource = str(req.nextUrl.searchParams.get("resource"), 40) || "overview";
-  const permission = resource === "proposals" ? "deals.proposals" : resource === "audits" ? "deals.audits" : resource === "prospects" ? "deals.prospects" : "deals";
+  const permission = resource === "proposals" ? "deals.proposals" : resource === "audits" ? "deals.audits"
+    : resource === "prospects" || resource === "pipeline" ? "deals.prospects" : "deals";
   const { denied } = await requireAdmin(req, permission);
   if (denied) return denied;
   try {
     if (resource === "proposals") {
-      const [proposals, events, funnel] = await Promise.all([
+      // The checklist rides along so a proposal can be raised from a prospect
+      // already researched rather than retyping what Deals already knows. Only
+      // the fields the create form fills, and only prospects still in play.
+      const [proposals, events, funnel, prospects] = await Promise.all([
         signedProposalRows(),
         glashQuery<any>(`select * from public.deal_proposal_events order by created_at desc limit 400`),
         glashQuery<any>(`select stage, count(*)::int total, coalesce(sum(deal_value),0)::float value
                            from public.deal_proposals where stage <> 'archived' group by stage`),
+        glashQuery<any>(`select id, display_name, company_name, category, status, website, social_url, email, phone,
+                                location, notes, next_action, research_brief, follow_up_at
+                           from public.deal_prospects
+                          where status <> 'not_relevant'
+                          order by display_name asc limit 500`),
       ]);
-      return NextResponse.json({ ok: true, proposals, events, funnel });
+      return NextResponse.json({ ok: true, proposals, events, funnel, prospects });
     }
     if (resource === "audits") {
       const audits = await glashQuery<any>(`select * from public.deal_brand_audits order by updated_at desc limit 200`);
       return NextResponse.json({ ok: true, audits });
+    }
+    if (resource === "pipeline") {
+      const pipeline = await buildPipeline();
+      return NextResponse.json({ ok: true, pipeline });
     }
     if (resource === "prospects") {
       const prospects = await glashQuery<any>(`select * from public.deal_prospects order by follow_up_at asc nulls last, updated_at desc limit 500`);
       return NextResponse.json({ ok: true, prospects });
     }
     const metrics = await glashMaybeOne<any>(`select
-      (select count(*)::int from public.sales_growth_prospects) growth_prospects,
       (select count(*)::int from public.deal_proposals where status not in ('archived')) proposals,
       (select count(*)::int from public.deal_brand_audits where status not in ('archived')) audits,
       (select count(*)::int from public.deal_prospects where status not in ('converted','not_relevant')) checklist,
@@ -159,21 +306,43 @@ export async function POST(req: NextRequest) {
       if (!checkIntelligenceRateLimit(`deal-proposal:${session.email}`, 12, 60 * 60_000).allowed) {
         return NextResponse.json({ ok: false, error: "Proposal research limit reached. Please wait before generating another." }, { status: 429 });
       }
-      const brandName = str(body.brand_name, 180);
-      const targetUrl = publicUrl(body.target_url);
-      const socialUrl = publicUrl(body.social_url);
-      const focusArea = str(body.focus_area, 1200);
+      // A proposal can be raised from four places, and only the create form
+      // supplies every field by hand. From a directory company, a brand audit
+      // or a checklist entry we already know the brand, the site and what the
+      // work is about, so the seed is read off that record instead of retyped.
+      const seed = await proposalSeed(body);
+      if ("error" in seed) return NextResponse.json({ ok: false, error: seed.error }, { status: seed.status });
+
+      const brandName = str(body.brand_name, 180) || seed.brand_name;
+      const targetUrl = publicUrl(body.target_url) || seed.target_url;
+      const socialUrl = publicUrl(body.social_url) || seed.social_url;
+      const focusArea = str(body.focus_area, 1200) || seed.focus_area;
       if (!brandName || !focusArea || (!targetUrl && !socialUrl)) {
         return NextResponse.json({ ok: false, error: "Brand name, work focus, and a website or social link are required." }, { status: 400 });
       }
+      // The link is kept so the prospect card, the proposal, the audit and that
+      // person's chat tag all point at the same deal.
+      const prospectId = uuid(body.prospect_id) || seed.prospect_id;
+      const prospect = prospectId
+        ? await glashMaybeOne<any>(`select id, display_name, company_name, status from public.deal_prospects where id=$1`, [prospectId])
+        : null;
+      if (prospectId && !prospect) {
+        return NextResponse.json({ ok: false, error: "That prospect is no longer on the checklist." }, { status: 400 });
+      }
+
       const research = targetUrl ? await researchPublicSite(targetUrl, true) : null;
       const query = `${brandName} ${focusArea} market statistics report`;
       const marketSources = await searchOpenWeb(query, 8);
-      const title = str(body.title, 240) || `${brandName} ${focusArea} proposal`;
+      // A focus area can contain a full research brief. It belongs in the AI
+      // context, not verbatim in the proposal name. The generated deck supplies
+      // the concise engagement title when the sender has not written one.
+      const requestedTitle = str(body.title, 240);
+      const generationTitle = requestedTitle || `${brandName} project proposal`;
       const [content, deck] = await Promise.all([
         buildDealProposalContent({ brandName, focusArea, targetUrl, socialUrl, research, marketSources }),
-        buildProposalDeck({ brandName, focusArea, targetUrl, socialUrl, title, research, marketSources }),
+        buildProposalDeck({ brandName, focusArea, targetUrl, socialUrl, title: generationTitle, research, marketSources }),
       ]);
+      const title = requestedTitle || str(deck.cover.title, 240) || generationTitle;
       const sources = [
         ...(research?.sources || []).map((url) => ({ title: `${brandName} public website`, url, kind: "website" })),
         ...marketSources.map((source) => ({ title: source.title, url: source.url, kind: "market" })),
@@ -184,12 +353,16 @@ export async function POST(req: NextRequest) {
       }
       const proposal = await glashMaybeOne<any>(
         `insert into public.deal_proposals
-          (brand_name,target_url,social_url,recipient_email,focus_area,title,status,stage,cover_storage_path,cover_mime_type,content,deck,sources,email_subject,owner_email,created_by,updated_by)
-         values ($1,$2,$3,$4,$5,$6,'ready','ready',$7,$8,$9,$10,$11,$12,$13,$13,$13)
+          (brand_name,target_url,social_url,recipient_email,focus_area,title,status,stage,cover_storage_path,cover_mime_type,content,deck,sources,email_subject,owner_email,created_by,updated_by,prospect_id,audit_id)
+         values ($1,$2,$3,$4,$5,$6,'ready','ready',$7,$8,$9,$10,$11,$12,$13,$13,$13,$14,$15)
          returning *`,
-        [brandName, targetUrl || null, socialUrl || null, str(body.recipient_email, 320).toLowerCase() || null, focusArea, title, coverPath || null, coverPath ? "image/webp" : null, JSON.stringify(content), JSON.stringify(deck), JSON.stringify(sources), `A focused proposal for ${brandName}`, session.email],
+        [brandName, targetUrl || null, socialUrl || null, str(body.recipient_email, 320).toLowerCase() || seed.recipient_email || null, focusArea, title, coverPath || null, coverPath ? "image/webp" : null, JSON.stringify(content), JSON.stringify(deck), JSON.stringify(sources), `A focused proposal for ${brandName}`, session.email, prospect?.id || null, seed.audit_id],
       );
-      if (proposal?.id) await recordProposalEvent({ proposalId: proposal.id, type: "created", actor: session.email, detail: title });
+      if (proposal?.id) await recordProposalEvent({ proposalId: proposal.id, type: "created", actor: session.email, detail: prospect ? `${title} (from the checklist entry for ${prospect.display_name})` : title });
+      // A prospect we have written a proposal for is no longer one to research.
+      if (prospect && ["to_research", "ready"].includes(prospect.status)) {
+        await glashQuery(`update public.deal_prospects set status='contacted', updated_by=$2, updated_at=now() where id=$1`, [prospect.id, session.email]);
+      }
       await logActivity({ action: "deals.proposal.generate", page: "deals/proposals", resource_type: "deal_proposal", resource_id: proposal?.id, resource_label: title, metadata: { source_count: sources.length } });
       return NextResponse.json({ ok: true, proposal }, { status: 201 });
     }
@@ -221,6 +394,34 @@ export async function POST(req: NextRequest) {
       );
       await recordProposalEvent({ proposalId: id, type: "edited", actor: session.email, detail: title });
       return NextResponse.json({ ok: true, proposal: updated });
+    }
+
+    if (action === "rewrite_proposal_field") {
+      const id = uuid(body.id);
+      const fieldPath = str(body.field_path, 120);
+      const spec = proposalRewriteSpec(fieldPath);
+      const proposal = id ? await glashMaybeOne<any>(`select * from public.deal_proposals where id=$1`, [id]) : null;
+      if (!proposal) return NextResponse.json({ ok: false, error: "Proposal not found." }, { status: 404 });
+      if (!spec) return NextResponse.json({ ok: false, error: "That proposal field cannot be rewritten." }, { status: 400 });
+      if (!checkIntelligenceRateLimit(`deal-proposal-field:${session.email}`, 80, 60 * 60_000).allowed) {
+        return NextResponse.json({ ok: false, error: "Field rewrite limit reached. Please wait before trying again." }, { status: 429 });
+      }
+
+      // The browser sends the current editor draft because its last keystroke
+      // may still be inside the autosave debounce. It is normalised before it
+      // becomes model context, and only the requested string is returned.
+      const title = str(body.title, 240) || proposal.title;
+      const focusArea = str(body.focus_area, 1200) || proposal.focus_area;
+      const deck = normalizeDeck(body.deck ?? proposal.deck, { brandName: proposal.brand_name, focusArea, title });
+      const value = await rewriteProposalField({
+        brandName: proposal.brand_name,
+        focusArea,
+        title,
+        fieldPath,
+        currentValue: str(body.current_value, spec.maxCharacters),
+        deck,
+      });
+      return NextResponse.json({ ok: true, value });
     }
 
     if (action === "set_proposal_stage") {
@@ -312,17 +513,156 @@ export async function POST(req: NextRequest) {
       const targetUrl = publicUrl(body.target_url);
       const socialUrl = publicUrl(body.social_url);
       if (!brandName || !targetUrl) return NextResponse.json({ ok: false, error: "Brand name and a public website are required." }, { status: 400 });
+      // Raised from a directory company or a checklist prospect, the audit keeps
+      // both links so the pipeline can see it and the socials already researched
+      // are judged instead of guessed at.
+      const companyId = uuid(body.company_id);
+      const company = companyId
+        ? await glashMaybeOne<any>(`select id, prospect_id, socials from public.prospect_companies where id=$1`, [companyId])
+        : null;
+      const prospectId = uuid(body.prospect_id) || company?.prospect_id || null;
+      const socials = auditSocials(company?.socials, socialUrl);
+
       const research = await researchPublicSite(targetUrl, true);
-      const content = await buildDealBrandAudit({ brandName, targetUrl, socialUrl, research });
+      // Every platform is checked before the audit says anything about social,
+      // including the ones the website links to itself, which this used to
+      // ignore entirely. An absence is only reportable once it has been looked
+      // for, so "no social presence" now arrives with the searches that found
+      // none rather than as a conclusion drawn from silence.
+      const sweep = await sweepSocialPresence({
+        brandName,
+        targetUrl,
+        known: socials,
+        siteLinks: research.socialLinks,
+        pagesRead: research.sources.length,
+      });
+      const auditedSocials = auditSocials([...socials, ...sweep.found]);
+      const brandConsistency = await inspectBrandIdentity(brandName, targetUrl, auditedSocials);
+      const content = await buildDealBrandAudit({ brandName, targetUrl, socialUrl, research, socials: auditedSocials, brandConsistency, socialSweep: sweep });
       const overall = Math.round(content.scores.reduce((sum, item) => sum + item.score, 0) / Math.max(1, content.scores.length));
-      const sources = research.sources.map((url) => ({ title: `${brandName} public website`, url, kind: "website" }));
+      const websiteSources = research.sources.map((url) => ({ title: `${brandName} public website`, url, kind: "website" }));
+      const socialSources = auditedSocials.map((entry) => ({ title: `${brandName} ${entry.platform}`, url: entry.url, kind: "social" }));
+      const sources = [...websiteSources, ...socialSources].filter((entry, index, list) => list.findIndex((candidate) => candidate.url === entry.url) === index);
       const audit = await glashMaybeOne<any>(
-        `insert into public.deal_brand_audits (brand_name,target_url,social_url,status,overall_score,content,sources,created_by,updated_by)
-         values ($1,$2,$3,'generated',$4,$5,$6,$7,$7) returning *`,
-        [brandName, targetUrl, socialUrl || null, overall, JSON.stringify(content), JSON.stringify(sources), session.email],
+        `insert into public.deal_brand_audits (brand_name,target_url,social_url,status,overall_score,content,touchpoints,sources,created_by,updated_by,company_id,prospect_id)
+         values ($1,$2,$3,'generated',$4,$5,$6,$7,$8,$8,$9,$10) returning *`,
+        [brandName, targetUrl, socialUrl || null, overall, JSON.stringify(content), JSON.stringify(content.touchpoints || []), JSON.stringify(sources), session.email, company?.id || null, prospectId],
       );
+      if (prospectId && audit?.id) {
+        await recordProspectEvent({ prospectId, type: "Brand audit generated", detail: brandName, source: "audits", actor: session.email, metadata: { audit_id: audit.id, overall_score: overall } });
+      }
       await logActivity({ action: "deals.audit.generate", page: "deals/brand-audits", resource_type: "deal_brand_audit", resource_id: audit?.id, resource_label: brandName, metadata: { source_count: sources.length, overall_score: overall } });
       return NextResponse.json({ ok: true, audit }, { status: 201 });
+    }
+
+    if (action === "refine_audit" || action === "save_audit" || action === "set_audit_share" || action === "delete_audit") {
+      const id = uuid(body.id);
+      if (!id) return NextResponse.json({ ok: false, error: "Audit is invalid." }, { status: 400 });
+      const existing = await glashMaybeOne<any>(`select * from public.deal_brand_audits where id=$1`, [id]);
+      if (!existing) return NextResponse.json({ ok: false, error: "Audit not found." }, { status: 404 });
+
+      if (action === "delete_audit") {
+        await glashQuery(`delete from public.deal_brand_audits where id=$1`, [id]);
+        await logActivity({ action: "deals.audit.delete", page: "deals/brand-audits", resource_type: "deal_brand_audit", resource_id: id, resource_label: existing.brand_name });
+        return NextResponse.json({ ok: true });
+      }
+
+      // Turning the share off leaves the audit intact; the public link simply
+      // stops resolving. Turning it on is what the pipeline reads as "shared".
+      if (action === "set_audit_share") {
+        const enabled = body.share_enabled !== false;
+        const audit = await glashMaybeOne<any>(
+          `update public.deal_brand_audits
+              set share_enabled=$2,
+                  last_shared_at=case when $2 then coalesce(last_shared_at, now()) else last_shared_at end,
+                  updated_by=$3, updated_at=now()
+            where id=$1 returning *`,
+          [id, enabled, session.email],
+        );
+        if (enabled && existing.prospect_id && !existing.last_shared_at) {
+          await recordProspectEvent({ prospectId: existing.prospect_id, stage: "audit_shared", type: "Brand audit link shared", detail: existing.brand_name, source: "audits", actor: session.email, metadata: { audit_id: id } });
+        }
+        return NextResponse.json({ ok: true, audit });
+      }
+
+      // Hand edits. The report is ours to correct, so the whole content object
+      // is replaced with what the editor sends, touchpoints kept to our own list.
+      if (action === "save_audit") {
+        const incoming = (body.content && typeof body.content === "object" ? body.content : {}) as Partial<DealAuditContent>;
+        const scores = Array.isArray(incoming.scores) ? incoming.scores.slice(0, 8) : existing.content?.scores || [];
+        const known = new Map((Array.isArray(incoming.touchpoints) ? incoming.touchpoints : []).map((entry: any) => [String(entry?.key || ""), entry]));
+        const touchpoints = AUDIT_TOUCHPOINTS.map((entry) => {
+          const item = known.get(entry.key) || {};
+          const state = String(item.state || "unknown");
+          return {
+            key: entry.key,
+            label: entry.label,
+            state: ["strong", "adequate", "weak", "missing", "unknown"].includes(state) ? state : "unknown",
+            observation: str(item.observation, 1200),
+            fix: str(item.fix, 1200) || entry.asks,
+            evidence: Array.isArray(item.evidence) ? item.evidence.map((value: unknown) => str(value, 500)).filter(Boolean).slice(0, 4) : [],
+          };
+        });
+        const content = { ...existing.content, ...incoming, touchpoints };
+        const overall = Math.round(scores.reduce((sum: number, item: any) => sum + (Number(item?.score) || 0), 0) / Math.max(1, scores.length));
+        const audit = await glashMaybeOne<any>(
+          `update public.deal_brand_audits
+              set brand_name=coalesce(nullif($2,''), brand_name), overall_score=$3, content=$4::jsonb,
+                  touchpoints=$5::jsonb, status='reviewed', updated_by=$6, updated_at=now()
+            where id=$1 returning *`,
+          [id, str(body.brand_name, 180), overall, JSON.stringify(content), JSON.stringify(touchpoints), session.email],
+        );
+        return NextResponse.json({ ok: true, audit });
+      }
+
+      // Refine: re-research and rewrite against a written instruction, keeping
+      // whatever still holds. The note steers the rewrite, it is never evidence.
+      if (!checkIntelligenceRateLimit(`deal-audit:${session.email}`, 12, 60 * 60_000).allowed) {
+        return NextResponse.json({ ok: false, error: "Brand audit research limit reached. Please wait before refining again." }, { status: 429 });
+      }
+      const refineNote = str(body.note, 1200);
+      if (!refineNote) return NextResponse.json({ ok: false, error: "Say what should be reconsidered." }, { status: 400 });
+      const research = await researchPublicSite(existing.target_url, true);
+      const company = existing.company_id
+        ? await glashMaybeOne<any>(`select socials from public.prospect_companies where id=$1`, [existing.company_id])
+        : null;
+      const socials = auditSocials(company?.socials, existing.social_url || "");
+      // A refine re-researches, so the platform sweep runs again too: a channel
+      // opened since the first audit is picked up, and one that still does not
+      // exist stays evidenced rather than inherited from the previous version.
+      const sweep = await sweepSocialPresence({
+        brandName: existing.brand_name,
+        targetUrl: existing.target_url,
+        known: socials,
+        siteLinks: research.socialLinks,
+        pagesRead: research.sources.length,
+      });
+      const auditedSocials = auditSocials([...socials, ...sweep.found]);
+      const brandConsistency = await inspectBrandIdentity(existing.brand_name, existing.target_url, auditedSocials);
+      const content = await buildDealBrandAudit({
+        brandName: existing.brand_name,
+        targetUrl: existing.target_url,
+        socialUrl: existing.social_url || "",
+        research,
+        socials: auditedSocials,
+        brandConsistency,
+        socialSweep: sweep,
+        refineNote,
+        previous: existing.content || null,
+      });
+      const overall = Math.round(content.scores.reduce((sum, item) => sum + item.score, 0) / Math.max(1, content.scores.length));
+      const websiteSources = research.sources.map((url) => ({ title: `${existing.brand_name} public website`, url, kind: "website" }));
+      const socialSources = auditedSocials.map((entry) => ({ title: `${existing.brand_name} ${entry.platform}`, url: entry.url, kind: "social" }));
+      const sources = [...websiteSources, ...socialSources].filter((entry, index, list) => list.findIndex((candidate) => candidate.url === entry.url) === index);
+      const audit = await glashMaybeOne<any>(
+        `update public.deal_brand_audits
+            set overall_score=$2, content=$3::jsonb, touchpoints=$4::jsonb, sources=$5::jsonb,
+                status='generated', refined_count=refined_count+1, updated_by=$6, updated_at=now()
+          where id=$1 returning *`,
+        [id, overall, JSON.stringify(content), JSON.stringify(content.touchpoints || []), JSON.stringify(sources), session.email],
+      );
+      await logActivity({ action: "deals.audit.refine", page: "deals/brand-audits", resource_type: "deal_brand_audit", resource_id: id, resource_label: existing.brand_name, metadata: { note: refineNote.slice(0, 200) } });
+      return NextResponse.json({ ok: true, audit });
     }
 
     if (action === "save_prospect") {

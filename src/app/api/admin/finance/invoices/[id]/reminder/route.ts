@@ -31,12 +31,12 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   const db = financeDb();
   const { data: invoice, error } = await db
     .from("finance_invoices")
-    .select("id, invoice_number, client_name, client_email, currency, total, status, due_date, public_token, user_id")
+    .select("id, invoice_number, client_name, client_email, currency, total, amount_paid, balance_due, payment_percentage, status, due_date, public_token, user_id")
     .eq("id", id)
     .maybeSingle();
   if (error || !invoice) return NextResponse.json({ error: "Invoice not found." }, { status: 404 });
-  if (!["sent", "overdue"].includes(String(invoice.status))) {
-    return NextResponse.json({ error: "Payment reminders are available only for sent or overdue invoices awaiting payment." }, { status: 409 });
+  if (!["sent", "partially_paid", "overdue"].includes(String(invoice.status))) {
+    return NextResponse.json({ error: "Payment reminders are available only for invoices with an outstanding balance." }, { status: 409 });
   }
 
   const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString();
@@ -66,12 +66,14 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     }
   }
 
-  const amount = money(Number(invoice.total || 0), String(invoice.currency || "NGN"));
+  const balance = Number(invoice.balance_due ?? Math.max(Number(invoice.total || 0) - Number(invoice.amount_paid || 0), 0));
+  const amount = money(balance, String(invoice.currency || "NGN"));
   const invoiceUrl = absolutePublicUrl(`/invoice/${invoice.public_token}`);
   const dueLine = invoice.due_date
     ? ` It was due on ${new Date(`${invoice.due_date}T12:00:00Z`).toLocaleDateString("en", { day: "numeric", month: "long", year: "numeric", timeZone: "UTC" })}.`
     : "";
-  const message = `Hello ${invoice.client_name || "there"}, this is a friendly payment reminder for invoice ${invoice.invoice_number} (${amount}), which is still awaiting payment.${dueLine} Review the invoice or submit your bank-transfer confirmation here: ${invoiceUrl}`;
+  const progressLine = Number(invoice.amount_paid || 0) > 0 ? ` ${Number(invoice.payment_percentage || 0).toFixed(0)}% has been paid; the remaining balance is ${amount}.` : "";
+  const message = `Hello ${invoice.client_name || "there"}, this is a friendly payment reminder for invoice ${invoice.invoice_number}.${progressLine || ` The outstanding amount is ${amount}.`}${dueLine} Review the invoice or submit your bank-transfer confirmation here: ${invoiceUrl}`;
 
   let chatMessageId: string | null = null;
   let chatSentAt: string | null = null;

@@ -34,7 +34,7 @@ export async function GET() {
   }
 
   // Independent lookups run together to keep the overview snappy.
-  const [projects, unreadMessages, meetingIds, resumeRows, attendanceRows] = await Promise.all([
+  const [projects, unreadMessages, meetingIds, attendanceRows] = await Promise.all([
     glashQuery<RecentProject>(
       `select distinct p.id,
               p.name as title,
@@ -78,13 +78,6 @@ export async function GET() {
         where team_member_id = $1`,
       [session.id],
     ).catch(() => []),
-    glashQuery<Record<string, unknown>>(
-      `select headline, about, avatar_url, location, skills, past_roles, projects, education
-         from public.team_resumes
-        where team_member_id = $1
-        limit 1`,
-      [session.id],
-    ).catch(() => []),
     glashQuery<Attendance>(
       `select clock_in_at, clock_out_at
          from public.team_time_entries
@@ -93,20 +86,6 @@ export async function GET() {
       [session.id, lagosDate()],
     ).catch(() => []),
   ]);
-
-  // Resume completion - the share of key profile fields that are filled in.
-  // Drives the "finish your resume" nudge on the overview.
-  const resume = resumeRows[0] || null;
-  const RESUME_FIELDS = ["headline", "about", "avatar_url", "location", "skills", "past_roles", "projects", "education"];
-  const isFilled = (v: unknown) => {
-    if (v == null) return false;
-    if (Array.isArray(v)) return v.length > 0;
-    if (typeof v === "string") return v.trim().length > 0;
-    return true;
-  };
-  const resumeCompletion = resume
-    ? Math.round((RESUME_FIELDS.filter((k) => isFilled(resume[k])).length / RESUME_FIELDS.length) * 100)
-    : 0;
 
   let upcomingMeetings: Meeting[] = [];
   if (meetingIds.length) {
@@ -134,7 +113,6 @@ export async function GET() {
       },
       recent_work: recentProjects,
       upcoming_meetings: upcomingMeetings,
-      resume_completion: resumeCompletion,
       attendance: attendanceRows[0] || null,
     },
   });

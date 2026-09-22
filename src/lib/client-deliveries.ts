@@ -24,12 +24,77 @@ export const DELIVERY_FILE_ACCEPT = [
   ".txt", ".md", ".csv", ".json",
 ].join(",");
 
-const DELIVERY_SYSTEM_FILES = new Set([".ds_store", "thumbs.db", "desktop.ini"]);
+const DELIVERY_SYSTEM_FILES = new Set([
+  ".ds_store", "thumbs.db", "ehthumbs.db", "desktop.ini", ".localized", "icon\r",
+]);
+const DELIVERY_SYSTEM_FOLDERS = new Set([
+  "__macosx", ".git", ".svn", ".spotlight-v100", ".trashes", ".fseventsd", ".temporaryitems", "$recycle.bin",
+]);
 
-/** Ignore operating-system and source-control metadata included by folder pickers. */
+/**
+ * Ignore operating-system and source-control metadata included by folder pickers.
+ *
+ * macOS writes an AppleDouble companion (`._Name`) beside every file it copies
+ * to a non-Mac disk, zip or network share. They hold Finder metadata, not the
+ * client's work, and they have no real extension - so without this they were
+ * rejected as an unknown file type and blocked the whole delivery.
+ */
 export function isIgnoredDeliveryPath(path: string) {
   const segments = path.replaceAll("\\", "/").toLowerCase().split("/").filter(Boolean);
-  return segments.some((segment) => DELIVERY_SYSTEM_FILES.has(segment) || segment === "__macosx" || segment === ".git");
+  return segments.some((segment) => DELIVERY_SYSTEM_FILES.has(segment)
+    || DELIVERY_SYSTEM_FOLDERS.has(segment)
+    || segment.startsWith("._"));
+}
+
+/**
+ * Every extension a delivery accepts, derived from the picker's accept list
+ * plus the raster types it covers with "image/*". Kept in step with the
+ * server gate in upload-security.ts, so a file screened in here is one the
+ * server will also take (bar a content check it cannot see in advance).
+ */
+export const DELIVERY_ALLOWED_EXTENSIONS = new Set([
+  "jpg", "jpeg", "png", "gif", "webp",
+  ...DELIVERY_FILE_ACCEPT.split(",")
+    .map((entry) => entry.trim().toLowerCase())
+    .filter((entry) => entry.startsWith("."))
+    .map((entry) => entry.slice(1)),
+]);
+
+/** The extension of a file name; a leading dot marks a hidden file, not a type. */
+export function deliveryFileExtension(name: string) {
+  const lower = name.trim().toLowerCase();
+  const dot = lower.lastIndexOf(".");
+  return dot > 0 && dot < lower.length - 1 ? lower.slice(dot + 1) : "";
+}
+
+export type ExcludedDeliveryFile = { file: File; path: string; reason: string };
+
+/**
+ * Splits a selection into files that will be delivered and files that will
+ * not, with a plain reason for each exclusion, so the sender can see exactly
+ * what is being left out before anything uploads.
+ */
+export function screenDeliveryFiles(incoming: File[]): { accepted: File[]; excluded: ExcludedDeliveryFile[] } {
+  const accepted: File[] = [];
+  const excluded: ExcludedDeliveryFile[] = [];
+  for (const file of incoming) {
+    const path = deliveryFileRelativePath(file);
+    const ext = deliveryFileExtension(file.name);
+    if (isIgnoredDeliveryPath(path)) {
+      excluded.push({ file, path, reason: "System file (created by macOS or Windows, not part of the work)" });
+    } else if (!file.size) {
+      excluded.push({ file, path, reason: "Empty file" });
+    } else if (!ext) {
+      excluded.push({ file, path, reason: "No file type" });
+    } else if (!DELIVERY_ALLOWED_EXTENSIONS.has(ext)) {
+      excluded.push({ file, path, reason: `.${ext} files cannot be delivered` });
+    } else if (file.size > MAX_DELIVERY_FILE_BYTES) {
+      excluded.push({ file, path, reason: "Larger than the 50MB per-file limit" });
+    } else {
+      accepted.push(file);
+    }
+  }
+  return { accepted, excluded };
 }
 
 /** Preserve browser folder-upload paths while keeping ordinary files compatible. */

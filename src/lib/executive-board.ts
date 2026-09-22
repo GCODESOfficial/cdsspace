@@ -15,12 +15,36 @@ export const BUDGET_CATEGORIES = [
   "other",
 ] as const;
 
+export const EXPANSION_BUDGET_TYPES = [
+  "new_market",
+  "new_office",
+  "hiring",
+  "technology",
+  "product",
+  "infrastructure",
+  "acquisition",
+  "other",
+] as const;
+export const EXPANSION_BUDGET_STATUSES = [
+  "idea",
+  "researching",
+  "planned",
+  "approved",
+  "on_hold",
+  "launched",
+  "cancelled",
+] as const;
+export const EXPANSION_BUDGET_PRIORITIES = ["low", "medium", "high", "critical"] as const;
+
 export const TARGET_STATUSES = ["on_track", "at_risk", "off_track", "achieved"] as const;
 export const MODEL_STATUSES = ["exploring", "piloting", "active", "paused", "retired"] as const;
 export const STEP_STATUSES = ["todo", "doing", "blocked", "done"] as const;
 export const VAULT_KINDS = ["legal", "budget", "target", "revenue", "attachment", "other"] as const;
 
 export type BudgetStatus = (typeof BUDGET_STATUSES)[number];
+export type ExpansionBudgetType = (typeof EXPANSION_BUDGET_TYPES)[number];
+export type ExpansionBudgetStatus = (typeof EXPANSION_BUDGET_STATUSES)[number];
+export type ExpansionBudgetPriority = (typeof EXPANSION_BUDGET_PRIORITIES)[number];
 export type TargetStatus = (typeof TARGET_STATUSES)[number];
 export type ModelStatus = (typeof MODEL_STATUSES)[number];
 export type StepStatus = (typeof STEP_STATUSES)[number];
@@ -42,6 +66,28 @@ export const STATUS_LABELS: Record<string, string> = {
   doing: "In progress",
   blocked: "Blocked",
   done: "Done",
+  idea: "Idea",
+  researching: "Researching",
+  planned: "Planned",
+  approved: "Approved",
+  on_hold: "On hold",
+  launched: "Launched",
+  cancelled: "Cancelled",
+  low: "Low",
+  medium: "Medium",
+  high: "High",
+  critical: "Critical",
+};
+
+export const EXPANSION_TYPE_LABELS: Record<ExpansionBudgetType, string> = {
+  new_market: "New market",
+  new_office: "New office",
+  hiring: "Team growth",
+  technology: "Technology",
+  product: "New product",
+  infrastructure: "Infrastructure",
+  acquisition: "Acquisition",
+  other: "Other",
 };
 
 export const KIND_LABELS: Record<string, string> = {
@@ -67,6 +113,33 @@ export interface Budget {
   status: BudgetStatus;
   notes: string | null;
   created_at: string;
+  updated_at: string;
+}
+
+export interface ExpansionBudget {
+  id: string;
+  title: string;
+  expansion_type: ExpansionBudgetType;
+  location: string | null;
+  rationale: string | null;
+  target_start: string;
+  target_end: string | null;
+  currency: string;
+  estimated_amount: number;
+  contingency_amount: number;
+  committed_amount: number;
+  funding_source: string | null;
+  owner: string | null;
+  priority: ExpansionBudgetPriority;
+  status: ExpansionBudgetStatus;
+  expected_outcome: string | null;
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ExpansionBudgetDraft {
+  payload: Partial<ExpansionBudget>;
   updated_at: string;
 }
 
@@ -166,10 +239,62 @@ export function budgetVariance(budget: Pick<Budget, "planned_amount" | "actual_a
   return Number(budget.planned_amount || 0) - Number(budget.actual_amount || 0);
 }
 
+export function expansionRequirement(
+  budget: Pick<ExpansionBudget, "estimated_amount" | "contingency_amount">,
+) {
+  return Number(budget.estimated_amount || 0) + Number(budget.contingency_amount || 0);
+}
+
+export function expansionFundingGap(
+  budget: Pick<ExpansionBudget, "estimated_amount" | "contingency_amount" | "committed_amount">,
+) {
+  return Math.max(0, expansionRequirement(budget) - Number(budget.committed_amount || 0));
+}
+
 export function targetProgress(target: Pick<Target, "target_value" | "current_value">) {
   const goal = Number(target.target_value || 0);
   if (goal <= 0) return 0;
   return Math.max(0, Math.min(100, Math.round((Number(target.current_value || 0) / goal) * 100)));
+}
+
+/**
+ * The roll-up behind the Targets summary: everything being aimed at, what has
+ * landed, and what is still outstanding.
+ *
+ * Only targets whose unit names a currency are added together, because a
+ * headcount, a percentage and a sum of money do not share a scale and adding
+ * them would produce a number that means nothing. Everything else is counted
+ * and reported separately, so a non-money target is never silently dropped.
+ */
+export function summariseTargets(targets: Target[], view: BoardViewCurrency) {
+  const into = (amount: number, from: string) => convertMoney(amount, from, view) ?? Number(amount || 0);
+  let goal = 0;
+  let achieved = 0;
+  let money = 0;
+  for (const target of targets) {
+    const unit = currencyUnit(target.unit);
+    if (!unit) continue;
+    money += 1;
+    goal += into(Number(target.target_value || 0), unit);
+    // A target beyond its goal still only contributes its goal to the roll-up,
+    // so one runaway line cannot mask the rest of the board falling short.
+    achieved += Math.min(into(Number(target.current_value || 0), unit), into(Number(target.target_value || 0), unit));
+  }
+  return {
+    currency: view,
+    /** How many targets carry a money unit and are therefore in the totals. */
+    monetary: money,
+    /** Targets left out of the totals because their unit is not money. */
+    nonMonetary: targets.length - money,
+    total: targets.length,
+    goal,
+    achieved,
+    pending: Math.max(0, goal - achieved),
+    progress: goal > 0 ? Math.max(0, Math.min(100, Math.round((achieved / goal) * 100))) : 0,
+    achievedCount: targets.filter((target) => target.status === "achieved").length,
+    onTrackCount: targets.filter((target) => target.status === "on_track").length,
+    atRiskCount: targets.filter((target) => target.status === "at_risk" || target.status === "off_track").length,
+  };
 }
 
 export function planProgress(steps: Pick<RevenueStep, "status">[]) {

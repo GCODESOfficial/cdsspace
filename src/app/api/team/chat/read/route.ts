@@ -1,7 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase";
-import { getChatViewer } from "@/lib/team-chat-auth";
+import { getChatViewer, viewerMemberId } from "@/lib/team-chat-auth";
 import { glashQuery } from "@/lib/glashdb/postgres";
 
 export const runtime = "nodejs";
@@ -12,7 +12,8 @@ export async function POST(req: Request) {
   if (!viewer || !supabaseAdmin) {
     return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
   }
-  if (viewer.kind !== "team") return NextResponse.json({ ok: true }); // admin has no per-thread read state
+  const memberId = viewerMemberId(viewer);
+  if (!memberId) return NextResponse.json({ ok: true }); // super admin has no per-thread read state
 
   const { threadId } = await req.json().catch(() => ({}));
   if (!threadId) return NextResponse.json({ ok: false, error: "threadId required" }, { status: 400 });
@@ -22,7 +23,7 @@ export async function POST(req: Request) {
   const { error } = await db
     .from("team_chat_participants")
     .upsert(
-      { thread_id: threadId, team_member_id: viewer.session.id, last_read_at: now },
+      { thread_id: threadId, team_member_id: memberId, last_read_at: now },
       { onConflict: "thread_id,team_member_id" }
     );
   if (error) return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
@@ -33,7 +34,7 @@ export async function POST(req: Request) {
   await db
     .from("team_notifications")
     .update({ read_at: now })
-    .eq("recipient_id", viewer.session.id)
+    .eq("recipient_id", memberId)
     .eq("thread_id", threadId)
     .is("read_at", null);
 
@@ -47,14 +48,14 @@ export async function POST(req: Request) {
          and m.deleted_at is null
        on conflict (message_id, viewer_key)
        do update set read_at = excluded.read_at, last_seen_at = excluded.last_seen_at`,
-      [threadId, viewer.session.id, viewer.session.id, now],
+      [threadId, memberId, memberId, now],
     );
 
     await glashQuery(
       `update public.team_chat_participants
        set last_seen_at = $3::timestamptz
        where thread_id = $1 and team_member_id = $2::uuid`,
-      [threadId, viewer.session.id, now],
+      [threadId, memberId, now],
     );
   } catch {
     /* receipt/presence writes are best-effort */

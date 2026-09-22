@@ -1,8 +1,16 @@
 'use server'
 
+import {
+    completeClientEmailVerification,
+    consumeClientEmailVerification,
+    consumeClientSignupCode,
+    findPendingClientVerification,
+    issueClientEmailVerification,
+    issueClientSignupVerification,
+} from '@/lib/client-email-verification'
 import { createClient } from '@/lib/supabase/server'
 import { cookies } from 'next/headers'
-import { ensureClientProfile } from '@/lib/client-account'
+import { ensureClientProfile, isPasswordAccount } from '@/lib/client-account'
 import { clearClientDashboardSessionCookie, setClientDashboardSessionCookie } from '@/lib/client-dashboard-session'
 import { clearMarketerDashboardSessionCookie } from '@/lib/marketer-dashboard-session'
 import { clientDashboardPath } from '@/lib/client-routes'
@@ -40,6 +48,7 @@ import {
 } from '@/lib/client-login-security'
 import { getGlashDbAdmin } from '@/lib/glashdb'
 import { BLOCKED_EMAIL_MESSAGE, isBlockedEmail } from '@/lib/security/email-blocklist'
+import { publicSiteOrigin } from '@/lib/public-site'
 
 type AuthFormData = {
     email: string;
@@ -65,6 +74,7 @@ function validPassword(value: unknown) {
 }
 
 function getSiteUrl() {
+    if (process.env.NODE_ENV === 'production') return publicSiteOrigin();
     // Use explicit env var if set, otherwise fall back based on environment
     if (process.env.NEXT_PUBLIC_SITE_URL) {
         return process.env.NEXT_PUBLIC_SITE_URL;
@@ -112,6 +122,12 @@ export async function login(formData: AuthFormData) {
     })
 
     if (error) {
+        // GlashDB refuses accounts it never confirmed with "email not verified".
+        // That is not a wrong password, so it must not count toward the
+        // five-attempt lockout or tell the owner their password is incorrect.
+        if (/not (verified|confirmed)/i.test(error.message || '')) {
+            return { error: 'This email is not verified yet. Sign up again with the same email to receive a new verification code.', unverified: true }
+        }
         const failure = await recordClientLoginFailure(email);
         return failure.locked
             ? { error: 'Five unsuccessful attempts were reached. Reset your password to continue.', locked: true }
@@ -122,17 +138,33 @@ export async function login(formData: AuthFormData) {
         return { error: 'Sign in completed without a user session. Please try again.' }
     }
 
-    if (!data.user.email || !(data.user.email_confirmed_at || data.user.confirmed_at)) {
+    // GlashDB now confirms every password account on creation, so its flag no
+    // longer proves the address. The CDS Space verification link does, and it
+    // is checked before any profile is created or any admin is notified.
+    if (!data.user.email) {
         await supabase.auth.signOut({ scope: 'global' }).catch(() => undefined)
         await clearClientDashboardSessionCookie()
         return { error: 'Verify your email address before signing in.' }
+    }
+    if (isPasswordAccount(data.user)) {
+        const verified = await glashMaybeOne<{ id: string }>(
+            'select id from public.profiles where id = $1 and email_verified_at is not null limit 1',
+            [data.user.id],
+        );
+        if (!verified) {
+            await supabase.auth.signOut({ scope: 'global' }).catch(() => undefined)
+            await clearClientDashboardSessionCookie()
+            return { error: 'Verify your email address before signing in. Sign up again with the same email to receive a new verification code.', unverified: true }
+        }
     }
 
     const profile = await ensureClientProfile(data.user)
     if (profile.account_status !== 'active') {
         await supabase.auth.signOut({ scope: 'global' })
         await clearClientDashboardSessionCookie()
-        return { error: 'This CDS Space business account is closed. Contact support if you need help restoring access.' }
+        return { error: profile.account_status === 'suspended'
+            ? 'This CDS Space business account is temporarily suspended. Use a previously connected social sign-in or contact support to restore access.'
+            : 'This CDS Space business account is closed. Contact support if you need help restoring access.' }
     }
 
     const nextPath = getSafeNextPath(formData.next);
@@ -232,7 +264,9 @@ export async function verifyClientLoginOtp(input: { challengeId: string; otp: st
     if (profile.account_status !== 'active') {
         await supabase.auth.signOut({ scope: 'global' }).catch(() => undefined);
         await clearClientDashboardSessionCookie();
-        return { error: 'This CDS Space business account is closed.' }
+        return { error: profile.account_status === 'suspended'
+            ? 'This CDS Space business account is temporarily suspended.'
+            : 'This CDS Space business account is closed.' }
     }
 
     await Promise.all([
@@ -329,42 +363,47 @@ export async function signup(formData: AuthFormData) {
         return { error: 'This client invitation is invalid, expired, or belongs to another email address.' }
     }
 
-    // Generate and deliver the verification link ourselves so activation does
-    // not depend on an auth-provider dashboard toggle or provider email theme.
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const admin = getGlashDbAdmin() as any;
-    const existing = await glashMaybeOne<{ id: string; email_confirmed_at: string | null }>(
-        'select id, email_confirmed_at from auth.users where lower(email) = $1 limit 1',
+    const alreadyVerified = await glashMaybeOne<{ id: string }>(
+        'select id from public.profiles where lower(email) = $1 and email_verified_at is not null limit 1',
         [deliverableEmail.email],
     );
-    if (existing?.email_confirmed_at) {
+    if (alreadyVerified) {
         // Do not disclose account existence through the public sign-up form.
         return { success: true, resendInSeconds: CLIENT_SIGNUP_RESEND_SECONDS }
     }
 
-    const linkResult = existing
-        ? await admin.auth.admin.generateLink({
-            type: 'magiclink',
-            email: deliverableEmail.email,
-            options: { redirectTo: `${siteUrl}/auth/callback?next=${encodeURIComponent(nextPath)}` },
-        })
-        : await admin.auth.admin.generateLink({
-            type: 'signup',
-            email: deliverableEmail.email,
-            password: validated.data.password,
-            options: {
-                data: {
-                    full_name: validated.data.fullName,
-                    phone_number: validated.data.phoneNumber,
-                    company_name: validated.data.companyName,
-                    client_invite_id: invite?.id || null,
-                },
-                redirectTo: `${siteUrl}/auth/callback?next=${encodeURIComponent(nextPath)}`,
-            },
-        });
-    const actionLink = linkResult.data?.properties?.action_link;
-    const createdUserId = existing ? null : linkResult.data?.user?.id;
-    if (linkResult.error || !actionLink) {
+    // Created unconfirmed through the admin API, which sends no GlashDB email
+    // of its own. The branded CDS Space link below is the only way in, and
+    // following it confirms the account through the admin API.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const accountAdmin = getGlashDbAdmin() as any;
+    const signup = await accountAdmin.auth.admin.createUser({
+        email: deliverableEmail.email,
+        password: validated.data.password,
+        email_confirm: false,
+        user_metadata: {
+            full_name: validated.data.fullName,
+            phone_number: validated.data.phoneNumber,
+            company_name: validated.data.companyName,
+            client_invite_id: invite?.id || null,
+        },
+    });
+
+    let userId = signup.data?.user?.id || null;
+    if (signup.error || !userId) {
+        // The address already has an account that was never verified: send a
+        // fresh link for that account instead of failing.
+        const pending = await findPendingClientVerification(deliverableEmail.email);
+        if (!pending) {
+            return { error: 'We could not create the account. Please try again, or sign up with Google.' }
+        }
+        userId = pending.user_id;
+    }
+
+    let issued: Awaited<ReturnType<typeof issueClientSignupVerification>>;
+    try {
+        issued = await issueClientSignupVerification({ userId, email: deliverableEmail.email, nextPath, siteUrl });
+    } catch {
         return { error: 'We could not prepare the verification email. Please try again.' }
     }
 
@@ -372,11 +411,14 @@ export async function signup(formData: AuthFormData) {
         await sendClientSignupVerification({
             email: deliverableEmail.email,
             name: validated.data.fullName,
-            actionLink,
+            actionLink: issued.link,
+            code: issued.code,
         });
     } catch {
-        if (createdUserId) {
-            await admin.auth.admin.deleteUser(createdUserId).catch(() => undefined);
+        // The account exists but its owner can never be told how to verify
+        // it. Remove it so the address can be used again.
+        if (signup.data?.user?.id) {
+            await accountAdmin.auth.admin.deleteUser(signup.data.user.id).catch(() => undefined);
         }
         return { error: 'We could not deliver the verification email. Check the address and try again.' }
     }
@@ -389,7 +431,7 @@ export async function resendClientSignupVerification(input: { email: string; nex
     const email = normalizeClientEmail(input.email);
     const generic = {
         success: true,
-        message: 'If this address has a pending CDS Space account, a new verification link has been sent.',
+        message: 'If this address has a pending CDS Space account, a new code has been sent.',
         resendInSeconds: CLIENT_SIGNUP_RESEND_SECONDS,
     };
     if (isBlockedEmail(email)) return generic;
@@ -402,32 +444,55 @@ export async function resendClientSignupVerification(input: { email: string; nex
 
     const deliverableEmail = await verifyNewAccountEmail(email);
     if (!deliverableEmail.ok) return generic;
-    const pending = await glashMaybeOne<{ id: string; full_name: string | null }>(
-        `select u.id, u.raw_user_meta_data->>'full_name' as full_name
-           from auth.users u
-          where lower(u.email) = $1 and u.email_confirmed_at is null
-          limit 1`,
-        [deliverableEmail.email],
-    );
+    const pending = await findPendingClientVerification(deliverableEmail.email);
     if (!pending) return generic;
 
     try {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const admin = getGlashDbAdmin() as any;
-        const { data, error } = await admin.auth.admin.generateLink({
-            type: 'magiclink',
+        const issued = await issueClientSignupVerification({
+            userId: pending.user_id,
             email: deliverableEmail.email,
-            options: {
-                redirectTo: `${getSiteUrl()}/auth/callback?next=${encodeURIComponent(getSafeNextPath(input.next))}`,
-            },
+            nextPath: getSafeNextPath(input.next || pending.next_path),
+            siteUrl: getSiteUrl(),
         });
-        const actionLink = data?.properties?.action_link;
-        if (error || !actionLink) return generic;
-        await sendClientSignupVerification({ email: deliverableEmail.email, name: pending.full_name, actionLink });
+        await sendClientSignupVerification({ email: deliverableEmail.email, name: null, actionLink: issued.link, code: issued.code });
     } catch {
         return { error: 'The verification email could not be resent. Please try again.' }
     }
     return generic;
+}
+
+/**
+ * Checks the six-digit code from the sign-up email. Only email/password
+ * sign-ups get one: Google and LinkedIn have already proved the address.
+ */
+export async function verifyClientSignupCode(input: { email: string; code: string; next?: string | null }) {
+    const email = normalizeClientEmail(input.email);
+    const code = String(input.code || '').replace(/\D/g, '');
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/i.test(email) || !/^\d{6}$/.test(code)) {
+        return { error: 'Enter the six-digit code from the email.' }
+    }
+    const context = await clientRequestContext();
+    const blocked = await consumeSecurityRateLimit({
+        bucket: 'client-signup-code-network',
+        identifier: context.ipHash,
+        limit: 30,
+        windowSeconds: 15 * 60,
+        blockSeconds: 15 * 60,
+    });
+    if (blocked) return { error: 'Too many attempts. Wait a few minutes and try again.' }
+
+    const result = await consumeClientSignupCode(email, code).catch(() => null);
+    if (!result) return { error: 'We could not check the code. Please try again.' }
+    if (result.status === 'wrong') {
+        return { error: `That code is incorrect. ${result.attemptsRemaining} ${result.attemptsRemaining === 1 ? 'attempt' : 'attempts'} remaining.` }
+    }
+    if (result.status === 'expired') {
+        return { error: 'This code has expired or was replaced. Request a new code.', expired: true }
+    }
+
+    await completeClientEmailVerification(result.spent);
+    const next = getSafeNextPath(input.next || result.spent.next_path);
+    return { success: true, next: `/login?verified=1&next=${encodeURIComponent(next)}` }
 }
 
 export async function requestClientPasswordReset(input: { email: string; botToken?: string | null }) {
@@ -447,20 +512,23 @@ export async function requestClientPasswordReset(input: { email: string; botToke
     if (networkBlocked || identityBlocked) return generic;
 
     try {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const admin = getGlashDbAdmin() as any;
-        const { data, error } = await admin.auth.admin.generateLink({
-            type: 'recovery',
-            email,
-            options: { redirectTo: `${getSiteUrl().replace(/\/$/, '')}/auth/recovery` },
-        });
-        const tokenHash = data?.properties?.hashed_token;
-        if (!error && tokenHash) {
-            // Keep the user-facing recovery link on the canonical CDS Space
-            // origin. The fragment is not sent in HTTP requests or referrers;
-            // the browser exchanges it directly with the auth provider.
-            const recoveryLink = `${getSiteUrl().replace(/\/$/, '')}/auth/recovery#token_hash=${encodeURIComponent(tokenHash)}&type=recovery`;
-            await sendClientPasswordReset({ email, actionLink: recoveryLink });
+        // GlashDB's own recovery link cannot be completed (its verify step
+        // fails), so the reset is a CDS Space link that the server honours by
+        // setting the password through the admin API. Only verified clients
+        // have a profile, which is the account this looks up.
+        const account = await glashMaybeOne<{ id: string }>(
+            'select id from public.profiles where lower(email) = $1 and email_verified_at is not null limit 1',
+            [email],
+        );
+        if (account) {
+            const resetLink = await issueClientEmailVerification({
+                userId: account.id,
+                email,
+                nextPath: '/login',
+                siteUrl: getSiteUrl(),
+                purpose: 'password_reset',
+            });
+            await sendClientPasswordReset({ email, actionLink: resetLink });
         }
     } catch {
         // Deliberately return the same response so account existence is never disclosed.
@@ -468,21 +536,24 @@ export async function requestClientPasswordReset(input: { email: string; botToke
     return generic;
 }
 
-export async function completeClientPasswordReset(input: { password: string; confirmPassword: string }) {
+export async function completeClientPasswordReset(input: { password: string; confirmPassword: string; token?: string | null }) {
     if (input.password !== input.confirmPassword || !validPassword(input.password)) {
         return { error: 'Use 8–128 characters with uppercase, lowercase, number and symbol.' }
     }
-    const supabase = await createClient();
-    const user = await getVerifiedAuthUser(supabase.auth);
-    if (!user?.email) return { error: 'This recovery session expired. Request another reset link.' }
-    const { error } = await supabase.auth.updateUser({ password: input.password });
+    // The link is the authority, not a session: GlashDB cannot issue one to a
+    // recovering client. Spending the token here makes the link single-use.
+    const spent = input.token ? await consumeClientEmailVerification(input.token, 'password_reset') : null;
+    if (!spent) return { error: 'This reset link is invalid or expired. Request another reset link.' }
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const admin = getGlashDbAdmin() as any;
+    const { error } = await admin.auth.admin.updateUserById(spent.user_id, { password: input.password });
     if (error) return { error: 'The password could not be updated. Request another reset link.' }
 
     await Promise.all([
-        clearClientLoginFailures(user.email),
-        glashQuery('delete from public.client_login_verifications where user_id = $1::uuid', [user.id]),
+        clearClientLoginFailures(spent.email),
+        glashQuery('delete from public.client_login_verifications where user_id = $1::uuid', [spent.user_id]),
     ]);
-    await supabase.auth.signOut({ scope: 'global' }).catch(() => undefined);
     await clearClientDashboardSessionCookie();
     return { success: true }
 }

@@ -1,0 +1,11 @@
+import { NextResponse } from "next/server";
+import { getAdminSession } from "@/lib/admin-session";
+import { hasPermission } from "@/lib/admin-permissions";
+import { closeStaleCmeets } from "@/lib/cmeet-autoclose";
+import { buildCMeetAutoJoinPath, buildCMeetPath } from "@/lib/cmeet-links";
+import { glashQuery } from "@/lib/glashdb/postgres";
+
+export const runtime="nodejs";
+export const dynamic="force-dynamic";
+
+export async function GET(){const session=await getAdminSession();if(!session||(session.role!=="super_admin"&&!hasPermission(session.permissions||[],"messages")))return NextResponse.json({ok:false,error:"Unauthorized"},{status:401});await closeStaleCmeets();const calls=await glashQuery<{id:string;room_code:string;title:string;audio_only:boolean;started_at:string;caller_name:string}>(`with incoming as (select meeting.id,meeting.room_code,meeting.title,meeting.audio_only,coalesce(meeting.started_at,meeting.created_at) as started_at,coalesce(profile.full_name,profile.company_name,profile.email,'A client') as caller_name from public.cmeet_staff_invitations invitation join public.team_meetings meeting on meeting.id=invitation.meeting_id left join public.profiles profile on profile.id=meeting.created_by_client where invitation.joined_at is null and meeting.status='live' and meeting.scheduled_for is null and meeting.ended_at is null union all select meeting.id,meeting.room_code,meeting.title,meeting.audio_only,coalesce(meeting.started_at,meeting.created_at),coalesce(creator.full_name,'A teammate') from public.team_meeting_participants participant join public.team_meetings meeting on meeting.id=participant.meeting_id left join public.team_members creator on creator.id=meeting.created_by where $1::uuid is not null and participant.team_member_id=$1::uuid and participant.joined_at is null and meeting.created_by is distinct from $1::uuid and meeting.status='live' and meeting.scheduled_for is null and meeting.ended_at is null) select id,room_code,title,audio_only,started_at::text,caller_name from incoming order by started_at desc limit 5`,[session.memberId||null]);return NextResponse.json({ok:true,calls:calls.map(call=>({id:call.id,roomCode:call.room_code,title:call.title,audioOnly:call.audio_only,callerName:call.caller_name,startedAt:call.started_at,link:buildCMeetAutoJoinPath(buildCMeetPath(call.room_code,call.title))}))});}

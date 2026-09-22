@@ -12,12 +12,15 @@ import { PROSPECT_ISSUES, isProspectIssue } from "@/lib/prospect-issues";
 import { registryCatalogue, registryFor } from "@/lib/prospect-registries";
 import { browserConfigured, browserSetupHint } from "@/lib/prospect-browser";
 import { logActivity } from "@/lib/activity-log";
+import { recordProspectEvent } from "@/lib/deal-pipeline";
 import { huntCompanyEmails } from "@/lib/prospect-email-hunt";
 import { auditForAiSearch } from "@/lib/prospect-ai-audit";
 import { chatComplete } from "@/lib/ai/openai";
 import { CATEGORIES } from "@/lib/constants";
 import { sendEmail } from "@/lib/email-from";
 import { brandedEmailHtml } from "@/lib/email-template";
+import { sanitizeCompanyCompetitors } from "@/lib/prospect-competitors";
+import { normalizeBrandFindings } from "@/lib/prospect-brand";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -26,6 +29,19 @@ export const maxDuration = 300;
 const PERMISSION = "deals.prospects";
 
 const SERVICE_NAMES = CATEGORIES.map((category) => category.name);
+
+function companyForOutput<T extends Record<string, unknown>>(company: T): T {
+  const competitors = sanitizeCompanyCompetitors(company);
+  const brandConsistency = normalizeBrandFindings(competitors.brand_consistency);
+  const issues = Array.isArray(competitors.issues)
+    ? competitors.issues.filter((issue) => issue !== "inconsistent_communications" || brandConsistency.some((finding) => finding.status === "differs"))
+    : [];
+  return {
+    ...competitors,
+    brand_consistency: brandConsistency,
+    issues,
+  };
+}
 
 // Enrichment is a live crawl, so a request handles a small slice and the page
 // keeps calling back until the queue drains. That keeps a directory of millions
@@ -36,6 +52,28 @@ const DEFAULT_BATCH = 4;
 // Above this many matching rows the list view reports an estimate. Counting ten
 // million rows exactly on every keystroke is not worth the table scan.
 const EXACT_COUNT_LIMIT = 50_000;
+
+/**
+ * The columns a collapsed list row actually renders. The research columns left
+ * out here - competitors, brand consistency, pain points, the drafted outreach
+ * email, the crawl findings - are the bulk of a company record: selecting all
+ * 60 columns made a page of 100 companies a 694 KB response, of which roughly
+ * seven tenths was never on screen. They are fetched per company by
+ * `resource=company` when a row is expanded or an action needs them.
+ */
+const LIST_COLUMNS = [
+  "id", "company_name", "domain", "website", "industry", "city", "country", "hq_country",
+  "country_count", "employee_count", "employee_range", "size_band", "founded_year",
+  "is_public", "stock_exchanges", "ticker", "is_startup",
+  "activity_status", "website_status", "website_score", "issues",
+  // Needed even though the collapsed row never prints it: companyForOutput()
+  // decides whether the "inconsistent communications" chip is honest by asking
+  // whether any brand finding actually differs. Without it every row would
+  // quietly lose that issue.
+  "brand_consistency",
+  "deal_score", "priority", "enrichment_status", "enrichment_error",
+  "review_status", "prospect_id", "batch_id", "name_key", "created_at", "updated_at",
+].join(", ");
 
 
 function str(value: unknown, max = 4000) {
@@ -152,7 +190,18 @@ async function companyFilters(params: URLSearchParams) {
     .split(",")
     .map((value) => value.trim())
     .filter(isProspectIssue);
-  if (issues.length) add((index) => `issues @> $${index}::text[]`, Array.from(new Set(issues)));
+  const uniqueIssues = Array.from(new Set(issues));
+  const storedIssues = uniqueIssues.filter((issue) => issue !== "inconsistent_communications");
+  if (storedIssues.length) add((index) => `issues @> $${index}::text[]`, storedIssues);
+  if (uniqueIssues.includes("inconsistent_communications")) {
+    // Older rows inferred inconsistency from different file bytes or dimensions.
+    // Filter only on a remaining evidence-backed difference, matching the card.
+    conditions.push(`exists (
+      select 1 from jsonb_array_elements(coalesce(brand_consistency, '[]'::jsonb)) as brand_finding
+      where brand_finding->>'status' = 'differs'
+        and coalesce(brand_finding->>'detail', '') !~* 'different image file from the closest brand image|does not match any brand image.*different shape|does not visibly carry the company name'
+    )`);
+  }
 
   // A decision maker we can actually write to, which is what the summary card
   // above the list counts.
@@ -217,6 +266,14 @@ async function companyFilters(params: URLSearchParams) {
   if (Number.isFinite(foundedFrom) && foundedFrom > 1500) add((index) => `founded_year >= $${index}`, Math.round(foundedFrom));
   if (Number.isFinite(foundedTo) && foundedTo > 1500) add((index) => `founded_year <= $${index}`, Math.round(foundedTo));
 
+  // Deal score band. The two ends are independent, so "below 50" is a top end
+  // alone, "50 and above" a bottom end alone, and clicking a company's score
+  // badge sends the same number as both ends to gather everyone who scored it.
+  const scoreFrom = Number(params.get("score_from"));
+  const scoreTo = Number(params.get("score_to"));
+  if (Number.isFinite(scoreFrom) && params.get("score_from")) add((index) => `deal_score >= $${index}`, Math.min(100, Math.max(0, Math.round(scoreFrom))));
+  if (Number.isFinite(scoreTo) && params.get("score_to")) add((index) => `deal_score <= $${index}`, Math.min(100, Math.max(0, Math.round(scoreTo))));
+
   const staffFrom = Number(params.get("staff_from"));
   const staffTo = Number(params.get("staff_to"));
   if (Number.isFinite(staffFrom) && staffFrom > 0) add((index) => `employee_count >= $${index}`, Math.round(staffFrom));
@@ -247,14 +304,12 @@ const SORTS: Record<string, string> = {
   newest: "created_at desc",
 };
 
-/** Exact below the limit, planner estimate above it. */
-async function countCompanies(where: string, values: unknown[]) {
-  const [exact] = await glashQuery<any>(
-    `select count(*)::bigint total from (select 1 from public.prospect_companies ${where} limit ${EXACT_COUNT_LIMIT + 1}) sample`,
-    values,
-  );
-  const sampled = Number(exact?.total || 0);
-  if (sampled <= EXACT_COUNT_LIMIT) return { total: sampled, estimated: false };
+/**
+ * Only for a result set past the exact-count ceiling, where counting for real
+ * would mean scanning the directory. The caller has already counted up to the
+ * ceiling in the same round trip as the page itself.
+ */
+async function estimateCompanies(where: string, values: unknown[], sampled: number) {
   const plan = await glashQuery<any>(`explain (format json) select 1 from public.prospect_companies ${where}`, values);
   const rows = plan?.[0]?.["QUERY PLAN"]?.[0]?.Plan?.["Plan Rows"];
   return { total: Math.max(sampled, Math.round(Number(rows) || sampled)), estimated: true };
@@ -268,20 +323,26 @@ export async function GET(req: NextRequest) {
 
   try {
     if (resource === "summary") {
-      // Counters are trigger-maintained, so this stays instant at any size.
-      const counters = await glashQuery<any>(`select bucket, value from public.prospect_directory_counters`);
-      const value = (bucket: string) => Number(counters.find((row) => row.bucket === bucket)?.value || 0);
-      const [extras] = await glashQuery<any>(`select
-        (select count(*)::bigint from public.prospect_companies where country_count > 1) multi_country,
-        (select count(distinct lower(country))::int from public.prospect_company_countries) countries_covered,
-        (select count(distinct company_id)::bigint from public.prospect_company_contacts where seniority = 'decision_maker' and email is not null) reachable_decision_makers`);
-      const batches = await glashQuery<any>(`select * from public.prospect_import_batches order by created_at desc limit 30`);
-      const topCountries = await glashQuery<any>(
-        `select country, count(*)::int companies from public.prospect_company_countries group by country order by companies desc limit 25`,
-      );
-      const industries = await glashQuery<any>(
-        `select industry, count(*)::int companies from public.prospect_companies where industry is not null group by industry order by companies desc limit 40`,
-      );
+      // All overview figures are trigger-maintained. This is intentionally one
+      // small database round trip: full-table country and industry aggregates
+      // took close to twenty seconds once the directory reached 1.6m records
+      // and could outlive the hosting proxy request.
+      const [summary] = await glashQuery<any>(`select
+        (select coalesce(json_object_agg(bucket, value), '{}'::json)
+           from public.prospect_directory_counters) counters,
+        (select coalesce(json_agg(to_jsonb(batch_row) order by batch_row.created_at desc), '[]'::json)
+           from (select * from public.prospect_import_batches order by created_at desc limit 30) batch_row) batches,
+        (select coalesce(json_agg(json_build_object('country', country_row.label, 'companies', country_row.company_count)
+                                  order by country_row.company_count desc, country_row.label), '[]'::json)
+           from (select label, company_count from public.prospect_directory_facets
+                  where facet = 'country' order by company_count desc, label limit 25) country_row) top_countries,
+        (select coalesce(json_agg(industry_row.label order by industry_row.company_count desc, industry_row.label), '[]'::json)
+           from (select label, company_count from public.prospect_directory_facets
+                  where facet = 'industry' order by company_count desc, label limit 40) industry_row) industries,
+        (select count(*)::int from public.prospect_directory_facets
+          where facet = 'country' and company_count > 0) countries_covered`);
+      const counters = summary?.counters || {};
+      const value = (bucket: string) => Number(counters[bucket] || 0);
       return NextResponse.json({
         totals: {
           total: value("total"),
@@ -293,13 +354,13 @@ export async function GET(req: NextRequest) {
           needs_website: value("website:outdated") + value("website:missing") + value("website:broken"),
           high_priority: value("priority:high"),
           promoted: value("review:promoted"),
-          multi_country: Number(extras?.multi_country || 0),
-          countries_covered: Number(extras?.countries_covered || 0),
-          reachable_decision_makers: Number(extras?.reachable_decision_makers || 0),
+          multi_country: value("multi_country"),
+          countries_covered: Number(summary?.countries_covered || 0),
+          reachable_decision_makers: value("reachable_decision_makers"),
         },
-        batches,
-        topCountries,
-        industries: industries.map((row) => row.industry),
+        batches: summary?.batches || [],
+        topCountries: summary?.top_countries || [],
+        industries: summary?.industries || [],
         target: DIRECTORY_TARGET,
       });
     }
@@ -325,24 +386,80 @@ export async function GET(req: NextRequest) {
       // chosen sort; the sort then orders the companies of equal closeness.
       const sort = `${rank ? `${rank}, ` : ""}${SORTS[str(params.get("sort"), 20)] || SORTS.score}`;
 
-      const rows = await glashQuery<any>(
-        `select * from public.prospect_companies ${where} order by ${sort} limit ${limit} offset ${offset}`,
+      // The page, its contacts, its countries and the total all arrive in ONE
+      // round trip. They used to be four queries in two waves, and against a
+      // remote database the round trip is the whole cost: each of these answers
+      // in well under a millisecond, while every wave paid the full network
+      // latency again. That is what made a filter click feel slow.
+      const [bundle] = await glashQuery<any>(
+        `with page as (
+           select ${LIST_COLUMNS} from public.prospect_companies ${where} order by ${sort} limit ${limit} offset ${offset}
+         ), matched as (
+           select p.*, row_number() over () as list_position from page p
+         )
+         select
+           (select coalesce(json_agg(to_jsonb(m) - 'list_position' order by m.list_position), '[]'::json)
+              from matched m) companies,
+           (select count(*)::bigint
+              from (select 1 from public.prospect_companies ${where} limit ${EXACT_COUNT_LIMIT + 1}) sample) total,
+           (select coalesce(json_agg(to_jsonb(c) order by c.seniority, c.full_name), '[]'::json)
+              from public.prospect_company_contacts c
+             where c.company_id in (select id from matched)) contacts,
+           (select coalesce(json_agg(json_build_object('company_id', pc.company_id, 'country', pc.country)
+                                     order by pc.is_headquarters desc, pc.country), '[]'::json)
+              from public.prospect_company_countries pc
+             where pc.company_id in (select id from matched)) countries`,
         values,
       );
-      const ids = rows.map((row) => row.id);
-      const [contacts, countries, count] = await Promise.all([
-        ids.length ? glashQuery<any>(`select * from public.prospect_company_contacts where company_id = any($1::uuid[]) order by seniority, full_name`, [ids]) : [],
-        ids.length ? glashQuery<any>(`select company_id, country, is_headquarters from public.prospect_company_countries where company_id = any($1::uuid[]) order by is_headquarters desc, country`, [ids]) : [],
-        countCompanies(where, values),
-      ]);
+
+      const rows: any[] = bundle?.companies || [];
+      const contacts: any[] = bundle?.contacts || [];
+      const countries: any[] = bundle?.countries || [];
+
+      // Past the exact-count ceiling the true total is not worth a full scan,
+      // so the planner's estimate stands in. That extra trip is rare, and never
+      // happens on a filter narrow enough for anyone to read the results.
+      const sampled = Number(bundle?.total || 0);
+      const count = sampled <= EXACT_COUNT_LIMIT
+        ? { total: sampled, estimated: false }
+        : await estimateCompanies(where, values, sampled);
+
       return NextResponse.json({
-        companies: rows.map((row) => ({
-          ...row,
-          contacts: contacts.filter((contact) => contact.company_id === row.id),
-          countries: countries.filter((entry) => entry.company_id === row.id).map((entry) => entry.country),
-        })),
+        companies: rows.map((rawRow) => {
+          const row = companyForOutput(rawRow);
+          return {
+            ...row,
+            contacts: contacts.filter((contact) => contact.company_id === row.id),
+            countries: countries.filter((entry) => entry.company_id === row.id).map((entry) => entry.country),
+          };
+        }),
         total: count.total,
         estimated: count.estimated,
+      });
+    }
+
+    // One company in full, for a row the reader has opened. The research
+    // columns live here rather than in every list row, which is what keeps a
+    // page of a hundred companies small enough to arrive quickly.
+    if (resource === "company") {
+      const id = uuid(params.get("id"));
+      if (!id) return NextResponse.json({ error: "A company is required." }, { status: 400 });
+      const [bundle] = await glashQuery<any>(
+        `select
+           (select to_jsonb(c) from public.prospect_companies c where c.id = $1) company,
+           (select coalesce(json_agg(to_jsonb(pc) order by pc.seniority, pc.full_name), '[]'::json)
+              from public.prospect_company_contacts pc where pc.company_id = $1) contacts,
+           (select coalesce(json_agg(pcc.country order by pcc.is_headquarters desc, pcc.country), '[]'::json)
+              from public.prospect_company_countries pcc where pcc.company_id = $1) countries`,
+        [id],
+      );
+      if (!bundle?.company) return NextResponse.json({ error: "That company is no longer in the directory." }, { status: 404 });
+      return NextResponse.json({
+        company: {
+          ...companyForOutput(bundle.company),
+          contacts: bundle.contacts || [],
+          countries: bundle.countries || [],
+        },
       });
     }
 
@@ -357,7 +474,8 @@ export async function GET(req: NextRequest) {
       ]);
       const header = ["Company", "Domain", "Website", "HQ country", "Countries", "Country count", "Industry", "Staff", "Size band", "Founded", "Publicly traded", "Exchanges", "Ticker", "Startup", "Activity", "Website status", "Website score", "Deal score", "Priority", "Decision makers", "Decision maker emails", "General emails", "Socials", "Brief", "Pain points", "How we help", "Service fit", "Local competitors", "Global competitors", "Outreach subject", "Outreach email"];
       const lines = [header.join(",")];
-      for (const row of rows) {
+      for (const rawRow of rows) {
+        const row = companyForOutput(rawRow);
         const rowContacts = contacts.filter((contact) => contact.company_id === row.id);
         const rowCountries = countries.filter((entry) => entry.company_id === row.id).map((entry) => entry.country);
         lines.push([
@@ -375,8 +493,8 @@ export async function GET(req: NextRequest) {
           (row.pain_points || []).join(" | "),
           (row.how_we_help || []).join(" | "),
           (row.service_fit || []).map((entry: any) => entry.service).join("; "),
-          (row.competitors_local || []).map((entry: any) => entry.name).join("; "),
-          (row.competitors_global || []).map((entry: any) => entry.name).join("; "),
+          (row.competitors_local || []).map((entry: any) => `${entry.type}: ${entry.name}`).join("; "),
+          (row.competitors_global || []).map((entry: any) => `${entry.type}: ${entry.name}`).join("; "),
           row.outreach_subject, row.outreach_email,
         ].map(csvCell).join(","));
       }
@@ -392,6 +510,107 @@ export async function GET(req: NextRequest) {
   } catch (error) {
     return NextResponse.json({ error: error instanceof Error ? error.message : "Prospect generation could not be loaded." }, { status: 500 });
   }
+}
+
+/**
+ * Copies a researched company onto the prospect checklist and starts its
+ * pipeline. Shared by the explicit "Add to checklist" action and by
+ * shortlisting, which readers reasonably expect to put a company on the list
+ * rather than only flag it in this view.
+ */
+async function promoteCompanyToChecklist(id: string, actor: string, reviewStatus: "promoted" | "shortlisted" = "promoted") {
+    const storedCompany = await glashMaybeOne<any>(`select * from public.prospect_companies where id=$1`, [id]);
+    if (!storedCompany) return { error: "Company not found.", status: 404 } as const;
+    const company = companyForOutput(storedCompany);
+    if (company.prospect_id) return { error: "This company is already on the prospect checklist.", status: 409 } as const;
+
+    const [contacts, countries] = await Promise.all([
+      glashQuery<any>(`select * from public.prospect_company_contacts where company_id=$1 order by seniority`, [id]),
+      glashQuery<any>(`select country from public.prospect_company_countries where company_id=$1 order by is_headquarters desc`, [id]),
+    ]);
+    const lead = contacts.find((contact) => contact.seniority === "decision_maker" && contact.email) || contacts.find((contact) => contact.email) || contacts[0];
+
+    // The whole write-up is copied onto the checklist entry so the team can
+    // edit it and add their own findings, leaving the researched record intact.
+    const section = (title: string, body: string) => body.trim() ? `${title}\n${body.trim()}` : "";
+    const bullets = (items: unknown[], format: (entry: any) => string) =>
+      (Array.isArray(items) ? items : []).map((entry) => `- ${format(entry)}`).join("\n");
+
+    const researchBrief = [
+      section("SUMMARY", company.brief || ""),
+      section("TRADING STATUS", company.activity_evidence || ""),
+      section("PROFILE", [
+        company.industry ? `Industry: ${company.industry}` : "",
+        company.employee_count ? `Staff: ${company.employee_count}` : "",
+        company.founded_year ? `Founded: ${company.founded_year}` : "",
+        company.is_public ? `Publicly traded${company.ticker ? ` (${(company.stock_exchanges || []).join(", ")}: ${company.ticker})` : ""}` : "",
+        countries.length ? `Countries: ${countries.map((entry) => entry.country).join(", ")}` : "",
+        company.website ? `Website: ${company.website}` : "No website found",
+      ].filter(Boolean).join("\n")),
+      section("PAIN POINTS", bullets(company.pain_points, (entry) => String(entry))),
+      section("HOW CDS SPACE HELPS", bullets(company.how_we_help, (entry) => String(entry))),
+      section("SERVICE FIT", bullets(company.service_fit, (entry) => `${entry.service}: ${entry.reason}`)),
+      section("WEBSITE FINDINGS", bullets(company.website_findings, (entry) => String(entry))
+        + (company.website_score !== null ? `\n(Website score ${company.website_score} out of 100)` : "")),
+      section("BRAND CONSISTENCY", bullets(company.brand_consistency, (entry) => `${entry.area} [${entry.status}]: ${entry.detail}`)),
+      section("DOMAIN CONFIGURATION", bullets(company.domain_variants, (entry) => `${entry.host}: ${entry.note}`)),
+      section("CONTACT ROUTES", [
+        bullets(contacts, (entry) => `${entry.full_name}${entry.job_title ? `, ${entry.job_title}` : ""} (${entry.seniority.replace("_", " ")})${entry.email ? ` - ${entry.email}` : " - no public email"}`),
+        bullets(company.emails, (entry) => `${entry.email} (${entry.kind})`),
+        bullets(company.dns_contacts, (entry) => `${entry.value}: ${entry.detail}`),
+        bullets(company.socials, (entry) => `${entry.platform}: ${entry.url}`),
+      ].filter(Boolean).join("\n")),
+      section("LOCAL COMPETITORS", bullets(company.competitors_local, (entry) => `${entry.type === "indirect" ? "Indirect" : "Direct"}: ${entry.name}${entry.note ? `: ${entry.note}` : ""}`)),
+      section("GLOBAL COMPETITORS", bullets(company.competitors_global, (entry) => `${entry.type === "indirect" ? "Indirect" : "Direct"}: ${entry.name}${entry.note ? `: ${entry.note}` : ""}`)),
+      section("OUTREACH ANGLE", company.outreach_angle || ""),
+      section("SUGGESTED FIRST EMAIL", [company.outreach_subject ? `Subject: ${company.outreach_subject}` : "", company.outreach_email || ""].filter(Boolean).join("\n\n")),
+      section("SOURCES", bullets((company.sources || []).slice(0, 15), (entry) => String(entry))),
+      "OUR NOTES\n(Add your own findings here.)",
+    ].filter(Boolean).join("\n\n");
+
+    const notes = [
+      company.brief,
+      countries.length > 1 ? `Present in ${countries.length} countries: ${countries.map((entry) => entry.country).join(", ")}` : "",
+      company.is_public ? `Publicly traded${company.ticker ? ` (${(company.stock_exchanges || []).join(", ")}: ${company.ticker})` : ""}` : "",
+      company.employee_count ? `Approximately ${company.employee_count} staff` : "",
+      company.pain_points?.length ? `Pain points: ${company.pain_points.join(" | ")}` : "",
+      company.how_we_help?.length ? `How CDS Space helps: ${company.how_we_help.join(" | ")}` : "",
+      company.competitors_local?.length ? `Local competitors: ${company.competitors_local.map((entry: any) => `${entry.type}: ${entry.name}`).join("; ")}` : "",
+      company.competitors_global?.length ? `Global competitors: ${company.competitors_global.map((entry: any) => `${entry.type}: ${entry.name}`).join("; ")}` : "",
+      company.activity_evidence ? `Activity: ${company.activity_evidence}` : "",
+    ].filter(Boolean).join("\n\n").slice(0, 6000);
+
+    const prospect = await glashMaybeOne<any>(
+      `insert into public.deal_prospects (category,display_name,company_name,website,social_url,email,phone,location,notes,next_action,status,created_by,updated_by,research_brief)
+       values ('potential_client',$1,$2,$3,$4,$5,$6,$7,$8,$9,'ready',$10,$10,$11) returning *`,
+      [
+        lead?.full_name || company.company_name,
+        company.company_name,
+        company.website,
+        company.socials?.[0]?.url || null,
+        lead?.email || company.emails?.[0]?.email || null,
+        lead?.phone || company.phones?.[0] || null,
+        [company.city, company.hq_country || company.country].filter(Boolean).join(", ") || null,
+        notes,
+        company.outreach_angle || "Send the researched outreach email.",
+        actor,
+        researchBrief,
+      ],
+    );
+    // prospect_id is what records "this is on the checklist", so the review
+    // status is free to keep saying how it got there.
+    await glashQuery(`update public.prospect_companies set prospect_id=$2, review_status=$4, updated_by=$3, updated_at=now() where id=$1`, [id, prospect.id, actor, reviewStatus]);
+    // The moment the pipeline starts counting from.
+    await recordProspectEvent({
+      prospectId: prospect.id, stage: "shortlisted", type: "Shortlisted from prospect generation",
+      detail: company.company_name, source: "prospect-generation", actor,
+      metadata: { company_id: id, deal_score: company.deal_score },
+    });
+    await logActivity({
+      action: "deals.prospect_generation.promote", page: "deals/prospect-generation", resource_type: "prospect_company",
+      resource_id: id, resource_label: company.company_name, metadata: { prospect_id: prospect.id },
+    });
+    return { prospect, company: { ...company, prospect_id: prospect.id, review_status: reviewStatus } } as const;
 }
 
 export async function POST(req: NextRequest) {
@@ -486,16 +705,18 @@ export async function POST(req: NextRequest) {
 
       const limit = intValue(body.limit, DEFAULT_BATCH, 1, MAX_BATCH);
       const batchId = uuid(body.batch_id);
+      const companyId = uuid(body.id);
+      const scope = companyId ? "and id = $2" : batchId ? "and batch_id = $2" : "";
       // Claiming inside one statement stops two open tabs researching the same row.
       const claimed = await glashQuery<any>(
         `update public.prospect_companies set enrichment_status='running', enrichment_attempts = enrichment_attempts + 1, updated_at=now()
          where id in (
            select id from public.prospect_companies
-           where enrichment_status = 'queued' ${batchId ? "and batch_id = $2" : ""}
+           where enrichment_status = 'queued' ${scope}
            order by created_at limit $1
            for update skip locked
          ) returning *`,
-        batchId ? [limit, batchId] : [limit],
+        companyId ? [limit, companyId] : batchId ? [limit, batchId] : [limit],
       );
 
       const processed: Array<{ id: string; company_name: string; status: string; deal_score?: number }> = [];
@@ -627,95 +848,25 @@ export async function POST(req: NextRequest) {
         [id, review || null, typeof body.notes === "string" ? str(body.notes, 4000) : null, actor],
       );
       if (!company) return NextResponse.json({ error: "Company not found." }, { status: 404 });
+
+      // Shortlisting is what a reader means by "keep this one", so it puts the
+      // company on the prospect checklist as well as flagging it here. Without
+      // this the shortlist was a marker that lived only in this view and the
+      // checklist stayed empty. Only a researched company can be copied over;
+      // one still queued keeps the flag and joins the list once research lands.
+      if (review === "shortlisted" && !company.prospect_id && company.enrichment_status === "enriched") {
+        const promoted = await promoteCompanyToChecklist(id, actor, "shortlisted");
+        if (!("error" in promoted)) return NextResponse.json({ company: promoted.company, prospect: promoted.prospect });
+      }
       return NextResponse.json({ company });
     }
 
     if (action === "promote") {
       const id = uuid(body.id);
       if (!id) return NextResponse.json({ error: "A company is required." }, { status: 400 });
-      const company = await glashMaybeOne<any>(`select * from public.prospect_companies where id=$1`, [id]);
-      if (!company) return NextResponse.json({ error: "Company not found." }, { status: 404 });
-      if (company.prospect_id) return NextResponse.json({ error: "This company is already on the prospect checklist." }, { status: 409 });
-
-      const [contacts, countries] = await Promise.all([
-        glashQuery<any>(`select * from public.prospect_company_contacts where company_id=$1 order by seniority`, [id]),
-        glashQuery<any>(`select country from public.prospect_company_countries where company_id=$1 order by is_headquarters desc`, [id]),
-      ]);
-      const lead = contacts.find((contact) => contact.seniority === "decision_maker" && contact.email) || contacts.find((contact) => contact.email) || contacts[0];
-
-      // The whole write-up is copied onto the checklist entry so the team can
-      // edit it and add their own findings, leaving the researched record intact.
-      const section = (title: string, body: string) => body.trim() ? `${title}\n${body.trim()}` : "";
-      const bullets = (items: unknown[], format: (entry: any) => string) =>
-        (Array.isArray(items) ? items : []).map((entry) => `- ${format(entry)}`).join("\n");
-
-      const researchBrief = [
-        section("SUMMARY", company.brief || ""),
-        section("TRADING STATUS", company.activity_evidence || ""),
-        section("PROFILE", [
-          company.industry ? `Industry: ${company.industry}` : "",
-          company.employee_count ? `Staff: ${company.employee_count}` : "",
-          company.founded_year ? `Founded: ${company.founded_year}` : "",
-          company.is_public ? `Publicly traded${company.ticker ? ` (${(company.stock_exchanges || []).join(", ")}: ${company.ticker})` : ""}` : "",
-          countries.length ? `Countries: ${countries.map((entry) => entry.country).join(", ")}` : "",
-          company.website ? `Website: ${company.website}` : "No website found",
-        ].filter(Boolean).join("\n")),
-        section("PAIN POINTS", bullets(company.pain_points, (entry) => String(entry))),
-        section("HOW CDS SPACE HELPS", bullets(company.how_we_help, (entry) => String(entry))),
-        section("SERVICE FIT", bullets(company.service_fit, (entry) => `${entry.service}: ${entry.reason}`)),
-        section("WEBSITE FINDINGS", bullets(company.website_findings, (entry) => String(entry))
-          + (company.website_score !== null ? `\n(Website score ${company.website_score} out of 100)` : "")),
-        section("BRAND CONSISTENCY", bullets(company.brand_consistency, (entry) => `${entry.area} [${entry.status}]: ${entry.detail}`)),
-        section("DOMAIN CONFIGURATION", bullets(company.domain_variants, (entry) => `${entry.host}: ${entry.note}`)),
-        section("CONTACT ROUTES", [
-          bullets(contacts, (entry) => `${entry.full_name}${entry.job_title ? `, ${entry.job_title}` : ""} (${entry.seniority.replace("_", " ")})${entry.email ? ` - ${entry.email}` : " - no public email"}`),
-          bullets(company.emails, (entry) => `${entry.email} (${entry.kind})`),
-          bullets(company.dns_contacts, (entry) => `${entry.value}: ${entry.detail}`),
-          bullets(company.socials, (entry) => `${entry.platform}: ${entry.url}`),
-        ].filter(Boolean).join("\n")),
-        section("LOCAL COMPETITORS", bullets(company.competitors_local, (entry) => `${entry.name}${entry.note ? `: ${entry.note}` : ""}`)),
-        section("GLOBAL COMPETITORS", bullets(company.competitors_global, (entry) => `${entry.name}${entry.note ? `: ${entry.note}` : ""}`)),
-        section("OUTREACH ANGLE", company.outreach_angle || ""),
-        section("SUGGESTED FIRST EMAIL", [company.outreach_subject ? `Subject: ${company.outreach_subject}` : "", company.outreach_email || ""].filter(Boolean).join("\n\n")),
-        section("SOURCES", bullets((company.sources || []).slice(0, 15), (entry) => String(entry))),
-        "OUR NOTES\n(Add your own findings here.)",
-      ].filter(Boolean).join("\n\n");
-
-      const notes = [
-        company.brief,
-        countries.length > 1 ? `Present in ${countries.length} countries: ${countries.map((entry) => entry.country).join(", ")}` : "",
-        company.is_public ? `Publicly traded${company.ticker ? ` (${(company.stock_exchanges || []).join(", ")}: ${company.ticker})` : ""}` : "",
-        company.employee_count ? `Approximately ${company.employee_count} staff` : "",
-        company.pain_points?.length ? `Pain points: ${company.pain_points.join(" | ")}` : "",
-        company.how_we_help?.length ? `How CDS Space helps: ${company.how_we_help.join(" | ")}` : "",
-        company.competitors_local?.length ? `Local competitors: ${company.competitors_local.map((entry: any) => entry.name).join("; ")}` : "",
-        company.competitors_global?.length ? `Global competitors: ${company.competitors_global.map((entry: any) => entry.name).join("; ")}` : "",
-        company.activity_evidence ? `Activity: ${company.activity_evidence}` : "",
-      ].filter(Boolean).join("\n\n").slice(0, 6000);
-
-      const prospect = await glashMaybeOne<any>(
-        `insert into public.deal_prospects (category,display_name,company_name,website,social_url,email,phone,location,notes,next_action,status,created_by,updated_by,research_brief)
-         values ('potential_client',$1,$2,$3,$4,$5,$6,$7,$8,$9,'ready',$10,$10,$11) returning *`,
-        [
-          lead?.full_name || company.company_name,
-          company.company_name,
-          company.website,
-          company.socials?.[0]?.url || null,
-          lead?.email || company.emails?.[0]?.email || null,
-          lead?.phone || company.phones?.[0] || null,
-          [company.city, company.hq_country || company.country].filter(Boolean).join(", ") || null,
-          notes,
-          company.outreach_angle || "Send the researched outreach email.",
-          actor,
-          researchBrief,
-        ],
-      );
-      await glashQuery(`update public.prospect_companies set prospect_id=$2, review_status='promoted', updated_by=$3, updated_at=now() where id=$1`, [id, prospect.id, actor]);
-      await logActivity({
-        action: "deals.prospect_generation.promote", page: "deals/prospect-generation", resource_type: "prospect_company",
-        resource_id: id, resource_label: company.company_name, metadata: { prospect_id: prospect.id },
-      });
-      return NextResponse.json({ prospect, company: { ...company, prospect_id: prospect.id, review_status: "promoted" } });
+      const result = await promoteCompanyToChecklist(id, actor);
+      if ("error" in result) return NextResponse.json({ error: result.error }, { status: result.status });
+      return NextResponse.json(result);
     }
 
     if (action === "rewrite_outreach") {
@@ -737,7 +888,7 @@ export async function POST(req: NextRequest) {
         website: company.website,
         domain: company.domain,
         socials: Array.isArray(company.socials) ? company.socials : [],
-        brandFindings: Array.isArray(company.brand_consistency) ? company.brand_consistency : [],
+        brandFindings: normalizeBrandFindings(company.brand_consistency),
       });
 
       const senderName = str(body.sender_name, 120).trim() || process.env.PROSPECT_SENDER_NAME || session?.name || "";
@@ -912,6 +1063,14 @@ export async function POST(req: NextRequest) {
         resource_id: id, resource_label: company.company_name,
         metadata: { sent, failed: failed.length, recipients },
       });
+      // Outreach only moves the pipeline for a company already on the checklist.
+      if (company.prospect_id) {
+        await recordProspectEvent({
+          prospectId: company.prospect_id, stage: "contacted", type: "Outreach email sent",
+          detail: `${subject} (${sent} of ${recipients.length} delivered)`, source: "prospect-generation", actor,
+          metadata: { recipients, sent, failed: failed.length },
+        });
+      }
 
       return NextResponse.json({ sent, failed });
     }

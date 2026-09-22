@@ -93,7 +93,11 @@ export interface FinanceInvoice {
   tax_amount: number;
   discount: number;
   total: number;
-  status: "draft" | "sent" | "paid" | "overdue" | "cancelled";
+  amount_paid: number;
+  balance_due: number;
+  payment_percentage: number;
+  last_payment_at?: string | null;
+  status: "draft" | "sent" | "partially_paid" | "paid" | "overdue" | "cancelled";
   scope: "custom" | "project" | "milestone" | "monthly";
   period_month: string | null;
   issue_date: string;
@@ -110,6 +114,20 @@ export interface FinanceInvoice {
   working_hours?: string | null;
   delivery_speed?: "standard" | "express" | "super_express" | "flash" | null;
   delivery_period?: string | null;
+}
+
+export interface FinanceInvoicePayment {
+  id: string;
+  invoice_id?: string;
+  amount: number;
+  currency: Currency;
+  paid_on: string;
+  payment_method: string;
+  payment_reference: string | null;
+  source_type: string;
+  notes: string | null;
+  recorded_by: string | null;
+  created_at: string;
 }
 
 export interface InvoicePaymentSubmission {

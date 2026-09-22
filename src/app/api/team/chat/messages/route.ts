@@ -1,6 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { NextResponse } from "next/server";
-import { getChatViewer } from "@/lib/team-chat-auth";
+import { getChatViewer, viewerIsSuperAdmin, viewerMemberId } from "@/lib/team-chat-auth";
 import {
   canViewTeamThread,
   getTeamChatDb,
@@ -109,7 +109,7 @@ export async function GET(req: Request) {
   let typing: { id: string; name: string }[] = [];
   let readWatermark: string | null = null;
   if (!before) {
-    const selfId = viewer.kind === "team" ? viewer.session.id : null;
+    const selfId = viewerMemberId(viewer);
     const { data: parts } = await db
       .from("team_chat_participants")
       .select("team_member_id, last_read_at, last_typing_at")
@@ -177,13 +177,17 @@ export async function POST(req: Request) {
     return NextResponse.json({ ok: false, error: protectedShare.error }, { status: 403 });
   }
 
-  // Files/media may only be shared in group spaces (department & project group
-  // chats). Block attachments in 1-on-1 direct member chats. Admin DMs
-  // (includes_admin) and all group/department/broadcast threads are allowed.
+  // Direct member chats accept inline photos. Other attachments remain in
+  // managed group spaces; admin DMs and group threads allow every valid type.
   const carriesAttachment = !!attachmentUrl || (typeof messageType === "string" && ["file", "image", "video", "audio"].includes(messageType));
-  if (carriesAttachment && (await isAttachmentRestrictedThread(threadId))) {
+  const isInlinePhoto =
+    !!attachmentUrl &&
+    (messageType === "image" ||
+      messageType === "sticker" ||
+      /^\[\[image:[^\]]+\]\]$/.test(String(body || "")));
+  if (carriesAttachment && !isInlinePhoto && (await isAttachmentRestrictedThread(threadId))) {
     return NextResponse.json(
-      { ok: false, error: "Sharing files, images and videos isn't allowed in direct chats - use your department or project group chat." },
+      { ok: false, error: "Documents and videos belong in a department or project group chat. Photos can be pasted directly into this chat." },
       { status: 403 },
     );
   }
@@ -220,8 +224,8 @@ export async function POST(req: Request) {
     .from("team_chat_messages")
     .insert({
       thread_id: threadId,
-      sender_id: viewer.kind === "team" ? viewer.session.id : null,
-      sender_is_admin: viewer.kind === "admin",
+      sender_id: viewerMemberId(viewer),
+      sender_is_admin: viewerIsSuperAdmin(viewer),
       body: body?.trim() || null,
       attachment_url: attachmentUrl || null,
       reply_to_message_id: replyToMessageId || null,
@@ -256,9 +260,9 @@ export async function POST(req: Request) {
 
   const senderName =
     viewer.kind === "admin"
-      ? (viewer.name || "Admin")
+      ? (viewer.name || "Super admin")
       : (viewer.session.full_name || "A teammate");
-  const senderId = viewer.kind === "team" ? viewer.session.id : null;
+  const senderId = viewerMemberId(viewer);
 
   // "@everyone" turns the normal per-message notification into an explicit
   // mention so every participant sees they were tagged.
@@ -276,7 +280,7 @@ export async function POST(req: Request) {
       link: `/team/chat?thread=${threadId}`,
       thread_id: threadId,
       actor_member_id: senderId,
-      actor_is_admin: viewer.kind === "admin",
+      actor_is_admin: viewerIsSuperAdmin(viewer),
     }));
   if (notifRows.length) await db.from("team_notifications").insert(notifRows);
 

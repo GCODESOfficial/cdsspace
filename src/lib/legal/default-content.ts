@@ -13,7 +13,7 @@
  */
 
 export interface DefaultLegalDoc {
-    slug: "privacy" | "terms" | "brand-marketer-agreement";
+    slug: "privacy" | "terms" | "brand-marketer-agreement" | "aml-ctf-policy";
     title: string;
     subtitle: string;
     effective_date: string;
@@ -73,7 +73,8 @@ const PRIVACY_CONTENT = `
 <h2 id="sharing">5. Who We Share Data With</h2>
 <p>We do <strong>not</strong> sell your personal data. We share it only with the categories of recipients below, and only to the extent needed for the purposes in Section 4:</p>
 <ul>
-  <li><strong>Service providers (processors)</strong> - hosting and infrastructure (Vercel Inc., USA), database and authentication (GlashDB), Google OAuth (Google LLC, USA), email delivery (Google Workspace / SMTP), file storage, and analytics providers.</li>
+  <li><strong>GlashDB infrastructure</strong> - GlashDB is our primary full-stack development infrastructure layer and provides deployment, database, authentication, file storage, and cloud-management capabilities for the Services.</li>
+  <li><strong>Operational service providers</strong> - limited providers may process data where needed for payment processing, optional third-party sign-in, email delivery, communications, and analytics. These providers do not replace GlashDB as the infrastructure hosting the Services.</li>
   <li><strong>Payment processors</strong> - to take payment and refund transactions.</li>
   <li><strong>Professional advisors</strong> - accountants, auditors, and lawyers, under duties of confidentiality.</li>
   <li><strong>Authorities</strong> - where required by a valid legal request under Nigerian law or another applicable jurisdiction (for example, the Nigeria Data Protection Commission, tax authorities, or a court).</li>
@@ -82,7 +83,7 @@ const PRIVACY_CONTENT = `
 <p>Every processor is bound by a written data-processing agreement that obliges them to process your data only on our instructions and to keep it secure.</p>
 
 <h2 id="transfers">6. International Data Transfers</h2>
-<p>CDS Space is based in Nigeria. Our infrastructure providers are primarily located in the United States and the European Union. This means your data may be transferred to, and processed in, countries outside your country of residence.</p>
+<p>CDS Space is based in Nigeria and the Services are hosted on GlashDB. GlashDB provides the full-stack infrastructure used for deployment, database, authentication, file storage, and cloud management. Personal data may be processed outside your country of residence where GlashDB or a strictly necessary operational provider uses infrastructure to deliver the relevant service.</p>
 <ul>
   <li><strong>From Nigeria (NDPA):</strong> transfers are made only to jurisdictions that provide an adequate level of protection, or under appropriate safeguards (standard contractual clauses, binding corporate rules, or your explicit consent).</li>
   <li><strong>From the EU and UK (GDPR / UK GDPR):</strong> we rely on European Commission / UK adequacy decisions where available, and on UK IDTA or EU Standard Contractual Clauses (2021) for other transfers.</li>
@@ -231,7 +232,7 @@ const TERMS_CONTENT = `
 <p>We may remove content, suspend features, or terminate accounts that we reasonably believe breach this Section.</p>
 
 <h2 id="third-parties">8. Third-Party Services</h2>
-<p>The Services rely on third-party providers including Google (for Sign-In), GlashDB (for authentication and data storage), Vercel (for hosting), and payment processors. Your use of those services is also subject to their respective terms and privacy policies. We are not responsible for outages, changes, or failures of third-party services, but we will use reasonable efforts to minimise disruption.</p>
+<p>The Services are hosted on GlashDB, our primary full-stack development infrastructure layer for deployment, database, authentication, file storage, and cloud management. Limited operational providers may also be used for functions such as payment processing, optional third-party sign-in, email delivery, communications, and analytics. Those providers do not replace GlashDB as the infrastructure hosting the Services. Where a separate provider applies, your use of its service may also be subject to its terms and privacy policy. We will use reasonable efforts to minimise disruption caused by an external service outage or change.</p>
 
 <h2 id="confidentiality">9. Confidentiality</h2>
 <p>Each party will protect the other&rsquo;s confidential information with at least the same care it uses for its own, and only use it to perform or receive the Services. This obligation survives termination for 5 years, or indefinitely for trade secrets. It does not apply to information that is public, was already known, is independently developed, or is required to be disclosed by law.</p>
@@ -364,13 +365,114 @@ const BRAND_MARKETER_AGREEMENT_CONTENT = `
 <p><em>This operational agreement should be reviewed by qualified counsel before production publication. It is not a substitute for jurisdiction-specific legal advice.</em></p>
 `.trim();
 
-export const DEFAULT_LEGAL_DOCS: Record<"privacy" | "terms" | "brand-marketer-agreement", DefaultLegalDoc> = {
+const AML_CTF_POLICY_CONTENT = `
+<h2 id="purpose">1. Purpose</h2>
+<p>This Anti-Money Laundering and Counter-Terrorist Financing Policy (the &ldquo;<strong>Policy</strong>&rdquo;) explains how <strong>CDS Space Branding Agency LTD</strong> (RC 7647292, &ldquo;<strong>CDS Space</strong>&rdquo;, &ldquo;<strong>we</strong>&rdquo;, &ldquo;<strong>us</strong>&rdquo;) prevents its services, accounts, projects, payment channels and business relationships from being used for money laundering, terrorist financing, proliferation financing, fraud or related financial crime.</p>
+<p>This Policy applies to our directors, officers, employees, contractors, brand marketers and other persons acting for CDS Space. It also establishes the checks we may apply to clients, beneficial owners, representatives, suppliers, partners, payment sources and transactions.</p>
+
+<h2 id="regulatory-status">2. Regulatory status and commitment</h2>
+<p><strong>CDS Space Branding Agency LTD is registered with the Special Control Unit against Money Laundering (SCUML).</strong> Registration details or evidence may be provided to a regulator, financial institution or verified counterparty where there is a lawful and proportionate need.</p>
+<p>We are committed to complying with applicable Nigerian anti-money laundering, counter-terrorist financing and counter-proliferation financing requirements, including the following instruments as amended or replaced:</p>
+<ul>
+  <li>the Money Laundering (Prevention and Prohibition) Act, 2022;</li>
+  <li>the Terrorism (Prevention and Prohibition) Act, 2022;</li>
+  <li>the Nigerian Financial Intelligence Unit Act, 2018;</li>
+  <li>the Proceeds of Crime (Recovery and Management) Act, 2022;</li>
+  <li>applicable SCUML and Economic and Financial Crimes Commission regulations, guidelines and directives; and</li>
+  <li>applicable United Nations and Nigerian targeted financial sanctions requirements.</li>
+</ul>
+<p>SCUML registration is a regulatory registration. It is not an endorsement or guarantee of any client, project, payment or transaction.</p>
+
+<h2 id="governance">3. Governance and responsibility</h2>
+<p>Senior management owns this Policy and is responsible for ensuring that proportionate controls, resources and reporting lines are maintained. CDS Space will designate a responsible compliance lead with sufficient authority to receive internal reports, maintain compliance records, coordinate training, assess escalations and communicate with SCUML, the Nigerian Financial Intelligence Unit (NFIU) and other competent authorities when required.</p>
+<p>Everyone acting for CDS Space must understand the controls relevant to their role, complete assigned training, keep accurate records and report concerns promptly. No commercial target, client relationship or deadline takes priority over compliance with this Policy or applicable law.</p>
+
+<h2 id="risk-assessment">4. Risk-based approach</h2>
+<p>We apply measures proportionate to the nature and level of risk. A risk assessment may consider:</p>
+<ul>
+  <li>the client&rsquo;s identity, ownership, control structure, reputation and business activity;</li>
+  <li>the purpose, value, frequency, urgency and complexity of the engagement or transaction;</li>
+  <li>the countries connected to the client, payment, delivery, beneficial owner or project;</li>
+  <li>whether the relationship is remote, intermediated or involves an unexplained third party;</li>
+  <li>the services, payment methods, delivery channels and assets involved; and</li>
+  <li>sanctions, politically exposed person, adverse-media, fraud and other relevant indicators.</li>
+</ul>
+<p>Risk ratings and supporting information may be reviewed during a relationship and when ownership, activity, payment behaviour, geography or other material circumstances change.</p>
+
+<h2 id="due-diligence">5. Customer and counterparty due diligence</h2>
+<p>Before entering or continuing a relationship, we may obtain and verify information sufficient to understand who we are dealing with and why. Depending on the risk, this may include:</p>
+<ul>
+  <li>the legal name, contact information, address, date of birth or incorporation details;</li>
+  <li>a government-issued identity document or corporate registration record;</li>
+  <li>the identity of directors, authorised representatives and ultimate beneficial owners;</li>
+  <li>evidence that a representative is authorised to act;</li>
+  <li>the nature and purpose of the business relationship or project;</li>
+  <li>source of funds or source of wealth information where appropriate; and</li>
+  <li>supporting invoices, contracts, bank records or other reliable evidence.</li>
+</ul>
+<p>We will not knowingly establish or maintain an anonymous or fictitious relationship. Where required information cannot be obtained or material concerns cannot be resolved, we may refuse, pause or end the relationship, decline or return a payment where lawful, and consider whether a report is required.</p>
+
+<h2 id="enhanced-due-diligence">6. Enhanced due diligence</h2>
+<p>Higher-risk relationships or transactions receive additional scrutiny. Enhanced measures may include obtaining senior-management approval, verifying additional identity or ownership information, establishing source of funds or wealth, reviewing the reason for unusual structures or payments, conducting more frequent monitoring, and applying appropriate limits or conditions.</p>
+<p>Enhanced due diligence may apply to politically exposed persons and their family members or close associates, higher-risk jurisdictions, complex or opaque ownership structures, unusual third-party funding, significant unexplained cash activity, negative information or sanctions exposure.</p>
+
+<h2 id="screening">7. Sanctions, PEP and adverse-information screening</h2>
+<p>Where appropriate to the risk and required by law, CDS Space screens relevant persons and entities against applicable United Nations and Nigerian sanctions lists and checks for politically exposed person status and credible adverse information. Screening may occur at onboarding, before a payment or delivery, periodically, and when relevant lists or relationship details change.</p>
+<p>A potential match must be escalated and resolved before the affected activity continues. We will freeze, reject, suspend, report or otherwise restrict assets or activity when required by law or a competent authority and will not knowingly make funds, services or economic resources available in breach of sanctions.</p>
+
+<h2 id="prohibited-relationships">8. Prohibited relationships and activity</h2>
+<p>CDS Space will not knowingly support:</p>
+<ul>
+  <li>money laundering, terrorist financing, proliferation financing, fraud, corruption, bribery, tax evasion or sanctions evasion;</li>
+  <li>anonymous, fictitious or materially misleading identities or beneficial ownership;</li>
+  <li>shell banks or entities established principally to conceal unlawful ownership or activity;</li>
+  <li>payments or projects involving criminal proceeds or an unlawful purpose;</li>
+  <li>unexplained payments from or refunds to unrelated third parties; or</li>
+  <li>any person, entity, country, asset or transaction that CDS Space is legally prohibited from serving.</li>
+</ul>
+
+<h2 id="payments">9. Payment controls</h2>
+<p>We favour identifiable and traceable payment methods and reconcile payments to an invoice, client and stated commercial purpose. We may request evidence of account ownership, investigate overpayments or repeated refunds, restrict cash acceptance, refuse split or third-party payments, and return funds to the verified originating source where appropriate and lawful.</p>
+<p>Staff and representatives must not use personal accounts to receive CDS Space client payments, structure transactions to avoid reporting or verification requirements, or alter payment records to conceal the true payer, beneficiary, value or purpose.</p>
+
+<h2 id="monitoring">10. Ongoing monitoring and warning signs</h2>
+<p>We monitor relationships and transactions in a manner proportionate to risk. Warning signs may include an unwillingness to provide verification, information inconsistent with public records, unexplained urgency or secrecy, unnecessarily complex ownership, payments inconsistent with the stated project, unrelated third-party payers, repeated overpayments or refund requests, unusual use of cash or virtual assets, and links to a sanctioned or higher-risk person or jurisdiction.</p>
+<p>A warning sign does not by itself prove wrongdoing. It must be documented, assessed in context and escalated where appropriate.</p>
+
+<h2 id="reporting">11. Internal escalation and regulatory reporting</h2>
+<p>Anyone acting for CDS Space who knows, suspects or has reasonable grounds to suspect financial crime or criminal property must report the concern promptly through the internal compliance channel. The compliance lead will assess the information and submit suspicious transaction, currency transaction, cross-border or other reports to the NFIU, SCUML or another competent authority when and within the time required by law.</p>
+<p>CDS Space will cooperate with lawful requests from competent authorities. A person must not disclose that a report has been made or that an investigation is being considered where doing so may amount to prohibited tipping off. Reports and related enquiries must be handled confidentially.</p>
+
+<h2 id="records">12. Record keeping</h2>
+<p>We retain due-diligence materials, beneficial-ownership information, account and transaction records, risk assessments, internal reports, training records and relevant communications for at least the period required by applicable law, generally no less than five years after the end of the relationship or completion of the transaction. Records may be retained longer where required for a legal hold, investigation, court order, tax obligation or other lawful purpose.</p>
+<p>Records must be accurate, retrievable and protected against unauthorised access, alteration, loss or destruction.</p>
+
+<h2 id="training">13. Training and awareness</h2>
+<p>Relevant directors, employees and contractors receive AML/CTF awareness at onboarding and refresher training at least twice each year or more often when risk, law or responsibilities change. Training covers warning signs, due diligence, sanctions and PEP controls, internal escalation, confidentiality, record keeping and the prohibition on tipping off.</p>
+
+<h2 id="third-parties">14. Employees, contractors and third parties</h2>
+<p>CDS Space applies proportionate screening when appointing people to sensitive roles and expects contractors, agents, marketers, suppliers and other third parties to comply with applicable financial-crime laws and relevant contractual controls. Risk-based due diligence and ongoing oversight may be completed before and during a higher-risk third-party relationship. We may suspend or terminate a relationship where a third party fails to meet these standards.</p>
+
+<h2 id="review">15. Testing, review and updates</h2>
+<p>Compliance controls will be reviewed periodically and after a material legal, regulatory, product, geographic or risk change. The review may include sample testing, remediation tracking and an independent assessment where proportionate or required. Material weaknesses must be recorded, assigned and corrected within a reasonable period.</p>
+<p>Senior management approves this Policy. We may update it to reflect legal, regulatory or operational changes, and the effective date displayed on this page identifies the current published version.</p>
+
+<h2 id="data-protection">16. Confidentiality and data protection</h2>
+<p>Personal information collected for AML/CTF purposes is used and disclosed only where necessary for compliance, fraud prevention, legal claims, public safety or another lawful purpose. It is handled in accordance with the CDS Space <a href="/privacy">Privacy Policy</a> and applicable data-protection law. Legal restrictions may limit our ability to disclose a report, investigation or certain screening information to the person concerned.</p>
+
+<h2 id="concerns">17. Raising a concern</h2>
+<p>Questions about this Policy or good-faith concerns about suspected financial crime may be sent to <a href="mailto:support@cdsspace.pro">support@cdsspace.pro</a> with the subject &ldquo;AML/CTF concern&rdquo;. Do not send passwords, full payment-card numbers or unnecessary identity documents by ordinary email. CDS Space prohibits retaliation against a person who raises a genuine concern in good faith.</p>
+
+<p><em>This Policy describes CDS Space&rsquo;s compliance framework and does not constitute legal advice or a representation that every customer or transaction is risk-free. It should be reviewed periodically by qualified Nigerian legal or compliance counsel.</em></p>
+`.trim();
+
+export const DEFAULT_LEGAL_DOCS: Record<"privacy" | "terms" | "brand-marketer-agreement" | "aml-ctf-policy", DefaultLegalDoc> = {
     privacy: {
         slug: "privacy",
         title: "Privacy Policy",
         subtitle:
             "How CDS Space collects, uses, shares, and protects personal data when you access cdsspace.pro, cdsspace.com, our dashboards, or engage our branding, design, development, and print services.",
-        effective_date: "2026-04-20",
+        effective_date: "2026-09-08",
         content: PRIVACY_CONTENT,
     },
     terms: {
@@ -378,7 +480,7 @@ export const DEFAULT_LEGAL_DOCS: Record<"privacy" | "terms" | "brand-marketer-ag
         title: "Terms of Service",
         subtitle:
             "These Terms of Service form a legally binding agreement between you and CDS Space. By accessing our websites, dashboards, or engaging any of our branding, design, development, or print services, you agree to be bound by these Terms.",
-        effective_date: "2026-04-20",
+        effective_date: "2026-09-08",
         content: TERMS_CONTENT,
     },
     "brand-marketer-agreement": {
@@ -389,10 +491,18 @@ export const DEFAULT_LEGAL_DOCS: Record<"privacy" | "terms" | "brand-marketer-ag
         effective_date: "2026-08-04",
         content: BRAND_MARKETER_AGREEMENT_CONTENT,
     },
+    "aml-ctf-policy": {
+        slug: "aml-ctf-policy",
+        title: "Anti-money laundering and counter-terrorist financing policy",
+        subtitle:
+            "How CDS Space identifies, assesses, prevents and reports money laundering, terrorist-financing, proliferation-financing, sanctions and related financial-crime risks.",
+        effective_date: "2026-09-07",
+        content: AML_CTF_POLICY_CONTENT,
+    },
 };
 
 export type LegalSlug = keyof typeof DEFAULT_LEGAL_DOCS;
 
 export function isLegalSlug(value: string): value is LegalSlug {
-    return value === "privacy" || value === "terms" || value === "brand-marketer-agreement";
+    return value === "privacy" || value === "terms" || value === "brand-marketer-agreement" || value === "aml-ctf-policy";
 }

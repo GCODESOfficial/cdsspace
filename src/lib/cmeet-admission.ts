@@ -10,11 +10,11 @@ export type AdmissionStatus = "admitted" | "waiting" | "denied";
 
 export interface AdmissionResult {
   status: AdmissionStatus;
-  /** True only for staff, who are the only ones who may admit others. */
+  /** True for an admin host or the authenticated non-admin room creator. */
   canAdmit: boolean;
   requestId?: string;
-  /** "staff" or "invited" when admission was immediate. */
-  reason?: string;
+  /** Server-verified role used by the in-call host/co-host UI. */
+  role?: "host" | "cohost" | "staff" | "invited" | "guest";
 }
 
 export interface WaitingGuest {
@@ -60,7 +60,7 @@ export async function pollAdmission(code: string, peerId: string): Promise<Admis
   return (payload.status as AdmissionStatus) || "waiting";
 }
 
-/** Host view: everyone currently knocking. Returns empty for non-staff. */
+/** Host/co-host view: everyone currently knocking. */
 export async function fetchWaitingGuests(code: string): Promise<WaitingGuest[]> {
   const response = await fetch(`/api/cmeet/${encodeURIComponent(code)}/admission`, {
     credentials: "include",
@@ -71,10 +71,26 @@ export async function fetchWaitingGuests(code: string): Promise<WaitingGuest[]> 
 }
 
 export async function decideAdmission(code: string, requestId: string, admit: boolean) {
-  await fetch(`/api/cmeet/${encodeURIComponent(code)}/admission`, {
+  const response = await fetch(`/api/cmeet/${encodeURIComponent(code)}/admission`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     credentials: "include",
     body: JSON.stringify({ action: "decide", requestId, decision: admit ? "admit" : "deny" }),
   });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(payload.error || "Could not update this admission request.");
+}
+
+/** Fetch short-lived relay credentials after the server has admitted a peer. */
+export async function fetchCMeetIceServers(code: string, peerId: string): Promise<RTCIceServer[]> {
+  const response = await fetch(`/api/cmeet/${encodeURIComponent(code)}/ice-servers`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    credentials: "include",
+    cache: "no-store",
+    body: JSON.stringify({ peerId, guestToken: guestTokenFromUrl() }),
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(payload.error || "Could not configure the meeting relay.");
+  return Array.isArray(payload.iceServers) ? payload.iceServers as RTCIceServer[] : [];
 }

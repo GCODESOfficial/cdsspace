@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { financeDb, requireFinanceAdminAsync } from "@/lib/finance/api-auth";
+import { callerSeesClientIdentity, financeDb, requireFinanceAdminAsync } from "@/lib/finance/api-auth";
+import { maskClientRows } from "@/lib/client-identity";
 import { ensureProjectChannel } from "@/lib/team-chat-channels";
 import { resolveClientBillingCurrency } from "@/lib/client-billing-server";
 import { CURRENCIES } from "@/lib/finance/types";
@@ -21,7 +22,9 @@ export async function GET(req: NextRequest) {
     const total_paid = ms.reduce((s: number, m: any) => s + Number(m.paid_amount || 0), 0);
     return { ...p, total_budget, total_paid, milestone_count: ms.length };
   });
-  return NextResponse.json({ projects });
+  // Masked here rather than in the page: a name an admin may not see must not
+  // travel to their browser at all.
+  return NextResponse.json({ projects: maskClientRows(projects, await callerSeesClientIdentity(req)) });
 }
 
 export async function POST(req: NextRequest) {

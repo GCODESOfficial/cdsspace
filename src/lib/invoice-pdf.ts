@@ -13,7 +13,9 @@ import {
     formatFinanceDate,
 } from "./finance/types";
 
-const CURRENCY_SYMBOLS: Record<string, string> = { NGN: "N", USD: "$", GBP: "GBP ", EUR: "EUR ", RWF: "FRw ", CNY: "CNY ", AED: "AED " };
+// NGN is written as its code: the PDF fonts cannot draw ₦, and a bare "N"
+// reads as a typo. Matches the Executive Board documents.
+const CURRENCY_SYMBOLS: Record<string, string> = { NGN: "NGN ", USD: "$", GBP: "GBP ", EUR: "EUR ", RWF: "RWF ", CNY: "CNY ", AED: "AED " };
 
 function fmtMoney(n: number | string | null | undefined, currency: string) {
     const v = Number(n || 0);
@@ -138,7 +140,7 @@ export async function exportInvoiceToPdf(invoice: FinanceInvoice, items: Finance
     await localizePdfLabels(doc as unknown as { text: (...args: unknown[]) => unknown }, [
         "Branding & Digital Agency", isReceipt ? "RECEIPT" : "INVOICE", isReceipt ? "RECEIVED FROM" : "BILLED TO", isReceipt ? "PAID / ISSUED" : "ISSUED / DUE",
         "ITEM", "QTY", "UNIT PRICE", "AMOUNT", "NOTES", "Payment Details",
-        "Subtotal", "Discount", "Total",
+        "Subtotal", "Discount", "Total", "Paid", "Balance due",
     ]);
     const pageWidth = doc.internal.pageSize.getWidth();
     const pageHeight = doc.internal.pageSize.getHeight();
@@ -185,6 +187,7 @@ export async function exportInvoiceToPdf(invoice: FinanceInvoice, items: Finance
     const statusLabel = isReceipt ? "PAID" : (invoice.status || "draft").toUpperCase();
     const statusColors: Record<string, { bg: [number, number, number]; fg: [number, number, number] }> = {
         PAID: { bg: [209, 250, 229], fg: [6, 95, 70] },
+        PARTIALLY_PAID: { bg: [254, 243, 199], fg: [146, 64, 14] },
         SENT: { bg: [219, 234, 254], fg: [29, 78, 216] },
         OVERDUE: { bg: [254, 226, 226], fg: [153, 27, 27] },
         DRAFT: { bg: [243, 244, 246], fg: [75, 85, 99] },
@@ -254,7 +257,9 @@ export async function exportInvoiceToPdf(invoice: FinanceInvoice, items: Finance
     // Items table
     const col = {
         name: margin + 12,
-        qty: margin + innerWidth * 0.55,
+        // Sits left enough that a full "NGN 850,000.00" unit price keeps a
+        // clear gap from the quantity instead of reading as one figure.
+        qty: margin + innerWidth * 0.49,
         unit: margin + innerWidth * 0.72,
         total: margin + innerWidth - 12,
     };
@@ -278,9 +283,9 @@ export async function exportInvoiceToPdf(invoice: FinanceInvoice, items: Finance
     };
 
     items.forEach((it, i) => {
-        const nameLines = doc.splitTextToSize(it.name || "-", innerWidth * 0.52);
+        const nameLines = doc.splitTextToSize(it.name || "-", innerWidth * 0.4);
         const descLines = it.description
-            ? doc.splitTextToSize(it.description, innerWidth * 0.52)
+            ? doc.splitTextToSize(it.description, innerWidth * 0.4)
             : [];
         const rowHeight = Math.max(
             28,
@@ -361,6 +366,10 @@ export async function exportInvoiceToPdf(invoice: FinanceInvoice, items: Finance
     doc.line(totalsX, totalsY - 4, totalsX + totalsW, totalsY - 4);
     totalsY += 4;
     drawTotalRow("Total", fmtMoney(invoice.total, currency), true);
+    if (!isReceipt && Number(invoice.amount_paid || 0) > 0) {
+        drawTotalRow(`Paid (${Number(invoice.payment_percentage || 0).toFixed(0)}%)`, fmtMoney(invoice.amount_paid, currency));
+        drawTotalRow("Balance due", fmtMoney(invoice.balance_due, currency), true);
+    }
 
     y = Math.max(y + sealSize, totalsY) + 24;
 

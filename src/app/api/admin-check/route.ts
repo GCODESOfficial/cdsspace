@@ -28,6 +28,75 @@ export function getAdminSession(req: NextRequest): AdminSession | null {
   return null;
 }
 
+async function refreshSubAdminSession(session: AdminSession): Promise<AdminSession | null> {
+  const identifier = session.memberId || session.email;
+  const predicate = session.memberId ? "m.id = $1::uuid" : "lower(m.email) = lower($1)";
+  try {
+    const member = await glashMaybeOne<{
+      id: string;
+      full_name: string | null;
+      email: string;
+      role_title: string | null;
+      department: string | null;
+      permissions: string[] | null;
+      admin_role_name: string | null;
+      role_permissions: string[] | null;
+    }>(
+      `select m.id, m.full_name, m.email, m.role_title, m.department, m.permissions,
+              r.name as admin_role_name, r.permissions as role_permissions
+         from public.team_members m
+         left join public.admin_roles r on r.id = m.role_id
+        where ${predicate}
+          and m.is_active = true
+          and m.is_sub_admin = true
+        limit 1`,
+      [identifier],
+    );
+    if (member) {
+      return {
+        role: "sub_admin",
+        email: member.email,
+        name: member.full_name || session.name || member.email,
+        permissions: Array.from(new Set([
+          ...(Array.isArray(member.permissions) ? member.permissions : []),
+          ...(Array.isArray(member.role_permissions) ? member.role_permissions : []),
+        ])),
+        source: "admin_cookie",
+        memberId: member.id,
+        teamRoleTitle: member.role_title,
+        department: member.department,
+        adminRoleName: member.admin_role_name,
+      };
+    }
+  } catch {
+    // Compatibility fallback for databases that predate roles/role_id.
+  }
+
+  // Old admin sessions may predate stable team-member IDs. Keep their
+  // normalized-email compatibility path, but refresh permissions from the
+  // database instead of trusting the stale cookie payload.
+  const legacy = await glashMaybeOne<{
+    email: string;
+    name: string | null;
+    permissions: string[] | null;
+  }>(
+    `select email, name, permissions
+       from public.sub_admins
+      where lower(email) = lower($1)
+        and is_active = true
+      limit 1`,
+    [session.email],
+  ).catch(() => null);
+  if (!legacy) return null;
+  return {
+    ...session,
+    email: legacy.email,
+    name: legacy.name || session.name,
+    permissions: Array.isArray(legacy.permissions) ? legacy.permissions : [],
+    source: "admin_cookie",
+  };
+}
+
 /**
  * Core team_members columns that exist on every environment. The `role_id`
  * column was added by migration 20260423_admin_roles.sql; production
@@ -53,25 +122,7 @@ export async function getAdminSessionAsync(req: NextRequest): Promise<AdminSessi
   const fromAdminCookie = getAdminSession(req);
   if (fromAdminCookie?.role === "super_admin") return fromAdminCookie;
   if (fromAdminCookie?.role === "sub_admin") {
-    const activeAdmin = fromAdminCookie.memberId
-      ? await glashMaybeOne<{ id: string }>(
-          `select id
-             from public.team_members
-            where id = $1
-              and is_active = true
-              and is_sub_admin = true
-            limit 1`,
-          [fromAdminCookie.memberId],
-        )
-      : await glashMaybeOne<{ email: string }>(
-          `select email
-             from public.sub_admins
-            where lower(email) = lower($1)
-              and is_active = true
-            limit 1`,
-          [fromAdminCookie.email],
-        );
-    return activeAdmin ? fromAdminCookie : null;
+    return refreshSubAdminSession(fromAdminCookie);
   }
 
   const teamToken = req.cookies.get("team_session")?.value;
@@ -162,6 +213,7 @@ export async function GET(req: NextRequest) {
         teamRoleTitle: session.teamRoleTitle,
         department: session.department,
         adminRoleName: session.adminRoleName,
+        issuedAt: new Date().toISOString(),
       }), adminSessionCookieOptions());
     }
 

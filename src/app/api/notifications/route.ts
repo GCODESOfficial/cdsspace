@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { verifyAdmin, verifyUser } from "@/lib/admin-auth";
 import { supabaseAdmin } from "@/lib/supabase";
 import { isLegacyClientUuid } from "@/lib/client-routes";
+import { superAdminEmailCandidates } from "@/lib/super-admin-profile";
 
 export const dynamic = "force-dynamic";
 
@@ -21,6 +22,15 @@ export async function GET(request: Request) {
     }
 
     const isAdmin = !!admin && !clientActorRequested;
+    // Sub-admin business alerts are delivered through team_notifications.
+    // Do not let the legacy sender-ID fallback expose the super-admin inbox.
+    const isSuperAdmin = Boolean(admin && (
+      admin.role === "super_admin"
+      || superAdminEmailCandidates().includes(String(admin.email || "").trim().toLowerCase())
+    ));
+    if (isAdmin && !isSuperAdmin) {
+      return NextResponse.json({ notifications: [] });
+    }
     const userId = isAdmin ? admin.id : userSession!.user.id;
     // Environment-authenticated admins do not necessarily have a profiles row.
     // Notifications are profile-scoped UUIDs, so never query the UUID column with
@@ -77,6 +87,13 @@ export async function PATCH(request: Request) {
     }
 
     const isAdmin = !!admin && !clientActorRequested;
+    const isSuperAdmin = Boolean(admin && (
+      admin.role === "super_admin"
+      || superAdminEmailCandidates().includes(String(admin.email || "").trim().toLowerCase())
+    ));
+    if (isAdmin && !isSuperAdmin) {
+      return NextResponse.json({ success: true });
+    }
     const userId = isAdmin ? admin.id : userSession!.user.id;
     if (isAdmin && !isLegacyClientUuid(userId)) {
       return NextResponse.json({ success: true });

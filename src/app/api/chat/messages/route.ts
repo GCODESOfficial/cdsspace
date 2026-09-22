@@ -9,6 +9,8 @@ import { externalIdFromRoomId, getMetaIntegration } from "@/lib/meta/config";
 import { graphPost } from "@/lib/meta/graph";
 import { isLegacyClientUuid } from "@/lib/client-routes";
 import { ADMIN_FEATURE_PERMISSION_KEYS, notifyAdminFeatureEvent } from "@/lib/admin-feature-notifications";
+import { queueAdminAlert } from "@/lib/admin-alerts";
+import { resolveChatSticker } from "@/lib/chat-sticker-server";
 
 export const dynamic = "force-dynamic";
 
@@ -71,7 +73,7 @@ export async function POST(request: Request) {
     }
 
     const body = await request.json();
-    const { roomId, message, fileUrl } = body;
+    const { roomId, message } = body;
     const replyToMessageId = typeof body.replyToMessageId === "string" && body.replyToMessageId
       ? body.replyToMessageId
       : null;
@@ -93,6 +95,8 @@ export async function POST(request: Request) {
       ? (isLegacyClientUuid(admin.id) ? admin.id : null)
       : userSession!.user.id;
     const senderRole = isAdmin ? "admin" : "client";
+    const sticker = await resolveChatSticker(supabaseAdmin, body.stickerKey);
+    const fileUrl = sticker?.attachmentUrl || body.fileUrl;
 
     // External channel rooms can only be replied to by admin.
     const isWaRoom = roomId.startsWith("whatsapp_");
@@ -134,6 +138,10 @@ export async function POST(request: Request) {
         sender_role: senderRole,
         message,
         file_url: fileUrl || null,
+        sticker_key: sticker?.stickerKey || null,
+        message_type: sticker ? "sticker" : (typeof body.messageType === "string" ? body.messageType : fileUrl ? "file" : "text"),
+        mime_type: sticker?.mimeType || (typeof body.mimeType === "string" ? body.mimeType : null),
+        metadata: sticker?.metadata || {},
         reply_to_message_id: replyToMessageId,
         source: outboundSource,
       })
@@ -263,6 +271,23 @@ export async function POST(request: Request) {
         link: `/admin/messages?room=${encodeURIComponent(roomId)}`,
         eyebrow: "Sales Hub · Chat/Meet",
         details: { Client: senderName, Channel: outboundSource === "web" ? "Client dashboard" : outboundSource },
+      });
+
+      // A client waiting on a reply cannot wait for the digest cycle, so the
+      // desk is emailed straight away as well.
+      queueAdminAlert({
+        kind: "client_message",
+        subject: senderName,
+        details: [
+          ["Client", senderName],
+          ["Email", userSession?.user.email],
+          ["Channel", outboundSource === "web" ? "Client dashboard" : outboundSource],
+          ["Attachment", fileUrl ? "Yes" : null],
+        ],
+        body: message,
+        actionPath: `/admin/messages?room=${encodeURIComponent(roomId)}`,
+        actionLabel: "Open the conversation",
+        ...(userSession?.user.email ? { replyTo: userSession.user.email } : {}),
       });
     }
 

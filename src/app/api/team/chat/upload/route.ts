@@ -22,18 +22,16 @@ export async function POST(req: Request) {
       return NextResponse.json({ ok: false, error: "No file provided" }, { status: 400 });
     }
 
-    // Files/media may only be uploaded for group spaces (department & project
-    // group chats) and admin DMs - never for 1-on-1 member chats. When the
-    // client sends the target thread, block early so no orphaned blob is
-    // written to storage. (The message-send route enforces this again.)
+    // Direct member chats accept photos, but documents and videos remain in
+    // managed group spaces. Block before upload so no orphaned blob is stored.
     const threadId = String(formData.get("threadId") || "");
     if (threadId) {
       if (!(await canViewTeamThread(viewer, threadId))) {
         return NextResponse.json({ ok: false, error: "Forbidden" }, { status: 403 });
       }
-      if (await isAttachmentRestrictedThread(threadId)) {
+      if (await isAttachmentRestrictedThread(threadId) && !file.type.startsWith("image/")) {
         return NextResponse.json(
-          { ok: false, error: "Sharing files isn't allowed in direct chats - use your department or project group chat." },
+          { ok: false, error: "Documents and videos belong in a department or project group chat. Photos can be pasted directly into this chat." },
           { status: 403 },
         );
       }

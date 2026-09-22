@@ -15,7 +15,7 @@ export interface ClientProfile {
   id: string;
   public_user_id: string;
   email: string;
-  email_verified_at: string;
+  email_verified_at: string | null;
   full_name: string | null;
   company_name: string | null;
   phone_number: string | null;
@@ -60,9 +60,24 @@ export function safeClientPath(value: string | null | undefined, fallback = "/da
   return value;
 }
 
+/**
+ * Whether the address was verified by someone other than GlashDB.
+ *
+ * GlashDB now confirms password accounts the moment they are created, so its
+ * email_confirmed_at proves nothing for them: only the CDS Space verification
+ * link can set email_verified_at on a password account. Google and LinkedIn
+ * verify the address themselves, so their confirmation still counts.
+ */
+export function isPasswordAccount(user: User) {
+  const provider = String(user.app_metadata?.provider || "").toLowerCase();
+  return provider === "email" || provider === "";
+}
+
 function userProfilePayload(user: User) {
-  const emailVerifiedAt = user.email_confirmed_at || user.confirmed_at || null;
-  if (!user.email || !emailVerifiedAt) {
+  const emailVerifiedAt = isPasswordAccount(user)
+    ? null
+    : user.email_confirmed_at || user.confirmed_at || null;
+  if (!user.email) {
     throw new Error("Verify your email address before activating your CDS Space account.");
   }
   return {
@@ -134,7 +149,10 @@ export async function ensureClientProfile(user: User): Promise<ClientProfile> {
     const restoredFromDashboardSession = user.user_metadata?.dashboard_audience === "client";
     if (!existing.email && payload.email) metadataPatch.email = payload.email;
     if (!existing.avatar_url && payload.avatar_url) metadataPatch.avatar_url = payload.avatar_url;
-    if (!restoredFromDashboardSession && existing.email_verified_at !== payload.email_verified_at) {
+    // Only ever fills a missing verification, and only from a provider that
+    // verifies addresses. It used to copy GlashDB's value on every load, which
+    // would have marked unverified password accounts verified.
+    if (!restoredFromDashboardSession && !existing.email_verified_at && payload.email_verified_at) {
       metadataPatch.email_verified_at = payload.email_verified_at;
     }
     if (Object.keys(metadataPatch).length) {
@@ -192,13 +210,17 @@ export async function getClientAccountState(): Promise<ClientAccountState | null
   const user = await readClientDashboardSessionUser();
   if (!user) return null;
 
-  const profile = await ensureClientProfile(user);
+  // Both need only the user, so they are read together rather than one after
+  // the other. Every client page, the dashboard layout and CREATE included,
+  // waits on this.
+  const [profile, agreementResult] = await Promise.all([
+    ensureClientProfile(user),
+    db.from("user_legal_agreements").select("*").eq("user_id", user.id).maybeSingle(),
+  ]);
   if (profile.account_status !== "active") return null;
-  const { data: agreement } = await db
-    .from("user_legal_agreements")
-    .select("*")
-    .eq("user_id", user.id)
-    .maybeSingle();
+  // No verified address, no dashboard. Every active client already has one.
+  if (!profile.email_verified_at) return null;
+  const agreement = agreementResult?.data;
 
   return { user, profile, agreement: (agreement as ClientAgreement | null) ?? null };
 }

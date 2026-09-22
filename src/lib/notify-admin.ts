@@ -1,4 +1,5 @@
 import { supabaseAdmin } from "@/lib/supabase";
+import { getSuperAdminProfileId } from "@/lib/super-admin-profile";
 
 /**
  * Best-effort notification to the super admin's bell (legacy `notifications`
@@ -10,22 +11,6 @@ import { supabaseAdmin } from "@/lib/supabase";
  *
  * Never throws - a failed notification must not break the calling flow.
  */
-const SUPER_ADMIN_EMAIL = "ceo@cdsspace.pro";
-
-let cachedSuperAdminProfileId: string | null = null;
-
-async function superAdminProfileId(): Promise<string | null> {
-  if (cachedSuperAdminProfileId) return cachedSuperAdminProfileId;
-  if (!supabaseAdmin) return null;
-  const { data } = await supabaseAdmin
-    .from("profiles")
-    .select("id")
-    .eq("email", SUPER_ADMIN_EMAIL)
-    .maybeSingle();
-  cachedSuperAdminProfileId = (data?.id as string | undefined) ?? null;
-  return cachedSuperAdminProfileId;
-}
-
 export async function notifySuperAdmin(input: {
   type: "team_checkin" | "team_checkout" | "team_alert" | "work_tracking" | "status_change";
   title: string;
@@ -33,7 +18,7 @@ export async function notifySuperAdmin(input: {
   link?: string;
 }) {
   try {
-    const userId = await superAdminProfileId();
+    const userId = await getSuperAdminProfileId();
     if (!userId || !supabaseAdmin) return;
     const { error } = await supabaseAdmin.from("notifications").insert({
       user_id: userId,

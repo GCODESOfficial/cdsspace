@@ -4,6 +4,7 @@ import { getSupabaseAdmin } from "@/lib/supabase";
 import { requireAdmin } from "@/lib/admin-api-auth";
 import { emailFrom, createEmailTransport } from "@/lib/email-from";
 import { brandedEmailHtml } from "@/lib/email-template";
+import { emailAttachmentsFor } from "@/lib/email-logo";
 
 export const runtime = "nodejs";
 

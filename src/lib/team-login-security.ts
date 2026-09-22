@@ -15,7 +15,7 @@ import {
   generateSessionToken,
   teamSessionExpiresAt,
 } from "@/lib/team-auth";
-import { glashMaybeOne, glashOne, glashPool, glashQuery } from "@/lib/glashdb/postgres";
+import { getGlashPoolClient, glashMaybeOne, glashOne, glashQuery } from "@/lib/glashdb/postgres";
 import { insertActivityLog } from "@/lib/activity-log";
 
 export interface TeamLocationInput {
@@ -182,7 +182,7 @@ export async function createTeamSession(memberId: string, req?: { headers: Heade
     location_accuracy: context.location?.accuracy ?? null,
     client_captured_at: context.location?.clientCapturedAt ?? null,
   };
-  const client = await glashPool.connect();
+  const client = await getGlashPoolClient();
   let replacedSessionCount = 0;
   let sessionId = "";
   let member: {

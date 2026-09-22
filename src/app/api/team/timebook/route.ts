@@ -15,6 +15,7 @@ import {
   officeRequiredFor,
   overtimeMinutes,
   TIMEBOOK_SCHEDULE,
+  validateLeavePeriod,
   workMinutes,
   type WorkMode,
 } from "@/lib/timebook";
@@ -249,6 +250,10 @@ export async function POST(req: NextRequest) {
       const { leave_type, start_date, end_date, reason } = body;
       if (!leave_type || !start_date || !end_date) {
         return NextResponse.json({ ok: false, error: "Leave type and dates are required." }, { status: 400 });
+      }
+      const validationError = validateLeavePeriod(String(leave_type), String(start_date), String(end_date));
+      if (validationError) {
+        return NextResponse.json({ ok: false, error: validationError }, { status: 400 });
       }
       const { data, error } = await db
         .from("team_leave_requests")

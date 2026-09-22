@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { financeDb, requireFinanceAdminAsync } from "@/lib/finance/api-auth";
-import { CURRENCIES, generateInvoiceNumber, randomToken } from "@/lib/finance/types";
+import { CURRENCIES, formatMoney, generateInvoiceNumber, randomToken } from "@/lib/finance/types";
 import { isMissingInvoiceExtensionColumn, stripInvoiceExtensionFields } from "@/lib/finance/invoice-schema-fallback";
 import { logActivity } from "@/lib/activity-log";
 import { recordResourceVersion } from "@/lib/admin-versioning";
@@ -12,7 +12,7 @@ export async function GET(req: NextRequest) {
   const archived = new URL(req.url).searchParams.get("archived") === "1";
   let query = sb
     .from("finance_invoices")
-    .select("*, finance_projects(name, client), invoice_payment_submissions(id, status, submitted_at, method)");
+    .select("*, finance_projects(name, client), invoice_payment_submissions(id, status, submitted_at, method, amount, currency, transfer_reference)");
   query = archived ? query.not("deleted_at", "is", null) : query.is("deleted_at", null);
   const { data, error } = await query.order("created_at", { ascending: false });
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
@@ -27,6 +27,8 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   const denied = await requireFinanceAdminAsync(req, "finance_invoices.create"); if (denied) return denied;
   const body = await req.json();
+  const isAutosave = req.headers.get("x-cds-silent") === "1";
+  const isFinalSave = body?.finalize === true && !isAutosave;
   const {
     project_id = null, milestone_id = null, client_name, client_email, client_address,
     currency: requestedCurrency = "NGN", tax_rate = 0, discount = 0, status = "draft",
@@ -41,6 +43,9 @@ export async function POST(req: NextRequest) {
   const subtotal = items.reduce((s: number, it: { quantity: number; unit_price: number }) => s + Number(it.quantity) * Number(it.unit_price), 0);
   const tax_amount = (subtotal - Number(discount || 0)) * (Number(tax_rate || 0) / 100);
   const total = subtotal - Number(discount || 0) + tax_amount;
+  if (isFinalSave && total <= 0) {
+    return NextResponse.json({ error: "Add a positive invoice amount before saving." }, { status: 400 });
+  }
 
   const invoice_number = generateInvoiceNumber();
   const public_token = randomToken(28);
@@ -85,7 +90,13 @@ export async function POST(req: NextRequest) {
     total: Number(it.quantity) * Number(it.unit_price),
     position: idx,
   }));
-  await sb.from("finance_invoice_items").insert(itemRows);
+  const { error: itemError } = await sb.from("finance_invoice_items").insert(itemRows);
+  if (itemError) {
+    // Treat the header and line items as one logical save. Removing this new,
+    // incomplete row prevents an orphaned zero-detail invoice from appearing.
+    await sb.from("finance_invoices").delete().eq("id", invoice.id);
+    return NextResponse.json({ error: itemError.message }, { status: 500 });
+  }
 
   // Autosave: if any item name doesn't already exist in price list, save it
   const names = items.map((it: { name: string }) => it.name).filter(Boolean);
@@ -101,23 +112,41 @@ export async function POST(req: NextRequest) {
     if (toSave.length > 0) await sb.from("finance_price_items").insert(toSave);
   }
 
+  const action = isFinalSave ? "invoice.create" : "invoice.draft_saved";
+  const activityMetadata = {
+    "Invoice": invoice.invoice_number,
+    "Client": invoice.client_name,
+    "Client email": invoice.client_email,
+    "Client address": invoice.client_address,
+    "Issue date": invoice.issue_date,
+    "Due date": invoice.due_date,
+    "Line items": itemRows.length,
+    "Items": itemRows.map((item: { name: string; quantity: number; total: number }) => `${item.name} × ${item.quantity} (${formatMoney(item.total, invoice.currency)})`).join("; "),
+    "Subtotal": formatMoney(invoice.subtotal, invoice.currency),
+    "Discount": formatMoney(invoice.discount, invoice.currency),
+    "Tax": formatMoney(invoice.tax_amount, invoice.currency),
+    "Total": formatMoney(invoice.total, invoice.currency),
+    "Currency": invoice.currency,
+    "Status": invoice.status,
+    "Payment terms": invoice.payment_terms,
+  };
   await logActivity({
-    action: "invoice.create",
+    action,
     page: "finance/invoices",
     resource_type: "invoice",
     resource_id: invoice.id,
     resource_label: `${invoice.invoice_number} · ${client_name}`,
-    metadata: { total: invoice.total, currency: invoice.currency, status: invoice.status },
+    metadata: activityMetadata,
   });
   await recordResourceVersion({
-    action: "invoice.create",
+    action,
     page: "finance/invoices",
     resource_type: "invoice",
     resource_id: invoice.id,
     resource_label: `${invoice.invoice_number} · ${client_name}`,
     before_data: {},
     after_data: { invoice, items: itemRows },
-    metadata: { total: invoice.total, currency: invoice.currency, status: invoice.status },
+    metadata: activityMetadata,
   });
 
   return NextResponse.json({ invoice });

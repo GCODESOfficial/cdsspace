@@ -8,8 +8,10 @@ import {
   setMarketerDashboardSessionCookie,
 } from "@/lib/marketer-dashboard-session";
 import { BLOCKED_EMAIL_MESSAGE, isBlockedEmail } from "@/lib/security/email-blocklist";
+import { publicSiteOrigin } from "@/lib/public-site";
 
 function siteOrigin() {
+  if (process.env.NODE_ENV === "production") return publicSiteOrigin();
   if (process.env.NEXT_PUBLIC_SITE_URL) return process.env.NEXT_PUBLIC_SITE_URL.replace(/\/$/, "");
   if (process.env.VERCEL_URL) return `https://${process.env.VERCEL_URL}`;
   return "http://localhost:3000";

@@ -64,6 +64,15 @@ export function getGlashDbServiceRoleConfig(): GlashDbRuntimeConfig & { serviceR
   };
 }
 
+/**
+ * The HS256 secret GlashDB signs access tokens with. Optional: without it,
+ * sessions are only checked by asking GlashDB. Server-only - never expose it
+ * with a NEXT_PUBLIC_ prefix.
+ */
+export function getGlashDbJwtSecret(): string | null {
+  return firstPresent(process.env.GLASHDB_JWT_SECRET, process.env.JWT_SECRET, process.env.JWT_Secret) || null;
+}
+
 export function getGlashDbDatabaseUrl(): string {
   return normalizePostgresSslMode(
     requireEnv(firstPresent(process.env.GLASHDB_DATABASE_URL, process.env.DATABASE_URL), "GLASHDB_DATABASE_URL, DATABASE_URL"),

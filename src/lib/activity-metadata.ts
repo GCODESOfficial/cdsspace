@@ -37,6 +37,15 @@ export function activityDetailRows(metadata: Record<string, unknown> | null | un
   const files = namesFromArray(metadata.files, "relative_path") || namesFromArray(metadata.files, "name");
   if (files) add("Uploaded", files);
   add("Approved by", metadata.approved_by);
+  add("Approved on", metadata.approved_on);
+  add("Reason", metadata.reason);
+  add("Changed fields", metadata.changed_fields);
+  add("Previous salary", metadata.previous_salary);
+  add("New salary", metadata.new_salary);
+  add("Target start", metadata.target_start);
+  add("Status", metadata.status);
+  add("Priority", metadata.priority);
+  add("Forecast", metadata.forecast);
   add("Sent by", metadata.sent_by);
   add("Device", metadata.device_name || metadata.system_name || metadata.device_type);
   add("Browser", metadata.browser_name);

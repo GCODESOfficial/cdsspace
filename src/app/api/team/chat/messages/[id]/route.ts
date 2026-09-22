@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getChatViewer } from "@/lib/team-chat-auth";
+import { getChatViewer, viewerIsSuperAdmin } from "@/lib/team-chat-auth";
 import {
   canDeleteTeamMessage,
   canEditTeamMessage,
@@ -9,6 +9,7 @@ import {
   TEAM_CHAT_MESSAGE_COLUMNS,
   type TeamChatMessageRecord,
 } from "@/lib/team-chat-server";
+import { purgeChatAttachment } from "@/lib/chat-storage";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -89,6 +90,13 @@ export async function DELETE(_req: Request, { params }: { params: Promise<{ id: 
   }
   if (!canDeleteTeamMessage(viewer, message)) {
     return NextResponse.json({ ok: false, error: "You cannot delete this message" }, { status: 403 });
+  }
+
+  if (viewerIsSuperAdmin(viewer)) {
+    await purgeChatAttachment(message.attachment_url).catch(() => undefined);
+    const { error } = await db.from("team_chat_messages").delete().eq("id", id);
+    if (error) return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
+    return NextResponse.json({ ok: true, hardDeleted: true, messageId: id });
   }
 
   const now = new Date().toISOString();

@@ -1,15 +1,23 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { supabaseAdmin } from "@/lib/supabase";
-import { type ChatViewer, viewerDisplayName } from "@/lib/team-chat-auth";
+import {
+  type ChatViewer,
+  viewerDisplayName,
+  viewerIsSuperAdmin,
+  viewerMemberId,
+  viewerRoleTitle,
+} from "@/lib/team-chat-auth";
 
 export interface TeamChatViewerPayload {
   kind: "admin" | "team";
   id: string | null;
   displayName: string;
+  roleTitle: string | null;
   reactionKey: string;
   // "Management" = admins + sub-admins. Used client-side to gate posting in
   // announcement-only channels (the server is the authoritative check).
   isManagement: boolean;
+  isSuperAdmin: boolean;
 }
 
 export interface TeamChatMessageRecord {
@@ -59,23 +67,28 @@ export function getTeamChatDb() {
 }
 
 export function getViewerReactionKey(viewer: ChatViewer) {
-  return viewer.kind === "admin" ? `admin:${viewer.email}` : viewer.session.id;
+  return viewerMemberId(viewer) || `admin:${viewer.kind === "admin" ? viewer.email : viewer.session.email}`;
 }
 
 export function getViewerPayload(viewer: ChatViewer): TeamChatViewerPayload {
   return {
     kind: viewer.kind,
-    id: viewer.kind === "team" ? viewer.session.id : null,
+    id: viewerMemberId(viewer),
     displayName: viewerDisplayName(viewer),
+    roleTitle: viewerRoleTitle(viewer),
     reactionKey: getViewerReactionKey(viewer),
     isManagement: viewer.kind === "admin" || (viewer.kind === "team" && !!viewer.session.is_sub_admin),
+    isSuperAdmin: viewerIsSuperAdmin(viewer),
   };
 }
 
 export async function canViewTeamThread(viewer: ChatViewer, threadId: string) {
   const db = getTeamChatDb();
   if (!db) return false;
-  if (viewer.kind === "admin") return true;
+  if (viewerIsSuperAdmin(viewer)) return true;
+
+  const memberId = viewerMemberId(viewer);
+  if (!memberId) return false;
 
   const [{ data: thread }, { data: part }] = await Promise.all([
     db.from("team_chat_threads").select("kind, visibility").eq("id", threadId).maybeSingle(),
@@ -83,7 +96,7 @@ export async function canViewTeamThread(viewer: ChatViewer, threadId: string) {
       .from("team_chat_participants")
       .select("thread_id")
       .eq("thread_id", threadId)
-      .eq("team_member_id", viewer.session.id)
+      .eq("team_member_id", memberId)
       .maybeSingle(),
   ]);
 
@@ -113,14 +126,14 @@ export async function isAttachmentRestrictedThread(threadId: string): Promise<bo
 
 export function canEditTeamMessage(viewer: ChatViewer, message: TeamChatMessageRecord) {
   if (message.deleted_at) return false;
-  if (viewer.kind === "admin") return message.sender_is_admin;
-  return message.sender_id === viewer.session.id && !message.sender_is_admin;
+  if (viewerIsSuperAdmin(viewer)) return message.sender_is_admin;
+  return message.sender_id === viewerMemberId(viewer) && !message.sender_is_admin;
 }
 
 export function canDeleteTeamMessage(viewer: ChatViewer, message: TeamChatMessageRecord) {
   if (message.deleted_at) return false;
-  if (viewer.kind === "admin") return true;
-  return message.sender_id === viewer.session.id && !message.sender_is_admin;
+  if (viewerIsSuperAdmin(viewer)) return true;
+  return message.sender_id === viewerMemberId(viewer) && !message.sender_is_admin;
 }
 
 export function describeTeamMessage(message: Partial<TeamChatMessageRecord>) {
@@ -161,11 +174,11 @@ export async function hydrateTeamMessages(messages: TeamChatMessageRecord[]) {
     new Set(relatedMessages.map((message) => message.client_user_id).filter(Boolean)),
   ) as string[];
 
-  const nameById: Record<string, { name: string; avatar: string | null }> = {};
+  const nameById: Record<string, { name: string; avatar: string | null; roleTitle: string | null }> = {};
   if (ids.length) {
-    const { data: members } = await db.from("team_members").select("id, full_name, avatar_url").in("id", ids);
+    const { data: members } = await db.from("team_members").select("id, full_name, avatar_url, role_title").in("id", ids);
     (members || []).forEach((member: any) => {
-      nameById[member.id] = { name: member.full_name, avatar: member.avatar_url };
+      nameById[member.id] = { name: member.full_name, avatar: member.avatar_url, roleTitle: member.role_title || null };
     });
   }
 
@@ -189,7 +202,7 @@ export async function hydrateTeamMessages(messages: TeamChatMessageRecord[]) {
       {
         ...message,
         sender_name: message.sender_is_admin
-          ? "Admin"
+          ? "Super admin"
           : message.client_user_id
             ? clientById[message.client_user_id]?.name || "Client"
             : nameById[message.sender_id || ""]?.name || "Member",
@@ -198,6 +211,9 @@ export async function hydrateTeamMessages(messages: TeamChatMessageRecord[]) {
           : message.client_user_id
             ? clientById[message.client_user_id]?.avatar || null
             : nameById[message.sender_id || ""]?.avatar || null,
+        sender_role_title: message.sender_is_admin || message.client_user_id
+          ? null
+          : nameById[message.sender_id || ""]?.roleTitle || null,
       },
     ]),
   );

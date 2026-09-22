@@ -1,17 +1,17 @@
 import "server-only";
 
 import { createHash } from "node:crypto";
+import { chatComplete, type ChatContentPart } from "@/lib/ai/openai";
+import sharp from "sharp";
 
 /**
  * Brand consistency between a company's website and its social accounts, and
  * whether both the bare domain and the www host actually serve the site.
  *
- * Images are compared by their bytes and by their shape, read straight from the
- * PNG, JPEG, GIF or WebP header rather than decoded. That is enough to say "this
- * is literally the same file", "this is a different file of the same shape", or
- * "this is a different shape entirely", which is what a designer needs to know
- * before looking. Nothing here claims to judge a design; it points at the pairs
- * worth opening.
+ * Exact file matches are detected locally. Different crops, backgrounds,
+ * colourways, lockups, resolutions and aspect ratios are normal logo variants,
+ * so they are never treated as inconsistencies on dimensions alone. When an
+ * OpenAI key is configured, the public images are also compared visually.
  */
 
 const USER_AGENT = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
@@ -23,11 +23,13 @@ export interface BrandAsset {
   width: number | null;
   height: number | null;
   bytes: number;
+  /** Small normalised raster used only for the server-side visual comparison. */
+  visionUrl?: string;
 }
 
 export interface BrandFinding {
   area: string;
-  status: "consistent" | "differs" | "missing" | "unchecked";
+  status: "consistent" | "variant" | "differs" | "missing" | "unchecked";
   detail: string;
   evidence: string[];
 }
@@ -39,6 +41,47 @@ export interface DomainVariant {
   ok: boolean;
   redirectsTo: string | null;
   note: string;
+}
+
+/**
+ * Corrects findings saved by the former file-and-dimension comparison. It does
+ * not rewrite genuine reviewed differences; only the old known false-positive
+ * explanations are converted to a neutral variant or unchecked state.
+ */
+export function normalizeBrandFindings(value: unknown): BrandFinding[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((raw) => {
+    if (!raw || typeof raw !== "object") return [];
+    const item = raw as Record<string, unknown>;
+    const area = typeof item.area === "string" ? item.area.trim().slice(0, 160) : "";
+    const detail = typeof item.detail === "string" ? item.detail.trim().slice(0, 2000) : "";
+    const evidence = Array.isArray(item.evidence)
+      ? item.evidence.map((entry) => typeof entry === "string" ? entry.trim() : "").filter(Boolean).slice(0, 8)
+      : [];
+    const rawStatus = String(item.status || "unchecked");
+    const knownStatus = ["consistent", "variant", "differs", "missing", "unchecked"].includes(rawStatus)
+      ? rawStatus as BrandFinding["status"]
+      : "unchecked";
+    if (!area || !detail) return [];
+
+    if (knownStatus === "differs" && /different image file from the closest brand image|does not match any brand image.*different shape/i.test(detail)) {
+      return [{
+        area,
+        status: "variant" as const,
+        detail: `${area.replace(/ logo$/i, "")} and the official website use differently formatted brand artwork. File bytes, crop, canvas shape, dimensions, and colour treatment do not make this an identity inconsistency. Re-run the audit for an AI-assisted visual comparison.`,
+        evidence,
+      }];
+    }
+    if (knownStatus === "differs" && /does not visibly carry the company name/i.test(detail)) {
+      return [{
+        area,
+        status: "unchecked" as const,
+        detail: "The platform did not expose enough public page copy to verify the displayed name. This is inconclusive and is not recorded as an inconsistency.",
+        evidence,
+      }];
+    }
+    return [{ area, status: knownStatus, detail, evidence }];
+  });
 }
 
 function absolute(value: string, base: string) {
@@ -110,7 +153,20 @@ async function fetchAsset(source: string, url: string): Promise<BrandAsset | nul
     const buffer = Buffer.from(await response.arrayBuffer());
     if (!buffer.length || buffer.length > 8_000_000) return null;
     const { width, height } = imageSize(buffer);
-    return { source, url, hash: createHash("sha256").update(buffer).digest("hex").slice(0, 32), width, height, bytes: buffer.length };
+    let visionUrl: string | undefined;
+    if (process.env.OPENAI_API_KEY) {
+      try {
+        const raster = await sharp(buffer, { limitInputPixels: 16_000_000 })
+          .resize({ width: 768, height: 768, fit: "inside", withoutEnlargement: true })
+          .png({ compressionLevel: 8 })
+          .toBuffer();
+        if (raster.length <= 3_000_000) visionUrl = `data:image/png;base64,${raster.toString("base64")}`;
+      } catch {
+        // Some remote assets are malformed. The public URL remains available
+        // to the model when it is already a supported image format.
+      }
+    }
+    return { source, url, hash: createHash("sha256").update(buffer).digest("hex").slice(0, 32), width, height, bytes: buffer.length, visionUrl };
   } catch {
     return null;
   }
@@ -136,11 +192,81 @@ function ratio(asset: BrandAsset) {
   return asset.width && asset.height ? asset.width / asset.height : null;
 }
 
+type BrandRelationship = {
+  relationship: "same_brand_variant" | "different_brand" | "uncertain";
+  confidence: number;
+  reason: string;
+};
+
+function jsonObject(value: string) {
+  const cleaned = value.trim().replace(/^```(?:json)?/i, "").replace(/```$/, "").trim();
+  return JSON.parse(cleaned) as Record<string, unknown>;
+}
+
 /**
- * Compares each social account's brand image against the website's, and checks
- * that the account name still reads like the company. A logo that differs
- * between a website and a social profile is the exact inconsistency a rebrand
- * leaves behind, and it is a concrete thing to open a conversation with.
+ * Uses the configured OpenAI vision-capable model to compare the actual marks,
+ * not their file names or canvas dimensions. The result remains conservative:
+ * only a high-confidence different identity can become an inconsistency.
+ */
+async function reviewBrandRelationship(input: {
+  companyName: string;
+  platform: string;
+  profile: BrandAsset;
+  website: BrandAsset[];
+}): Promise<BrandRelationship | null> {
+  if (!process.env.OPENAI_API_KEY) return null;
+
+  const content: ChatContentPart[] = [
+    {
+      type: "text",
+      text: [
+        `Company: ${input.companyName}`,
+        `Social platform: ${input.platform}`,
+        "The first image is the social profile image. The remaining images are public brand images from the official website.",
+        "Decide whether the images express the same core brand identity. Ignore normal variants such as symbol-only versus wordmark, horizontal versus stacked lockups, crops, padding, canvas ratio, resolution, monochrome or reversed colourways, and light versus dark backgrounds.",
+        "Return different_brand only when the core mark or named identity is clearly different. If an image is unreadable or the relationship cannot be established, return uncertain.",
+        "Return only JSON: {relationship: same_brand_variant|different_brand|uncertain, confidence: number from 0 to 1, reason: one concise evidence-based sentence}.",
+      ].join("\n"),
+    },
+    { type: "text", text: "Social profile image:" },
+    { type: "image_url", image_url: { url: input.profile.visionUrl || input.profile.url, detail: "low" } },
+  ];
+
+  input.website.slice(0, 4).forEach((asset, index) => {
+    content.push({ type: "text", text: `Official website brand image ${index + 1}:` });
+    content.push({ type: "image_url", image_url: { url: asset.visionUrl || asset.url, detail: "low" } });
+  });
+
+  try {
+    const { text } = await chatComplete([
+      {
+        role: "system",
+        content: "You are a conservative brand identity reviewer. Different executions of the same mark are variants, not inconsistencies. Do not use file dimensions, aspect ratio, crop, or colour treatment as proof of a different brand.",
+      },
+      { role: "user", content },
+    ], {
+      model: process.env.OPENAI_VISION_MODEL || process.env.OPENAI_DEFAULT_MODEL || "gpt-4o-mini",
+      temperature: 0.1,
+      max_tokens: 300,
+      response_format: { type: "json_object" },
+    });
+    const parsed = jsonObject(text);
+    const relationship = String(parsed.relationship || "") as BrandRelationship["relationship"];
+    if (!["same_brand_variant", "different_brand", "uncertain"].includes(relationship)) return null;
+    return {
+      relationship,
+      confidence: Math.max(0, Math.min(1, Number(parsed.confidence) || 0)),
+      reason: typeof parsed.reason === "string" ? parsed.reason.trim().slice(0, 500) : "",
+    };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Compares each social account's brand image against the website's. File and
+ * shape differences are treated as normal variants. A finding is marked as a
+ * genuine difference only after strong visual evidence of another identity.
  */
 export async function assessBrandConsistency(input: {
   companyName: string;
@@ -208,26 +334,33 @@ export async function assessBrandConsistency(input: {
         if (bestRatio === null) return asset;
         return Math.abs(current - profileRatio) < Math.abs(bestRatio - profileRatio) ? asset : best;
       }, siteAsset);
-    const comparableRatio = ratio(comparable);
-    const shapeKnown = profileRatio !== null && comparableRatio !== null;
-    const sameShape = shapeKnown && Math.abs(comparableRatio - profileRatio) < 0.15;
+    const visualReview = sameFile ? null : await reviewBrandRelationship({
+      companyName: input.companyName,
+      platform: social.platform,
+      profile: profileAsset,
+      website: siteAssets,
+    });
+    const confirmedDifferent = handleMatches && visualReview?.relationship === "different_brand" && visualReview.confidence >= 0.9;
+    const confirmedVariant = visualReview?.relationship === "same_brand_variant" && visualReview.confidence >= 0.55;
 
     findings.push({
       area: `${social.platform} logo`,
-      status: sameFile ? "consistent" : "differs",
+      status: sameFile ? "consistent" : confirmedDifferent ? "differs" : "variant",
       detail: sameFile
         ? `The ${social.platform} profile uses the same brand image file the website publishes, so the mark is consistent across both.`
-        : !shapeKnown || sameShape
-          ? `The ${social.platform} profile picture is a different image file from the closest brand image on the website. It may be the same mark exported at another size, or an older logo left behind after a rebrand. Open both and compare.`
-          : `The ${social.platform} profile picture (${profileAsset.width || "?"}x${profileAsset.height || "?"}) does not match any brand image on the website, and the nearest one is a different shape (${comparable.width || "?"}x${comparable.height || "?"}). Worth checking whether the social account is still carrying a previous version of the logo.`,
+        : confirmedDifferent
+          ? `The ${social.platform} profile appears to use a genuinely different brand identity from the official website. ${visualReview?.reason || "The core mark differs, beyond a normal crop, lockup, colourway, or size variant."}`
+          : confirmedVariant
+            ? `The ${social.platform} profile and official website use the same core brand identity in different valid executions. ${visualReview?.reason || "The change is a crop, lockup, colourway, or format variant rather than a different logo."}`
+            : `The ${social.platform} profile image is a different file or format from the website artwork, but that alone is not a brand inconsistency. Treat it as a valid brand variant unless a visual review confirms a different core mark.`,
       evidence: [social.url, profileAsset.url, comparable.url],
     });
 
     if (!handleMatches) {
       findings.push({
         area: `${social.platform} naming`,
-        status: "differs",
-        detail: `The ${social.platform} page does not visibly carry the company name, so the account may be under an old brand name or may belong to someone else.`,
+        status: "unchecked",
+        detail: `The ${social.platform} page copy available to the automated check did not expose the company name. Platform login walls and restricted metadata make this inconclusive, so it is not recorded as an inconsistency.`,
         evidence: [social.url],
       });
     }

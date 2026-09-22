@@ -1,7 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { NextResponse } from "next/server";
 import { randomUUID } from "crypto";
-import { getChatViewer } from "@/lib/team-chat-auth";
+import { getChatViewer, viewerIsSuperAdmin, viewerMemberId } from "@/lib/team-chat-auth";
 import { describeTeamMessage, getTeamChatDb, getViewerPayload } from "@/lib/team-chat-server";
 
 export const runtime = "nodejs";
@@ -20,7 +20,8 @@ export async function GET() {
     return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
   }
 
-  const isSuperAdmin = viewer.kind === "admin" && viewer.role === "super_admin";
+  const isSuperAdmin = viewerIsSuperAdmin(viewer);
+  const memberId = viewerMemberId(viewer);
   let threadIdFilter: string[] | null = null;
   let superAdminHideDirectsOfOthers = false;
 
@@ -28,11 +29,11 @@ export async function GET() {
     let participantThreadIds: string[] = [];
 
     // 1. Threads where they are a participant (Direct messages + Groups where they're added)
-    if (viewer.kind === "team") {
+    if (memberId) {
       const { data: parts } = await db
         .from("team_chat_participants")
         .select("thread_id")
-        .eq("team_member_id", viewer.session.id);
+        .eq("team_member_id", memberId);
       participantThreadIds = (parts || []).map((p: any) => p.thread_id);
     }
 
@@ -116,24 +117,23 @@ export async function GET() {
     threads?.forEach((t: any) => {
       if (t.kind === "direct") {
         const parts = threadParts.filter((p: any) => p.thread_id === t.id);
-        if (viewer.kind === "admin") {
+        if (isSuperAdmin) {
           const other = parts.find((p: any) => nameById[p.team_member_id]);
           if (other) participantNames[t.id] = nameById[other.team_member_id];
         } else {
-          const myId = viewer.kind === "team" ? viewer.session.id : null;
-          const other = parts.find((p: any) => p.team_member_id !== myId && nameById[p.team_member_id]);
+          const other = parts.find((p: any) => p.team_member_id !== memberId && nameById[p.team_member_id]);
           if (other) participantNames[t.id] = nameById[other.team_member_id];
-          else if (t.includes_admin) participantNames[t.id] = "Admin";
+          else if (t.includes_admin) participantNames[t.id] = "Super admin";
         }
       }
     });
 
     // Unread for team members (admins: skip)
-    if (viewer.kind === "team") {
+    if (memberId) {
       const { data: myParts } = await db
         .from("team_chat_participants")
         .select("thread_id, last_read_at")
-        .eq("team_member_id", viewer.session.id)
+        .eq("team_member_id", memberId)
         .in("thread_id", threadIds);
       const readMap: Record<string, string | null> = {};
       (myParts || []).forEach((p: any) => {
@@ -142,7 +142,7 @@ export async function GET() {
       lastMsgs.forEach((m: any) => {
         const rd = readMap[m.thread_id];
         if (!rd || new Date(m.created_at) > new Date(rd)) {
-          if (m.sender_id !== viewer.session.id) {
+          if (m.sender_id !== memberId) {
             unread[m.thread_id] = (unread[m.thread_id] || 0) + 1;
           }
         }
@@ -197,7 +197,8 @@ export async function POST(req: Request) {
   }
   const storedKind = kind === "project" || kind === "self" ? "direct" : kind;
   
-  const isSuperAdmin = viewer.kind === "admin" && viewer.role === "super_admin";
+  const isSuperAdmin = viewerIsSuperAdmin(viewer);
+  const memberId = viewerMemberId(viewer);
   if (kind === "admin_broadcast" && !isSuperAdmin) {
     return NextResponse.json({ ok: false, error: "Only super admin can broadcast" }, { status: 403 });
   }
@@ -223,17 +224,17 @@ export async function POST(req: Request) {
   }
 
   if (kind === "self") {
-    if (viewer.kind === "team") {
+    if (memberId) {
       const { data: existing } = await db
         .from("team_chat_threads")
         .select("id")
         .eq("kind", "direct")
         .eq("name", "Saved messages")
-        .eq("created_by", viewer.session.id)
+        .eq("created_by", memberId)
         .maybeSingle();
       if (existing?.id) return NextResponse.json({ ok: true, thread_id: existing.id });
     }
-    if (viewer.kind === "admin") {
+    if (isSuperAdmin) {
       const { data: existing } = await db
         .from("team_chat_threads")
         .select("id")
@@ -268,8 +269,8 @@ export async function POST(req: Request) {
       name: resolvedName,
       department: kind === "department" ? String(department).trim() : null,
       project_id: kind === "project" ? project_id : null,
-      created_by: viewer.kind === "team" ? viewer.session.id : null,
-      includes_admin: viewer.kind === "admin" || hasAdmin,
+      created_by: memberId,
+      includes_admin: isSuperAdmin || hasAdmin,
       visibility: ["public", "private", "invite_only"].includes(String(visibility)) ? String(visibility) : "private",
       description: typeof description === "string" && description.trim() ? description.trim() : null,
       rules: typeof rules === "string" && rules.trim() ? rules.trim() : null,
@@ -282,7 +283,7 @@ export async function POST(req: Request) {
   if (error) return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
 
   const allParticipants = new Set<string>(realUserIds);
-  if (viewer.kind === "team") allParticipants.add(viewer.session.id);
+  if (memberId) allParticipants.add(memberId);
 
   if (kind === "admin_broadcast") {
     const { data: all } = await db.from("team_members").select("id").eq("is_active", true);
@@ -339,7 +340,7 @@ export async function PATCH(req: Request) {
   if (!thread) return NextResponse.json({ ok: false, error: "Thread not found" }, { status: 404 });
 
   const isAdmin = viewer.kind === "admin";
-  const isCreator = viewer.kind === "team" && thread.created_by === viewer.session.id;
+  const isCreator = !!viewerMemberId(viewer) && thread.created_by === viewerMemberId(viewer);
   const isManagement = isAdmin || (viewer.kind === "team" && !!viewer.session.is_sub_admin);
   if (!isAdmin && !isCreator && !isManagement) {
     return NextResponse.json({ ok: false, error: "You do not manage this conversation." }, { status: 403 });

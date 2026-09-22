@@ -9,15 +9,12 @@ import {
   newPaystackReference,
   paystackRequest,
 } from "@/lib/paystack";
+import { applicationOrigin } from "@/lib/public-site";
 
 export const dynamic = "force-dynamic";
 
 function siteOrigin(request: NextRequest) {
-  const configured = process.env.NEXT_PUBLIC_SITE_URL?.trim();
-  if (configured) {
-    try { return new URL(configured).origin; } catch { /* fall through */ }
-  }
-  return request.nextUrl.origin;
+  return applicationOrigin(request);
 }
 
 export async function POST(request: NextRequest) {

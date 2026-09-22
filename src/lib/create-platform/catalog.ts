@@ -1,4 +1,7 @@
 export type CreateRole = "client" | "team" | "admin";
+
+/** Private CREATE workspace storage available to every account. */
+export const CREATE_STORAGE_LIMIT_BYTES = 2 * 1024 * 1024 * 1024;
 export type CreateToolStatus = "active" | "maintenance" | "disabled";
 export type CreateStage = "phase_1" | "phase_2" | "phase_3";
 
@@ -29,6 +32,16 @@ export interface CreateCreditAccount {
   storageLimitBytes: number;
   storageUsedBytes: number;
   resetAt: string | null;
+}
+
+export interface CreateAdvertBanner {
+  imageUrl: string | null;
+  altText: string;
+  targetUrl: string | null;
+  isActive: boolean;
+  width: number | null;
+  height: number | null;
+  updatedAt: string | null;
 }
 
 export interface CreateProject {
@@ -71,6 +84,7 @@ export interface CreateCreation {
 
 export interface CreateDashboardData {
   tools: CreateTool[];
+  advertBanner: CreateAdvertBanner | null;
   favoriteToolSlugs: string[];
   recentCreations: CreateCreation[];
   projects: CreateProject[];
@@ -90,6 +104,7 @@ export const CREATE_CATEGORIES = [
   "Image",
   "Video",
   "Brand",
+  "Documents",
   "Mockups",
   "Conversion",
 ] as const;
@@ -314,7 +329,7 @@ export const DEFAULT_CREATE_TOOLS: CreateTool[] = [
   {
     slug: "brand-name-checker",
     name: "Brand name checker",
-    shortDescription: "Run a preliminary naming review across internal rules, social fit, domains, and similarity signals.",
+    shortDescription: "Check live domain, major social-handle, and global company-registration signals before choosing a name.",
     category: "Brand",
     stage: "phase_2",
     status: "active",
@@ -322,12 +337,30 @@ export const DEFAULT_CREATE_TOOLS: CreateTool[] = [
     creditCost: 1,
     requiresProvider: false,
     providerKey: null,
-    isBeta: true,
-    isNew: false,
+    isBeta: false,
+    isNew: true,
     isFeatured: false,
     supportsSimpleMode: true,
     supportsProMode: false,
     outputFormats: ["PDF", "TXT"],
+  },
+  {
+    slug: "official-letterhead",
+    name: "Create an official letterhead",
+    shortDescription: "Write, refine, sign, duplicate, and export private corporate letterhead documents as PDF.",
+    category: "Documents",
+    stage: "phase_2",
+    status: "active",
+    roleAccess: ["client", "team", "admin"],
+    creditCost: 0,
+    requiresProvider: false,
+    providerKey: null,
+    isBeta: false,
+    isNew: true,
+    isFeatured: true,
+    supportsSimpleMode: true,
+    supportsProMode: true,
+    outputFormats: ["PDF"],
   },
   {
     slug: "logo-animation",

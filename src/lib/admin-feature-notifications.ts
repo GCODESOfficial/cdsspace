@@ -24,6 +24,7 @@ interface AdminFeatureRecipient {
   id: string;
   full_name: string | null;
   email: string | null;
+  can_open_admin: boolean;
 }
 
 function escapeHtml(value: unknown) {
@@ -58,7 +59,7 @@ async function permissionRecipients(permissionKeys: readonly string[]) {
   const keys = [...new Set(["all", ...permissionKeys])];
   try {
     return await glashQuery<AdminFeatureRecipient>(
-      `select distinct m.id, m.full_name, m.email
+      `select distinct m.id, m.full_name, m.email, true as can_open_admin
          from public.team_members m
          left join public.admin_roles r on r.id = m.role_id
         where m.is_active = true
@@ -70,7 +71,7 @@ async function permissionRecipients(permissionKeys: readonly string[]) {
     );
   } catch {
     return glashQuery<AdminFeatureRecipient>(
-      `select distinct m.id, m.full_name, m.email
+      `select distinct m.id, m.full_name, m.email, true as can_open_admin
          from public.team_members m
         where m.is_active = true
           and m.is_sub_admin = true
@@ -80,6 +81,71 @@ async function permissionRecipients(permissionKeys: readonly string[]) {
       [keys],
     ).catch(() => []);
   }
+}
+
+async function departmentRecipients(departmentNames: readonly string[]) {
+  const names = [...new Set(departmentNames.map((name) => name.trim().toLowerCase()).filter(Boolean))];
+  if (!names.length) return [];
+  try {
+    return await glashQuery<AdminFeatureRecipient>(
+      `select distinct m.id, m.full_name, m.email, false as can_open_admin
+         from public.team_members m
+        where m.is_active = true
+          and m.email_verified_at is not null
+          and (
+            exists (
+              select 1 from unnest($1::text[]) requested(name)
+               where lower(trim(coalesce(m.department, ''))) = requested.name
+                  or lower(trim(coalesce(m.department, ''))) like '%' || requested.name || '%'
+            )
+            or exists (
+              select 1
+                from public.team_member_departments tmd
+                join public.departments d on d.id = tmd.department_id
+               where tmd.team_member_id = m.id
+                 and exists (
+                   select 1 from unnest($1::text[]) requested(name)
+                    where lower(trim(d.name)) = requested.name
+                       or lower(trim(d.name)) like '%' || requested.name || '%'
+                 )
+            )
+          )
+        order by m.full_name`,
+      [names],
+    );
+  } catch {
+    // Compatibility path for databases that still use only the legacy
+    // team_members.department field.
+    return glashQuery<AdminFeatureRecipient>(
+      `select distinct m.id, m.full_name, m.email, false as can_open_admin
+         from public.team_members m
+        where m.is_active = true
+          and m.email_verified_at is not null
+          and exists (
+            select 1 from unnest($1::text[]) requested(name)
+             where lower(trim(coalesce(m.department, ''))) = requested.name
+                or lower(trim(coalesce(m.department, ''))) like '%' || requested.name || '%'
+          )
+        order by m.full_name`,
+      [names],
+    ).catch(() => []);
+  }
+}
+
+async function featureRecipients(permissionKeys: readonly string[], departmentNames: readonly string[]) {
+  const [permitted, departmental] = await Promise.all([
+    permissionRecipients(permissionKeys),
+    departmentRecipients(departmentNames),
+  ]);
+  const recipients = new Map<string, AdminFeatureRecipient>();
+  for (const recipient of [...departmental, ...permitted]) {
+    const current = recipients.get(recipient.id);
+    recipients.set(recipient.id, {
+      ...recipient,
+      can_open_admin: Boolean(current?.can_open_admin || recipient.can_open_admin),
+    });
+  }
+  return Array.from(recipients.values());
 }
 
 function notificationHtml(input: {
@@ -111,24 +177,35 @@ function notificationHtml(input: {
 /** Permission-aware in-app and branded email delivery for critical admin events. */
 export async function notifyAdminFeatureEvent(input: {
   permissionKeys: readonly string[];
+  departmentNames?: readonly string[];
   title: string;
   body: string;
   link: string;
+  teamLink?: string;
   eyebrow: string;
   details?: Record<string, unknown>;
 }) {
   try {
-    const recipients = await permissionRecipients(input.permissionKeys);
-    const absoluteLink = `${SITE_URL}${input.link.startsWith("/") ? input.link : `/${input.link}`}`;
+    const recipients = await featureRecipients(input.permissionKeys, input.departmentNames || []);
+    const adminLink = input.link.startsWith("/") ? input.link : `/${input.link}`;
+    const teamLink = input.teamLink
+      ? (input.teamLink.startsWith("/") ? input.teamLink : `/${input.teamLink}`)
+      : null;
+    const absoluteAdminLink = `${SITE_URL}${adminLink}`;
 
     if (recipients.length) {
-      await glashQuery(
-        `insert into public.team_notifications
-          (recipient_id, kind, title, body, link, actor_is_admin)
-         select recipient_id, 'admin_feature_activity', $2, $3, $4, true
-           from unnest($1::uuid[]) recipient_id`,
-        [recipients.map((recipient) => recipient.id), input.title, input.body, input.link],
-      ).catch(() => []);
+      const groupedRecipients = new Map<string | null, string[]>();
+      for (const recipient of recipients) {
+        const recipientLink = recipient.can_open_admin ? adminLink : teamLink;
+        groupedRecipients.set(recipientLink, [...(groupedRecipients.get(recipientLink) || []), recipient.id]);
+      }
+      await Promise.all(Array.from(groupedRecipients.entries()).map(([recipientLink, recipientIds]) => glashQuery(
+          `insert into public.team_notifications
+            (recipient_id, kind, title, body, link, actor_is_admin)
+           select recipient_id, 'admin_feature_activity', $2, $3, $4, true
+             from unnest($1::uuid[]) recipient_id`,
+          [recipientIds, input.title, input.body, recipientLink],
+        ).catch(() => [])));
     }
 
     await notifySuperAdmin({
@@ -148,23 +225,28 @@ export async function notifyAdminFeatureEvent(input: {
     const transporter = createEmailTransport();
     try {
       const threadCategory = notificationThreadCategory(input.permissionKeys);
-      const results = await Promise.allSettled(Array.from(emailRecipients.entries()).map(([email, name]) => sendEmail({
-        to: email,
-        subject: input.title,
-        text: `${input.title}\n\n${input.body}\n\n${absoluteLink}`,
-        html: notificationHtml({
-          recipientName: name,
-          title: input.title,
-          body: input.body,
-          eyebrow: input.eyebrow,
-          absoluteLink,
-          details: input.details || {},
-        }),
-        transporter,
-        // Critical system events remain separate, detailed messages with their
-        // own destination button, grouped by business area in the inbox.
-        threadCategory,
-      })));
+      const results = await Promise.allSettled(Array.from(emailRecipients.entries()).map(([email, name]) => {
+        const recipient = recipients.find((candidate) => validEmail(candidate.email) === email);
+        const recipientPath = recipient && !recipient.can_open_admin && teamLink ? teamLink : adminLink;
+        const absoluteLink = recipientPath === adminLink ? absoluteAdminLink : `${SITE_URL}${recipientPath}`;
+        return sendEmail({
+          to: email,
+          subject: input.title,
+          text: `${input.title}\n\n${input.body}\n\n${absoluteLink}`,
+          html: notificationHtml({
+            recipientName: name,
+            title: input.title,
+            body: input.body,
+            eyebrow: input.eyebrow,
+            absoluteLink,
+            details: input.details || {},
+          }),
+          transporter,
+          // Critical system events remain separate, detailed messages with their
+          // own destination button, grouped by business area in the inbox.
+          threadCategory,
+        });
+      }));
       const failed = results.filter((result) => result.status === "rejected").length;
       if (failed) console.error(`[admin-feature-notifications] ${failed} email delivery attempt(s) failed.`);
     } finally {
@@ -183,7 +265,7 @@ export function criticalActivityNotification(input: {
 }) {
   const label = input.resource_label || input.resource_id || "Business activity";
   const eventByAction: Record<string, { permissionKeys: readonly string[]; title: string; body: string; link: string; eyebrow: string }> = {
-    "invoice.create": { permissionKeys: ADMIN_FEATURE_PERMISSION_KEYS.invoices, title: "Invoice created", body: `${label} was created.`, link: "/admin/finance/invoices", eyebrow: "Finance · Invoices" },
+    "invoice.create": { permissionKeys: ADMIN_FEATURE_PERMISSION_KEYS.invoices, title: "Invoice saved", body: `${label} was completed and saved.`, link: "/admin/finance/invoices", eyebrow: "Finance · Invoices" },
     "invoice.payment_confirmed": { permissionKeys: ADMIN_FEATURE_PERMISSION_KEYS.invoices, title: "Invoice payment confirmed", body: `${label} has a confirmed payment.`, link: "/admin/finance/invoices", eyebrow: "Finance · Payments" },
     "quotation.create": { permissionKeys: ADMIN_FEATURE_PERMISSION_KEYS.quotations, title: "Quotation created", body: `${label} was created.`, link: "/admin/finance/quotations", eyebrow: "Finance · Quotations" },
     "quotation.convert": { permissionKeys: ADMIN_FEATURE_PERMISSION_KEYS.invoices, title: "Quotation converted", body: `${label} was converted into an invoice.`, link: "/admin/finance/invoices", eyebrow: "Finance · Invoices" },

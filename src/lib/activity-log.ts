@@ -8,6 +8,7 @@ import { getAdminSession } from "@/lib/admin-session";
 import { getTeamSession } from "@/lib/team-auth";
 import { glashQuery } from "@/lib/glashdb/postgres";
 import { criticalActivityNotification, notifyAdminFeatureEvent } from "@/lib/admin-feature-notifications";
+import { queueAdminAlert } from "@/lib/admin-alerts";
 
 export interface LogActivityInput {
     /** Verb like "team_member.suspend", "invoice.create", "project.assign". */
@@ -83,6 +84,32 @@ export async function logActivity(input: LogActivityInput): Promise<void> {
         });
         const notification = criticalActivityNotification(input);
         if (notification) await notifyAdminFeatureEvent(notification);
+
+        // A finished invoice is one of the few things the desk must see the
+        // moment it happens. notifyAdminFeatureEvent above routes by permission
+        // and rides the 30-minute digest queue; this goes out immediately and
+        // is hooked here so every path that raises an invoice (the invoice
+        // form, an edit that finalises a draft, and a converted quotation) is
+        // covered by one rule.
+        if (input.action === "invoice.create") {
+            const meta = (input.metadata || {}) as Record<string, unknown>;
+            queueAdminAlert({
+                kind: "invoice",
+                subject: `${meta["Invoice"] || input.resource_label || "Invoice"} for ${meta["Client"] || "a client"}`,
+                details: [
+                    ["Invoice", meta["Invoice"]],
+                    ["Client", meta["Client"]],
+                    ["Client email", meta["Client email"]],
+                    ["Total", meta["Total"]],
+                    ["Issue date", meta["Issue date"]],
+                    ["Due date", meta["Due date"]],
+                    ["Status", meta["Status"]],
+                    ["Raised by", actor_name],
+                ],
+                actionPath: "/admin/finance/invoices",
+                actionLabel: "Open invoices",
+            });
+        }
     } catch (err) {
         // Activity logging is best-effort. Never let it break the caller.
         console.error("[activity-log] insert failed:", err);

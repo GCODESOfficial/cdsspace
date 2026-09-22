@@ -11,14 +11,13 @@ export async function GET(_: Request, { params }: { params: Promise<{ code: stri
   const { code } = await params;
   const db = supabaseAdmin as any;
 
-  const admin = await getAdminSession();
-  const team = admin ? null : await getTeamSession();
+  const [admin, team] = await Promise.all([getAdminSession(), getTeamSession()]);
   if (!admin && !team) return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
 
   const { data: meeting } = await db
     .from("team_meetings")
     .select("*")
-    .eq("room_code", code.toUpperCase())
+    .eq("room_code", code)
     .maybeSingle();
   if (!meeting) return NextResponse.json({ ok: false, error: "Not found" }, { status: 404 });
 
@@ -54,8 +53,7 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ code: 
   const { code } = await params;
   const db = supabaseAdmin as any;
 
-  const admin = await getAdminSession();
-  const team = admin ? null : await getTeamSession();
+  const [admin, team] = await Promise.all([getAdminSession(), getTeamSession()]);
   if (!admin && !team) return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
 
   const body = await req.json().catch(() => ({}));
@@ -64,7 +62,7 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ code: 
   const { data: meeting } = await db
     .from("team_meetings")
     .select("id, status, created_by")
-    .eq("room_code", code.toUpperCase())
+    .eq("room_code", code)
     .maybeSingle();
   if (!meeting) return NextResponse.json({ ok: false, error: "Not found" }, { status: 404 });
 
@@ -88,12 +86,18 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ code: 
   }
 
   const isCreator = team && meeting.created_by === team.id;
-  if ((action === "start" || action === "end" || action === "cancel") && (admin || isCreator)) {
+  if (action === "start" && !admin) {
+    return NextResponse.json({ ok: false, error: "Only an admin can approve and start a cMeet." }, { status: 403 });
+  }
+  if ((action === "start" && admin) || ((action === "end" || action === "cancel") && (admin || isCreator))) {
     const now = new Date().toISOString();
     const updates: Record<string, any> = {};
     if (action === "start") {
       updates.status = "live";
       updates.started_at = now;
+      updates.approval_status = "approved";
+      updates.approved_at = now;
+      updates.approved_by_email = admin?.email || null;
     } else if (action === "end") {
       updates.status = "ended";
       updates.ended_at = now;

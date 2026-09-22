@@ -9,6 +9,7 @@ import { logActivity } from "@/lib/activity-log";
 import { notifyTeamMember } from "@/lib/notify-team";
 import { lagosDate } from "@/lib/timebook";
 import { BLOCKED_EMAIL_MESSAGE, isBlockedEmail } from "@/lib/security/email-blocklist";
+import { enforceDailyTeamSessionCutoff } from "@/lib/team-session-cutoff";
 
 export const runtime = "nodejs";
 
@@ -26,6 +27,9 @@ export async function GET() {
   }
 
   const db = supabaseAdmin as any;
+  await enforceDailyTeamSessionCutoff().catch((error) => {
+    console.error("[team-presence] daily cutoff sweep failed:", error);
+  });
   const { data, error } = await db
     .from("team_members")
     .select(
@@ -42,14 +46,14 @@ export async function GET() {
         `select
            m.id,
            case
-             when e.current_status = 'on_break' then 'break'
              when exists (
                select 1
                  from public.team_device_sessions s
                 where s.team_member_id = m.id
                   and s.revoked_at is null
                   and s.expires_at > now()
-             ) then 'online'
+                  and s.last_seen_at >= now() - interval '5 minutes'
+             ) then case when e.current_status = 'on_break' then 'break' else 'online' end
              else 'offline'
            end as availability_status
          from public.team_members m

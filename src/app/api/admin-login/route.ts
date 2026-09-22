@@ -42,6 +42,7 @@ export async function POST(req: NextRequest) {
       email: SUPER_ADMIN_EMAIL,
       name: "Admin",
       permissions: ["all"],
+      issuedAt: new Date().toISOString(),
     }), adminSessionCookieOptions());
     return response;
   }
@@ -106,6 +107,7 @@ export async function POST(req: NextRequest) {
       name: subAdmin.name,
       permissions: subAdmin.permissions || [],
       memberId: linkedTeamMember?.id,
+      issuedAt: new Date().toISOString(),
     }), adminSessionCookieOptions());
     return response;
   }
