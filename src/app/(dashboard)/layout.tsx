@@ -5,6 +5,9 @@ import { getClientAccountState, safeClientPath } from "@/lib/client-account";
 import { ClientAccountProvider } from "@/components/dashboard/ClientAccountProvider";
 import { clientDashboardPath, isLegacyDashboardPath, parseScopedClientDashboardPath } from "@/lib/client-routes";
 import { DashboardAutoSave } from "@/components/autosave/DashboardAutoSave";
+import { getClientModuleVisibility } from "@/lib/client-modules-server";
+import { isClientPathVisible } from "@/lib/client-modules";
+import { ClientIncomingCallRinger } from "@/components/dashboard/ClientIncomingCallRinger";
 
 export const dynamic = "force-dynamic";
 
@@ -30,6 +33,14 @@ export default async function DashboardLayout({
         redirect(clientDashboardPath(account.profile.public_user_id, `${requestedUrl.pathname}${requestedUrl.search}`));
     }
 
+    // A module admin has switched off is not just hidden in the sidebar: its
+    // pages send the client back to the dashboard rather than render.
+    const modules = await getClientModuleVisibility(account.profile.id);
+    const dashboardPathname = scopedRoute?.dashboardPath || "/dashboard";
+    if (!isClientPathVisible(dashboardPathname, modules)) {
+        redirect(clientDashboardPath(account.profile.public_user_id, "/dashboard"));
+    }
+
     return (
         <ClientAccountProvider
             initialAccount={{
@@ -43,8 +54,10 @@ export default async function DashboardLayout({
                 billingCurrency: account.profile.billing_currency,
                 createdAt: account.profile.created_at || null,
             }}
+            modules={modules}
         >
             <DashboardAutoSave scope="client" />
+            <ClientIncomingCallRinger />
             <DashboardShell>{children}</DashboardShell>
         </ClientAccountProvider>
     );

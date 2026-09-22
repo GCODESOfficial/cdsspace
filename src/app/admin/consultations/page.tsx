@@ -5,9 +5,11 @@ import Link from "next/link";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
-import { Calendar, Mail, Phone, Building2, DollarSign, MessageSquare, Paperclip, Trash2, Search, Video, Copy, Check, ExternalLink, Loader2, CalendarClock, MapPin, MessageCircle, Send, Clock, FileText } from "lucide-react";
+import { Calendar, Mail, Phone, Building2, DollarSign, MessageSquare, Paperclip, Trash2, Search, Video, Check, ExternalLink, Loader2, CalendarClock, MapPin, MessageCircle, Send, Clock, FileText } from "lucide-react";
 import { appConfirm } from "@/lib/app-notify";
 import { toast } from "sonner";
+import { CMEET_TOPIC_SUGGESTIONS, normalizeCMeetTopic } from "@/lib/cmeet-links";
+import { UniversalShareButton } from "@/components/share/UniversalShareButton";
 
 type MeetingType = "none" | "cmeet" | "zoom" | "google_meet" | "other";
 
@@ -25,6 +27,8 @@ interface Consultation {
   scheduled_at: string | null;
   meeting_type?: MeetingType | null;
   meeting_link?: string | null;
+  meeting_room_code?: string | null;
+  meeting_topic?: string | null;
   whatsapp?: string | null;
   location?: string | null;
   topics?: string[] | null;
@@ -50,6 +54,11 @@ function fullMeetingUrl(link: string | null | undefined) {
   if (typeof window !== "undefined") return `${window.location.origin}${link}`;
   return link;
 }
+function localDateTimeMin() {
+  const d = new Date(Date.now() + 60_000);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
 
 const STATUS_STYLES: Record<string, string> = {
   new:        "bg-blue-50 text-blue-700 ring-1 ring-blue-200",
@@ -67,10 +76,8 @@ export default function ConsultationsPage() {
   const [filter, setFilter] = useState<string>("all");
 
   // Meeting scheduling (local edit state for the open request)
-  const [meet, setMeet] = useState<{ scheduled_at: string; meeting_type: MeetingType; meeting_link: string }>({ scheduled_at: "", meeting_type: "none", meeting_link: "" });
+  const [meet, setMeet] = useState<{ scheduled_at: string; meeting_type: MeetingType; meeting_link: string; meeting_topic: string }>({ scheduled_at: "", meeting_type: "none", meeting_link: "", meeting_topic: "" });
   const [savingMeet, setSavingMeet] = useState(false);
-  const [genning, setGenning] = useState(false);
-  const [copied, setCopied] = useState(false);
 
   // Email composer (review before send)
   const [emailOpen, setEmailOpen] = useState(false);
@@ -84,8 +91,8 @@ export default function ConsultationsPage() {
         scheduled_at: toLocalInput(active.scheduled_at),
         meeting_type: (active.meeting_type as MeetingType) || "none",
         meeting_link: active.meeting_link || "",
+        meeting_topic: active.meeting_topic || `Consultation with ${active.full_name}`,
       });
-      setCopied(false);
       setEmailOpen(false);
     }
   }, [active]);
@@ -150,39 +157,51 @@ export default function ConsultationsPage() {
 
   const saveMeeting = async () => {
     if (!active) return;
-    const scheduledIso = meet.scheduled_at ? new Date(meet.scheduled_at).toISOString() : null;
+    const scheduledDate = meet.scheduled_at ? new Date(meet.scheduled_at) : null;
+    const scheduledIso = scheduledDate && Number.isFinite(scheduledDate.getTime()) ? scheduledDate.toISOString() : null;
+    const meetingTopic = normalizeCMeetTopic(meet.meeting_topic);
+    if (meet.meeting_type !== "none" && !scheduledIso) {
+      toast.error("Choose a future date and time for the meeting.");
+      return;
+    }
+    if (scheduledIso && new Date(scheduledIso).getTime() <= Date.now()) {
+      toast.error("The meeting time must be in the future.");
+      return;
+    }
+    if (meet.meeting_type === "cmeet" && !meetingTopic) {
+      toast.error("Add a meeting topic before scheduling cMeet.");
+      return;
+    }
     if (meet.meeting_type !== "none" && meet.meeting_type !== "cmeet" && !meet.meeting_link.trim()) {
       toast.error("Paste the meeting link (Zoom / Google Meet / other).");
       return;
     }
     setSavingMeet(true);
-    const updated = await patchActive(active.id, {
-      scheduled_at: scheduledIso,
-      meeting_type: meet.meeting_type,
-      meeting_link: meet.meeting_type === "none" ? null : meet.meeting_link.trim() || null,
-    });
+    const updated = await patchActive(active.id, meet.meeting_type === "cmeet"
+      ? {
+          generate_cmeet: true,
+          scheduled_at: scheduledIso,
+          meeting_topic: meetingTopic,
+        }
+      : {
+          scheduled_at: meet.meeting_type === "none" ? null : scheduledIso,
+          meeting_type: meet.meeting_type,
+          meeting_link: meet.meeting_type === "none" ? null : meet.meeting_link.trim() || null,
+          meeting_topic: meetingTopic || null,
+        });
     setSavingMeet(false);
-    if (updated) { setActive(updated); load(); toast.success("Meeting saved"); }
-  };
-
-  const generateCmeet = async () => {
-    if (!active) return;
-    const scheduledIso = meet.scheduled_at ? new Date(meet.scheduled_at).toISOString() : null;
-    setGenning(true);
-    const updated = await patchActive(active.id, { generate_cmeet: true, scheduled_at: scheduledIso });
-    setGenning(false);
     if (updated) {
       setActive(updated);
-      setMeet((m) => ({ ...m, meeting_type: "cmeet", meeting_link: updated.meeting_link || "" }));
+      setMeet((m) => ({
+        ...m,
+        scheduled_at: toLocalInput(updated.scheduled_at),
+        meeting_type: (updated.meeting_type as MeetingType) || "none",
+        meeting_link: updated.meeting_link || "",
+        meeting_topic: updated.meeting_topic || m.meeting_topic,
+      }));
       load();
-      toast.success("cMeet link created");
+      toast.success(meet.meeting_type === "cmeet" ? "Consultation cMeet scheduled" : "Meeting saved");
     }
-  };
-
-  const copyLink = () => {
-    const url = fullMeetingUrl(active?.meeting_link);
-    if (!url) return;
-    navigator.clipboard.writeText(url).then(() => { setCopied(true); setTimeout(() => setCopied(false), 1800); }).catch(() => {});
   };
 
   const filtered = list.filter((c) => {
@@ -370,23 +389,53 @@ export default function ConsultationsPage() {
                 )}
 
                 {/* Schedule a meeting */}
-                <div className="rounded-xl border border-violet-100 bg-violet-50/60 p-4 space-y-3">
-                  <div className="flex items-center gap-2 text-[10px] uppercase tracking-wider text-violet-700 font-semibold">
+                <div className="rounded-xl border border-blue-100 bg-blue-50/60 p-4 space-y-3">
+                  <div className="flex items-center gap-2 text-[11px] font-semibold text-[#0A4FE8]">
                     <CalendarClock className="w-3.5 h-3.5" /> Schedule a meeting
+                  </div>
+
+                  <div>
+                    <label className="text-[11px] font-medium text-gray-600">Meeting topic</label>
+                    <input
+                      type="text"
+                      maxLength={120}
+                      value={meet.meeting_topic}
+                      onChange={(e) => setMeet({ ...meet, meeting_topic: e.target.value })}
+                      placeholder={`Consultation with ${active.full_name}`}
+                      className="mt-1.5 h-11 w-full rounded-xl border border-gray-200 bg-white px-3 text-sm outline-none focus:border-[#0A4FE8]"
+                    />
+                    <div className="mt-2 flex flex-wrap gap-1.5" aria-label="Suggested meeting topics">
+                      {[`Consultation with ${active.full_name}`, ...CMEET_TOPIC_SUGGESTIONS].map((suggestion) => (
+                        <button
+                          key={suggestion}
+                          type="button"
+                          onClick={() => setMeet({ ...meet, meeting_topic: suggestion })}
+                          className={`rounded-full border px-2.5 py-1 text-[10.5px] transition ${
+                            meet.meeting_topic === suggestion
+                              ? "border-[#0A4FE8] bg-[#0A4FE8]/10 text-[#0A4FE8]"
+                              : "border-gray-200 bg-white text-gray-500 hover:border-[#0A4FE8]/40 hover:text-[#0A4FE8]"
+                          }`}
+                        >
+                          {suggestion}
+                        </button>
+                      ))}
+                    </div>
                   </div>
 
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div>
-                      <label className="text-[11px] uppercase tracking-wide text-gray-500">Date &amp; time</label>
+                      <label className="text-[11px] font-medium text-gray-600">Date and time</label>
                       <input
                         type="datetime-local"
+                        min={localDateTimeMin()}
                         value={meet.scheduled_at}
                         onChange={(e) => setMeet({ ...meet, scheduled_at: e.target.value })}
-                        className="mt-1.5 h-11 w-full rounded-xl border border-gray-200 bg-white px-3 text-sm outline-none focus:border-violet-400"
+                        className="mt-1.5 h-11 w-full rounded-xl border border-gray-200 bg-white px-3 text-sm outline-none focus:border-[#0A4FE8]"
                       />
+                      <p className="mt-1 text-[10px] text-gray-400">Uses your current device time zone.</p>
                     </div>
                     <div>
-                      <label className="text-[11px] uppercase tracking-wide text-gray-500">Platform</label>
+                      <label className="text-[11px] font-medium text-gray-600">Meeting platform</label>
                       <Select value={meet.meeting_type} onValueChange={(v) => setMeet({ ...meet, meeting_type: v as MeetingType })}>
                         <SelectTrigger className="h-11 rounded-xl mt-1.5 bg-white"><SelectValue /></SelectTrigger>
                         <SelectContent>
@@ -401,23 +450,17 @@ export default function ConsultationsPage() {
                   </div>
 
                   {meet.meeting_type === "cmeet" && (
-                    <div>
-                      <button
-                        type="button"
-                        onClick={generateCmeet}
-                        disabled={genning}
-                        className="inline-flex items-center gap-2 rounded-xl bg-violet-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-violet-700 disabled:opacity-60"
-                      >
-                        {genning ? <Loader2 className="w-4 h-4 animate-spin" /> : <Video className="w-4 h-4" />}
-                        {active.meeting_link && active.meeting_type === "cmeet" ? "Regenerate cMeet link" : "Generate cMeet link"}
-                      </button>
-                      <p className="mt-1.5 text-[11px] text-gray-500">Creates a scheduled cMeet room now so you can share the link ahead of the meeting date.</p>
+                    <div className="rounded-xl border border-blue-100 bg-white px-3 py-2.5">
+                      <p className="text-[11px] font-medium text-[#0D1B39]">
+                        {active.meeting_link && active.meeting_type === "cmeet" ? "The existing invitation link will stay active." : "The invitation link will be created when you schedule."}
+                      </p>
+                      <p className="mt-1 text-[10px] leading-4 text-gray-500">The client is registered as the invited guest, and changes to the topic or appointment time are synchronized with the cMeet room.</p>
                     </div>
                   )}
 
                   {(meet.meeting_type === "zoom" || meet.meeting_type === "google_meet" || meet.meeting_type === "other") && (
                     <div>
-                      <label className="text-[11px] uppercase tracking-wide text-gray-500">
+                      <label className="text-[11px] font-medium text-gray-600">
                         {meet.meeting_type === "zoom" ? "Zoom link" : meet.meeting_type === "google_meet" ? "Google Meet link" : "Meeting link"}
                       </label>
                       <input
@@ -425,22 +468,32 @@ export default function ConsultationsPage() {
                         value={meet.meeting_link}
                         onChange={(e) => setMeet({ ...meet, meeting_link: e.target.value })}
                         placeholder="https://…"
-                        className="mt-1.5 h-11 w-full rounded-xl border border-gray-200 bg-white px-3 text-sm outline-none focus:border-violet-400"
+                        className="mt-1.5 h-11 w-full rounded-xl border border-gray-200 bg-white px-3 text-sm outline-none focus:border-[#0A4FE8]"
                       />
                     </div>
                   )}
 
                   {/* Current saved link */}
                   {active.meeting_link && (
-                    <div className="flex items-center gap-2 rounded-lg bg-white border border-violet-100 px-3 py-2">
-                      <Video className="w-4 h-4 text-violet-600 shrink-0" />
+                    <div className="flex items-center gap-2 rounded-lg bg-white border border-blue-100 px-3 py-2">
+                      <Video className="w-4 h-4 text-[#0A4FE8] shrink-0" />
                       <span className="flex-1 truncate text-[13px] text-gray-700">{fullMeetingUrl(active.meeting_link)}</span>
-                      <button type="button" onClick={copyLink} className="p-1.5 rounded-md hover:bg-gray-100" title="Copy link">
-                        {copied ? <Check className="w-4 h-4 text-emerald-600" /> : <Copy className="w-4 h-4 text-gray-500" />}
-                      </button>
-                      <a href={fullMeetingUrl(active.meeting_link)} target="_blank" rel="noopener noreferrer" className="p-1.5 rounded-md hover:bg-gray-100" title="Open">
-                        <ExternalLink className="w-4 h-4 text-gray-500" />
-                      </a>
+                      <UniversalShareButton
+                        title={meet.meeting_topic || `Consultation with ${active.full_name}`}
+                        text={`Join the scheduled consultation with ${active.full_name}.`}
+                        url={active.meeting_link}
+                        label="Share"
+                        className="h-8 min-h-8 rounded-lg px-2.5 text-[10.5px] shadow-none"
+                      />
+                      {active.meeting_type === "cmeet" ? (
+                        <Link href={active.meeting_link} target="_blank" className="p-1.5 rounded-md hover:bg-gray-100" title="Open">
+                          <ExternalLink className="w-4 h-4 text-gray-500" />
+                        </Link>
+                      ) : (
+                        <a href={fullMeetingUrl(active.meeting_link)} target="_blank" rel="noopener noreferrer" className="p-1.5 rounded-md hover:bg-gray-100" title="Open">
+                          <ExternalLink className="w-4 h-4 text-gray-500" />
+                        </a>
+                      )}
                     </div>
                   )}
 
@@ -448,9 +501,12 @@ export default function ConsultationsPage() {
                     type="button"
                     onClick={saveMeeting}
                     disabled={savingMeet}
-                    className="inline-flex items-center gap-2 rounded-xl border border-violet-200 bg-white px-4 py-2.5 text-sm font-semibold text-violet-700 hover:bg-violet-50 disabled:opacity-60"
+                    className="inline-flex items-center gap-2 rounded-xl bg-[#0A4FE8] px-4 py-2.5 text-sm font-semibold text-white hover:bg-[#083FC2] disabled:opacity-60"
                   >
-                    {savingMeet ? <Loader2 className="w-4 h-4 animate-spin" /> : <CalendarClock className="w-4 h-4" />} Save meeting
+                    {savingMeet ? <Loader2 className="w-4 h-4 animate-spin" /> : <CalendarClock className="w-4 h-4" />}
+                    {meet.meeting_type === "cmeet"
+                      ? active.meeting_link && active.meeting_type === "cmeet" ? "Update scheduled cMeet" : "Schedule cMeet"
+                      : "Save meeting"}
                   </button>
                 </div>
 
@@ -562,6 +618,9 @@ export default function ConsultationsPage() {
 
 function defaultEmailBody(c: Consultation) {
   const lines = [`Hi ${c.full_name.split(" ")[0]},`, "", "Thank you for reaching out to CDS Space."];
+  if (c.meeting_topic) {
+    lines.push("", `Meeting topic: ${c.meeting_topic}`);
+  }
   if (c.scheduled_at) {
     lines.push("", `Your consultation is scheduled for ${new Date(c.scheduled_at).toLocaleString()}.`);
   }

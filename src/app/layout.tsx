@@ -79,12 +79,12 @@ export const metadata: Metadata = {
   },
 };
 
-import { AuthProvider } from "@/contexts/auth-context";
 import { AppNotifyRoot } from "@/lib/app-notify";
 import { SonnerProvider } from "@/components/sonner-provider";
 import { WriteConfirmations } from "@/components/WriteConfirmations";
 import { AccessibilityWidget } from "@/components/a11y/AccessibilityWidget";
 import { TranslationEngine } from "@/components/a11y/TranslationEngine";
+import { DashboardGuide } from "@/components/assistant/DashboardGuide";
 
 export default function RootLayout({
   children,
@@ -129,14 +129,13 @@ export default function RootLayout({
             }),
           }}
         />
-        <AuthProvider>
-          {children}
-          <AppNotifyRoot />
-          <SonnerProvider />
-          <WriteConfirmations />
-          <AccessibilityWidget />
-          <TranslationEngine />
-        </AuthProvider>
+        {children}
+        <AppNotifyRoot />
+        <SonnerProvider />
+        <WriteConfirmations />
+        <AccessibilityWidget />
+        <DashboardGuide />
+        <TranslationEngine />
       </body>
     </html>
   );

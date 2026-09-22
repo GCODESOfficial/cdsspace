@@ -16,13 +16,14 @@ import {
   Video,
   FileText,
   PenLine,
-  UserRound,
   Settings,
   LogOut,
   ArrowRightLeft,
   GraduationCap,
-  Wand2,
   X,
+  ClipboardCheck,
+  PackageCheck,
+  MonitorCog,
 } from "lucide-react";
 
 interface TeamSidebarProps {
@@ -47,14 +48,16 @@ export function TeamSidebar({ member, onLogout, mobileOpen = false, onClose }: T
     { label: "Taskboard", href: "/team/taskboard", icon: KanbanSquare },
     { label: "Attendance", href: "/team/timebook", icon: Clock },
     { label: "Projects", href: "/team/work", icon: Briefcase },
+    { label: "Delivery drafts", href: "/team/deliveries", icon: PackageCheck },
     { label: "Work Reports", href: "/team/work-tracking", icon: FileText },
+    { label: "Team compliance", href: "/team/compliance", icon: ClipboardCheck },
+    { label: "My equipment", href: "/team/equipment", icon: MonitorCog },
     { label: t("nav.chat"), href: "/team/chat", icon: MessageSquare },
     { label: t("nav.protectDocs"), href: "/team/protect-docs", icon: ShieldCheck },
     { label: t("nav.cmeet"), href: "/team/cmeet", icon: Video },
     { label: t("nav.cdocs"), href: "/team/cdocs", icon: FileText },
     { label: t("nav.csign"), href: "/team/csign", icon: PenLine },
-    { label: t("nav.cresume"), href: "/team/cresume", icon: UserRound },
-    { label: "CREATE Studio", href: "/create", icon: Wand2 },
+    { label: "Create Studio", href: "/create?workspace=team", icon: PenLine },
   ];
 
   const SidebarInner = ({ mobile = false }: { mobile?: boolean }) => (

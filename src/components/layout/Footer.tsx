@@ -281,6 +281,7 @@ export const Footer = () => {
                             <div className="flex flex-wrap items-center justify-center gap-5 sm:gap-8 md:gap-12">
                                 <Link href="/privacy" className="text-brand-mute hover:text-white text-[14px] font-medium tracking-[-0.14px] transition-colors">Privacy Policy</Link>
                                 <Link href="/terms" className="text-brand-mute hover:text-white text-[14px] font-medium tracking-[-0.14px] transition-colors">Terms of Service</Link>
+                                <Link href="/legal/aml-ctf-policy" className="text-brand-mute hover:text-white text-[14px] font-medium tracking-[-0.14px] transition-colors">AML/CTF policy</Link>
                             </div>
                         </div>
                     </div>

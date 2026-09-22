@@ -13,7 +13,7 @@ import { supabase } from "@/lib/supabase";
 const CarrierLinkModal = dynamic(() => import("@/components/carrier-link-modal").then((m) => m.CarrierLinkModal), { ssr: false });
 const AdvertisementModal = dynamic(() => import("@/components/advertisement-modal").then((m) => m.AdvertisementModal), { ssr: false });
 const FeaturedWorksModal = dynamic(() => import("@/components/featured-brands-modal").then((m) => m.FeaturedWorksModal), { ssr: false });
-import { Search, Star, Megaphone, Link2, TrendingUp, Globe, FolderOpen, BarChart3, ShieldCheck, Mail, BriefcaseBusiness, Building2, KeyRound, CheckCircle2, ArrowRight, ArrowRightLeft, MessageSquare, MessagesSquare, CalendarClock, Plane, ShoppingBag, FileText } from "lucide-react";
+import { Search, Star, Megaphone, Link2, TrendingUp, Globe, FolderOpen, BarChart3, ShieldCheck, Mail, BriefcaseBusiness, Building2, KeyRound, CheckCircle2, ArrowRight, ArrowRightLeft, MessageSquare, MessagesSquare, CalendarClock, Plane, ShoppingBag, FileText, Users, UserCheck, PhoneCall } from "lucide-react";
 import { logVisit } from "@/utils/logVisit";
 import { BirthdayReminder } from "@/components/admin/BirthdayCelebrate";
 import { useAdminSession, type AdminSession } from "@/hooks/use-admin-session";
@@ -36,6 +36,20 @@ export default function AdminDashboard() {
 	const [countryList, setCountryList] = useState<{ name: string; count: number }[]>([]);
 	const [last7days, setLast7days] = useState<{ date: string; count: number }[]>([]);
 	const [actionCounts, setActionCounts] = useState<Record<string, number>>({});
+	const [platformMetrics, setPlatformMetrics] = useState({ client_signups: 0, clients_live: 0, checked_in_today: 0, platform_calls: 0, calls_today: 0 });
+
+	useEffect(() => {
+		if (!hasDashboardAccess) return;
+		const fetchMetrics = async () => {
+			const response = await fetch("/api/admin/platform-metrics", { cache: "no-store" }).catch(() => null);
+			if (!response?.ok) return;
+			const payload = await response.json().catch(() => ({}));
+			if (payload.ok) setPlatformMetrics(payload.metrics);
+		};
+		void fetchMetrics();
+		const timer = window.setInterval(() => { if (!document.hidden) void fetchMetrics(); }, 30_000);
+		return () => window.clearInterval(timer);
+	}, [hasDashboardAccess]);
 
 	useEffect(() => {
 		if (!hasDashboardAccess) return;
@@ -130,6 +144,9 @@ export default function AdminDashboard() {
 
 			{/* Stats */}
 			<div className="mb-8 grid grid-cols-2 gap-3 sm:gap-5 xl:grid-cols-4">
+				<StatCard icon={<Users className="h-5 w-5 text-[#0A4FE8]" />} label="Client sign-ups" value={platformMetrics.client_signups.toString()} subtitle={`${platformMetrics.clients_live} live now`} color="blue" />
+				<StatCard icon={<UserCheck className="h-5 w-5 text-[#059669]" />} label="Clients checked in today" value={platformMetrics.checked_in_today.toString()} color="green" />
+				<StatCard icon={<PhoneCall className="h-5 w-5 text-[#7C3AED]" />} label="Platform calls" value={platformMetrics.platform_calls.toString()} subtitle={`${platformMetrics.calls_today} today`} color="purple" />
 				<StatCard
 					icon={<FolderOpen className="w-5 h-5 text-[#0A4FE8]" />}
 					label="Total Works"

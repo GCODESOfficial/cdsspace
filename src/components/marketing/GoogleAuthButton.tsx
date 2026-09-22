@@ -3,13 +3,23 @@
 import { useState } from "react";
 import Image from "next/image";
 import { Loader2 } from "lucide-react";
+import { rememberPendingProvider } from "@/lib/last-access";
 
 /**
  * Live "Continue / Sign up with Google" button. Navigates to
- * /api/auth/google/login, which kicks off GlashDB's native Google OAuth and
- * returns via /auth/callback. Styled to match LockedSocialButton.
+ * /api/auth/google/login, which starts the direct Google OIDC flow and returns
+ * through the approved /auth/callback URI. Styled to match LinkedInAuthButton.
  */
-export function GoogleAuthButton({ label, next = "/dashboard" }: { label: string; next?: string }) {
+export function GoogleAuthButton({
+    label,
+    next = "/dashboard",
+    className,
+}: {
+    label: string;
+    next?: string;
+    /** Lets a portal with its own palette borrow the button without forking the OAuth start. */
+    className?: string;
+}) {
     const [loading, setLoading] = useState(false);
     const canonicalOrigin = (process.env.NEXT_PUBLIC_SITE_URL || "").replace(/\/$/, "");
     const href = `${canonicalOrigin}/api/auth/google/login?next=${encodeURIComponent(next)}`;
@@ -17,16 +27,16 @@ export function GoogleAuthButton({ label, next = "/dashboard" }: { label: string
     return (
         <a
             href={href}
-            onClick={() => setLoading(true)}
+            onClick={() => { rememberPendingProvider("google"); setLoading(true); }}
             aria-busy={loading}
-            className="relative w-full flex items-center justify-center gap-3 py-3 lg:py-3.5 2xl:py-4 bg-white border border-brand-stroke rounded-[10px] lg:rounded-[12px] 2xl:rounded-[16px] shadow-[0_4px_8px_rgba(0,0,0,0.04)] overflow-hidden transition hover:bg-brand-bg hover:border-[#648EFC]/50 active:scale-[0.99]"
+            className={className || "relative w-full flex items-center justify-center gap-3 py-3 lg:py-3.5 2xl:py-4 bg-white border border-brand-stroke rounded-[10px] lg:rounded-[12px] 2xl:rounded-[16px] shadow-[0_4px_8px_rgba(0,0,0,0.04)] overflow-hidden transition hover:bg-brand-bg hover:border-[#648EFC]/50 active:scale-[0.99]"}
         >
             {loading ? (
                 <Loader2 className="w-5 h-5 animate-spin text-brand-blue" />
             ) : (
                 <Image src="/auth/Signup/flat-color-icons_google.svg" alt="Google" width={24} height={24} className="2xl:w-7 2xl:h-7" />
             )}
-            <span className="text-brand-navy text-[14px] lg:text-[15px] 2xl:text-[16px] font-semibold">
+            <span className={className ? "text-[14px] font-semibold text-[#040B37]" : "text-brand-navy text-[14px] lg:text-[15px] 2xl:text-[16px] font-semibold"}>
                 {loading ? "Redirecting…" : label}
             </span>
         </a>

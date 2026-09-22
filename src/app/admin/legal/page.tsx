@@ -2,9 +2,9 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { BadgePercent, FileSignature, FileText, Shield, ChevronRight, Loader2 } from "lucide-react";
+import { BadgePercent, FileSignature, FileText, Shield, ShieldCheck, ChevronRight, Loader2 } from "lucide-react";
 
-type LegalSlug = "privacy" | "terms" | "brand-marketer-agreement";
+type LegalSlug = "privacy" | "terms" | "brand-marketer-agreement" | "aml-ctf-policy";
 
 interface DocRow {
     slug: LegalSlug;
@@ -46,29 +46,41 @@ interface MarketerAgreementRow {
 const DOCS: { slug: LegalSlug; label: string; description: string; icon: typeof FileText }[] = [
     {
         slug: "privacy",
-        label: "Privacy Policy",
+        label: "Privacy policy",
         description:
             "How CDS Space collects, uses, and protects personal data. Compliant with Nigeria NDPA 2023 and adapted for Rwanda, UK/EU, USA, and China.",
         icon: Shield,
     },
     {
         slug: "terms",
-        label: "Terms of Service",
+        label: "Terms of service",
         description:
             "The terms that govern use of CDS Space websites, dashboards, and services. Governed by Nigerian law with consumer-protection overrides worldwide.",
         icon: FileText,
     },
     {
         slug: "brand-marketer-agreement",
-        label: "Brand Marketer Agreement",
+        label: "Brand marketer agreement",
         description:
             "The agreement governing marketer verification, code attribution, 5% commissions, payouts, conduct and CDS Space brand use.",
         icon: BadgePercent,
     },
+    {
+        slug: "aml-ctf-policy",
+        label: "AML/CTF policy",
+        description:
+            "The controls CDS Space uses to prevent financial crime, meet Nigerian AML/CTF obligations and record its SCUML registration.",
+        icon: ShieldCheck,
+    },
 ];
 
 export default function LegalDocsListPage() {
-    const [rows, setRows] = useState<Record<string, DocRow | null>>({ privacy: null, terms: null, "brand-marketer-agreement": null });
+    const [rows, setRows] = useState<Record<string, DocRow | null>>({
+        privacy: null,
+        terms: null,
+        "brand-marketer-agreement": null,
+        "aml-ctf-policy": null,
+    });
     const [loading, setLoading] = useState(true);
     const [agreements, setAgreements] = useState<AgreementRow[]>([]);
     const [agreementsLoading, setAgreementsLoading] = useState(true);
@@ -102,16 +114,16 @@ export default function LegalDocsListPage() {
     }, []);
 
     return (
-        <div className="p-8 max-w-[1100px]">
+        <div className="max-w-[1400px] p-4 sm:p-6 xl:p-8">
             <header className="mb-8">
-                <h1 className="text-[28px] font-bold text-[#0D1B39] mb-2">Legal Documents</h1>
+                <h1 className="mb-2 text-[28px] font-bold text-[#0D1B39]">Legal documents</h1>
                 <p className="text-gray-500 text-sm">
-                    Edit the Privacy Policy, Terms of Service and Brand Marketer Agreement. Download as Word
-                    (.docx), edit offline, and upload the revised file to publish changes.
+                    Edit and publish CDS Space legal documents. Download any document as PDF or Word (.docx),
+                    edit Word files offline, and upload a revision to publish it.
                 </p>
             </header>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5">
+            <div className="grid grid-cols-1 gap-5 md:grid-cols-2 xl:grid-cols-4">
                 {DOCS.map(({ slug, label, description, icon: Icon }) => {
                     const row = rows[slug];
                     const isSeed = row?.version === 0;

@@ -1,62 +1,68 @@
 "use client";
 
 import { usePathname } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { cn } from "@/lib/utils";
 import { motion, AnimatePresence } from "framer-motion";
-import { LogOut, LayoutDashboard, Newspaper, FileText, Image as ImageIcon, Package, MessageSquare, ShoppingBag, Settings, ReceiptText, FolderOpen, Palette, CalendarRange, ChevronDown } from "lucide-react";
+import { LogOut, LayoutDashboard, Newspaper, FileText, Image as ImageIcon, Package, MessageSquare, ShoppingBag, Settings, ReceiptText, FolderOpen, Palette, CalendarRange, ChevronDown, PenLine, Gift, Video } from "lucide-react";
 import { useClientAccount, type ClientAccountSnapshot } from "@/components/dashboard/ClientAccountProvider";
+import type { ClientModuleKey, ClientModuleVisibility } from "@/lib/client-modules";
 
 type NavigationItem = {
     name: string;
     href: string;
     icon: typeof LayoutDashboard;
     comingSoon?: boolean;
+    /** Admin can switch this entry off from Admin > CRM > Dashboard Modules. */
+    module: ClientModuleKey;
 };
 
 const navigationSections: { name: string; items: NavigationItem[] }[] = [
     {
         name: "Overview",
         items: [
-            { name: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
-            { name: "Intelligence", href: "/dashboard/intelligence", icon: Newspaper },
+            { name: "Dashboard", href: "/dashboard", icon: LayoutDashboard, module: "overview" },
+            { name: "Intelligence", href: "/dashboard/intelligence", icon: Newspaper, module: "intelligence" },
         ],
     },
     {
         name: "Brand strategy",
         items: [
-            { name: "Brand Brief", href: "/dashboard/brand-brief", icon: FileText },
-            { name: "Brand Identity", href: "/dashboard/brand-identity", icon: Palette },
+            { name: "Brand Brief", href: "/dashboard/brand-brief", icon: FileText, module: "brand_brief" },
+            { name: "Brand Identity", href: "/dashboard/brand-identity", icon: Palette, module: "brand_identity" },
         ],
     },
     {
         name: "Creative services",
         items: [
-            { name: "Banners", href: "/dashboard/banners", icon: ImageIcon },
-            { name: "Merch", href: "/dashboard/merch", icon: Package },
-            { name: "Subscription", href: "/dashboard/subscription", icon: CalendarRange },
+            { name: "Create Studio", href: "/create?workspace=client", icon: PenLine, module: "documents" },
+            { name: "Banners", href: "/dashboard/banners", icon: ImageIcon, module: "banners" },
+            { name: "Merch", href: "/dashboard/merch", icon: Package, module: "merch" },
+            { name: "cGifts", href: "/dashboard/cgifts", icon: Gift, module: "cgifts" },
+            { name: "Subscription", href: "/dashboard/subscription", icon: CalendarRange, module: "subscription" },
         ],
     },
     {
         name: "Communication & files",
         items: [
-            { name: "Chat/Meet", href: "/dashboard/messages", icon: MessageSquare },
-            { name: "Documents", href: "/dashboard/documents", icon: FolderOpen },
+            { name: "Chat", href: "/dashboard/messages", icon: MessageSquare, module: "messages" },
+            { name: "cMeet", href: "/dashboard/cmeet", icon: Video, module: "cmeet" },
+            { name: "cDrive", href: "/dashboard/cdrive", icon: FolderOpen, module: "documents" },
         ],
     },
     {
         name: "Orders & billing",
         items: [
-            { name: "Orders", href: "/dashboard/orders", icon: ShoppingBag },
-            { name: "Invoices", href: "/dashboard/invoices", icon: ReceiptText },
+            { name: "Orders", href: "/dashboard/orders", icon: ShoppingBag, module: "orders" },
+            { name: "Invoices", href: "/dashboard/invoices", icon: ReceiptText, module: "invoices" },
         ],
     },
     {
         name: "Account",
         items: [
-            { name: "Account Config", href: "/dashboard/settings", icon: Settings },
+            { name: "Account Config", href: "/dashboard/settings", icon: Settings, module: "settings" },
         ],
     },
 ];
@@ -66,10 +72,18 @@ interface SidebarProps {
     onClose?: () => void;
 }
 
+/** Drop every entry, and then every emptied section, admin has switched off. */
+function visibleSections(modules: ClientModuleVisibility) {
+    return navigationSections
+        .map((section) => ({ ...section, items: section.items.filter((item) => modules[item.module] !== false) }))
+        .filter((section) => section.items.length > 0);
+}
+
 export const Sidebar = ({ isOpen = false, onClose }: SidebarProps) => {
     const pathname = usePathname();
     const [collapsedSections, setCollapsedSections] = useState<Record<string, boolean>>({});
-    const { account, dashboardPath } = useClientAccount();
+    const { account, dashboardPath, modules } = useClientAccount();
+    const sections = useMemo(() => visibleSections(modules), [modules]);
     const userName = account.fullName || account.email.split("@")[0] || "User";
     const userCompany = account.companyName || "Client";
     const parts = userName.trim().split(/\s+/).filter(Boolean);
@@ -78,7 +92,7 @@ export const Sidebar = ({ isOpen = false, onClose }: SidebarProps) => {
         : userName.substring(0, 2).toUpperCase();
 
     useEffect(() => {
-        const activeSection = navigationSections.find((section) =>
+        const activeSection = sections.find((section) =>
             section.items.some((item) => {
                 const href = dashboardPath(item.href);
                 return pathname === href || (href !== dashboardPath("/dashboard") && pathname.startsWith(`${href}/`));
@@ -88,7 +102,7 @@ export const Sidebar = ({ isOpen = false, onClose }: SidebarProps) => {
         setCollapsedSections((current) => current[activeSection.name]
             ? { ...current, [activeSection.name]: false }
             : current);
-    }, [dashboardPath, pathname]);
+    }, [dashboardPath, pathname, sections]);
 
     const toggleSection = (name: string) => {
         setCollapsedSections((current) => ({ ...current, [name]: !current[name] }));
@@ -115,6 +129,7 @@ export const Sidebar = ({ isOpen = false, onClose }: SidebarProps) => {
                     handleLogout={handleLogout}
                     dashboardPath={dashboardPath}
                     pathname={pathname}
+                    sections={sections}
                 />
             </aside>
 
@@ -139,6 +154,7 @@ export const Sidebar = ({ isOpen = false, onClose }: SidebarProps) => {
                                 handleLogout={handleLogout}
                                 dashboardPath={dashboardPath}
                                 pathname={pathname}
+                                sections={sections}
                             />
                         </motion.div>
                     </>
@@ -226,6 +242,7 @@ function SidebarContent({
     handleLogout,
     dashboardPath,
     pathname,
+    sections,
 }: {
     isMobile?: boolean;
     onClose?: () => void;
@@ -238,6 +255,7 @@ function SidebarContent({
     handleLogout: () => void;
     dashboardPath: (destination?: string) => string;
     pathname: string;
+    sections: { name: string; items: NavigationItem[] }[];
 }) {
     return (
         <div className={cn(
@@ -249,7 +267,7 @@ function SidebarContent({
                 "flex items-center border-b border-[#E3E8F4]/40 shrink-0",
                 isMobile ? "h-[64px] px-5 justify-between" : "h-[64px] px-5 2xl:h-[80px] 2xl:px-7"
             )}>
-                <Link href="/" onClick={onClose} className="flex">
+                <Link href={dashboardPath("/dashboard")} onClick={onClose} className="flex rounded-lg outline-none focus-visible:ring-2 focus-visible:ring-[#0A4FE8]/40" aria-label="Return to dashboard home">
                     <div className={cn("relative", isMobile ? "w-[46px] h-[18px]" : "w-[56px] h-[22px] 2xl:w-[72px] 2xl:h-[28px]")}>
                         <Image src="/dashboard/Group 1000004159.svg" alt="CDS Space" fill className="object-contain" />
                     </div>
@@ -267,9 +285,7 @@ function SidebarContent({
                 isMobile ? "px-4 py-6" : "px-3 py-4 2xl:px-4 2xl:py-5"
             )}>
                 <nav aria-label="Client dashboard" className="space-y-4">
-                    {/* CREATE Studio is locked for clients until the tools are perfected.
-                        Re-enable this button and set CREATE_CLIENT_ACCESS=true to open it. */}
-                    {navigationSections.map((section) => (
+                    {sections.map((section) => (
                         <section key={section.name} aria-labelledby={`sidebar-${section.name.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`}>
                             <button
                                 type="button"

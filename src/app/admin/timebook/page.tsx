@@ -88,6 +88,8 @@ interface TimebookData {
   leave_requests: LeaveRequest[];
   bypass_codes: BypassCode[];
   stats: Record<string, number>;
+  actor_role?: "super_admin" | "sub_admin";
+  can_generate_bypass?: boolean;
 }
 
 type RangeMode = "day" | "week" | "month" | "custom";
@@ -208,6 +210,7 @@ export default function AdminTimebookPage() {
     [data?.leave_requests],
   );
   const bypassCodes = data?.bypass_codes ?? [];
+  const canGenerateBypass = data?.can_generate_bypass === true;
 
   const updateDate = (nextDate: string) => {
     setDate(nextDate);
@@ -471,10 +474,10 @@ export default function AdminTimebookPage() {
             <section className="rounded-2xl border border-white/80 bg-white p-5 shadow-sm">
               <div className="mb-4 flex items-center gap-2">
                 <KeyRound className="h-5 w-5 text-[#0A4FE8]" />
-                <h2 className="text-lg font-bold text-[#0D1B39]">Geofence Bypass Codes</h2>
+                <h2 className="text-lg font-semibold text-[#0D1B39]">Geofence bypass codes</h2>
               </div>
-              <div className="grid gap-4 xl:grid-cols-[380px_1fr]">
-                <div className="rounded-2xl bg-gray-50 p-4">
+              <div className={canGenerateBypass ? "grid items-start gap-4 xl:grid-cols-[380px_1fr]" : "grid gap-4"}>
+                {canGenerateBypass && <div className="self-start rounded-2xl bg-gray-50 p-4">
                   <div className="space-y-3">
                     <select
                       value={bypassMemberId}
@@ -516,28 +519,28 @@ export default function AdminTimebookPage() {
                       className="inline-flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-[#0A4FE8] text-sm font-semibold text-white disabled:opacity-50"
                     >
                       {savingId === "bypass_code" ? <Loader2 className="h-4 w-4 animate-spin" /> : <KeyRound className="h-4 w-4" />}
-                      Generate Code
+                      Generate code
                     </button>
                     {generatedCode && (
                       <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-3">
-                        <p className="text-[11px] font-bold uppercase tracking-wide text-emerald-700">Reusable until expiry</p>
+                        <p className="text-[11px] font-semibold text-emerald-700">Reusable until expiry</p>
                         <p className="mt-1 font-mono text-2xl font-bold tracking-wide text-emerald-800">{generatedCode}</p>
                       </div>
                     )}
                   </div>
-                </div>
-                <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                </div>}
+                <div className="max-h-[270px] overflow-y-auto overscroll-contain pr-1">
                   {bypassCodes.length === 0 ? (
                     <p className="text-sm text-gray-500">No bypass codes generated yet.</p>
                   ) : (
-                    bypassCodes.map((code) => (
+                    <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">{bypassCodes.map((code) => (
                       <div key={code.id} className="rounded-xl border border-gray-100 p-4">
                         <div className="flex items-start justify-between gap-3">
                           <div>
                             <p className="font-mono text-sm font-bold text-[#0D1B39]">{code.code_hint}</p>
                             <p className="mt-1 text-xs text-gray-500">{code.assigned_member?.full_name || "Any team member"}</p>
                           </div>
-                          <span className="rounded-full bg-gray-100 px-2 py-1 text-[10px] font-bold uppercase text-gray-600">{code.status}</span>
+                          <span className="rounded-full bg-gray-100 px-2 py-1 text-[10px] font-semibold capitalize text-gray-600">{code.status}</span>
                         </div>
                         <p className="mt-2 line-clamp-2 text-xs text-gray-500">{code.reason}</p>
                         <p className="mt-2 text-xs text-gray-400">Expires {new Date(code.expires_at).toLocaleString()}</p>
@@ -550,7 +553,7 @@ export default function AdminTimebookPage() {
                           </button>
                         )}
                       </div>
-                    ))
+                    ))}</div>
                   )}
                 </div>
               </div>

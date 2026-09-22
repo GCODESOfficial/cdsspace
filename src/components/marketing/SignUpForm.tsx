@@ -3,11 +3,11 @@
 import { useCallback, useState } from "react";
 import { useForm, Controller } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useRouter } from "next/navigation";
 import NextLink from "next/link";
 import { Eye, EyeOff, Loader2, CheckCircle2, Circle } from "lucide-react";
 import { signupSchema, type SignupInput } from "@/lib/validations/auth";
-import { resendClientSignupVerification, signup } from "@/lib/actions/auth";
+import { resendClientSignupVerification, signup, verifyClientSignupCode } from "@/lib/actions/auth";
 import { EmailConfirmationModal } from "./EmailConfirmationModal";
 import { GoogleAuthButton } from "./GoogleAuthButton";
 import { LinkedInAuthButton } from "./LinkedInAuthButton";
@@ -17,7 +17,15 @@ import { BotCheck } from "@/components/security/BotCheck";
 /**
  * SignUpForm - 1:1 Figma Implementation with real Supabase logic.
  */
-export const SignUpForm = () => {
+export const SignUpForm = ({
+    nextPath,
+    invitedEmail,
+    clientInvite,
+}: {
+    nextPath: string;
+    invitedEmail: string;
+    clientInvite: string | null;
+}) => {
     const [showPassword, setShowPassword] = useState(false);
     const [isLoading, setIsLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
@@ -28,13 +36,6 @@ export const SignUpForm = () => {
     const [resendInSeconds, setResendInSeconds] = useState(60);
     const onBotTokenChange = useCallback((token: string) => setBotToken(token), []);
     const router = useRouter();
-    const searchParams = useSearchParams();
-    const requestedNextPath = searchParams.get('next');
-    const invitedEmail = searchParams.get('email') || '';
-    const clientInvite = searchParams.get('client_invite');
-    const nextPath = requestedNextPath?.startsWith("/") && !requestedNextPath.startsWith("//")
-        ? requestedNextPath
-        : "/dashboard";
     const loginHref = `/login?next=${encodeURIComponent(nextPath)}`;
 
     const {
@@ -88,6 +89,11 @@ export const SignUpForm = () => {
                 email={userEmail}
                 initialResendSeconds={resendInSeconds}
                 onResend={() => resendClientSignupVerification({ email: userEmail, next: nextPath })}
+                onVerify={async (code) => {
+                    const result = await verifyClientSignupCode({ email: userEmail, code, next: nextPath });
+                    if (result.success && result.next) router.push(result.next);
+                    return result;
+                }}
             />
 
             {/* Header: Node 6229:11975 */}
@@ -235,7 +241,7 @@ export const SignUpForm = () => {
                     <div className="flex-1 h-px bg-brand-stroke opacity-10" />
                 </div>
 
-                {/* Social Login - Google live; others coming soon */}
+                {/* Social sign-in */}
                 {clientInvite ? (
                     <p className="rounded-xl border border-blue-100 bg-blue-50 px-4 py-3 text-center text-xs font-medium text-brand-blue">
                         Complete this invitation with the confirmed email form above so your project files attach to the correct client record.

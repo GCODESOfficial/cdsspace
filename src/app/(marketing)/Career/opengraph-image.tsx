@@ -1,5 +1,5 @@
 import { ImageResponse } from "next/og";
-import { renderBrandCard, OG_SIZE, OG_CONTENT_TYPE } from "@/lib/og/brand-card";
+import { renderSolidBlueCard, OG_SIZE, OG_CONTENT_TYPE } from "@/lib/og/brand-card";
 import { getOgFonts } from "@/lib/og/fonts";
 
 export const runtime = "nodejs";
@@ -10,13 +10,11 @@ export const contentType = OG_CONTENT_TYPE;
 export default async function Image() {
   const fonts = getOgFonts();
   return new ImageResponse(
-    await renderBrandCard({
-      eyebrow: "We're hiring",
-      title: "Join CDS Space",
+    await renderSolidBlueCard({
+      eyebrow: "Careers",
+      title: "Build your career with CDS Space",
       description:
-        "Open roles at CDS Space. Mentorship, flexible schedules, faith-sensitive workplace, and a culture that ships iconic work.",
-      tags: ["Design", "Engineering", "Brand Strategy", "Internships"],
-      domainPath: "/Career",
+        "Explore open roles and do meaningful work for ambitious brands.",
     }),
     { ...size, fonts },
   );

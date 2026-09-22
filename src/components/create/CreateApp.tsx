@@ -3,18 +3,23 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowLeft, BadgeCheck, Box, Cake, Check, ChevronDown, ChevronsLeft, ChevronsRight, Clapperboard,
-  Copy, Download, Eraser, Figma, Film, Gem, ImageIcon, ImagePlus, Images, LayoutDashboard,
+  AtSign, Building2, CircleAlert, CircleCheck, CircleHelp, Copy, Download, Eraser, ExternalLink, Figma, FileText, Film, Gem, Globe2, ImageIcon, ImagePlus, Images, LayoutDashboard,
   LayoutGrid, Lightbulb, Loader2, Megaphone, Paintbrush, Palette, PenTool, Plus, QrCode, Repeat,
-  Search, Shapes, Shirt, Spline, Star, Trash2, Upload, Video, Wand2, X,
+  LockKeyhole, Moon, PenLine, Search, Shapes, Shirt, Spline, Star, Sun, Trash2, Upload, Video, X,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import Link from "next/link";
+import { LetterheadStudio } from "@/components/create/LetterheadStudio";
 
 /* ---------- Types (mirror /api/create/session) ---------- */
 type Role = "client" | "team" | "admin";
+function createApiPath(path: string, workspace: Role) {
+  return `${path}${path.includes("?") ? "&" : "?"}workspace=${workspace}`;
+}
 interface Actor {
-  kind: Role; id: string; email: string; name: string; avatarUrl: string | null;
+  kind: Role; email: string; name: string; avatarUrl: string | null;
   organization: string; dashboardHref: string; dashboardLabel: string; permissionLevel: string;
+  workspaceReference: string;
   setupRequiredHref?: string; setupRequiredLabel?: string; accessLocked?: boolean;
 }
 interface Tool {
@@ -31,13 +36,15 @@ interface Creation {
   isFavorite: boolean; createdAt: string;
 }
 interface CreditAccount { monthlyCreditLimit: number; creditsUsed: number; storageLimitBytes: number; storageUsedBytes: number }
+interface AdvertBanner { imageUrl: string | null; altText: string; targetUrl: string | null; isActive: boolean; width: number | null; height: number | null; updatedAt: string | null }
 interface DashData {
   tools: Tool[]; favoriteToolSlugs: string[]; recentCreations: Creation[];
+  advertBanner?: AdvertBanner | null;
   creditAccount: CreditAccount; analytics: { creations: number; ready: number; providerRequired: number; storageUsedBytes: number };
 }
 
 const CATEGORY_ICON: Record<string, LucideIcon> = {
-  Brand: Gem, Design: Palette, Image: ImageIcon, Video: Video, Conversion: Repeat, Mockups: Box,
+  Brand: Gem, Design: Palette, Image: ImageIcon, Video: Video, Documents: FileText, Conversion: Repeat, Mockups: Box,
 };
 
 // Minimal, professional icon per tool - never a generic star/sparkle.
@@ -49,6 +56,7 @@ const TOOL_ICON: Record<string, LucideIcon> = {
   "mockup-generator": Shirt,
   "video-compressor": Film,
   "brand-name-checker": BadgeCheck,
+  "official-letterhead": FileText,
   "logo-ideator": Lightbulb,
   "illustration-generator": Paintbrush,
   "vector-generator": PenTool,
@@ -60,7 +68,7 @@ const TOOL_ICON: Record<string, LucideIcon> = {
 };
 
 function toolIcon(tool: { slug: string; category: string }): LucideIcon {
-  return TOOL_ICON[tool.slug] || CATEGORY_ICON[tool.category] || Wand2;
+  return TOOL_ICON[tool.slug] || CATEGORY_ICON[tool.category] || PenLine;
 }
 
 /* ---------- Per-tool input forms ---------- */
@@ -83,6 +91,8 @@ const TOOL_FIELDS: Record<string, Field[]> = {
   "brand-name-checker": [
     { name: "brandName", label: "Brand name", type: "text", placeholder: "e.g. Northwind" },
     { name: "industry", label: "Industry", type: "text", placeholder: "e.g. fintech" },
+    { name: "markets", label: "Priority countries or markets", type: "text", placeholder: "e.g. Nigeria, UK, United States" },
+    { name: "domainExtensions", label: "Extra domain endings (optional)", type: "text", placeholder: "e.g. app, design, studio", optional: true },
   ],
   "logo-ideator": [
     { name: "brandName", label: "Brand name", type: "text" },
@@ -263,39 +273,74 @@ function Avatar({ actor, size = 32 }: { actor: Actor; size?: number }) {
   );
 }
 
-export function CreateApp() {
-  const [loading, setLoading] = useState(true);
-  const [actor, setActor] = useState<Actor | null>(null);
-  const [data, setData] = useState<DashData | null>(null);
-  const [authed, setAuthed] = useState<boolean | null>(null);
+export function CreateApp({
+  initial,
+  initialTheme = "light",
+  workspaceKind = "client",
+}: {
+  /** Resolved on the server so the studio paints without a loading screen. */
+  initial?: { authed: boolean; actor: Actor | null; data: DashData | null };
+  initialTheme?: "light" | "dark";
+  workspaceKind?: Role;
+} = {}) {
+  const [loading, setLoading] = useState(!initial);
+  const [actor, setActor] = useState<Actor | null>(initial?.actor ?? null);
+  const [data, setData] = useState<DashData | null>(initial?.data ?? null);
+  const [authed, setAuthed] = useState<boolean | null>(initial ? initial.authed : null);
   const [search, setSearch] = useState("");
   const [category, setCategory] = useState<string | null>(null);
   const [view, setView] = useState<"home" | "creations">("home");
   const [activeTool, setActiveTool] = useState<Tool | null>(null);
-  const [collapsed, setCollapsed] = useState(true);
+  const [collapsed, setCollapsed] = useState(workspaceKind === "client");
+  const [theme, setTheme] = useState<"light" | "dark">(initialTheme);
   const searchRef = useRef<HTMLInputElement | null>(null);
+  const railStorageKey = `create_rail_collapsed_${workspaceKind}`;
 
   useEffect(() => {
-    try { const v = localStorage.getItem("create_rail_collapsed"); if (v !== null) setCollapsed(v === "1"); } catch { /* ignore */ }
+    try {
+      const saved = localStorage.getItem(railStorageKey);
+      setCollapsed(saved === null ? workspaceKind === "client" : saved === "1");
+    } catch {
+      setCollapsed(workspaceKind === "client");
+    }
+  }, [railStorageKey, workspaceKind]);
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem("create_theme");
+      if (saved === "light" || saved === "dark") setTheme(saved);
+    } catch { /* use the initial theme */ }
   }, []);
+  function toggleTheme() {
+    setTheme((current) => {
+      const next = current === "dark" ? "light" : "dark";
+      try { localStorage.setItem("create_theme", next); } catch { /* ignore */ }
+      return next;
+    });
+  }
   function toggleRail() {
-    setCollapsed((c) => { const n = !c; try { localStorage.setItem("create_rail_collapsed", n ? "1" : "0"); } catch { /* ignore */ } return n; });
+    setCollapsed((current) => {
+      const next = !current;
+      try { localStorage.setItem(railStorageKey, next ? "1" : "0"); } catch { /* ignore */ }
+      return next;
+    });
   }
 
   const load = useCallback(async () => {
-    const res = await fetch("/api/create/session", { cache: "no-store" });
+    const res = await fetch(createApiPath("/api/create/session", workspaceKind), { cache: "no-store" });
     if (res.status === 401) { setAuthed(false); setLoading(false); return; }
     const json = await res.json().catch(() => ({}));
     if (json.ok) { setActor(json.actor); setData(json.data); setAuthed(true); }
     setLoading(false);
-  }, []);
-  useEffect(() => { void load(); }, [load]);
+  }, [workspaceKind]);
+  // Only when the server could not hand the data over already.
+  const hasInitial = Boolean(initial);
+  useEffect(() => { if (!hasInitial) void load(); }, [load, hasInitial]);
 
   const favorites = useMemo(() => new Set(data?.favoriteToolSlugs || []), [data]);
 
   async function toggleFavorite(slug: string, next: boolean) {
     setData((d) => d ? { ...d, favoriteToolSlugs: next ? [...d.favoriteToolSlugs, slug] : d.favoriteToolSlugs.filter((s) => s !== slug) } : d);
-    await fetch("/api/create/favorites", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ toolSlug: slug, favorite: next }) });
+    await fetch(createApiPath("/api/create/favorites", workspaceKind), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ toolSlug: slug, favorite: next }) });
   }
 
   // While any creation is still processing on a worker, poll for its result.
@@ -303,7 +348,7 @@ export function CreateApp() {
   useEffect(() => {
     if (!hasProcessing) return;
     const timer = setInterval(async () => {
-      const res = await fetch("/api/create/creations", { cache: "no-store" });
+      const res = await fetch(createApiPath("/api/create/creations", workspaceKind), { cache: "no-store" });
       if (!res.ok) return;
       const json = await res.json().catch(() => ({}));
       if (json.ok && Array.isArray(json.creations)) {
@@ -311,7 +356,7 @@ export function CreateApp() {
       }
     }, 6000);
     return () => clearInterval(timer);
-  }, [hasProcessing]);
+  }, [hasProcessing, workspaceKind]);
 
   if (loading) {
     return <div className="grid min-h-screen place-items-center bg-[#F6F7FB]"><Loader2 className="h-7 w-7 animate-spin text-[#0A4FE8]" /></div>;
@@ -319,15 +364,15 @@ export function CreateApp() {
 
   if (authed === false) {
     return (
-      <div className="grid min-h-screen place-items-center bg-gradient-to-br from-[#0A4FE8] to-[#0835AE] p-6 text-white">
+      <div className="grid min-h-screen place-items-center bg-[#0A4FE8] p-6 text-white">
         <div className="w-full max-w-md rounded-3xl bg-white/10 p-8 text-center backdrop-blur-sm">
-          <div className="mx-auto mb-4 grid h-14 w-14 place-items-center rounded-2xl bg-white/15"><Wand2 className="h-7 w-7" /></div>
+          <div className="mx-auto mb-4 grid h-14 w-14 place-items-center rounded-2xl bg-white/15"><PenLine className="h-7 w-7" /></div>
           <p className="text-[11px] font-bold uppercase tracking-[0.2em] text-white/70">CDS Space</p>
           <h1 className="mt-1 text-3xl font-black tracking-tight">Welcome to CREATE</h1>
           <p className="mt-2 text-sm text-white/80">Professional creative tools powered by CDS Space. A CDS Space account is required to access CREATE.</p>
           <div className="mt-6 flex flex-col gap-2.5">
-            <Link href="/login?next=/create" className="rounded-xl bg-white px-5 py-3 text-sm font-bold text-[#0A4FE8] hover:bg-blue-50">Sign In</Link>
-            <Link href="/signup?next=/create" className="rounded-xl border border-white/40 px-5 py-3 text-sm font-bold text-white hover:bg-white/10">Create CDS Space account</Link>
+            <Link href={workspaceKind === "admin" ? "/admin/login" : workspaceKind === "team" ? "/team/login" : `/login?next=${encodeURIComponent("/create?workspace=client")}`} className="rounded-xl bg-white px-5 py-3 text-sm font-bold text-[#0A4FE8] hover:bg-blue-50">Sign in</Link>
+            {workspaceKind === "client" && <Link href={`/signup?next=${encodeURIComponent("/create?workspace=client")}`} className="rounded-xl border border-white/40 px-5 py-3 text-sm font-bold text-white hover:bg-white/10">Create CDS Space account</Link>}
           </div>
         </div>
       </div>
@@ -336,9 +381,9 @@ export function CreateApp() {
 
   if (actor?.accessLocked) {
     return (
-      <div className="grid min-h-screen place-items-center bg-gradient-to-br from-[#0A4FE8] to-[#0835AE] p-6 text-white">
+      <div className="grid min-h-screen place-items-center bg-[#0A4FE8] p-6 text-white">
         <div className="w-full max-w-md rounded-3xl bg-white/10 p-8 text-center backdrop-blur-sm">
-          <div className="mx-auto mb-4 grid h-14 w-14 place-items-center rounded-2xl bg-white/15"><Wand2 className="h-7 w-7" /></div>
+          <div className="mx-auto mb-4 grid h-14 w-14 place-items-center rounded-2xl bg-white/15"><PenLine className="h-7 w-7" /></div>
           <p className="text-[11px] font-bold uppercase tracking-[0.2em] text-white/70">CDS Space</p>
           <h1 className="mt-1 text-3xl font-black tracking-tight">CREATE is coming soon</h1>
           <p className="mt-2 text-sm text-white/80">We are putting the finishing touches on the CREATE studio. It will be available on your account shortly.</p>
@@ -355,55 +400,60 @@ export function CreateApp() {
     (!category || t.category === category) &&
     (!q || t.name.toLowerCase().includes(q) || t.shortDescription.toLowerCase().includes(q) || t.category.toLowerCase().includes(q)),
   );
-  const featured = allTools.filter((t) => t.isFeatured).slice(0, 6);
+  const featured = allTools.filter((t) => t.isFeatured && t.slug !== "official-letterhead").slice(0, 4);
+  const letterheadTool = allTools.find((t) => t.slug === "official-letterhead") || null;
   const credit = data?.creditAccount;
   const shownCategories = category ? [category] : Array.from(new Set(filtered.map((t) => t.category)));
+  const dark = theme === "dark";
 
   function railHome() { setView("home"); setCategory(null); setSearch(""); setActiveTool(null); }
   function startCreate() { railHome(); setTimeout(() => searchRef.current?.focus(), 40); }
 
   return (
-    <div className="flex h-screen overflow-hidden bg-[#F6F7FB] text-[#0D1B39]">
+    <div className={`flex h-[100dvh] w-full max-w-full overflow-hidden transition-colors duration-300 ${dark ? "bg-[#050D20] text-[#F4F7FF]" : "bg-[#F4F7FC] text-[#0D1B39]"}`} data-create-theme={theme}>
       {/* Left rail - collapsible */}
-      <aside className={`flex shrink-0 flex-col gap-1 border-r border-gray-100 bg-white p-3 transition-[width] duration-200 ${collapsed ? "w-[76px]" : "w-[232px]"}`}>
+      <aside className={`hidden shrink-0 flex-col gap-1 border-r p-3 transition-[width,background-color,border-color] duration-300 md:flex ${dark ? "border-[#1A315E] bg-[#09142D] shadow-[10px_0_38px_rgba(0,20,70,0.22)]" : "border-[#E6ECF5] bg-white"} ${collapsed ? "w-[76px]" : "w-[240px]"}`}>
         {/* Brand + collapse toggle */}
         <div className={`mb-1 flex items-center ${collapsed ? "justify-center" : "justify-between pl-1"}`}>
           <button onClick={railHome} className="flex items-center gap-2" title="CREATE home">
-            <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-[#0A4FE8] text-white shadow-sm"><Wand2 className="h-5 w-5" /></span>
+            <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-[#0A4FE8] text-white shadow-sm"><PenLine className="h-5 w-5" /></span>
             {!collapsed && <span className="text-[15px] font-black tracking-tight">CREATE</span>}
           </button>
           {!collapsed && (
-            <button onClick={toggleRail} title="Collapse" className="grid h-8 w-8 place-items-center rounded-lg text-gray-400 hover:bg-gray-100"><ChevronsLeft className="h-[18px] w-[18px]" /></button>
+            <button onClick={toggleRail} title="Collapse" className={`grid h-8 w-8 place-items-center rounded-lg text-gray-400 ${dark ? "hover:bg-white/[0.07]" : "hover:bg-gray-100"}`}><ChevronsLeft className="h-[18px] w-[18px]" /></button>
           )}
         </div>
         {collapsed && (
-          <button onClick={toggleRail} title="Expand" className="mb-1 grid h-8 w-full place-items-center rounded-lg text-gray-400 hover:bg-gray-100"><ChevronsRight className="h-[18px] w-[18px]" /></button>
+          <button onClick={toggleRail} title="Expand" className={`mb-1 grid h-8 w-full place-items-center rounded-lg text-gray-400 ${dark ? "hover:bg-white/[0.07]" : "hover:bg-gray-100"}`}><ChevronsRight className="h-[18px] w-[18px]" /></button>
         )}
 
         {/* Primary + view */}
-        <RailItem icon={Plus} label="Create" primary collapsed={collapsed} onClick={startCreate} />
-        <RailItem icon={Images} label="My Creations" active={view === "creations"} collapsed={collapsed} onClick={() => setView("creations")} />
+        <RailItem icon={Plus} label="Create" primary dark={dark} collapsed={collapsed} onClick={startCreate} />
+        {letterheadTool && (
+          <RailItem icon={FileText} label="Create letterhead" pinned dark={dark} collapsed={collapsed} onClick={() => setActiveTool(letterheadTool)} />
+        )}
+        <RailItem icon={Images} label="My creations" active={view === "creations"} dark={dark} collapsed={collapsed} onClick={() => setView("creations")} />
 
         {/* Browse by category */}
         <div className="my-2 flex items-center gap-2 px-1">
-          <div className="h-px flex-1 bg-gray-100" />
+          <div className={`h-px flex-1 ${dark ? "bg-white/[0.07]" : "bg-gray-100"}`} />
           {!collapsed && <span className="text-[10px] font-bold uppercase tracking-wider text-gray-300">Browse</span>}
-          <div className="h-px flex-1 bg-gray-100" />
+          <div className={`h-px flex-1 ${dark ? "bg-white/[0.07]" : "bg-gray-100"}`} />
         </div>
-        <RailItem icon={LayoutGrid} label="All tools" active={view === "home" && !category} collapsed={collapsed} onClick={() => { setView("home"); setCategory(null); }} />
+        <RailItem icon={LayoutGrid} label="All tools" active={view === "home" && !category} dark={dark} collapsed={collapsed} onClick={() => { setView("home"); setCategory(null); }} />
         {categories.map((cat) => (
-          <RailItem key={cat} icon={CATEGORY_ICON[cat] || LayoutGrid} label={cat} active={category === cat && view === "home"} collapsed={collapsed}
+          <RailItem key={cat} icon={CATEGORY_ICON[cat] || LayoutGrid} label={cat} active={category === cat && view === "home"} dark={dark} collapsed={collapsed}
             onClick={() => { setView("home"); setCategory(category === cat ? null : cat); }} />
         ))}
 
         {/* Profile */}
         <div className="mt-auto pt-2">
           {actor && (
-            <Link href={actor.dashboardHref} title={actor.name} className={`flex items-center rounded-xl transition hover:bg-gray-100 ${collapsed ? "justify-center py-1" : "gap-2.5 p-1.5"}`}>
+            <Link href={actor.dashboardHref} title={actor.name} className={`flex items-center rounded-xl transition ${dark ? "hover:bg-white/[0.07]" : "hover:bg-gray-100"} ${collapsed ? "justify-center py-1" : "gap-2.5 p-1.5"}`}>
               <Avatar actor={actor} size={collapsed ? 34 : 32} />
               {!collapsed && (
                 <div className="min-w-0 leading-tight">
-                  <p className="truncate text-[12.5px] font-bold text-[#0D1B39]">{actor.name}</p>
+                  <p className={`truncate text-[12.5px] font-bold ${dark ? "text-white" : "text-[#0D1B39]"}`}>{actor.name}</p>
                   <p className="truncate text-[10px] font-semibold text-gray-400">{actor.permissionLevel}</p>
                 </div>
               )}
@@ -413,31 +463,42 @@ export function CreateApp() {
       </aside>
 
       {/* Main */}
-      <div className="flex min-w-0 flex-1 flex-col">
+      <div className="flex min-w-0 max-w-full flex-1 flex-col overflow-hidden">
         {/* Top bar */}
-        <header className="flex items-center gap-3 border-b border-gray-100 bg-white/70 px-6 py-3 backdrop-blur">
+        <header className={`flex min-h-16 max-w-full items-center gap-2 overflow-hidden border-b px-3 py-3 transition-colors duration-300 sm:gap-3 sm:px-6 ${dark ? "border-[#1A315E] bg-[#09142D] shadow-[0_10px_34px_rgba(0,19,64,0.22)]" : "border-[#E6ECF5] bg-white"}`}>
           <div className="flex items-center gap-2 font-black tracking-tight">
+            <button onClick={railHome} className="grid h-9 w-9 place-items-center rounded-xl bg-[#0A4FE8] text-white md:hidden" aria-label="CREATE home"><PenLine className="h-5 w-5" /></button>
             <span className="text-[15px]">CREATE</span>
-            <span className="rounded-md bg-blue-50 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-[#0A4FE8]">by CDS Space</span>
+            <span className="hidden rounded-md bg-blue-50 px-1.5 py-0.5 text-[9px] font-bold text-[#0A4FE8] sm:inline">by CDS Space</span>
           </div>
           <div className="ml-auto flex items-center gap-2.5">
+            {actor && (
+              <span className={`hidden items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[11px] font-semibold xl:inline-flex ${dark ? "border border-emerald-400/20 bg-emerald-400/10 text-emerald-200" : "bg-emerald-50 text-emerald-700"}`} title="Creations and files are isolated to this signed-in account. The reference is not used for authentication.">
+                <LockKeyhole className="h-3.5 w-3.5" /> Private workspace <span className="font-mono">{actor.workspaceReference}</span>
+              </span>
+            )}
             {credit && (
-              <div className="hidden items-center gap-2 sm:flex">
-                <span className="rounded-lg bg-blue-50 px-2.5 py-1.5 text-[11px] font-bold text-[#0A4FE8]">{actor?.kind === "admin" ? "Unlimited" : `${Math.max(0, credit.monthlyCreditLimit - credit.creditsUsed)} credits`}</span>
+              <div className="hidden items-center gap-2 lg:flex">
+                <span className="rounded-lg bg-blue-50 px-2.5 py-1.5 text-[11px] font-bold text-[#0A4FE8]">{actor?.kind === "admin" ? "Premium" : `${Math.max(0, credit.monthlyCreditLimit - credit.creditsUsed)} credits`}</span>
                 <span className="rounded-lg bg-gray-100 px-2.5 py-1.5 text-[11px] font-semibold text-gray-500">{fmtBytes(credit.storageUsedBytes)} / {fmtBytes(credit.storageLimitBytes)}</span>
               </div>
             )}
-            <button onClick={() => setView("creations")} className={`rounded-lg px-3 py-2 text-[13px] font-semibold ${view === "creations" ? "bg-blue-50 text-[#0A4FE8]" : "text-gray-600 hover:bg-gray-100"}`}>My Creations</button>
+            {letterheadTool && <button onClick={() => setActiveTool(letterheadTool)} className="grid h-9 w-9 place-items-center rounded-xl bg-blue-50 text-[#0A4FE8] md:hidden" aria-label="Create letterhead"><FileText className="h-[18px] w-[18px]" /></button>}
+            <button onClick={() => setView("creations")} className={`grid h-9 w-9 place-items-center rounded-xl sm:hidden ${view === "creations" ? "bg-blue-50 text-[#0A4FE8]" : dark ? "text-slate-300" : "text-slate-500"}`} aria-label="My creations"><Images className="h-[18px] w-[18px]" /></button>
+            <button onClick={() => setView("creations")} className={`hidden rounded-lg px-3 py-2 text-[13px] font-semibold sm:block ${view === "creations" ? "bg-blue-50 text-[#0A4FE8]" : dark ? "text-slate-300 hover:bg-white/[0.07]" : "text-gray-600 hover:bg-gray-100"}`}>My creations</button>
+            <button onClick={toggleTheme} aria-label={`Use ${dark ? "light" : "dark"} mode`} title={`Use ${dark ? "light" : "dark"} mode`} className={`grid h-9 w-9 shrink-0 place-items-center rounded-xl border transition ${dark ? "border-[#315CA8] bg-[#0D1D3E] text-amber-200 shadow-[0_0_18px_rgba(43,105,255,0.22)] hover:border-[#4D7DD8] hover:bg-[#12264E]" : "border-[#E2E9F4] bg-white text-slate-600 hover:bg-slate-50"}`}>
+              {dark ? <Sun className="h-[17px] w-[17px]" /> : <Moon className="h-[17px] w-[17px]" />}
+            </button>
             {/* Role-aware return to dashboard */}
             <Link href={actor?.dashboardHref || "/dashboard"} className="inline-flex items-center gap-1.5 rounded-lg bg-[#0D1B39] px-3.5 py-2 text-[13px] font-bold text-white transition hover:bg-[#1a2a52]">
-              <LayoutDashboard className="h-4 w-4" /> {actor?.dashboardLabel || "Dashboard"}
+              <LayoutDashboard className="h-4 w-4" /> <span className="hidden xl:inline">{actor?.dashboardLabel || "Dashboard"}</span>
             </Link>
             {/* Profile chip */}
             {actor && (
-              <Link href={actor.dashboardHref} className="flex items-center gap-2 rounded-full border border-gray-100 bg-white py-1 pl-1 pr-3 shadow-sm transition hover:border-blue-200">
+              <Link href={actor.dashboardHref} className={`hidden items-center gap-2 rounded-full border py-1 pl-1 pr-3 shadow-sm transition xl:flex ${dark ? "border-white/10 bg-white/[0.05] hover:border-blue-400/40" : "border-gray-100 bg-white hover:border-blue-200"}`}>
                 <Avatar actor={actor} size={30} />
                 <div className="hidden leading-tight sm:block">
-                  <p className="max-w-[130px] truncate text-[12.5px] font-bold text-[#0D1B39]">{actor.name}</p>
+                  <p className={`max-w-[130px] truncate text-[12.5px] font-bold ${dark ? "text-white" : "text-[#0D1B39]"}`}>{actor.name}</p>
                   <p className="text-[10px] font-semibold text-gray-400">{actor.permissionLevel}</p>
                 </div>
               </Link>
@@ -445,7 +506,7 @@ export function CreateApp() {
           </div>
         </header>
 
-        <main className="flex-1 overflow-y-auto px-6 py-6 sm:px-10 sm:py-8">
+        <main className="min-w-0 max-w-full flex-1 overflow-x-hidden overflow-y-auto px-4 py-5 sm:px-7 sm:py-7 lg:px-10">
           {actor?.setupRequiredHref && (
             <Link href={actor.setupRequiredHref} className="mb-5 flex items-center justify-between rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-[13px] font-semibold text-amber-800">
               <span>Finish your CDS Space account setup to run CREATE tools.</span>
@@ -454,45 +515,79 @@ export function CreateApp() {
           )}
 
           {activeTool ? (
-            <ToolPage tool={activeTool} onBack={() => setActiveTool(null)} onSaved={load} />
+            activeTool.slug === "official-letterhead"
+              ? <LetterheadStudio workspaceKind={workspaceKind} onBack={() => setActiveTool(null)} />
+              : <ToolPage workspaceKind={workspaceKind} tool={activeTool} onBack={() => setActiveTool(null)} onSaved={load} />
           ) : view === "creations" ? (
-            <CreationsView data={data} onBack={() => setView("home")} reload={load} />
+            <CreationsView workspaceKind={workspaceKind} data={data} dark={dark} onBack={() => setView("home")} reload={load} />
           ) : (
-            <>
-              {/* Hero */}
-              <div className="mx-auto max-w-3xl pt-4 text-center">
-                <p className="text-[12px] font-bold uppercase tracking-[0.16em] text-[#0A4FE8]">Hi {actor?.name?.split(" ")[0] || "there"}</p>
-                <h1 className="mt-2 text-[30px] font-black tracking-tight sm:text-[40px]">{greeting()}, start creating!</h1>
-                <div className="relative mt-5">
-                  <Search className="absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
-                  <input ref={searchRef} value={search} onChange={(e) => { setSearch(e.target.value); setCategory(null); }} placeholder="Search creative tools" className="w-full rounded-2xl border border-gray-200 bg-white py-4 pl-11 pr-4 text-[15px] shadow-[0_8px_30px_rgba(15,40,90,0.06)] outline-none focus:border-blue-300 focus:ring-4 focus:ring-blue-50" />
+            <div className="mx-auto w-full max-w-[1380px]">
+              {/* Welcome and primary action */}
+              <section className={`grid overflow-hidden rounded-[24px] border transition-colors duration-300 lg:grid-cols-[1.45fr_0.75fr] ${dark ? "border-[#203C70] bg-[#0C1833] shadow-[0_0_0_1px_rgba(56,112,230,0.08),0_24px_70px_rgba(0,12,42,0.52),0_0_44px_rgba(22,82,220,0.08)]" : "border-[#E2E9F4] bg-white shadow-[0_14px_45px_rgba(26,54,93,0.06)]"}`}>
+                <div className="p-6 sm:p-8 lg:p-10">
+                  <p className="text-[13px] font-semibold text-[#0A4FE8]">{greeting()}, {actor?.name?.split(" ")[0] || "there"}</p>
+                  <h1 className="mt-2 max-w-2xl text-[30px] font-bold leading-[1.12] tracking-[-0.035em] sm:text-[38px]">What would you like to create?</h1>
+                  <p className={`mt-3 max-w-xl text-[14px] leading-6 ${dark ? "text-slate-400" : "text-slate-500"}`}>Start with a professional document or find the right creative tool for your next task.</p>
+                  <div className="relative mt-6 max-w-2xl">
+                    <Search className="absolute left-4 top-1/2 h-[18px] w-[18px] -translate-y-1/2 text-slate-400" />
+                    <input ref={searchRef} value={search} onChange={(e) => { setSearch(e.target.value); setCategory(null); }} placeholder="Search tools, documents and formats" className={`h-14 w-full rounded-xl border pl-12 pr-4 text-[14px] outline-none transition placeholder:text-slate-400 focus:border-[#3778FF] focus:ring-4 focus:ring-blue-500/10 ${dark ? "border-[#213D72] bg-[#07132B] text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.025),0_10px_28px_rgba(0,7,25,0.28)] focus:bg-[#08162F] focus:shadow-[0_0_22px_rgba(35,96,235,0.18)]" : "border-[#DCE4F0] bg-[#FAFCFF] shadow-sm focus:bg-white"}`} />
+                  </div>
                 </div>
+                {letterheadTool && (
+                  <button onClick={() => setActiveTool(letterheadTool)} className={`group relative m-3 flex min-h-[210px] flex-col justify-between overflow-hidden rounded-[20px] bg-[#0A4FE8] p-6 text-left text-white transition hover:bg-[#0844CC] focus:outline-none focus-visible:ring-4 focus-visible:ring-blue-200 sm:m-4 sm:p-7 ${dark ? "border border-[#5C8CFF]/45 shadow-[0_0_0_1px_rgba(108,151,255,0.14),0_0_34px_rgba(10,79,232,0.46),0_22px_50px_rgba(0,16,65,0.48)] hover:shadow-[0_0_0_1px_rgba(130,169,255,0.3),0_0_44px_rgba(10,79,232,0.58),0_24px_54px_rgba(0,16,65,0.5)]" : ""}`}>
+                    <div className="flex items-start justify-between gap-4">
+                      <span className="grid h-12 w-12 place-items-center rounded-2xl bg-white/15"><FileText className="h-6 w-6" /></span>
+                      <span className="rounded-full border border-white/25 bg-white/10 px-3 py-1 text-[11px] font-semibold">Pinned</span>
+                    </div>
+                    <div className="mt-8">
+                      <p className="text-[20px] font-bold tracking-tight">Create official letterhead</p>
+                      <p className="mt-2 max-w-sm text-[13px] leading-5 text-white/75">Draft, sign and export exact A4 or Legal documents as polished PDFs.</p>
+                      <span className="mt-5 inline-flex items-center gap-2 text-[13px] font-semibold">Open letterhead studio <ExternalLink className="h-4 w-4 transition group-hover:translate-x-0.5" /></span>
+                    </div>
+                  </button>
+                )}
+              </section>
+
+              {/* Mobile category navigation */}
+              <div className="mt-5 flex max-w-full flex-wrap gap-2 md:hidden">
+                <button onClick={() => { setCategory(null); setView("home"); }} className={`rounded-full px-4 py-2 text-[12px] font-semibold ${!category ? "bg-[#0A4FE8] text-white" : dark ? "border border-white/10 bg-white/[0.05] text-slate-300" : "border border-[#DCE4F0] bg-white text-slate-600"}`}>All tools</button>
+                {categories.map((cat) => <button key={cat} onClick={() => { setCategory(cat); setView("home"); }} className={`rounded-full px-4 py-2 text-[12px] font-semibold ${category === cat ? "bg-[#0A4FE8] text-white" : dark ? "border border-white/10 bg-white/[0.05] text-slate-300" : "border border-[#DCE4F0] bg-white text-slate-600"}`}>{cat}</button>)}
               </div>
 
-              {/* Quick action tiles (Magnific-style icon row) */}
+              {/* Useful shortcuts */}
               {!q && !category && featured.length > 0 && (
-                <div className="mx-auto mt-8 flex max-w-4xl flex-wrap justify-center gap-3">
-                  {featured.map((t) => {
-                    const TIcon = toolIcon(t);
-                    return (
-                      <button key={t.slug} onClick={() => setActiveTool(t)} className="group flex w-[120px] flex-col items-center gap-2 rounded-2xl border border-gray-100 bg-white p-4 text-center shadow-sm transition hover:-translate-y-0.5 hover:border-[#0A4FE8]/40 hover:shadow-md">
-                        <span className="grid h-11 w-11 place-items-center rounded-xl bg-blue-50 text-[#0A4FE8] transition group-hover:bg-[#0A4FE8] group-hover:text-white"><TIcon className="h-5 w-5" /></span>
-                        <span className="text-[12px] font-bold leading-tight">{t.name}</span>
-                      </button>
-                    );
-                  })}
-                </div>
+                <section className="mt-7">
+                  <div className="mb-3 flex items-end justify-between gap-4">
+                    <div><h2 className="text-[17px] font-bold">Quick start</h2><p className={`mt-0.5 text-[12px] ${dark ? "text-slate-400" : "text-slate-500"}`}>Your most useful tools, ready to open.</p></div>
+                  </div>
+                  <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                    {featured.map((t) => {
+                      const TIcon = toolIcon(t);
+                      return (
+                        <button key={t.slug} onClick={() => setActiveTool(t)} className={`group flex min-w-0 items-center gap-3 rounded-2xl border p-4 text-left transition hover:-translate-y-0.5 ${dark ? "border-[#1D396B] bg-[#0C1833] shadow-[0_12px_30px_rgba(0,8,30,0.28)] hover:border-[#3974E8] hover:shadow-[0_0_24px_rgba(10,79,232,0.18),0_14px_34px_rgba(0,8,30,0.34)]" : "border-[#E2E9F4] bg-white shadow-sm hover:border-[#0A4FE8]/35 hover:shadow-md"}`}>
+                          <span className="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-blue-50 text-[#0A4FE8] transition group-hover:bg-[#0A4FE8] group-hover:text-white"><TIcon className="h-5 w-5" /></span>
+                          <span className="min-w-0"><span className="block truncate text-[13px] font-bold">{t.name}</span><span className="mt-0.5 block truncate text-[11px] text-slate-400">{t.category}</span></span>
+                          <ChevronDown className="ml-auto h-4 w-4 -rotate-90 text-slate-300 transition group-hover:translate-x-0.5 group-hover:text-[#0A4FE8]" />
+                        </button>
+                      );
+                    })}
+                  </div>
+                </section>
+              )}
+
+              {!q && !category && data?.advertBanner?.isActive && data.advertBanner.imageUrl && (
+                <CreateAdvertBanner banner={data.advertBanner} dark={dark} />
               )}
 
               {/* Recent creations */}
               {!q && !category && (data?.recentCreations?.length || 0) > 0 && (
-                <section className="mt-10">
+                <section className="mt-8">
                   <div className="mb-3 flex items-center justify-between">
-                    <h2 className="text-[13px] font-bold uppercase tracking-wider text-gray-400">Recent creations</h2>
-                    <button onClick={() => setView("creations")} className="text-[12px] font-semibold text-[#0A4FE8]">View all</button>
+                    <div><h2 className="text-[17px] font-bold">Recent creations</h2><p className={`mt-0.5 text-[12px] ${dark ? "text-slate-400" : "text-slate-500"}`}>Continue where you left off.</p></div>
+                    <button onClick={() => setView("creations")} className="rounded-lg px-3 py-2 text-[12px] font-semibold text-[#0A4FE8] hover:bg-blue-50">View all</button>
                   </div>
-                  <div className="flex gap-3 overflow-x-auto pb-1">
-                    {data!.recentCreations.slice(0, 8).map((c) => <CreationCard key={c.id} c={c} compact />)}
+                  <div className="grid max-w-full grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6">
+                    {data!.recentCreations.slice(0, 6).map((c) => <CreationCard workspaceKind={workspaceKind} key={c.id} c={c} compact dark={dark} />)}
                   </div>
                 </section>
               )}
@@ -500,20 +595,20 @@ export function CreateApp() {
               {/* Tools by category */}
               {(category || q) && (
                 <div className="mb-4 mt-8 flex items-center gap-2">
-                  <h2 className="text-[15px] font-black">{category || `Results for "${search}"`}</h2>
+                  <h2 className="text-[18px] font-bold">{category || `Results for "${search}"`}</h2>
                   {(category || q) && <button onClick={() => { setCategory(null); setSearch(""); }} className="text-[12px] font-semibold text-[#0A4FE8]">Clear</button>}
                 </div>
               )}
               {shownCategories.map((cat) => (
                 <section key={cat} className="mt-8">
-                  <h2 className="mb-3 flex items-center gap-2 text-[13px] font-bold uppercase tracking-wider text-gray-400">
+                  <h2 className="mb-3 flex items-center gap-2 text-[15px] font-bold text-slate-700">
                     {(() => { const I = CATEGORY_ICON[cat] || LayoutGrid; return <I className="h-3.5 w-3.5" />; })()} {cat}
                   </h2>
                   <div className="grid gap-3.5 sm:grid-cols-2 lg:grid-cols-3">
                     {filtered.filter((t) => t.category === cat).map((t) => {
                       const fav = favorites.has(t.slug);
                       return (
-                        <div key={t.slug} className="group relative rounded-2xl border border-gray-100 bg-white p-4 shadow-sm transition hover:-translate-y-0.5 hover:border-[#0A4FE8]/30 hover:shadow-md">
+                        <div key={t.slug} className={`group relative min-w-0 rounded-2xl border p-5 transition hover:-translate-y-0.5 ${dark ? "border-[#1D396B] bg-[#0C1833] shadow-[0_12px_30px_rgba(0,8,30,0.25)] hover:border-[#3974E8] hover:shadow-[0_0_24px_rgba(10,79,232,0.16),0_14px_34px_rgba(0,8,30,0.34)]" : "border-[#E2E9F4] bg-white shadow-sm hover:border-[#0A4FE8]/30 hover:shadow-md"}`}>
                           <div className="flex items-start justify-between gap-2">
                             <span className="grid h-10 w-10 place-items-center rounded-xl bg-blue-50 text-[#0A4FE8]">
                               {(() => { const I = toolIcon(t); return <I className="h-5 w-5" />; })()}
@@ -529,7 +624,7 @@ export function CreateApp() {
                           </div>
                           <button onClick={() => setActiveTool(t)} className="mt-3 block w-full text-left">
                             <p className="text-[15px] font-bold">{t.name}</p>
-                            <p className="mt-1 line-clamp-2 text-[12.5px] leading-relaxed text-gray-500">{t.shortDescription}</p>
+                            <p className={`mt-1 line-clamp-2 text-[12.5px] leading-relaxed ${dark ? "text-slate-400" : "text-gray-500"}`}>{t.shortDescription}</p>
                             <div className="mt-3 flex items-center gap-1.5 text-[11px] font-semibold text-gray-400">
                               <span className="rounded bg-gray-100 px-1.5 py-0.5">{t.creditCost === 0 ? "Free" : `${t.creditCost} credit${t.creditCost === 1 ? "" : "s"}`}</span>
                               {t.outputFormats.slice(0, 3).map((f) => <span key={f} className="rounded bg-blue-50 px-1.5 py-0.5 text-[#0A4FE8]">{f}</span>)}
@@ -541,8 +636,8 @@ export function CreateApp() {
                   </div>
                 </section>
               ))}
-              {filtered.length === 0 && <p className="mt-10 rounded-2xl border border-dashed border-gray-200 bg-white py-16 text-center text-sm text-gray-400">No tools match your search.</p>}
-            </>
+              {filtered.length === 0 && <p className={`mt-10 rounded-2xl border border-dashed py-16 text-center text-sm text-gray-400 ${dark ? "border-white/10 bg-[#0E1A35]" : "border-gray-200 bg-white"}`}>No tools match your search.</p>}
+            </div>
           )}
         </main>
       </div>
@@ -550,12 +645,30 @@ export function CreateApp() {
   );
 }
 
-function RailItem({ icon: Icon, label, active, primary, collapsed, onClick }: { icon: LucideIcon; label: string; active?: boolean; primary?: boolean; collapsed: boolean; onClick: () => void }) {
+function CreateAdvertBanner({ banner, dark }: { banner: AdvertBanner; dark: boolean }) {
+  const content = (
+    // eslint-disable-next-line @next/next/no-img-element
+    <img src={banner.imageUrl || ""} alt={banner.altText || "CDS Space Create promotion"} className="h-full w-full object-cover" />
+  );
+  const className = `group relative block aspect-[16/5] w-full overflow-hidden rounded-2xl border transition hover:-translate-y-0.5 ${dark ? "border-[#28519A] bg-[#0C1833] shadow-[0_0_30px_rgba(10,79,232,0.14),0_18px_44px_rgba(0,8,30,0.36)] hover:border-[#4A7DE0] hover:shadow-[0_0_38px_rgba(10,79,232,0.22),0_20px_48px_rgba(0,8,30,0.42)]" : "border-[#DCE5F2] bg-white shadow-[0_12px_34px_rgba(20,45,90,0.08)] hover:border-blue-300 hover:shadow-[0_16px_40px_rgba(20,45,90,0.12)]"}`;
+
+  return (
+    <section className="mt-8" aria-label="Featured promotion">
+      {banner.targetUrl
+        ? banner.targetUrl.startsWith("/")
+          ? <Link href={banner.targetUrl} className={className}>{content}</Link>
+          : <a href={banner.targetUrl} target="_blank" rel="noopener noreferrer" className={className}>{content}</a>
+        : <div className={className}>{content}</div>}
+    </section>
+  );
+}
+
+function RailItem({ icon: Icon, label, active, primary, pinned, dark, collapsed, onClick }: { icon: LucideIcon; label: string; active?: boolean; primary?: boolean; pinned?: boolean; dark?: boolean; collapsed: boolean; onClick: () => void }) {
   return (
     <button
       onClick={onClick}
       title={collapsed ? label : undefined}
-      className={`flex items-center gap-3 rounded-xl transition ${collapsed ? "h-11 w-11 justify-center self-center" : "h-11 w-full px-3"} ${primary ? "bg-[#0A4FE8] text-white shadow-sm hover:bg-[#083EC0]" : active ? "bg-blue-50 text-[#0A4FE8]" : "text-gray-500 hover:bg-gray-100 hover:text-[#0D1B39]"}`}
+      className={`flex items-center gap-3 rounded-xl transition ${collapsed ? "h-11 w-11 justify-center self-center" : "h-11 w-full px-3"} ${primary ? dark ? "border border-[#5284FF]/50 bg-[#0A4FE8] text-white shadow-[0_0_24px_rgba(10,79,232,0.42)] hover:bg-[#135AF0] hover:shadow-[0_0_30px_rgba(10,79,232,0.56)]" : "bg-[#0A4FE8] text-white shadow-sm hover:bg-[#083EC0]" : pinned ? dark ? "border border-[#2B5BAF] bg-[#102447] text-blue-200 shadow-[inset_0_1px_0_rgba(255,255,255,0.035),0_0_18px_rgba(10,79,232,0.1)] hover:border-[#477EE1] hover:bg-[#142B54]" : "border border-blue-100 bg-blue-50 text-[#0A4FE8] hover:border-blue-200 hover:bg-blue-100/70" : active ? dark ? "border border-[#294E90] bg-[#132342] text-white shadow-[0_0_18px_rgba(10,79,232,0.1)]" : "bg-blue-50 text-[#0A4FE8]" : dark ? "text-slate-400 hover:bg-white/[0.06] hover:text-white" : "text-gray-500 hover:bg-gray-100 hover:text-[#0D1B39]"}`}
     >
       <Icon className="h-[19px] w-[19px] shrink-0" />
       {!collapsed && <span className="truncate text-[13px] font-semibold">{label}</span>}
@@ -564,8 +677,10 @@ function RailItem({ icon: Icon, label, active, primary, collapsed, onClick }: { 
 }
 
 /* ---------- Creation card ---------- */
-function CreationCard({ c, compact = false, onReload, selectable = false, selectMode = false, selected = false, onToggleSelect }: {
+function CreationCard({ workspaceKind, c, compact = false, dark = false, onReload, selectable = false, selectMode = false, selected = false, onToggleSelect }: {
   c: Creation; compact?: boolean; onReload?: () => void;
+  workspaceKind: Role;
+  dark?: boolean;
   /** When true a checkbox is offered; card clicks toggle selection once anything is selected. */
   selectable?: boolean; selectMode?: boolean; selected?: boolean; onToggleSelect?: () => void;
 }) {
@@ -575,13 +690,13 @@ function CreationCard({ c, compact = false, onReload, selectable = false, select
   const value = typeof c.output?.value === "string" ? c.output.value : "";
   const subtitle = value && value !== c.title ? value : c.toolName;
   async function act(action: "duplicate" | "delete") {
-    await fetch("/api/create/creations", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action, id: c.id }) });
+    await fetch(createApiPath("/api/create/creations", workspaceKind), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action, id: c.id }) });
     onReload?.();
   }
   return (
     <div
       onClick={selectMode ? onToggleSelect : undefined}
-      className={`group relative shrink-0 overflow-hidden rounded-2xl border bg-white shadow-sm ${compact ? "w-44" : ""} ${selectMode ? "cursor-pointer" : ""} ${selected ? "border-[#0A4FE8] ring-2 ring-[#0A4FE8]/30" : "border-gray-100"}`}
+      className={`group relative min-w-0 overflow-hidden rounded-2xl border transition hover:-translate-y-0.5 ${dark ? "bg-[#0C1833] shadow-[0_12px_30px_rgba(0,8,30,0.28)] hover:border-[#3974E8] hover:shadow-[0_0_24px_rgba(10,79,232,0.16),0_14px_34px_rgba(0,8,30,0.36)]" : "bg-white shadow-sm"} ${compact ? "w-full" : ""} ${selectMode ? "cursor-pointer" : ""} ${selected ? "border-[#0A4FE8] ring-2 ring-[#0A4FE8]/30" : dark ? "border-[#1D396B]" : "border-gray-100"}`}
     >
       {selectable && (
         <button
@@ -595,7 +710,7 @@ function CreationCard({ c, compact = false, onReload, selectable = false, select
           <Check className="h-3.5 w-3.5" />
         </button>
       )}
-      <div className="grid aspect-square place-items-center bg-[#F6F7FB] p-3">
+      <div className={`grid aspect-square place-items-center p-3 ${dark ? "bg-[#07132B]" : "bg-[#F6F7FB]"}`}>
         {src ? <img src={src} alt={c.title} className="max-h-full max-w-full object-contain" />
           : c.status === "processing" ? <span className="inline-flex items-center gap-1.5 text-[11px] font-semibold text-[#0A4FE8]"><Loader2 className="h-3.5 w-3.5 animate-spin" /> Processing</span>
           : c.status === "failed" ? <span className="rounded bg-rose-50 px-2 py-1 text-[10px] font-bold uppercase text-rose-600">Failed</span>
@@ -618,7 +733,7 @@ function CreationCard({ c, compact = false, onReload, selectable = false, select
 }
 
 /* ---------- My Creations ---------- */
-function CreationsView({ data, onBack, reload }: { data: DashData | null; onBack: () => void; reload: () => void }) {
+function CreationsView({ workspaceKind, data, dark, onBack, reload }: { workspaceKind: Role; data: DashData | null; dark: boolean; onBack: () => void; reload: () => void }) {
   const items = useMemo(() => data?.recentCreations || [], [data]);
   const [selected, setSelected] = useState<string[]>([]);
   const [busy, setBusy] = useState<null | "download" | "duplicate" | "delete">(null);
@@ -641,7 +756,7 @@ function CreationsView({ data, onBack, reload }: { data: DashData | null; onBack
     if (!selected.length) return;
     setBusy(action);
     try {
-      await fetch("/api/create/creations", {
+      await fetch(createApiPath("/api/create/creations", workspaceKind), {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action, ids: selected }),
       });
@@ -667,13 +782,13 @@ function CreationsView({ data, onBack, reload }: { data: DashData | null; onBack
       <button onClick={onBack} className="mb-4 inline-flex items-center gap-1.5 text-[13px] font-semibold text-gray-500 hover:text-[#0A4FE8]"><ArrowLeft className="h-4 w-4" /> Back</button>
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
-          <h1 className="text-[26px] font-black tracking-tight">My Creations</h1>
-          <p className="mt-1 text-sm text-gray-500">{items.length} recent item{items.length === 1 ? "" : "s"}. Select items for bulk actions, or download, duplicate, and remove one at a time.</p>
+          <h1 className="text-[26px] font-bold tracking-tight">My creations</h1>
+          <p className={`mt-1 text-sm ${dark ? "text-slate-400" : "text-gray-500"}`}>{items.length} recent item{items.length === 1 ? "" : "s"}. Select items for bulk actions, or download, duplicate, and remove one at a time.</p>
         </div>
         {items.length > 0 && (
           <button
             onClick={() => setSelected(allSelected ? [] : items.map((c) => c.id))}
-            className="rounded-xl border border-gray-200 bg-white px-3 py-2 text-[12.5px] font-semibold text-gray-600 hover:bg-gray-50"
+            className={`rounded-xl border px-3 py-2 text-[12.5px] font-semibold ${dark ? "border-white/10 bg-white/[0.05] text-slate-300 hover:bg-white/[0.08]" : "border-gray-200 bg-white text-gray-600 hover:bg-gray-50"}`}
           >
             {allSelected ? "Clear selection" : "Select all"}
           </button>
@@ -681,8 +796,8 @@ function CreationsView({ data, onBack, reload }: { data: DashData | null; onBack
       </div>
 
       {selecting && (
-        <div className="sticky top-2 z-20 mt-4 flex flex-wrap items-center gap-2 rounded-2xl border border-blue-100 bg-white/95 p-2.5 shadow-lg backdrop-blur">
-          <span className="px-1.5 text-[13px] font-bold text-[#0D1B39]">{selected.length} selected</span>
+        <div className={`sticky top-2 z-20 mt-4 flex flex-wrap items-center gap-2 rounded-2xl border p-2.5 shadow-lg backdrop-blur ${dark ? "border-white/10 bg-[#0E1A35]/95" : "border-blue-100 bg-white/95"}`}>
+          <span className={`px-1.5 text-[13px] font-bold ${dark ? "text-white" : "text-[#0D1B39]"}`}>{selected.length} selected</span>
           <button
             onClick={bulkDownload}
             disabled={!downloadable.length || busy !== null}
@@ -724,13 +839,15 @@ function CreationsView({ data, onBack, reload }: { data: DashData | null; onBack
       )}
 
       {items.length === 0 ? (
-        <p className="mt-6 rounded-2xl border border-dashed border-gray-200 bg-white py-16 text-center text-sm text-gray-400">No creations yet. Run a tool to get started.</p>
+        <p className={`mt-6 rounded-2xl border border-dashed py-16 text-center text-sm text-gray-400 ${dark ? "border-white/10 bg-[#0E1A35]" : "border-gray-200 bg-white"}`}>No creations yet. Run a tool to get started.</p>
       ) : (
         <div className="mt-5 grid grid-cols-2 gap-3.5 sm:grid-cols-3 lg:grid-cols-5">
           {items.map((c) => (
             <CreationCard
+              workspaceKind={workspaceKind}
               key={c.id}
               c={c}
+              dark={dark}
               onReload={reload}
               selectable
               selectMode={selecting}
@@ -817,8 +934,66 @@ function DownloadMenu({ output, base }: { output: Record<string, unknown>; base:
   );
 }
 
+type CheckState = "available" | "used" | "uncertain";
+
+function AvailabilityPill({ state }: { state: CheckState }) {
+  const Icon = state === "available" ? CircleCheck : state === "used" ? CircleAlert : CircleHelp;
+  const className = state === "available"
+    ? "bg-emerald-50 text-emerald-700"
+    : state === "used"
+      ? "bg-rose-50 text-rose-700"
+      : "bg-amber-50 text-amber-700";
+  return <span className={`inline-flex items-center gap-1 rounded-full px-2 py-1 text-[10px] font-semibold capitalize ${className}`}><Icon className="h-3 w-3" />{state}</span>;
+}
+
+function BrandNameReport({ output }: { output: Record<string, unknown> }) {
+  const domains = Array.isArray(output.domains) ? output.domains as Array<Record<string, unknown>> : [];
+  const social = Array.isArray(output.social) ? output.social as Array<Record<string, unknown>> : [];
+  const companies = Array.isArray(output.companies) ? output.companies as Array<Record<string, unknown>> : [];
+  const risks = Array.isArray(output.risks) ? output.risks.map(String) : [];
+  const alternatives = Array.isArray(output.alternatives) ? output.alternatives.map(String) : [];
+  const sources = Array.isArray(output.sources) ? output.sources as Array<Record<string, unknown>> : [];
+  return (
+    <div className="max-h-[560px] w-full space-y-4 overflow-y-auto p-1 text-left">
+      <div className="rounded-xl border border-blue-100 bg-blue-50 p-3">
+        <p className="text-[13px] font-bold text-[#07133B]">{String(output.brandName || "Brand name")} availability review</p>
+        <p className="mt-1 text-[11.5px] leading-relaxed text-gray-600">{String(output.summary || "Review the live signals below.")}</p>
+      </div>
+      <SignalSection title="Domains" icon={Globe2} rows={domains} primary="domain" />
+      <SignalSection title="Social handles" icon={AtSign} rows={social} primary="platform" secondary="handle" />
+      <div>
+        <h3 className="mb-2 flex items-center gap-1.5 text-[12px] font-bold text-[#07133B]"><Building2 className="h-4 w-4 text-[#0A4FE8]" />Company and commercial-name matches</h3>
+        {companies.length ? <div className="space-y-2">{companies.map((item, index) => (
+          <a key={`${String(item.name)}-${index}`} href={String(item.url || "#")} target="_blank" rel="noreferrer" className="block rounded-lg border border-gray-100 p-2.5 hover:border-blue-200">
+            <div className="flex items-start justify-between gap-2"><div><p className="text-[11.5px] font-bold text-[#07133B]">{String(item.name)}</p><p className="text-[10.5px] text-gray-400">{String(item.jurisdiction || "Jurisdiction not confirmed")}</p></div><span className="rounded-full bg-rose-50 px-2 py-1 text-[10px] font-semibold capitalize text-rose-700">{String(item.status || "match")}</span></div>
+            <p className="mt-1 text-[10.5px] leading-relaxed text-gray-500">{String(item.evidence || "Public commercial use found.")}</p>
+          </a>
+        ))}</div> : <p className="rounded-lg border border-gray-100 p-3 text-[11px] text-gray-500">No reliable public match was returned. This is not proof of legal availability.</p>}
+      </div>
+      {risks.length > 0 && <div><h3 className="mb-1.5 text-[12px] font-bold text-[#07133B]">Risk notes</h3><ul className="space-y-1 text-[11px] leading-relaxed text-gray-600">{risks.map((risk) => <li key={risk} className="flex gap-2"><span className="mt-1 h-1.5 w-1.5 shrink-0 rounded-full bg-amber-500" />{risk}</li>)}</ul></div>}
+      {alternatives.length > 0 && <div><h3 className="mb-1.5 text-[12px] font-bold text-[#07133B]">Suggested alternatives</h3><div className="flex flex-wrap gap-1.5">{alternatives.map((name) => <span key={name} className="rounded-lg border border-blue-100 bg-blue-50 px-2.5 py-1.5 text-[11px] font-semibold text-[#0A4FE8]">{name}</span>)}</div></div>}
+      {sources.length > 0 && <details className="rounded-lg border border-gray-100 p-3"><summary className="cursor-pointer text-[11px] font-semibold text-gray-600">Research sources ({sources.length})</summary><div className="mt-2 space-y-1">{sources.map((source, index) => <a key={`${String(source.url)}-${index}`} href={String(source.url)} target="_blank" rel="noreferrer" className="flex items-center gap-1 text-[10.5px] text-[#0A4FE8] hover:underline">{String(source.title || source.url)}<ExternalLink className="h-3 w-3" /></a>)}</div></details>}
+      <p className="rounded-lg bg-amber-50 px-3 py-2 text-[10.5px] leading-relaxed text-amber-800">{String(output.disclaimer || "This is a preliminary public-source search, not legal clearance or a guarantee of availability.")}</p>
+    </div>
+  );
+}
+
+function SignalSection({ title, icon: Icon, rows, primary, secondary }: { title: string; icon: LucideIcon; rows: Array<Record<string, unknown>>; primary: string; secondary?: string }) {
+  return (
+    <div>
+      <h3 className="mb-2 flex items-center gap-1.5 text-[12px] font-bold text-[#07133B]"><Icon className="h-4 w-4 text-[#0A4FE8]" />{title}</h3>
+      <div className="grid gap-2 sm:grid-cols-2">{rows.map((item, index) => (
+        <a key={`${String(item[primary])}-${index}`} href={String(item.url || "#")} target="_blank" rel="noreferrer" className="rounded-lg border border-gray-100 p-2.5 hover:border-blue-200">
+          <div className="flex items-center justify-between gap-2"><span className="truncate text-[11.5px] font-bold text-[#07133B]">{String(item[primary])}{secondary ? ` · ${String(item[secondary] || "")}` : ""}</span><AvailabilityPill state={(item.status === "available" || item.status === "used" ? item.status : "uncertain") as CheckState} /></div>
+          <p className="mt-1 line-clamp-2 text-[10px] leading-relaxed text-gray-400">{String(item.evidence || "No evidence supplied.")}</p>
+        </a>
+      ))}</div>
+    </div>
+  );
+}
+
 /* ---------- Full-page tool ---------- */
-function ToolPage({ tool, onBack, onSaved }: { tool: Tool; onBack: () => void; onSaved: () => void }) {
+function ToolPage({ workspaceKind, tool, onBack, onSaved }: { workspaceKind: Role; tool: Tool; onBack: () => void; onSaved: () => void }) {
   const fields = TOOL_FIELDS[tool.slug] || defaultFields();
   const [values, setValues] = useState<Record<string, string>>(() => Object.fromEntries(fields.map((f) => [f.name, fieldDefault(f)])));
   const [running, setRunning] = useState(false);
@@ -834,7 +1009,7 @@ function ToolPage({ tool, onBack, onSaved }: { tool: Tool; onBack: () => void; o
       if (!optional && f.type !== "color" && empty) { setError(`Please provide ${f.label.replace(/\s*\(optional\)/i, "").toLowerCase()}.`); return; }
     }
     setRunning(true); setError(null); setResult(null);
-    const res = await fetch(`/api/create/tools/${tool.slug}/run`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(values) });
+    const res = await fetch(createApiPath(`/api/create/tools/${tool.slug}/run`, workspaceKind), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(values) });
     const json = await res.json().catch(() => ({}));
     setRunning(false);
     if (!res.ok) { setError(json.error || "CREATE could not run this tool."); return; }
@@ -896,7 +1071,7 @@ function ToolPage({ tool, onBack, onSaved }: { tool: Tool; onBack: () => void; o
             })}
             {error && <p className="rounded-lg bg-rose-50 px-3 py-2 text-[12px] font-medium text-rose-600">{error}</p>}
             <button onClick={run} disabled={running} className="inline-flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-[#0A4FE8] text-[14px] font-bold text-white hover:bg-[#083EC0] disabled:opacity-60">
-              {running ? <Loader2 className="h-4 w-4 animate-spin" /> : <Wand2 className="h-4 w-4" />} {running ? "Generating..." : `Generate${tool.creditCost ? ` (${tool.creditCost} credit${tool.creditCost === 1 ? "" : "s"})` : ""}`}
+              {running ? <Loader2 className="h-4 w-4 animate-spin" /> : <PenLine className="h-4 w-4" />} {running ? "Generating..." : `Generate${tool.creditCost ? ` (${tool.creditCost} credit${tool.creditCost === 1 ? "" : "s"})` : ""}`}
             </button>
           </div>
         </div>
@@ -917,7 +1092,8 @@ function ToolPage({ tool, onBack, onSaved }: { tool: Tool; onBack: () => void; o
                   <span className="mx-auto mb-2 block w-fit rounded-full bg-blue-50 px-3 py-1 text-[11px] font-bold uppercase text-[#0A4FE8]">Processing</span>
                   <p className="text-[12.5px] text-gray-600">{String(result.output.message || "Your file is being processed. It will appear in My Creations when ready.")}</p>
                 </div>
-              ) : src ? <img src={src} alt="Result" className="max-h-[420px] max-w-full object-contain" />
+              ) : result.output.kind === "brand_name_report" ? <BrandNameReport output={result.output} />
+              : src ? <img src={src} alt="Result" className="max-h-[420px] max-w-full object-contain" />
               : reportText ? <pre className="max-h-[420px] w-full overflow-auto whitespace-pre-wrap text-[12px] leading-relaxed text-[#0D1B39]">{reportText}</pre>
               : <span className="text-[12px] text-gray-400">Saved to My Creations.</span>}
           </div>

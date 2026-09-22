@@ -8,6 +8,7 @@ import { TeamSidebar } from "@/components/team/TeamSidebar";
 import { NotificationBell } from "@/components/team/NotificationBell";
 import { LanguageSwitcher } from "@/components/team/LanguageSwitcher";
 import { WorkTracker } from "@/components/team/WorkTracker";
+import { IncomingCallRinger } from "@/components/team/IncomingCallRinger";
 import { DashboardAutoSave } from "@/components/autosave/DashboardAutoSave";
 
 interface Member {
@@ -23,6 +24,23 @@ interface Member {
   permissions: string[];
   language: string | null;
   has_screening_assignment?: boolean;
+}
+
+const RETRYABLE_SESSION_STATUSES = new Set([408, 425, 429, 500, 502, 503, 504]);
+
+async function fetchPortalSession(input: RequestInfo | URL, init?: RequestInit, attempts = 3) {
+  let response: Response | null = null;
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    try {
+      response = await fetch(input, init);
+      if (!RETRYABLE_SESSION_STATUSES.has(response.status) || attempt === attempts - 1) return response;
+    } catch (error) {
+      if (attempt === attempts - 1) throw error;
+    }
+    await new Promise((resolve) => window.setTimeout(resolve, 300 * (attempt + 1)));
+  }
+  if (!response) throw new Error("Session request did not complete.");
+  return response;
 }
 
 export default function TeamLayout({ children }: { children: React.ReactNode }) {
@@ -45,27 +63,29 @@ function TeamLayoutInner({ children }: { children: React.ReactNode }) {
   const isLoginPage = pathname === "/team/login" || pathname?.includes("/login");
   const isInvitePage = pathname?.includes("/team/invite") || pathname?.includes("/invite/");
 
-  const loadSession = useCallback(async () => {
+  const loadSession = useCallback(async (background = false) => {
     // Never load session or redirect if we are obviously on an auth/invite page
     if (isLoginPage || isInvitePage) {
       setChecking(false);
       return;
     }
 
-    setChecking(true);
-    setSessionUnavailable(false);
+    if (!background) {
+      setChecking(true);
+      setSessionUnavailable(false);
+    }
     try {
-      let res = await fetch("/api/team/session", { credentials: "include", cache: "no-store" });
+      let res = await fetchPortalSession("/api/team/session", { credentials: "include", cache: "no-store" });
       if (res.status === 401) {
-        const bridge = await fetch("/api/admin/team-bridge", {
+        const bridge = await fetchPortalSession("/api/admin/team-bridge", {
           method: "POST",
           credentials: "include",
           cache: "no-store",
         });
         if (bridge.ok) {
-          res = await fetch("/api/team/session", { credentials: "include", cache: "no-store" });
+          res = await fetchPortalSession("/api/team/session", { credentials: "include", cache: "no-store" });
         } else if (bridge.status >= 500) {
-          setSessionUnavailable(true);
+          if (!background) setSessionUnavailable(true);
           return;
         }
       }
@@ -75,16 +95,16 @@ function TeamLayoutInner({ children }: { children: React.ReactNode }) {
         if (res.status === 401 && !window.location.pathname.includes("/login") && !window.location.pathname.includes("/invite")) {
           router.replace("/team/login");
         } else {
-          setSessionUnavailable(true);
+          if (!background) setSessionUnavailable(true);
         }
         return;
       }
       const json = await res.json();
       setMember(json.member);
     } catch {
-      setSessionUnavailable(true);
+      if (!background) setSessionUnavailable(true);
     } finally {
-      setChecking(false);
+      if (!background) setChecking(false);
     }
   }, [isInvitePage, isLoginPage, router]);
 
@@ -103,6 +123,23 @@ function TeamLayoutInner({ children }: { children: React.ReactNode }) {
     return () => window.removeEventListener("refresh-team-session", handleRefresh);
   }, [isInvitePage, isLoginPage, loadSession]);
 
+  useEffect(() => {
+    if (isLoginPage || isInvitePage) return;
+
+    const refresh = () => {
+      if (document.visibilityState === "visible") void loadSession(true);
+    };
+    const timer = window.setInterval(refresh, 60_000);
+    window.addEventListener("focus", refresh);
+    document.addEventListener("visibilitychange", refresh);
+
+    return () => {
+      window.clearInterval(timer);
+      window.removeEventListener("focus", refresh);
+      document.removeEventListener("visibilitychange", refresh);
+    };
+  }, [isInvitePage, isLoginPage, loadSession]);
+
   const handleLogout = useCallback(async () => {
     await fetch("/api/team/logout", { method: "POST", credentials: "include" });
     router.replace("/team/login");
@@ -110,7 +147,7 @@ function TeamLayoutInner({ children }: { children: React.ReactNode }) {
 
   if (isLoginPage || isInvitePage) return <>{children}</>;
 
-  if (checking) {
+  if (checking && !member) {
     return (
       <div className="min-h-screen bg-brand-bg flex items-center justify-center">
         <Loader2 className="w-6 h-6 text-brand-blue animate-spin" />
@@ -118,7 +155,7 @@ function TeamLayoutInner({ children }: { children: React.ReactNode }) {
     );
   }
 
-  if (sessionUnavailable) {
+  if (sessionUnavailable && !member) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-brand-bg px-4">
         <div className="w-full max-w-sm rounded-2xl border border-brand-stroke bg-white p-6 text-center shadow-sm">
@@ -147,6 +184,7 @@ function TeamLayoutInner({ children }: { children: React.ReactNode }) {
     <div data-app-shell="team" className="flex min-h-[100dvh] max-w-full items-start overflow-x-clip bg-brand-bg">
       <DashboardAutoSave scope="team" />
       <WorkTracker />
+      <IncomingCallRinger />
       <TeamSidebar member={member} onLogout={handleLogout} mobileOpen={mobileNavOpen} onClose={() => setMobileNavOpen(false)} />
 
       <div className="flex min-h-[100dvh] min-w-0 flex-1 flex-col overflow-visible">
@@ -222,7 +260,25 @@ function TeamLayoutInner({ children }: { children: React.ReactNode }) {
         )}
 
         {/* Content */}
-        <main data-app-content className="min-h-0 min-w-0 flex-1 overflow-x-clip px-3 pb-[calc(6rem+env(safe-area-inset-bottom))] pt-4 sm:px-4 sm:pt-5 md:px-6 lg:px-8 lg:pb-10 lg:pt-8">{children}</main>
+        <main data-app-content className="min-h-0 min-w-0 flex-1 overflow-x-clip px-3 pb-[calc(6rem+env(safe-area-inset-bottom))] pt-4 sm:px-4 sm:pt-5 md:px-6 lg:px-8 lg:pb-10 lg:pt-8">
+          {sessionUnavailable ? (
+            <div className="grid min-h-[50dvh] place-items-center px-2">
+              <div className="w-full max-w-sm rounded-2xl border border-brand-stroke bg-white p-6 text-center shadow-sm">
+                <h1 className="text-lg font-semibold text-brand-navy">This page is temporarily unavailable</h1>
+                <p className="mt-2 text-sm leading-6 text-brand-body/70">
+                  Your team session and navigation are still active. Retry without leaving the portal.
+                </p>
+                <button
+                  type="button"
+                  onClick={() => void loadSession()}
+                  className="mt-5 min-h-11 rounded-xl bg-[#0A4FE8] px-5 text-sm font-semibold text-white transition hover:bg-[#083FC0]"
+                >
+                  Try again
+                </button>
+              </div>
+            </div>
+          ) : children}
+        </main>
       </div>
     </div>
   );

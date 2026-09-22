@@ -1,10 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
 import Image from "next/image";
-import { useRouter } from "next/navigation";
-import { createClient } from "@/lib/supabase/client";
+import Link from "next/link";
 
 /**
  * High-Fidelity Pricing Section using exported assets
@@ -12,29 +10,6 @@ import { createClient } from "@/lib/supabase/client";
  */
 
 export const Pricing = () => {
-    const router = useRouter();
-    const [isLoggedIn, setIsLoggedIn] = useState(false);
-    const [isLoading, setIsLoading] = useState(false);
-
-    useEffect(() => {
-        const supabase = createClient();
-        supabase.auth.getUser().then(({ data: { user } }) => setIsLoggedIn(!!user));
-        const { data: { subscription } } = supabase.auth.onAuthStateChange((_e, session) => setIsLoggedIn(!!session?.user));
-        return () => subscription.unsubscribe();
-    }, []);
-
-    const handleGetStarted = () => {
-        if (isLoggedIn) {
-            router.push("/dashboard/subscription");
-            return;
-        }
-        setIsLoading(true);
-        // Route through our own /api/auth/google/login so the Google consent
-        // screen reads "to continue to cdsspace.pro" instead of the Supabase URL.
-        const siteUrl = process.env.NEXT_PUBLIC_SITE_URL || window.location.origin;
-        window.location.href = `${siteUrl}/api/auth/google/login?next=/subscription`;
-    };
-
     return (
         <section className="w-full bg-brand-bg overflow-hidden" id="pricing">
             <div className="section-container flex flex-col items-center mb-20">
@@ -63,44 +38,39 @@ export const Pricing = () => {
 
                 {/* Cards Image Container */}
                 <div className="relative w-full max-w-[1200px] flex flex-col items-center select-none">
-                    <motion.div
-                        initial={{ opacity: 0, scale: 0.95 }}
-                        whileInView={{ opacity: 1, scale: 1 }}
-                        viewport={{ once: true }}
-                        transition={{ duration: 1, ease: "easeOut" }}
-                        className="w-full flex items-center justify-center"
-                        onContextMenu={(e) => e.preventDefault()}
-                    >
-                        <Image
-                            src="/home/cards.svg"
-                            alt="CDS Pricing Plans"
-                            width={1200}
-                            height={600}
-                            className="w-full h-auto object-contain pointer-events-none"
-                            draggable={false}
-                            loading="lazy"
-                        />
-                    </motion.div>
+                    <Link href="/subscription/start" aria-label="Choose a CDS Space subscription plan" className="block w-full rounded-3xl focus:outline-none focus-visible:ring-4 focus-visible:ring-blue-200">
+                        <motion.div
+                            initial={{ opacity: 0, scale: 0.95 }}
+                            whileInView={{ opacity: 1, scale: 1 }}
+                            viewport={{ once: true }}
+                            transition={{ duration: 1, ease: "easeOut" }}
+                            className="flex w-full items-center justify-center"
+                            onContextMenu={(e) => e.preventDefault()}
+                        >
+                            <Image
+                                src="/home/cards.svg"
+                                alt="Startup, Scaleup and Supreme CDS Space subscription plans"
+                                width={1200}
+                                height={600}
+                                className="h-auto w-full object-contain pointer-events-none"
+                                draggable={false}
+                                loading="lazy"
+                            />
+                        </motion.div>
+                    </Link>
 
                     {/* Get Started Button - Positioned on top of the white gradient */}
-                    <motion.button
-                        onClick={handleGetStarted}
-                        disabled={isLoading}
+                    <motion.div
                         initial={{ opacity: 0, y: 20 }}
                         whileInView={{ opacity: 1, y: 0 }}
                         viewport={{ once: true }}
                         transition={{ duration: 0.6, delay: 0.4 }}
-                        className="relative z-30 -mt-16 sm:-mt-24 md:-mt-40 lg:-mt-52 group p-[2px] rounded-full border border-[#648efc]/30 transition-all duration-300 hover:border-[#648efc] disabled:opacity-70 cursor-pointer"
+                        className="relative z-30 -mt-16 rounded-full border border-[#648efc]/30 p-[2px] transition-all duration-300 hover:border-[#648efc] sm:-mt-24 md:-mt-40 lg:-mt-52"
                     >
-                        <div
-                            className="px-8 py-3.5 md:py-4 rounded-full text-[#F4F6FB] text-[16px] md:text-[18px] font-medium tracking-[-0.18px] transition-all duration-300"
-                            style={{
-                                background: "linear-gradient(146.284deg, #0035C1 8.8345%, #0575FF 86.298%)"
-                            }}
-                        >
-                            {isLoading ? "Connecting..." : "Get Started"}
-                        </div>
-                    </motion.button>
+                        <Link href="/subscription/start" className="block rounded-full bg-[#0A4FE8] px-8 py-3.5 text-[16px] font-medium text-[#F4F6FB] transition-colors duration-300 hover:bg-[#083EC0] focus:outline-none focus-visible:ring-4 focus-visible:ring-blue-200 md:py-4 md:text-[18px]">
+                            Get Started
+                        </Link>
+                    </motion.div>
                 </div>
             </div>
         </section>

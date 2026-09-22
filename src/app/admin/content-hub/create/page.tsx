@@ -56,6 +56,29 @@ export default function CreateContentPage() {
   const fileRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
+    if (step !== 4) return;
+    const onPaste = (event: ClipboardEvent) => {
+      const files = Array.from(event.clipboardData?.items || [])
+        .filter((item) => item.kind === "file")
+        .map((item) => item.getAsFile())
+        .filter((file): file is File => Boolean(file))
+        // A pasted screenshot is always called "image.png"; give each a unique
+        // name so two pastes do not read as the same file in the media list.
+        .map((file, index) => {
+          if (file.name && file.name !== "image.png") return file;
+          const extension = (file.type.split("/")[1] || "png").replace("jpeg", "jpg");
+          return new File([file], `pasted-${Date.now()}-${index}.${extension}`, { type: file.type });
+        });
+      // Plain text pastes into the step's fields are left alone.
+      if (!files.length) return;
+      event.preventDefault();
+      void addFilesRef.current(files);
+    };
+    document.addEventListener("paste", onPaste);
+    return () => document.removeEventListener("paste", onPaste);
+  }, [step]);
+
+  useEffect(() => {
     fetch("/api/admin/content-hub/meta", { cache: "no-store" })
       .then((r) => r.json())
       .then((d) => {
@@ -115,6 +138,16 @@ export default function CreateContentPage() {
       setAiBusy(null);
     }
   }
+
+  /** The picker and the clipboard both land here, so both get the same validation. */
+  async function addFiles(files: File[]) {
+    if (!files.length) return;
+    setAiBusy("upload");
+    for (const f of files) { const att = await uploadFile(f); if (att) setMedia((m) => [...m, att]); }
+    setAiBusy(null);
+  }
+  const addFilesRef = useRef(addFiles);
+  addFilesRef.current = addFiles;
 
   async function uploadFile(file: File): Promise<Attachment | null> {
     const validation = validateContentHubUpload(file.size, file.type || "", file.name);
@@ -402,16 +435,15 @@ export default function CreateContentPage() {
             <Step title="Attach media">
               <input ref={fileRef} type="file" multiple accept="image/*,video/*,application/pdf,.doc,.docx" className="hidden"
                 onChange={async (e) => {
-                  const files = Array.from(e.target.files || []); if (!files.length) return;
-                  setAiBusy("upload");
-                  for (const f of files) { const att = await uploadFile(f); if (att) setMedia((m) => [...m, att]); }
-                  setAiBusy(null);
+                  await addFiles(Array.from(e.target.files || []));
+                  e.target.value = "";
                 }}
               />
               <button type="button" onClick={() => fileRef.current?.click()} className="flex h-32 w-full items-center justify-center gap-2 rounded-xl border-2 border-dashed border-gray-200 bg-gray-50 text-[13px] font-semibold text-gray-500 transition hover:border-blue-300 hover:bg-blue-50/40">
                 {aiBusy === "upload" ? <Loader2 className="h-5 w-5 animate-spin" /> : <Upload className="h-5 w-5" />}
                 Upload images, videos, PDFs or documents
               </button>
+              <p className="mt-1.5 text-center text-[11px] text-gray-400">...or paste an image straight in (Cmd/Ctrl + V)</p>
               {media.length > 0 && (
                 <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3">
                   {media.map((m, i) => (

@@ -3,7 +3,6 @@
 import { useEffect, useState } from "react";
 import Image from "next/image";
 import { Star } from "lucide-react";
-import { supabase } from "@/lib/supabase";
 
 interface Testimonial {
     id?: string;
@@ -25,45 +24,10 @@ const FALLBACK: Testimonial[] = [
  * testimonials, and a trust line - styled after the doola reference.
  */
 export function AuthBrandPanel() {
-    const [items, setItems] = useState<Testimonial[]>(FALLBACK);
     const [index, setIndex] = useState(0);
 
-    useEffect(() => {
-        let active = true;
-        // Defer the DB round-trip until the browser is idle so it never competes
-        // with first paint / hydration. Older Safari and embedded mobile browsers
-        // do not expose requestIdleCallback, so use a short timer fallback instead
-        // of letting the auth tree crash during hydration.
-        const run = () => {
-            supabase
-                .from("testimonials")
-                .select("id, name, review")
-                .order("created_at", { ascending: true })
-                .then(({ data }) => {
-                    if (active && Array.isArray(data) && data.length > 0) {
-                        setItems(data as Testimonial[]);
-                        setIndex(0);
-                    }
-                });
-        };
-
-        const supportsIdleCallback = typeof window.requestIdleCallback === "function";
-        const handle = supportsIdleCallback
-            ? window.requestIdleCallback(run, { timeout: 2500 })
-            : window.setTimeout(run, 250);
-
-        return () => {
-            active = false;
-            if (supportsIdleCallback && typeof window.cancelIdleCallback === "function") {
-                window.cancelIdleCallback(handle);
-            } else {
-                window.clearTimeout(handle);
-            }
-        };
-    }, []);
-
     // Keep the rotation set small so the dot indicator stays tidy.
-    const pool = items.slice(0, 5);
+    const pool = FALLBACK;
 
     useEffect(() => {
         if (pool.length <= 1) return;

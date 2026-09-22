@@ -11,6 +11,13 @@ import {
   UserPlus, X, Copy, Check, Plane,
 } from "lucide-react";
 import { toast } from "sonner";
+import {
+  ANNUAL_LEAVE_MAX_WORKING_DAYS,
+  annualLeaveLatestEndDate,
+  LEAVE_TYPES,
+  leaveWorkingDays,
+  validateLeavePeriod,
+} from "@/lib/timebook";
 
 interface Stats {
   subAdmins: number;
@@ -72,7 +79,7 @@ export default function HRMOverview() {
       const r = await fetch("/api/admin/timebook");
       if (!r.ok) return;
       const j = await r.json();
-      setLeaveRequests((j.leave_requests || []).filter((l: LeaveRequest) => l.status === "pending"));
+      setLeaveRequests(j.leave_requests || []);
     } catch { /* ignore */ }
   }, []);
 
@@ -112,12 +119,31 @@ export default function HRMOverview() {
     [can],
   );
 
-  const canBypass = can("timebook.manage_bypass");
+  const canBypass = session?.role === "super_admin";
   const canLeave = can("timebook") || can("team_members");
+  const pendingLeaveCount = useMemo(
+    () => leaveRequests.filter((leave) => leave.status === "pending").length,
+    [leaveRequests],
+  );
+  const approvedLeaveCount = useMemo(
+    () => leaveRequests.filter((leave) => leave.status === "approved").length,
+    [leaveRequests],
+  );
 
   const quickActions = [
     canBypass && { key: "bypass", label: "Generate bypass code", desc: "Geofence override for check-in", icon: KeyRound, onClick: () => setModal("bypass") },
-    canLeave && { key: "leave", label: "Review leave requests", desc: leaveRequests.length ? `${leaveRequests.length} pending` : "Approve or reject leave", icon: Plane, badge: leaveRequests.length, onClick: () => setModal("leave") },
+    canLeave && {
+      key: "leave",
+      label: "Review leave requests",
+      desc: pendingLeaveCount
+        ? `${pendingLeaveCount} pending`
+        : approvedLeaveCount
+          ? `${approvedLeaveCount} previously approved`
+          : "View requests and leave history",
+      icon: Plane,
+      badge: pendingLeaveCount,
+      onClick: () => setModal("leave"),
+    },
     can("team_members") && { key: "add-member", label: "Add team member", desc: "Invite someone to the team", icon: UserPlus, href: "/admin/team-members" },
     can("team_today") && { key: "assign-task", label: "Open Taskboard", desc: "Create and assign shared work", icon: KanbanSquare, href: "/admin/taskboard" },
     can("timebook") && { key: "set-office", label: "Set office geofence", desc: "Update location & radius", icon: CalendarClock, href: "/admin/timebook" },
@@ -140,7 +166,7 @@ export default function HRMOverview() {
               <Stat icon={<ShieldCheck className="w-5 h-5 text-[#0A4FE8]" />} label="Sub-admins" value={stats.subAdmins} bg="bg-blue-50" />
               <Stat icon={<Users className="w-5 h-5 text-emerald-600" />} label="Applications" value={stats.applications} bg="bg-emerald-50" />
               <Stat icon={<Briefcase className="w-5 h-5 text-amber-600" />} label="Active Roles" value={stats.openRoles} bg="bg-amber-50" />
-              <Stat icon={<Plane className="w-5 h-5 text-rose-600" />} label="Pending Leave" value={leaveRequests.length} subtitle={leaveRequests.length ? "needs review" : "all clear"} bg="bg-rose-50" />
+              <Stat icon={<Plane className="w-5 h-5 text-rose-600" />} label="Pending leave" value={pendingLeaveCount} subtitle={pendingLeaveCount ? "needs review" : "all clear"} bg="bg-rose-50" />
             </div>
           )}
 
@@ -197,6 +223,8 @@ export default function HRMOverview() {
       {modal === "leave" && (
         <LeaveModal
           leaveRequests={leaveRequests}
+          members={members}
+          isSuperAdmin={session?.role === "super_admin"}
           onClose={() => setModal(null)}
           onReviewed={loadLeave}
         />
@@ -297,9 +325,35 @@ function BypassModal({ members, onClose }: { members: Member[]; onClose: () => v
   );
 }
 
-function LeaveModal({ leaveRequests, onClose, onReviewed }: { leaveRequests: LeaveRequest[]; onClose: () => void; onReviewed: () => void }) {
+function LeaveModal({
+  leaveRequests,
+  members,
+  isSuperAdmin,
+  onClose,
+  onReviewed,
+}: {
+  leaveRequests: LeaveRequest[];
+  members: Member[];
+  isSuperAdmin: boolean;
+  onClose: () => void;
+  onReviewed: () => void;
+}) {
   const [items, setItems] = useState(leaveRequests);
   const [busyId, setBusyId] = useState<string>("");
+  const [showGrantForm, setShowGrantForm] = useState(false);
+  const [grantBusy, setGrantBusy] = useState(false);
+  const [grant, setGrant] = useState({ member_id: "", leave_type: "annual", start_date: "", end_date: "", reason: "" });
+
+  useEffect(() => setItems(leaveRequests), [leaveRequests]);
+
+  const pending = items.filter((leave) => leave.status === "pending");
+  const approved = items.filter((leave) => leave.status === "approved");
+  const rejected = items.filter((leave) => leave.status === "rejected");
+  const annualMaxEnd = grant.leave_type === "annual" ? annualLeaveLatestEndDate(grant.start_date) : "";
+  const grantWorkingDays = grant.start_date && grant.end_date ? leaveWorkingDays(grant.start_date, grant.end_date) : 0;
+  const grantError = grant.start_date && grant.end_date
+    ? validateLeavePeriod(grant.leave_type, grant.start_date, grant.end_date)
+    : null;
 
   const review = async (id: string, status: "approved" | "rejected") => {
     setBusyId(id);
@@ -310,8 +364,8 @@ function LeaveModal({ leaveRequests, onClose, onReviewed }: { leaveRequests: Lea
         body: JSON.stringify({ action: "review_leave", leave_id: id, status }),
       });
       const j = await r.json();
-      if (!j.ok) throw new Error(j.error || "Failed");
-      setItems((prev) => prev.filter((l) => l.id !== id));
+      if (!r.ok || !j.ok) throw new Error(j.error || "Failed");
+      setItems((prev) => prev.map((leave) => leave.id === id ? { ...leave, status } : leave));
       toast.success(`Leave ${status}`);
       onReviewed();
     } catch (e) {
@@ -321,33 +375,149 @@ function LeaveModal({ leaveRequests, onClose, onReviewed }: { leaveRequests: Lea
     }
   };
 
-  return (
-    <Modal title="Leave requests" onClose={onClose}>
-      {items.length === 0 ? (
-        <div className="py-10 text-center text-sm text-gray-400">No pending leave requests.</div>
-      ) : (
-        <div className="space-y-3 max-h-[60vh] overflow-y-auto">
-          {items.map((l) => (
-            <div key={l.id} className="rounded-xl border border-gray-100 p-4">
-              <div className="flex items-start justify-between gap-3">
-                <div className="min-w-0">
-                  <p className="font-semibold text-[#0D1B39] text-[14px]">{l.team_members?.full_name || "Team member"}</p>
-                  <p className="text-[12px] text-gray-500 capitalize">{l.leave_type} leave · {l.start_date} → {l.end_date}</p>
-                  {l.reason && <p className="mt-1 text-[12.5px] text-gray-600">{l.reason}</p>}
-                </div>
-              </div>
-              <div className="mt-3 flex gap-2">
-                <button type="button" disabled={!!busyId} onClick={() => review(l.id, "approved")} className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-lg bg-emerald-600 py-2 text-[13px] font-semibold text-white disabled:opacity-60">
-                  {busyId === l.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />} Approve
-                </button>
-                <button type="button" disabled={!!busyId} onClick={() => review(l.id, "rejected")} className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-lg border border-gray-200 py-2 text-[13px] font-semibold text-gray-700 disabled:opacity-60">
-                  <X className="h-3.5 w-3.5" /> Reject
-                </button>
-              </div>
-            </div>
-          ))}
+  const grantLeave = async () => {
+    const validationError = validateLeavePeriod(grant.leave_type, grant.start_date, grant.end_date);
+    if (!grant.member_id) {
+      toast.error("Choose a team member.");
+      return;
+    }
+    if (validationError) {
+      toast.error(validationError);
+      return;
+    }
+    setGrantBusy(true);
+    try {
+      const r = await fetch("/api/admin/timebook", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "grant_leave", ...grant }),
+      });
+      const j = await r.json();
+      if (!r.ok || !j.ok) throw new Error(j.error || "Could not grant leave");
+      setItems((prev) => [j.leave_request, ...prev]);
+      setGrant({ member_id: "", leave_type: "annual", start_date: "", end_date: "", reason: "" });
+      setShowGrantForm(false);
+      toast.success("Leave granted");
+      onReviewed();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not grant leave");
+    } finally {
+      setGrantBusy(false);
+    }
+  };
+
+  const leaveCard = (leave: LeaveRequest, showActions = false) => (
+    <div key={leave.id} className="rounded-xl border border-gray-100 bg-white p-4">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <p className="font-semibold text-[#0D1B39] text-[14px]">{leave.team_members?.full_name || "Team member"}</p>
+          <p className="text-[12px] text-gray-500 capitalize">{leave.leave_type.replace(/_/g, " ")} leave · {String(leave.start_date).slice(0, 10)} → {String(leave.end_date).slice(0, 10)}</p>
+          <p className="mt-1 text-[11px] text-gray-400">{leaveWorkingDays(String(leave.start_date).slice(0, 10), String(leave.end_date).slice(0, 10))} working day(s)</p>
+          {leave.reason && <p className="mt-1 text-[12.5px] text-gray-600">{leave.reason}</p>}
+        </div>
+        {!showActions && (
+          <span className={`shrink-0 rounded-full px-2 py-1 text-[10px] font-semibold capitalize ${leave.status === "approved" ? "bg-emerald-50 text-emerald-700" : "bg-red-50 text-red-700"}`}>
+            {leave.status}
+          </span>
+        )}
+      </div>
+      {showActions && (
+        <div className="mt-3 flex gap-2">
+          <button type="button" disabled={!!busyId} onClick={() => review(leave.id, "approved")} className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-lg bg-emerald-600 py-2 text-[13px] font-semibold text-white disabled:opacity-60">
+            {busyId === leave.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />} Approve
+          </button>
+          <button type="button" disabled={!!busyId} onClick={() => review(leave.id, "rejected")} className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-lg border border-gray-200 py-2 text-[13px] font-semibold text-gray-700 disabled:opacity-60">
+            <X className="h-3.5 w-3.5" /> Reject
+          </button>
         </div>
       )}
+    </div>
+  );
+
+  return (
+    <Modal title="Leave requests and history" onClose={onClose}>
+      <div className="max-h-[72vh] space-y-5 overflow-y-auto pr-1">
+        {isSuperAdmin && (
+          <section className="rounded-2xl bg-[#0A4FE8]/5 p-4">
+            <button
+              type="button"
+              onClick={() => setShowGrantForm((current) => !current)}
+              className="flex w-full items-center justify-between text-left text-sm font-semibold text-[#0D1B39]"
+            >
+              Grant leave to a team member
+              <span className="text-[#0A4FE8]">{showGrantForm ? "Hide" : "Open"}</span>
+            </button>
+            {showGrantForm && (
+              <div className="mt-4 space-y-3">
+                <Field label="Team member">
+                  <select value={grant.member_id} onChange={(event) => setGrant({ ...grant, member_id: event.target.value })} className="h-11 w-full rounded-xl border border-gray-200 bg-white px-3 text-sm">
+                    <option value="">Choose a team member</option>
+                    {members.map((member) => <option key={member.id} value={member.id}>{member.full_name}</option>)}
+                  </select>
+                </Field>
+                <Field label="Leave type">
+                  <select
+                    value={grant.leave_type}
+                    onChange={(event) => {
+                      const leaveType = event.target.value;
+                      const maxEnd = leaveType === "annual" ? annualLeaveLatestEndDate(grant.start_date) : "";
+                      setGrant({ ...grant, leave_type: leaveType, end_date: maxEnd && grant.end_date > maxEnd ? "" : grant.end_date });
+                    }}
+                    className="h-11 w-full rounded-xl border border-gray-200 bg-white px-3 text-sm capitalize"
+                  >
+                    {LEAVE_TYPES.map((type) => <option key={type} value={type}>{type}</option>)}
+                  </select>
+                </Field>
+                <div className="grid grid-cols-2 gap-2">
+                  <Field label="Start date">
+                    <input
+                      type="date"
+                      value={grant.start_date}
+                      onChange={(event) => {
+                        const startDate = event.target.value;
+                        const maxEnd = grant.leave_type === "annual" ? annualLeaveLatestEndDate(startDate) : "";
+                        setGrant({ ...grant, start_date: startDate, end_date: maxEnd && grant.end_date > maxEnd ? "" : grant.end_date });
+                      }}
+                      className="h-11 w-full rounded-xl border border-gray-200 bg-white px-3 text-sm"
+                    />
+                  </Field>
+                  <Field label="End date">
+                    <input type="date" min={grant.start_date || undefined} max={annualMaxEnd || undefined} value={grant.end_date} onChange={(event) => setGrant({ ...grant, end_date: event.target.value })} className="h-11 w-full rounded-xl border border-gray-200 bg-white px-3 text-sm" />
+                  </Field>
+                </div>
+                {grant.leave_type === "annual" && (
+                  <p className={`text-[11px] ${grantError ? "text-red-600" : "text-gray-500"}`}>
+                    Maximum {ANNUAL_LEAVE_MAX_WORKING_DAYS} working days{grant.start_date && grant.end_date ? ` · ${grantWorkingDays} selected` : ""}.
+                  </p>
+                )}
+                <Field label="Reason">
+                  <textarea rows={2} value={grant.reason} onChange={(event) => setGrant({ ...grant, reason: event.target.value })} className="w-full resize-y rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm" placeholder="Optional note" />
+                </Field>
+                <button type="button" disabled={grantBusy || !grant.member_id || !grant.start_date || !grant.end_date || !!grantError} onClick={grantLeave} className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-[#0A4FE8] py-3 text-sm font-semibold text-white disabled:opacity-50">
+                  {grantBusy && <Loader2 className="h-4 w-4 animate-spin" />} Grant leave
+                </button>
+              </div>
+            )}
+          </section>
+        )}
+
+        <section>
+          <h4 className="mb-2 text-sm font-semibold text-[#0D1B39]">Pending requests <span className="text-gray-400">({pending.length})</span></h4>
+          {pending.length ? <div className="space-y-3">{pending.map((leave) => leaveCard(leave, true))}</div> : <p className="rounded-xl bg-gray-50 px-4 py-5 text-center text-sm text-gray-400">No pending leave requests.</p>}
+        </section>
+
+        <section>
+          <h4 className="mb-2 text-sm font-semibold text-[#0D1B39]">Previously approved <span className="text-gray-400">({approved.length})</span></h4>
+          {approved.length ? <div className="space-y-3">{approved.map((leave) => leaveCard(leave))}</div> : <p className="rounded-xl bg-gray-50 px-4 py-5 text-center text-sm text-gray-400">No approved leave yet.</p>}
+        </section>
+
+        {rejected.length > 0 && (
+          <section>
+            <h4 className="mb-2 text-sm font-semibold text-[#0D1B39]">Rejected requests <span className="text-gray-400">({rejected.length})</span></h4>
+            <div className="space-y-3">{rejected.map((leave) => leaveCard(leave))}</div>
+          </section>
+        )}
+      </div>
     </Modal>
   );
 }
@@ -355,7 +525,7 @@ function LeaveModal({ leaveRequests, onClose, onReviewed }: { leaveRequests: Lea
 function Modal({ title, children, onClose }: { title: string; children: React.ReactNode; onClose: () => void }) {
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
-      <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl" onClick={(e) => e.stopPropagation()}>
+      <div className="w-full max-w-lg rounded-2xl bg-white p-6 shadow-2xl" onClick={(e) => e.stopPropagation()}>
         <div className="mb-5 flex items-center justify-between">
           <h3 className="text-lg font-bold text-[#0D1B39]">{title}</h3>
           <button type="button" onClick={onClose} className="rounded-lg p-1.5 text-gray-400 hover:bg-gray-100"><X className="h-5 w-5" /></button>

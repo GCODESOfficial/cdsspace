@@ -1,13 +1,13 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Image from "next/image";
 import {
   AlertTriangle, CalendarRange, Check, CreditCard, Eye, EyeOff, KeyRound, Loader2, LockKeyhole,
-  Save, Settings2, ShieldCheck, Trash2, UserRound, WalletCards, X,
+  Link2, Save, Settings2, ShieldCheck, Trash2, UserRound, WalletCards, X,
 } from "lucide-react";
 import { useClientAccount } from "@/components/dashboard/ClientAccountProvider";
 import { SecureProfilePhotoPicker } from "@/components/shared/SecureProfilePhotoPicker";
-import { createClient } from "@/lib/supabase/client";
 import { CLIENT_BILLING_CURRENCY_OPTIONS, type ClientBillingCurrency } from "@/lib/client-billing";
 import { appConfirm } from "@/lib/app-notify";
 
@@ -36,6 +36,14 @@ interface PaymentMethodResponse {
 
 type Notice = { type: "success" | "error" | "info"; text: string } | null;
 
+type AuthProvider = "google" | "linkedin";
+interface AuthConnection {
+  provider: AuthProvider;
+  email: string;
+  connectedAt: string;
+  lastUsedAt: string;
+}
+
 export default function ClientSettingsPage() {
   const { account, updateAccount } = useClientAccount();
   const [fullName, setFullName] = useState(account.fullName);
@@ -55,29 +63,33 @@ export default function ClientSettingsPage() {
 
     setSaving(true);
     setMessage(null);
-    const db = createClient();
-    const patch = {
-      full_name: fullName.trim(),
-      company_name: companyName.trim() || null,
-      phone_number: phoneNumber.trim() || null,
-      billing_currency: billingCurrency,
-      billing_currency_selected_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-    };
-    const { error } = await db.from("profiles").update(patch).eq("id", account.userId);
+    try {
+      const response = await fetch("/api/client/account/profile", {
+        method: "PATCH",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ fullName, companyName, phoneNumber, billingCurrency }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(payload.error || "Could not save your account configuration.");
+      }
 
-    if (error) {
-      setMessage({ type: "error", text: error.message || "Could not save your account configuration." });
-    } else {
       updateAccount({
-        fullName: patch.full_name,
-        companyName: patch.company_name || "",
-        phoneNumber: patch.phone_number || "",
-        billingCurrency: patch.billing_currency,
+        fullName: payload.profile?.fullName || fullName.trim(),
+        companyName: payload.profile?.companyName || "",
+        phoneNumber: payload.profile?.phoneNumber || "",
+        billingCurrency: payload.profile?.billingCurrency || billingCurrency,
       });
       setMessage({ type: "success", text: "Account configuration saved." });
+    } catch (error) {
+      setMessage({
+        type: "error",
+        text: error instanceof Error ? error.message : "Could not save your account configuration.",
+      });
+    } finally {
+      setSaving(false);
     }
-    setSaving(false);
   };
 
   return (
@@ -120,6 +132,7 @@ export default function ClientSettingsPage() {
           </form>
 
           <PasswordSection />
+          <ConnectedAccountsSection />
           <PaymentMethodSection />
           <CloseAccountSection accountEmail={account.email} />
         </div>
@@ -147,6 +160,104 @@ export default function ClientSettingsPage() {
         </aside>
       </div>
     </div>
+  );
+}
+
+function ConnectedAccountsSection() {
+  const [connections, setConnections] = useState<AuthConnection[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [notice, setNotice] = useState<Notice>(null);
+
+  useEffect(() => {
+    const parameters = new URLSearchParams(window.location.search);
+    const result = parameters.get("connection") || "";
+    const detail = parameters.get("detail") || "";
+    if (result.endsWith("_connected")) {
+      const provider = result.startsWith("linkedin") ? "LinkedIn" : "Google";
+      setNotice({ type: "success", text: `${provider} is now connected to this active user ID.` });
+    } else if (result.endsWith("_failed") || result === "session_failed") {
+      setNotice({ type: "error", text: detail || "The sign-in account could not be connected. Please try again." });
+    }
+    if (result) {
+      parameters.delete("connection");
+      parameters.delete("detail");
+      const remaining = parameters.toString();
+      window.history.replaceState({}, "", `${window.location.pathname}${remaining ? `?${remaining}` : ""}`);
+    }
+
+    (async () => {
+      try {
+        const response = await fetch("/api/client/account/connections", { credentials: "include", cache: "no-store" });
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(payload.error || "Connected accounts could not be loaded.");
+        setConnections(Array.isArray(payload.connections) ? payload.connections : []);
+      } catch (error) {
+        setNotice({ type: "error", text: error instanceof Error ? error.message : "Connected accounts could not be loaded." });
+      } finally {
+        setLoading(false);
+      }
+    })();
+  }, []);
+
+  const connected = new Map(connections.map((connection) => [connection.provider, connection]));
+  return (
+    <section className="rounded-[16px] border border-brand-stroke/70 bg-white p-5 shadow-[0_10px_40px_rgba(15,40,90,0.05)] sm:p-6">
+      <SectionHeading
+        icon={Link2}
+        title="Connected sign-in accounts"
+        description="Connect Google and LinkedIn so either sign-in opens this same active user ID."
+      />
+      {loading ? (
+        <div className="grid min-h-28 place-items-center rounded-[14px] bg-slate-50"><Loader2 className="h-5 w-5 animate-spin text-brand-blue" /></div>
+      ) : (
+        <div className="grid gap-3 sm:grid-cols-2">
+          {(["google", "linkedin"] as const).map((provider) => {
+            const connection = connected.get(provider);
+            const label = provider === "google" ? "Google" : "LinkedIn";
+            return (
+              <div key={provider} className="rounded-[14px] border border-brand-stroke/60 bg-slate-50/60 p-4">
+                <div className="flex items-start gap-3">
+                  <span className="grid h-10 w-10 shrink-0 place-items-center rounded-[10px] bg-white shadow-sm">
+                    <ProviderIcon provider={provider} />
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <h3 className="text-sm font-semibold text-brand-navy">{label}</h3>
+                      {connection && <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-1 text-[10px] font-semibold text-emerald-700"><Check className="h-3 w-3" />Connected</span>}
+                    </div>
+                    <p className="mt-1 truncate text-[11px] text-brand-body/60">{connection?.email || `No ${label} account connected`}</p>
+                  </div>
+                </div>
+                {connection ? (
+                  <p className="mt-4 rounded-[10px] border border-emerald-100 bg-emerald-50/70 px-3 py-2 text-[11px] leading-5 text-emerald-800">Continue with {label} will sign in to this active user ID.</p>
+                ) : (
+                  <a
+                    href={`/api/client/account/connections/${provider}/connect?next=${encodeURIComponent("/dashboard/settings")}`}
+                    className="mt-4 inline-flex h-10 w-full items-center justify-center gap-2 rounded-[10px] bg-[#0A4FE8] px-3 text-[12px] font-semibold text-white transition hover:bg-[#083EC0]"
+                  >
+                    <Link2 className="h-3.5 w-3.5" />Connect {label}
+                  </a>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+      <p className="mt-4 text-[11px] leading-5 text-brand-body/55">Until accounts are connected, each social identity may open its own separate CDS Space user entry. Connecting a provider changes which active user ID that sign-in opens; it does not merge documents, orders, invoices or other data from a separate entry.</p>
+      <NoticeBox notice={notice} />
+    </section>
+  );
+}
+
+function ProviderIcon({ provider }: { provider: AuthProvider }) {
+  if (provider === "google") {
+    return <Image src="/auth/Signup/flat-color-icons_google.svg" alt="" width={22} height={22} aria-hidden="true" />;
+  }
+  return (
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <rect width="24" height="24" rx="4" fill="#0A66C2" />
+      <path fill="#fff" d="M6.94 8.58H4.5V19h2.44V8.58zM5.72 7.44a1.42 1.42 0 1 0 0-2.84 1.42 1.42 0 0 0 0 2.84zM19.5 19h-2.44v-5.09c0-1.28-.46-2.15-1.6-2.15-.87 0-1.39.59-1.62 1.16-.08.2-.1.49-.1.77V19h-2.44s.03-9.19 0-10.42h2.44v1.48c.32-.5.9-1.21 2.2-1.21 1.6 0 2.8 1.05 2.8 3.3V19z" />
+    </svg>
   );
 }
 

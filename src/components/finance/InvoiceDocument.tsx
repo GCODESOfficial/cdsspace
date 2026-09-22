@@ -15,6 +15,7 @@ interface Invoice {
   client_name: string; client_email: string | null; client_address: string | null;
   currency: Currency;
   subtotal: number; tax_rate: number; tax_amount: number; discount: number; total: number;
+  amount_paid?: number; balance_due?: number; payment_percentage?: number;
   status: string; issue_date: string; due_date: string | null; notes: string | null;
   payment_terms?: string | null;
   revisions_note?: string | null;
@@ -58,6 +59,7 @@ export default function InvoiceDocument({ invoice, items, bankAccounts, receipt 
           <div className="sm:mt-2 text-xs">
             <span className={`inline-block px-2.5 py-1 rounded-full font-semibold uppercase tracking-wider ${
               invoice.status === "paid" ? "bg-emerald-50 text-emerald-700" :
+              invoice.status === "partially_paid" ? "bg-amber-50 text-amber-700" :
               invoice.status === "sent" ? "bg-blue-50 text-blue-700" :
               invoice.status === "overdue" ? "bg-red-50 text-red-700" :
               "bg-gray-100 text-gray-600"
@@ -151,6 +153,15 @@ export default function InvoiceDocument({ invoice, items, bankAccounts, receipt 
           <div className="flex justify-between gap-4 pt-3 border-t border-gray-200 text-lg font-bold">
             <span>Total</span><span className="whitespace-nowrap">{formatMoney(invoice.total, invoice.currency)}</span>
           </div>
+          {!isReceipt && Number(invoice.amount_paid || 0) > 0 && (
+            <>
+              <div className="flex justify-between gap-4 text-emerald-700"><span>Paid ({Number(invoice.payment_percentage || 0).toFixed(0)}%)</span><span className="whitespace-nowrap">{formatMoney(invoice.amount_paid, invoice.currency)}</span></div>
+              <div className="flex justify-between gap-4 font-bold text-[#0D1B39]"><span>Balance due</span><span className="whitespace-nowrap">{formatMoney(invoice.balance_due ?? Math.max(Number(invoice.total) - Number(invoice.amount_paid || 0), 0), invoice.currency)}</span></div>
+              <div className="h-2 overflow-hidden rounded-full bg-gray-100" aria-label={`${Number(invoice.payment_percentage || 0).toFixed(0)}% paid`}>
+                <div className="h-full rounded-full bg-[#0A4FE8]" style={{ width: `${Math.min(100, Number(invoice.payment_percentage || 0))}%` }} />
+              </div>
+            </>
+          )}
         </div>
       </div>
 

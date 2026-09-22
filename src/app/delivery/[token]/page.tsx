@@ -81,7 +81,7 @@ export default async function PublicDeliveryPage({ params }: { params: Params })
         <section className="mt-6 overflow-hidden rounded-3xl border border-[#DDE5F2] bg-white shadow-[0_24px_80px_rgba(15,40,90,0.10)]">
           <div className="bg-[#0A4FE8] px-5 py-8 text-white sm:px-8 sm:py-10">
             <div className="inline-flex items-center gap-2 rounded-full border border-white/20 bg-white/10 px-3 py-1.5 text-[10px] font-semibold text-white/90">
-              <PackageCheck className="h-3.5 w-3.5" /> Completed {delivery.delivery_type === "brand_identity" ? "brand identity" : "design delivery"}
+              <PackageCheck className="h-3.5 w-3.5" /> Completed {delivery.delivery_type === "brand_identity" ? "brand identity" : "project delivery"}
             </div>
             <h1 className="mt-5 max-w-3xl text-3xl font-bold sm:text-4xl">{delivery.title}</h1>
             {delivery.description && <p className="mt-3 max-w-3xl text-sm leading-6 text-white/75">{delivery.description}</p>}

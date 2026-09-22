@@ -15,6 +15,7 @@ import {
   X,
 } from "lucide-react";
 import { ShareInChatModal } from "@/components/chat/ShareInChatModal";
+import { ViewportPortal } from "@/components/ui/ViewportPortal";
 import { appToast } from "@/lib/app-notify";
 import { cn } from "@/lib/utils";
 import { publicSiteOrigin } from "@/lib/public-site";
@@ -39,6 +40,8 @@ export function UniversalShareButton({
   url,
   label = "Share",
   className,
+  iconOnly = false,
+  disabled = false,
   clientTarget = null,
   onChannel,
 }: {
@@ -50,6 +53,9 @@ export function UniversalShareButton({
   url?: string;
   label?: string;
   className?: string;
+  /** Keep the accessible label while rendering only the share icon. */
+  iconOnly?: boolean;
+  disabled?: boolean;
   /** Optional client account to place first in the in-app destination picker. */
   clientTarget?: ClientTarget;
   onChannel?: (channel: ShareChannel) => void | Promise<void>;
@@ -148,24 +154,26 @@ export function UniversalShareButton({
       <button
         type="button"
         onClick={() => setOpen(true)}
+        disabled={disabled}
         className={cn(
-          "inline-flex min-h-10 items-center justify-center gap-2 rounded-xl border border-[#D9E2F1] bg-white px-4 text-xs font-bold text-[#0A4FE8] shadow-sm transition hover:border-blue-300 hover:bg-blue-50",
+          "inline-flex min-h-10 items-center justify-center gap-2 rounded-xl border border-[#D9E2F1] bg-white px-4 text-xs font-bold text-[#0A4FE8] shadow-sm transition hover:border-blue-300 hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:border-[#D9E2F1] disabled:hover:bg-white",
           className,
         )}
         aria-haspopup="dialog"
         aria-label={label || `Share ${title}`}
         title={label || `Share ${title}`}
       >
-        <Share2 className="h-4 w-4" /> {label}
+        <Share2 className="h-4 w-4" /> {!iconOnly && label}
       </button>
 
+      <ViewportPortal>
       {open && (
-        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-[#07133B]/55 p-4 backdrop-blur-sm" onMouseDown={() => setOpen(false)}>
+        <div className="fixed inset-0 z-[180] flex items-center justify-center overflow-y-auto overscroll-contain bg-[#07133B]/55 p-3 backdrop-blur-sm sm:p-4" onMouseDown={() => setOpen(false)}>
           <section
             role="dialog"
             aria-modal="true"
             aria-label={`Share ${title}`}
-            className="w-full max-w-lg overflow-hidden rounded-3xl border border-white/60 bg-white shadow-2xl"
+            className="my-auto flex max-h-[calc(100dvh-1.5rem)] w-full max-w-lg flex-col overflow-hidden rounded-3xl border border-white/60 bg-white shadow-2xl sm:max-h-[calc(100dvh-2rem)]"
             onMouseDown={(event) => event.stopPropagation()}
           >
             <header className="flex items-start gap-4 border-b border-[#E9EEF6] px-5 py-4 sm:px-6">
@@ -181,7 +189,7 @@ export function UniversalShareButton({
               </button>
             </header>
 
-            <div className="p-5 sm:p-6">
+            <div className="overflow-y-auto p-5 sm:p-6">
               <div className="flex items-center gap-2 rounded-2xl border border-[#E1E7F2] bg-[#F8FAFD] p-2">
                 <span className="min-w-0 flex-1 truncate px-2 text-xs text-[#69738D]">{resolvedUrl}</span>
                 <button type="button" onClick={() => void copyLink()} className="inline-flex h-10 shrink-0 items-center gap-2 rounded-xl bg-[#0A4FE8] px-3.5 text-xs font-bold text-white hover:bg-blue-700">
@@ -221,6 +229,7 @@ export function UniversalShareButton({
         title={`Share ${title}`}
         clientTarget={clientTarget}
       />
+      </ViewportPortal>
     </>
   );
 }

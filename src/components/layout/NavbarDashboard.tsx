@@ -43,7 +43,7 @@ const dashboardSearchPages = [
     { id: "page:messages", group: "Pages", title: "Chat/Meet", description: "Messages, documents, and calls with CDS Space", href: "/dashboard/messages", keywords: "message chat meet call conversation support" },
     { id: "page:orders", group: "Pages", title: "Orders", description: "Design, banner, merch and recurring orders", href: "/dashboard/orders", keywords: "jobs projects requests banner merch design recurring status" },
     { id: "page:invoices", group: "Pages", title: "Invoices", description: "Billing documents, balances and payment status", href: "/dashboard/invoices", keywords: "billing payment quote receipt currency budget finance" },
-    { id: "page:documents", group: "Pages", title: "Documents", description: "Files and documents shared with your account", href: "/dashboard/documents", keywords: "files uploads downloads project documents" },
+    { id: "page:documents", group: "Pages", title: "cDrive", description: "Project drives, uploads, folders and finished deliveries", href: "/dashboard/cdrive", keywords: "files uploads downloads project drive documents" },
     { id: "page:settings", group: "Pages", title: "Account Config", description: "Profile, password, payment method and billing preferences", href: "/dashboard/settings", keywords: "settings profile company account password billing currency payment card paystack subscription preference" },
 ] as const;
 
@@ -53,7 +53,7 @@ const resultIcons: Record<string, typeof Search> = {
     "Brand workspace": Palette,
     Orders: ShoppingBag,
     Invoices: ReceiptText,
-    Documents: FolderOpen,
+    cDrive: FolderOpen,
     Messages: MessageSquare,
 };
 
@@ -191,9 +191,13 @@ export const NavbarDashboard = ({ onMenuClick }: NavbarDashboardProps) => {
     return (
         <header className="h-[64px] 2xl:h-[80px] bg-white border-b border-[#E3E8F4]/40 w-full px-3 sm:px-4 lg:px-6 2xl:px-8 flex items-center justify-between gap-2 lg:gap-0 sticky top-0 z-30">
             {/* Mobile Logo */}
-            <div className="lg:hidden shrink-0">
-                <Image src="/dashboard/Group 1000004159.svg" alt="Logo" width={46} height={18} />
-            </div>
+            <Link
+                href={dashboardPath("/dashboard")}
+                className="shrink-0 rounded-lg p-1 outline-none focus-visible:ring-2 focus-visible:ring-[#0A4FE8]/40 lg:hidden"
+                aria-label="Return to dashboard home"
+            >
+                <Image src="/dashboard/Group 1000004159.svg" alt="CDS Space" width={46} height={18} priority />
+            </Link>
 
             {/* Search */}
             <div className="flex min-w-0 flex-1 justify-center px-1 sm:px-2 lg:justify-end lg:ps-3 lg:pe-3">
@@ -295,11 +299,13 @@ export const NavbarDashboard = ({ onMenuClick }: NavbarDashboardProps) => {
                         )}
                     </div>
 
-                    <NotificationBell />
-
-                    <div className="hidden lg:block w-px h-7 bg-[#E3E8F4]/40 mx-1 shrink-0" />
                 </div>
             </div>
+
+            <div className="flex shrink-0 items-center gap-1.5 sm:gap-2">
+                <NotificationBell />
+
+                <div className="mx-1 hidden h-7 w-px shrink-0 bg-[#E3E8F4]/40 lg:block" />
 
             {/* Mobile Menu */}
             <button
@@ -339,6 +345,7 @@ export const NavbarDashboard = ({ onMenuClick }: NavbarDashboardProps) => {
                     )}
                 </div>
             </Link>
+            </div>
         </header>
     );
 };

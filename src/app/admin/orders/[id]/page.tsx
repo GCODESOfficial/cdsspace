@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
+import { RichText } from "@/components/shared/RichText";
 import { useParams } from "next/navigation";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -15,8 +16,8 @@ import {
 	SelectValue,
 } from "@/components/ui/select";
 import Link from "next/link";
-import { ArrowLeft, Save, RefreshCw } from "lucide-react";
-import { useAuth } from "@/contexts/auth-context";
+import { ArrowLeft, Save, RefreshCw, ClipboardList, FolderKanban, Loader2, ShieldCheck } from "lucide-react";
+import { appAlert } from "@/lib/app-notify";
 
 interface OrderProfile {
 	full_name: string;
@@ -58,7 +59,18 @@ interface OrderDetail {
 	admin_notes?: string;
 	profile: OrderProfile | null;
 	status_updates: StatusUpdate[];
+	workflow_type?: "taskboard" | "project" | null;
+	workflow_status?: string;
+	team_title?: string | null;
+	team_brief?: string | null;
+	task_id?: string | null;
+	workflow_board_id?: string | null;
+	project_id?: string | null;
+	delivery_id?: string | null;
 }
+
+interface WorkflowBoard { id: string; title: string; lists: Array<{ id: string; title: string }>; }
+interface WorkflowMember { id: string; full_name: string; department: string | null; role_title: string | null; }
 
 const STATUS_COLORS: Record<string, string> = {
   AWAITING_QUOTE: "bg-orange-500/20 text-orange-300",
@@ -98,7 +110,6 @@ function formatShortDate(dateStr: string) {
 export default function AdminOrderDetailPage() {
 	const params = useParams();
 	const orderId = params.id as string;
-	const { signOut } = useAuth();
 
 	const [order, setOrder] = useState<OrderDetail | null>(null);
 	const [isLoading, setIsLoading] = useState(true);
@@ -107,6 +118,38 @@ export default function AdminOrderDetailPage() {
 	const [isUpdatingStatus, setIsUpdatingStatus] = useState(false);
 	const [adminNotes, setAdminNotes] = useState("");
 	const [isSavingNotes, setIsSavingNotes] = useState(false);
+	const [workflowBoards, setWorkflowBoards] = useState<WorkflowBoard[]>([]);
+	const [workflowMembers, setWorkflowMembers] = useState<WorkflowMember[]>([]);
+	const [workflowRoute, setWorkflowRoute] = useState<"taskboard" | "project">("taskboard");
+	const [workflowBoardId, setWorkflowBoardId] = useState("");
+	const [workflowListId, setWorkflowListId] = useState("");
+	const [workflowMemberIds, setWorkflowMemberIds] = useState<string[]>([]);
+
+	/**
+	 * Team members grouped by department, so a whole department can be assigned
+	 * in one click. Anyone without a department is gathered at the end rather
+	 * than dropped, since they are still assignable.
+	 */
+	const workflowDepartments = useMemo(() => {
+		const groups = new Map<string, WorkflowMember[]>();
+		for (const member of workflowMembers) {
+			const name = member.department?.trim() || "No department";
+			const existing = groups.get(name);
+			if (existing) existing.push(member);
+			else groups.set(name, [member]);
+		}
+		return Array.from(groups, ([name, members]) => ({
+			name,
+			members: [...members].sort((a, b) => a.full_name.localeCompare(b.full_name)),
+		})).sort((a, b) => {
+			if (a.name === "No department") return 1;
+			if (b.name === "No department") return -1;
+			return a.name.localeCompare(b.name);
+		});
+	}, [workflowMembers]);
+	const [teamTitle, setTeamTitle] = useState("");
+	const [teamBrief, setTeamBrief] = useState("");
+	const [isRouting, setIsRouting] = useState(false);
 
 	const fetchOrder = async () => {
 		try {
@@ -128,6 +171,53 @@ export default function AdminOrderDetailPage() {
 	useEffect(() => {
 		if (orderId) fetchOrder();
 	}, [orderId]);
+
+	useEffect(() => {
+		if (!order || order.type !== "design" || order.workflow_type) return;
+		const plainBrief = document.createElement("div");
+		plainBrief.innerHTML = order.description || "";
+		setTeamTitle(order.team_title || `Design production ${order.displayId}`);
+		setTeamBrief(order.team_brief || plainBrief.textContent || "");
+		fetch(`/api/admin/orders/${orderId}/workflow`, { cache: "no-store" })
+			.then(async (response) => response.ok ? response.json() : Promise.reject(new Error("Could not load workflow options")))
+			.then((data) => {
+				const boards = data.boards || [];
+				setWorkflowBoards(boards);
+				setWorkflowMembers(data.members || []);
+				if (boards[0]) {
+					setWorkflowBoardId(boards[0].id);
+					setWorkflowListId(boards[0].lists?.[0]?.id || "");
+				}
+			})
+			.catch((error) => console.error(error));
+	}, [order, orderId]);
+
+	const routeOrder = async () => {
+		if (!workflowMemberIds.length) return void appAlert("Select at least one team member.");
+		if (workflowRoute === "taskboard" && (!workflowBoardId || !workflowListId)) return void appAlert("Choose a taskboard list.");
+		setIsRouting(true);
+		try {
+			const response = await fetch(`/api/admin/orders/${orderId}/workflow`, {
+				method: "POST",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({
+					route: workflowRoute,
+					board_id: workflowBoardId,
+					list_id: workflowListId,
+					member_ids: workflowMemberIds,
+					team_title: teamTitle,
+					team_brief: teamBrief,
+				}),
+			});
+			const data = await response.json().catch(() => ({}));
+			if (!response.ok) throw new Error(data.error || "Could not route this order.");
+			await fetchOrder();
+		} catch (error) {
+			await appAlert(error instanceof Error ? error.message : "Could not route this order.");
+		} finally {
+			setIsRouting(false);
+		}
+	};
 
 	const handleStatusUpdate = async () => {
 		if (!newStatus || newStatus === order?.status) return;
@@ -299,7 +389,9 @@ export default function AdminOrderDetailPage() {
 										<p className="text-xs text-gray-400 uppercase tracking-wide">
 											{field.label}
 										</p>
-										<p className="text-white whitespace-pre-wrap">{field.value}</p>
+										{/* Briefs arrive as the editor's HTML, so they are rendered
+											rather than printed: tags on screen were the old behaviour. */}
+										<RichText value={field.value} tone="dark" className="mt-0.5" />
 									</div>
 								))}
 							</div>
@@ -308,6 +400,110 @@ export default function AdminOrderDetailPage() {
 						)}
 					</Card>
 				</div>
+
+				{order.type === "design" && (
+					<Card className="mb-6 border-blue-200 bg-white p-6 text-[#0D1B39]">
+						<div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+							<div>
+								<h3 className="flex items-center gap-2 text-lg font-semibold"><ClipboardList className="h-5 w-5 text-[#0A4FE8]" /> Production handoff</h3>
+								<p className="mt-1 max-w-2xl text-sm leading-6 text-slate-500">Route the order to a task list or create a project. The team sees only the production title and brief below, never the client name, contact details, or account.</p>
+							</div>
+							<span className="inline-flex items-center gap-1.5 rounded-full bg-blue-50 px-3 py-1 text-xs font-semibold text-[#0A4FE8]"><ShieldCheck className="h-3.5 w-3.5" /> Client identity protected</span>
+						</div>
+
+						{order.workflow_type ? (
+							<div className="mt-5 rounded-2xl border border-emerald-200 bg-emerald-50 p-4">
+								<p className="font-semibold text-emerald-800">Routed to {order.workflow_type === "project" ? "a project" : "the taskboard"}</p>
+								<p className="mt-1 text-sm text-emerald-700">Internal state: {(order.workflow_status || "assigned").replaceAll("_", " ")}</p>
+								<div className="mt-3 flex flex-wrap gap-2">
+									{order.workflow_type === "taskboard" && order.task_id && <Link href={`/admin/taskboard?${new URLSearchParams({ ...(order.workflow_board_id ? { board_id: order.workflow_board_id } : {}), task_id: order.task_id }).toString()}`} className="rounded-lg bg-[#0A4FE8] px-3 py-2 text-xs font-semibold text-white">Open taskboard</Link>}
+									{order.project_id && <Link href="/admin/finance/projects" className="rounded-lg bg-[#0A4FE8] px-3 py-2 text-xs font-semibold text-white">Open projects</Link>}
+									{order.delivery_id && <Link href="/admin/clients/deliveries" className="rounded-lg border border-blue-200 bg-white px-3 py-2 text-xs font-semibold text-[#0A4FE8]">Open delivery review</Link>}
+								</div>
+							</div>
+						) : (
+							<div className="mt-5 space-y-4">
+								<div className="grid gap-3 md:grid-cols-2">
+									<button type="button" onClick={() => setWorkflowRoute("taskboard")} className={`flex items-center gap-3 rounded-xl border p-4 text-left ${workflowRoute === "taskboard" ? "border-[#0A4FE8] bg-blue-50" : "border-slate-200"}`}><ClipboardList className="h-5 w-5 text-[#0A4FE8]" /><span><strong className="block text-sm">Send to taskboard</strong><small className="text-slate-500">Create assigned production work</small></span></button>
+									<button type="button" onClick={() => setWorkflowRoute("project")} className={`flex items-center gap-3 rounded-xl border p-4 text-left ${workflowRoute === "project" ? "border-[#0A4FE8] bg-blue-50" : "border-slate-200"}`}><FolderKanban className="h-5 w-5 text-[#0A4FE8]" /><span><strong className="block text-sm">Create a project</strong><small className="text-slate-500">Open a managed project workspace</small></span></button>
+								</div>
+								<div className="grid gap-4 md:grid-cols-2">
+									<label className="text-sm font-medium">Team-facing title<input value={teamTitle} onChange={(event) => setTeamTitle(event.target.value)} className="mt-1.5 h-11 w-full rounded-xl border border-slate-200 px-3 text-sm outline-none focus:border-[#0A4FE8]" /></label>
+									{/* A native multiple-select needed ctrl-clicking to pick more
+										than one person and gave no way to take a whole department.
+										Checkboxes make multiple selection obvious, and each
+										department header assigns or clears everyone under it. */}
+									<div className="text-sm font-medium">
+										<div className="flex flex-wrap items-baseline justify-between gap-2">
+											<span>Assigned team members</span>
+											<span className="text-xs font-normal text-slate-500">
+												{workflowMemberIds.length ? `${workflowMemberIds.length} selected` : "Nobody selected yet"}
+												{workflowMemberIds.length > 0 && (
+													<button type="button" onClick={() => setWorkflowMemberIds([])} className="ms-2 font-semibold text-[#0A4FE8] hover:underline">Clear</button>
+												)}
+											</span>
+										</div>
+										<div className="mt-1.5 max-h-72 overflow-y-auto rounded-xl border border-slate-200 p-1.5">
+											{workflowDepartments.length === 0 && <p className="p-3 text-xs font-normal text-slate-500">No active team members to assign.</p>}
+											{workflowDepartments.map((group) => {
+												const ids = group.members.map((member) => member.id);
+												const selected = ids.filter((id) => workflowMemberIds.includes(id));
+												const all = selected.length === ids.length;
+												return (
+													<div key={group.name} className="mb-1 last:mb-0">
+														<div className="flex items-center justify-between gap-2 rounded-lg bg-slate-50 px-2.5 py-1.5">
+															<span className="text-[11px] font-bold uppercase tracking-wider text-slate-500">
+																{group.name} <span className="font-medium normal-case tracking-normal text-slate-400">({selected.length}/{ids.length})</span>
+															</span>
+															<button
+																type="button"
+																onClick={() => setWorkflowMemberIds((current) => (all
+																	? current.filter((id) => !ids.includes(id))
+																	: Array.from(new Set([...current, ...ids]))))}
+																className="text-[11px] font-semibold text-[#0A4FE8] hover:underline"
+															>
+																{all ? "Remove department" : "Assign department"}
+															</button>
+														</div>
+														{group.members.map((member) => {
+															const checked = workflowMemberIds.includes(member.id);
+															return (
+																<label key={member.id} className={`flex cursor-pointer items-center gap-2.5 rounded-lg px-2.5 py-2 transition hover:bg-blue-50/60 ${checked ? "bg-blue-50" : ""}`}>
+																	<input
+																		type="checkbox"
+																		checked={checked}
+																		onChange={() => setWorkflowMemberIds((current) => (checked
+																			? current.filter((id) => id !== member.id)
+																			: [...current, member.id]))}
+																		className="h-4 w-4 shrink-0 accent-[#0A4FE8]"
+																	/>
+																	<span className="min-w-0">
+																		<span className="block truncate text-[13px] font-medium text-slate-800">{member.full_name}</span>
+																		{member.role_title && <span className="block truncate text-[11px] font-normal text-slate-400">{member.role_title}</span>}
+																	</span>
+																</label>
+															);
+														})}
+													</div>
+												);
+											})}
+										</div>
+										{/* The first person picked leads the delivery, which is worth
+											saying out loud since the order decides it. */}
+										{workflowMemberIds.length > 0 && (
+											<p className="mt-1.5 text-xs font-normal text-slate-500">
+												{workflowMembers.find((member) => member.id === workflowMemberIds[0])?.full_name} leads this delivery.
+											</p>
+										)}
+									</div>
+								</div>
+								<label className="block text-sm font-medium">Team-facing brief<textarea value={teamBrief} onChange={(event) => setTeamBrief(event.target.value)} rows={5} className="mt-1.5 w-full rounded-xl border border-slate-200 p-3 text-sm leading-6 outline-none focus:border-[#0A4FE8]" /></label>
+								{workflowRoute === "taskboard" && <div className="grid gap-3 md:grid-cols-2"><label className="text-sm font-medium">Board<select value={workflowBoardId} onChange={(event) => { const board = workflowBoards.find((item) => item.id === event.target.value); setWorkflowBoardId(event.target.value); setWorkflowListId(board?.lists?.[0]?.id || ""); }} className="mt-1.5 h-11 w-full rounded-xl border border-slate-200 px-3 text-sm">{workflowBoards.map((board) => <option key={board.id} value={board.id}>{board.title}</option>)}</select></label><label className="text-sm font-medium">List<select value={workflowListId} onChange={(event) => setWorkflowListId(event.target.value)} className="mt-1.5 h-11 w-full rounded-xl border border-slate-200 px-3 text-sm">{(workflowBoards.find((board) => board.id === workflowBoardId)?.lists || []).map((list) => <option key={list.id} value={list.id}>{list.title}</option>)}</select></label></div>}
+								<button type="button" onClick={() => void routeOrder()} disabled={isRouting || !teamTitle.trim() || !teamBrief.trim()} className="inline-flex h-11 items-center gap-2 rounded-xl bg-[#0A4FE8] px-5 text-sm font-semibold text-white disabled:opacity-50">{isRouting ? <Loader2 className="h-4 w-4 animate-spin" /> : workflowRoute === "project" ? <FolderKanban className="h-4 w-4" /> : <ClipboardList className="h-4 w-4" />} {workflowRoute === "project" ? "Create project and assign" : "Create task and assign"}</button>
+							</div>
+						)}
+					</Card>
+				)}
 
 				{/* Status Management */}
 				<Card className="bg-[#0A4FE8] border-gray-700 p-6 mb-6">

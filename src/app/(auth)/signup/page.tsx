@@ -1,14 +1,25 @@
-import { SignUpForm } from "@/components/marketing";
-import { Suspense } from "react";
+import { SignUpForm } from "@/components/marketing/SignUpForm";
 
 /**
  * SignUpPage - 1:1 Figma Implementation of Create Account.
  * The layout is handled by app/(auth)/layout.tsx
  */
-export default function SignUpPage() {
+export default async function SignUpPage({
+    searchParams,
+}: {
+    searchParams: Promise<{ next?: string; email?: string; client_invite?: string }>;
+}) {
+    const params = await searchParams;
+    const requestedNext = params.next;
+    const nextPath = requestedNext?.startsWith("/") && !requestedNext.startsWith("//")
+        ? requestedNext
+        : "/dashboard";
+
     return (
-        <Suspense fallback={<div>Loading...</div>}>
-            <SignUpForm />
-        </Suspense>
+        <SignUpForm
+            nextPath={nextPath}
+            invitedEmail={params.email || ""}
+            clientInvite={params.client_invite || null}
+        />
     );
 }

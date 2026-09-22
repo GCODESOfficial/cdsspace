@@ -15,6 +15,7 @@ const SectionSkeleton = () => (
 const WhatWeBring = dynamic(() => import("@/components/marketing/WhatWeBring").then(m => ({ default: m.WhatWeBring })), { loading: SectionSkeleton });
 const HowItWorksBig = dynamic(() => import("@/components/marketing/HowItWorksBig").then(m => ({ default: m.HowItWorksBig })), { loading: SectionSkeleton });
 const HelpingBrands = dynamic(() => import("@/components/marketing/HelpingBrands").then(m => ({ default: m.HelpingBrands })), { loading: SectionSkeleton });
+const BeyondBranding = dynamic(() => import("@/components/marketing/BeyondBranding").then(m => ({ default: m.BeyondBranding })), { loading: SectionSkeleton });
 const Works = dynamic(() => import("@/components/marketing/Works").then(m => ({ default: m.Works })), { loading: SectionSkeleton });
 const Brands = dynamic(() => import("@/components/marketing/Brands").then(m => ({ default: m.Brands })), { loading: SectionSkeleton });
 const CTA = dynamic(() => import("@/components/marketing/CTA").then(m => ({ default: m.CTA })), { loading: SectionSkeleton });
@@ -52,6 +53,9 @@ export default function Home() {
       </LazySection>
       <LazySection minHeight={840}>
         <HelpingBrands />
+      </LazySection>
+      <LazySection minHeight={900}>
+        <BeyondBranding />
       </LazySection>
       <LazySection minHeight={780}>
         <Works />

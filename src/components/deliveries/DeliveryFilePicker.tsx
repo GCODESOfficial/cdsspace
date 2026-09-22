@@ -1,14 +1,14 @@
 "use client";
 
 import { DragEvent, useId, useMemo, useState, type InputHTMLAttributes } from "react";
-import { FileArchive, FileText, FolderOpen, FolderUp, Plus, Upload, X } from "lucide-react";
+import { AlertTriangle, FileArchive, FileText, FolderOpen, FolderUp, Plus, Upload, X } from "lucide-react";
 import {
   DELIVERY_FILE_ACCEPT,
   deliveryFileRelativePath,
-  isIgnoredDeliveryPath,
   MAX_DELIVERY_BATCH_BYTES,
-  MAX_DELIVERY_FILE_BYTES,
   MAX_DELIVERY_FILES,
+  screenDeliveryFiles,
+  type ExcludedDeliveryFile,
 } from "@/lib/client-deliveries";
 
 interface DeliveryFilePickerProps {
@@ -36,6 +36,9 @@ export function DeliveryFilePicker({
   const inputId = useId();
   const folderInputId = useId();
   const [error, setError] = useState("");
+  // A selection that contains files we cannot deliver waits here until the
+  // sender either proceeds without them or cancels the whole selection.
+  const [review, setReview] = useState<{ accepted: File[]; excluded: ExcludedDeliveryFile[] } | null>(null);
   const folderCount = useMemo(() => {
     const roots = new Set(
       files
@@ -46,17 +49,10 @@ export function DeliveryFilePicker({
     return roots.size;
   }, [files]);
 
-  function addFiles(incoming: File[]) {
-    setError("");
-    const usableIncoming = incoming.filter((file) => !isIgnoredDeliveryPath(deliveryFileRelativePath(file)));
-    const oversized = usableIncoming.find((file) => file.size > MAX_DELIVERY_FILE_BYTES);
-    if (oversized) {
-      setError(`${oversized.name} is larger than the 50MB per-file limit.`);
-      return;
-    }
-
+  /** Adds screened files to the selection, enforcing the count and size caps. */
+  function commit(accepted: File[]) {
     const existing = new Set(files.map(fileKey));
-    const unique = usableIncoming.filter((file) => !existing.has(fileKey(file)));
+    const unique = accepted.filter((file) => !existing.has(fileKey(file)));
     const next = [...files, ...unique];
     if (next.length > MAX_DELIVERY_FILES) {
       setError(`Add up to ${MAX_DELIVERY_FILES} assets to one delivery. Use a ZIP for larger folders.`);
@@ -67,6 +63,26 @@ export function DeliveryFilePicker({
       return;
     }
     onChange(next);
+  }
+
+  function addFiles(incoming: File[]) {
+    setError("");
+    const screened = screenDeliveryFiles(incoming);
+    // Nothing unwanted: go straight in, exactly as before.
+    if (!screened.excluded.length) {
+      commit(screened.accepted);
+      return;
+    }
+    // Otherwise show the sender what would be left out and let them decide.
+    setReview(screened);
+  }
+
+  function proceedWithoutExcluded() {
+    if (!review) return;
+    const accepted = review.accepted;
+    setReview(null);
+    if (accepted.length) commit(accepted);
+    else setError("None of the selected files can be delivered.");
   }
 
   function handleDrop(event: DragEvent<HTMLDivElement>) {
@@ -115,6 +131,38 @@ export function DeliveryFilePicker({
           />
           <span className="text-[10px] text-gray-500">Upload individual assets, a complete folder, or a ZIP bundle.</span>
         </div>
+
+        {review && (
+          <div role="alertdialog" aria-label="Files that will not be delivered" className="mt-3 rounded-xl border border-amber-200 bg-amber-50 p-3">
+            <p className="flex items-center gap-1.5 text-[11px] font-bold text-amber-800">
+              <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+              {review.excluded.length} file{review.excluded.length === 1 ? "" : "s"} will be left out of this delivery
+            </p>
+            <p className="mt-1 text-[10px] text-amber-700">
+              {review.accepted.length
+                ? `${review.accepted.length} other file${review.accepted.length === 1 ? "" : "s"} will be added. Nothing is uploaded until you proceed.`
+                : "None of the selected files can be delivered."}
+            </p>
+            <ul className="mt-2 max-h-36 space-y-1 overflow-y-auto pr-1">
+              {review.excluded.map(({ path, reason }) => (
+                <li key={path} className="flex items-start justify-between gap-3 rounded-lg bg-white/70 px-2.5 py-1.5">
+                  <span className="min-w-0 truncate text-[11px] font-medium text-gray-700" title={path}>{path}</span>
+                  <span className="shrink-0 text-right text-[10px] text-amber-700">{reason}</span>
+                </li>
+              ))}
+            </ul>
+            <div className="mt-2.5 flex flex-wrap gap-2">
+              {review.accepted.length > 0 && (
+                <button type="button" onClick={proceedWithoutExcluded} className="rounded-lg bg-[#0A4FE8] px-3 py-2 text-[11px] font-bold text-white hover:bg-[#083EC0]">
+                  Proceed without {review.excluded.length === 1 ? "this file" : "these files"}
+                </button>
+              )}
+              <button type="button" onClick={() => setReview(null)} className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-[11px] font-bold text-gray-600 hover:bg-gray-50">
+                Cancel selection
+              </button>
+            </div>
+          </div>
+        )}
 
         {files.length > 0 && (
           <div className="mt-3 space-y-1.5">

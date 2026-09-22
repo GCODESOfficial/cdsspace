@@ -5,13 +5,14 @@ import { motion } from "framer-motion";
 import Link from "next/link";
 import { supabase } from "@/lib/supabase";
 import { useClientAccount } from "@/components/dashboard/ClientAccountProvider";
+import type { ClientModuleKey } from "@/lib/client-modules";
 import { UniversalShareButton } from "@/components/share/UniversalShareButton";
 import { formatFinanceDate } from "@/lib/finance/types";
 import { BRANDING_WOTD_BLUE, getBrandingWordDateKey } from "@/lib/branding-word-of-day";
 import {
     Plus, FileText, Image as ImageIcon, Package, Calendar, MessageSquare,
     ShoppingBag, Loader2, ArrowRight, Volume2, Download,
-    BookOpen, Clock, FileCheck, Star,
+    BookOpen, Clock, FileCheck, Star, PenTool, CalendarRange,
 } from "lucide-react";
 
 interface BrandingWord {
@@ -25,7 +26,7 @@ interface BrandingWord {
     created_at?: string | null;
 }
 
-interface PendingJob {
+interface CurrentProject {
     id: string;
     title: string;
     status: string;
@@ -70,11 +71,13 @@ const INSTANT_WOTD_FALLBACK: BrandingWord = {
 
 const WOTD_CACHE_KEY = "cds.dashboard.wotd";
 
-const QUICK_ACTIONS = [
-    { label: "Brand Brief", desc: "Define your brand", icon: FileText, href: "/dashboard/brand-brief", color: "bg-blue-50 text-brand-blue" },
-    { label: "New Banner", desc: "Order a banner", icon: ImageIcon, href: "/dashboard/banners", color: "bg-amber-50 text-amber-600" },
-    { label: "Order Merch", desc: "Branded items", icon: Package, href: "/dashboard/merch", color: "bg-emerald-50 text-emerald-600" },
-    { label: "Brand Identity", desc: "View your identity", icon: FileCheck, href: "/dashboard/brand-identity", color: "bg-purple-50 text-purple-600" },
+const QUICK_ACTIONS: { label: string; desc: string; icon: typeof FileText; href: string; color: string; module?: ClientModuleKey }[] = [
+    { label: "Brand brief", desc: "Define your brand", icon: FileText, href: "/dashboard/brand-brief", color: "bg-blue-50 text-brand-blue", module: "brand_brief" },
+    { label: "New banner", desc: "Order a banner", icon: ImageIcon, href: "/dashboard/banners", color: "bg-amber-50 text-amber-600", module: "banners" },
+    { label: "Create studio", desc: "Create brand assets", icon: PenTool, href: "/create?workspace=client", color: "bg-sky-50 text-sky-700" },
+    { label: "Subscription", desc: "Manage your plan", icon: CalendarRange, href: "/dashboard/subscription", color: "bg-indigo-50 text-indigo-700", module: "subscription" },
+    { label: "Order merch", desc: "Branded items", icon: Package, href: "/dashboard/merch", color: "bg-emerald-50 text-emerald-600", module: "merch" },
+    { label: "Brand identity", desc: "View your identity", icon: FileCheck, href: "/dashboard/brand-identity", color: "bg-purple-50 text-purple-600", module: "brand_identity" },
 ];
 
 const SPEECH_LOCALES: Record<string, string> = {
@@ -90,11 +93,13 @@ const SPEECH_LOCALES: Record<string, string> = {
 };
 
 export default function DashboardPage() {
-    const { account, dashboardPath } = useClientAccount();
+    const { account, dashboardPath, isModuleEnabled } = useClientAccount();
+    // The overview only advertises what admin has left switched on for this client.
+    const quickActions = QUICK_ACTIONS.filter((action) => !action.module || isModuleEnabled(action.module));
     const userId = account.userId;
     const userName = account.fullName?.split(" ")[0] || account.email.split("@")[0] || "there";
     const [word, setWord] = useState<BrandingWord>(INSTANT_WOTD_FALLBACK);
-    const [pendingJobs, setPendingJobs] = useState<PendingJob[]>([]);
+    const [currentProjects, setCurrentProjects] = useState<CurrentProject[]>([]);
     const [invoices, setInvoices] = useState<Invoice[]>([]);
     const [messages, setMessages] = useState<ChatMessage[]>([]);
     const [recentDeliveries, setRecentDeliveries] = useState<RecentDelivery[]>([]);
@@ -113,13 +118,13 @@ export default function DashboardPage() {
                     supabase.from("chat_messages").select("id, message, sender_role, created_at").eq("room_id", `client_${userId}`).order("created_at", { ascending: false }).limit(5),
                     fetch("/api/client/deliveries/recent", { cache: "no-store" }),
                 ]);
-                const jobs = [
+                const projects = [
                     // eslint-disable-next-line @typescript-eslint/no-explicit-any
                     ...(((designsRes.data as any[]) || []).map((d: any) => ({ ...d, type: "design" }))),
                     // eslint-disable-next-line @typescript-eslint/no-explicit-any
                     ...(((bannersRes.data as any[]) || []).map((b: any) => ({ ...b, type: "banner" }))),
                 ].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()).slice(0, 5);
-                setPendingJobs(jobs);
+                setCurrentProjects(projects);
                 setInvoices(invsRes.data || []);
                 setMessages(msgsRes.data || []);
                 const deliveryPayload = await deliveriesRes.json().catch(() => ({}));
@@ -280,10 +285,10 @@ export default function DashboardPage() {
             </motion.div>
 
             {/* Quick Actions */}
-            <div className="mb-8">
-                <p className="text-[11px] font-bold text-gray-400 uppercase tracking-wider mb-3">Quick Actions</p>
-                <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-                    {QUICK_ACTIONS.map((a, i) => (
+            {quickActions.length > 0 && <div className="mb-8">
+                <p className="mb-3 text-[12px] font-semibold text-gray-500">Quick actions</p>
+                <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 xl:grid-cols-6">
+                    {quickActions.map((a, i) => (
                         <motion.div key={a.label}
                             initial={{ opacity: 0, y: 20 }}
                             animate={{ opacity: 1, y: 0 }}
@@ -299,17 +304,17 @@ export default function DashboardPage() {
                         </motion.div>
                     ))}
                 </div>
-            </div>
+            </div>}
 
             {/* Recent Deliveries */}
-            <section className="mb-8 rounded-2xl border border-white/70 bg-white/80 p-5 shadow-[0_10px_40px_rgba(15,40,90,0.05)] backdrop-blur-xl lg:p-6">
+            {isModuleEnabled("documents") && <section className="mb-8 rounded-2xl border border-white/70 bg-white/80 p-5 shadow-[0_10px_40px_rgba(15,40,90,0.05)] backdrop-blur-xl lg:p-6">
                 <div className="mb-4 flex items-center justify-between gap-4">
                     <div>
                         <h2 className="text-[17px] font-semibold text-brand-navy">Recent deliveries</h2>
                         <p className="mt-1 text-[12px] text-brand-body/55">Your newest finished work from CDS Space.</p>
                     </div>
-                    <Link href={dashboardPath("/dashboard/documents")} className="inline-flex shrink-0 items-center gap-1.5 text-[12px] font-semibold text-brand-blue hover:underline">
-                        View documents <ArrowRight className="h-3.5 w-3.5" />
+                    <Link href={dashboardPath("/dashboard/cdrive")} className="inline-flex shrink-0 items-center gap-1.5 text-[12px] font-semibold text-brand-blue hover:underline">
+                        Open cDrive <ArrowRight className="h-3.5 w-3.5" />
                     </Link>
                 </div>
                 {isLoading ? (
@@ -333,7 +338,7 @@ export default function DashboardPage() {
                         ))}
                     </div>
                 )}
-            </section>
+            </section>}
 
             {/* Top Row: Word of Day + Book Session */}
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-5 mb-8">
@@ -385,7 +390,7 @@ export default function DashboardPage() {
                 </motion.div>
 
                 {/* Book Session */}
-                <motion.div
+                {isModuleEnabled("book_session") && <motion.div
                     initial={{ opacity: 0, scale: 0.98 }}
                     animate={{ opacity: 1, scale: 1 }}
                     transition={{ delay: 0.1 }}
@@ -402,20 +407,20 @@ export default function DashboardPage() {
                         className="flex items-center justify-center gap-2 px-5 py-3 bg-brand-blue text-white text-[13px] font-semibold rounded-xl hover:bg-brand-blue/90 transition">
                         <Calendar className="w-4 h-4" /> Schedule now
                     </Link>
-                </motion.div>
+                </motion.div>}
             </div>
 
             {/* Three Column Data Widgets */}
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
-                {/* Pending Jobs */}
-                <Widget title="Pending Jobs" icon={<Clock className="w-4 h-4 text-amber-500" />} viewAllHref={dashboardPath("/dashboard/orders")} delay={0.15}>
+                {/* Current projects */}
+                {isModuleEnabled("orders") && <Widget title="Current Projects" icon={<Clock className="w-4 h-4 text-amber-500" />} viewAllHref={dashboardPath("/dashboard/orders")} delay={0.15}>
                     {isLoading ? (
                         <div className="py-6 flex justify-center"><Loader2 className="w-5 h-5 animate-spin text-brand-blue/40" /></div>
-                    ) : pendingJobs.length === 0 ? (
-                        <EmptyState icon={<ShoppingBag className="w-7 h-7 text-brand-stroke/40" />} text="No active jobs" />
+                    ) : currentProjects.length === 0 ? (
+                        <EmptyState icon={<ShoppingBag className="w-7 h-7 text-brand-stroke/40" />} text="No projects running" />
                     ) : (
                         <div className="space-y-2">
-                            {pendingJobs.map(j => (
+                            {currentProjects.map(j => (
                                 <div key={`${j.type}-${j.id}`} className="flex items-center gap-3 p-2.5 rounded-xl hover:bg-[#F5F7FA]/50 transition">
                                     <div className={`w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 ${j.type === "banner" ? "bg-amber-50" : "bg-blue-50"}`}>
                                         {j.type === "banner" ? <ImageIcon className="w-4 h-4 text-amber-600" /> : <FileText className="w-4 h-4 text-brand-blue" />}
@@ -428,10 +433,10 @@ export default function DashboardPage() {
                             ))}
                         </div>
                     )}
-                </Widget>
+                </Widget>}
 
                 {/* Past Invoices */}
-                <Widget title="Past Invoices" icon={<FileCheck className="w-4 h-4 text-emerald-500" />} viewAllHref={dashboardPath("/dashboard/invoices")} delay={0.2}>
+                {isModuleEnabled("invoices") && <Widget title="Past Invoices" icon={<FileCheck className="w-4 h-4 text-emerald-500" />} viewAllHref={dashboardPath("/dashboard/invoices")} delay={0.2}>
                     {isLoading ? (
                         <div className="py-6 flex justify-center"><Loader2 className="w-5 h-5 animate-spin text-brand-blue/40" /></div>
                     ) : invoices.length === 0 ? (
@@ -452,10 +457,10 @@ export default function DashboardPage() {
                             ))}
                         </div>
                     )}
-                </Widget>
+                </Widget>}
 
                 {/* Recent Messages */}
-                <Widget title="Recent Messages" icon={<MessageSquare className="w-4 h-4 text-brand-blue" />} viewAllHref={dashboardPath("/dashboard/messages")} delay={0.25}>
+                {isModuleEnabled("messages") && <Widget title="Recent Messages" icon={<MessageSquare className="w-4 h-4 text-brand-blue" />} viewAllHref={dashboardPath("/dashboard/messages")} delay={0.25}>
                     {isLoading ? (
                         <div className="py-6 flex justify-center"><Loader2 className="w-5 h-5 animate-spin text-brand-blue/40" /></div>
                     ) : messages.length === 0 ? (
@@ -475,7 +480,7 @@ export default function DashboardPage() {
                             ))}
                         </div>
                     )}
-                </Widget>
+                </Widget>}
             </div>
         </div>
     );

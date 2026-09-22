@@ -7,9 +7,10 @@ import { supabase } from "@/lib/supabase";
 import { formatFinanceDate, formatMoney, type Currency } from "@/lib/finance/types";
 import { useFinanceDisplayCurrency } from "@/components/finance/FinanceCurrencySelector";
 import { convertFinanceAmount } from "@/lib/finance/currency-display";
+import { appAlert, appConfirm, appToast } from "@/lib/app-notify";
 import {
   ArrowDownToLine, Briefcase, Tag, FileText, Users, Receipt, Wallet, BarChart3, ArrowUpRight,
-  TrendingUp, TrendingDown, DollarSign, AlertCircle, Clock, Loader2, ScrollText,
+  TrendingUp, TrendingDown, DollarSign, AlertCircle, Clock, Loader2, ScrollText, Check, ShieldCheck,
 } from "lucide-react";
 
 const SECTIONS = [
@@ -31,6 +32,9 @@ interface RecentInvoice {
   total: number | string;
   status: string;
   currency: Currency;
+  amount_paid?: number | string;
+  balance_due?: number | string;
+  payment_percentage?: number | string;
 }
 
 interface RecentExpense {
@@ -46,6 +50,26 @@ type FinanceExpenseRow = RecentExpense;
 type FinanceProjectRow = { id: string; status: string };
 type CurrencyAmountRow = { amount: number | string; currency: Currency };
 type FinanceEmployeeRow = { id: string; base_salary: number | string | null; currency: Currency };
+
+interface PendingPaymentSubmission {
+  id: string;
+  status: string;
+  submitted_at: string;
+  amount: number | string;
+  currency: Currency;
+  transfer_reference?: string | null;
+}
+
+interface PendingPaymentConfirmation {
+  invoice: {
+    id: string;
+    invoice_number: string;
+    client_name: string;
+    total: number | string;
+    currency: Currency;
+  };
+  submission: PendingPaymentSubmission;
+}
 
 interface Stats {
   totalRevenue: number;
@@ -64,11 +88,14 @@ interface Stats {
   outstandingPayables: number;
   recentInvoices: RecentInvoice[];
   recentExpenses: RecentExpense[];
+  pendingPaymentConfirmations: PendingPaymentConfirmation[];
 }
 
 export default function FinanceHome() {
   const [stats, setStats] = useState<Stats | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [reviewingPayment, setReviewingPayment] = useState<string | null>(null);
+  const [refreshKey, setRefreshKey] = useState(0);
   const { currency: displayCurrency, rates } = useFinanceDisplayCurrency();
   const display = (amount: number | string | null | undefined, source: Currency | string | null | undefined) =>
     convertFinanceAmount(amount, source, displayCurrency, rates);
@@ -84,14 +111,16 @@ export default function FinanceHome() {
           employeesRes,
           inflowsRes,
           contractorPaymentsRes,
+          invoiceQueueRes,
         ] = await Promise.all([
           supabase.from("finance_projects").select("id, status"),
-          supabase.from("finance_invoices").select("id, total, status, currency, client_name, issue_date, due_date").order("created_at", { ascending: false }),
+          supabase.from("finance_invoices").select("id, total, amount_paid, balance_due, payment_percentage, status, currency, client_name, issue_date, due_date").order("created_at", { ascending: false }),
           supabase.from("finance_expenditures").select("id, amount, currency, title, spent_on").order("spent_on", { ascending: false }),
           supabase.from("finance_contractors").select("id"),
           supabase.from("finance_employees").select("id, base_salary, currency").eq("active", true),
           supabase.from("finance_inflows").select("id, title, source, amount, currency, received_on").order("received_on", { ascending: false }),
           supabase.from("finance_contractor_payments").select("amount, currency"),
+          fetch("/api/admin/finance/invoices", { cache: "no-store" }),
         ]);
 
         const projects = (projectsRes.data || []) as FinanceProjectRow[];
@@ -101,8 +130,24 @@ export default function FinanceHome() {
         const employees = (employeesRes.data || []) as FinanceEmployeeRow[];
         const inflows = (inflowsRes.data || []) as CurrencyAmountRow[];
         const contractorPayments = (contractorPaymentsRes.data || []) as CurrencyAmountRow[];
+        const invoiceQueuePayload = invoiceQueueRes.ok ? await invoiceQueueRes.json().catch(() => ({})) : {};
+        const pendingPaymentConfirmations = ((invoiceQueuePayload.invoices || []) as Array<{
+          id: string;
+          invoice_number: string;
+          client_name: string;
+          total: number | string;
+          currency: Currency;
+          invoice_payment_submissions?: PendingPaymentSubmission[];
+        }>).flatMap((invoice) => (invoice.invoice_payment_submissions || [])
+          .filter((submission) => submission.status === "pending")
+          .map((submission) => ({ invoice, submission })));
 
-        const invoiceRevenue = invoices.filter(i => i.status === "paid").reduce((sum, i) => sum + display(i.total, i.currency), 0);
+        const invoiceRevenue = invoices.reduce((sum, invoice) => {
+          const received = invoice.amount_paid == null
+            ? (invoice.status === "paid" ? invoice.total : 0)
+            : invoice.amount_paid;
+          return sum + display(received, invoice.currency);
+        }, 0);
         const totalInflow = inflows.reduce((sum, entry) => sum + display(entry.amount, entry.currency), 0);
         const totalRevenue = invoiceRevenue + totalInflow;
         const totalExpenses =
@@ -111,8 +156,13 @@ export default function FinanceHome() {
           employees.reduce((sum, e) => sum + display(e.base_salary, e.currency), 0);
 
         const outstandingPayables = invoices
-          .filter(i => i.status === "sent" || i.status === "overdue")
-          .reduce((sum, i) => sum + display(i.total, i.currency), 0);
+          .filter(i => !["paid", "cancelled", "draft"].includes(i.status))
+          .reduce((sum, invoice) => {
+            const balance = invoice.balance_due == null
+              ? Math.max(Number(invoice.total) - Number(invoice.amount_paid || 0), 0)
+              : invoice.balance_due;
+            return sum + display(balance, invoice.currency);
+          }, 0);
 
         setStats({
           totalRevenue,
@@ -123,7 +173,7 @@ export default function FinanceHome() {
           completedProjects: projects.filter(p => p.status === "completed").length,
           totalInvoices: invoices.length,
           paidInvoices: invoices.filter(i => i.status === "paid").length,
-          pendingInvoices: invoices.filter(i => i.status === "sent" || i.status === "draft").length,
+          pendingInvoices: invoices.filter(i => i.status === "sent" || i.status === "draft" || i.status === "partially_paid").length,
           overdueInvoices: invoices.filter(i => i.status === "overdue").length,
           totalContractors: contractors.length,
           totalEmployees: employees.length,
@@ -131,6 +181,7 @@ export default function FinanceHome() {
           outstandingPayables,
           recentInvoices: invoices.slice(0, 5) as RecentInvoice[],
           recentExpenses: expenditures.slice(0, 5) as RecentExpense[],
+          pendingPaymentConfirmations,
         });
       } catch (error) {
         console.error("Failed to load finance stats:", error);
@@ -139,7 +190,33 @@ export default function FinanceHome() {
       }
     }
     loadStats();
-  }, [displayCurrency, rates]);
+  }, [displayCurrency, rates, refreshKey]);
+
+  const reviewPayment = async (payment: PendingPaymentConfirmation, action: "confirm" | "reject") => {
+    const prompt = action === "confirm"
+      ? `Confirm ${formatMoney(payment.submission.amount, payment.submission.currency)} as received and mark ${payment.invoice.invoice_number} paid?`
+      : `Reject the payment submission for ${payment.invoice.invoice_number}? The invoice will remain unpaid.`;
+    if (!(await appConfirm(prompt))) return;
+    setReviewingPayment(payment.submission.id);
+    try {
+      const response = await fetch(`/api/admin/finance/invoices/${payment.invoice.id}/payment/${payment.submission.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error || "Payment review failed.");
+      appToast({
+        message: action === "confirm" ? "Payment confirmed and receipt issued." : "Payment submission rejected.",
+        kind: "success",
+      });
+      setRefreshKey((value) => value + 1);
+    } catch (reason) {
+      appAlert(reason instanceof Error ? reason.message : "Payment review failed.");
+    } finally {
+      setReviewingPayment(null);
+    }
+  };
 
   return (
     <FinanceShell title="Finance" subtitle="Manage every financial moving part of CDS Space.">
@@ -208,6 +285,59 @@ export default function FinanceHome() {
             <MiniMetric icon={<Users className="w-4 h-4 text-violet-600" />} label="Contractors" value={stats.totalContractors} sub={`${stats.totalEmployees} employees`} bg="bg-violet-50" />
             <MiniMetric icon={<ArrowDownToLine className="w-4 h-4 text-emerald-600" />} label="Inflow" value={formatMoney(stats.totalInflow, displayCurrency)} sub="Positive funds" bg="bg-emerald-50" valueIsString />
           </div>
+
+          {stats.pendingPaymentConfirmations.length > 0 && (
+            <section className={`${glassCard} mb-6 p-5`}>
+              <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <h2 className="flex items-center gap-2 text-sm font-semibold text-gray-900">
+                    <ShieldCheck className="h-4 w-4 text-amber-600" /> Pending payment confirmations
+                  </h2>
+                  <p className="mt-1 text-xs text-gray-500">Clients have marked these invoices as paid. Confirm receipt before work moves forward.</p>
+                </div>
+                <Link href="/admin/finance/invoices" className="text-xs font-medium text-blue-600 hover:underline">View all invoices</Link>
+              </div>
+              <div className="space-y-3">
+                {stats.pendingPaymentConfirmations.slice(0, 5).map((payment) => (
+                  <div key={payment.submission.id} className="rounded-2xl border border-slate-100 bg-white/80 p-4">
+                    <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                      <div className="min-w-0">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="rounded-full bg-amber-50 px-2.5 py-1 text-[10px] font-semibold text-amber-700">Pending</span>
+                          <span className="text-sm font-bold text-[#0D1B39]">{formatMoney(payment.submission.amount, payment.submission.currency)}</span>
+                          <Link href={`/admin/finance/invoices/${payment.invoice.id}#payment-verification`} className="truncate text-xs font-medium text-blue-600 hover:underline">
+                            {payment.invoice.invoice_number} · {payment.invoice.client_name}
+                          </Link>
+                        </div>
+                        <p className="mt-2 text-xs text-slate-500">
+                          Submitted {new Date(payment.submission.submitted_at).toLocaleString()}
+                          {payment.submission.transfer_reference ? ` · Ref: ${payment.submission.transfer_reference}` : ""}
+                        </p>
+                      </div>
+                      <div className="flex shrink-0 flex-wrap gap-2">
+                        <button
+                          type="button"
+                          onClick={() => void reviewPayment(payment, "reject")}
+                          disabled={reviewingPayment === payment.submission.id}
+                          className="h-10 rounded-xl border border-red-100 px-4 text-xs font-semibold text-red-600 transition hover:bg-red-50 disabled:opacity-60"
+                        >
+                          Reject
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => void reviewPayment(payment, "confirm")}
+                          disabled={reviewingPayment === payment.submission.id}
+                          className="inline-flex h-10 items-center gap-1.5 rounded-xl bg-emerald-600 px-4 text-xs font-semibold text-white transition hover:bg-emerald-700 disabled:opacity-60"
+                        >
+                          {reviewingPayment === payment.submission.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />} Confirm payment
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </section>
+          )}
 
           {/* Alerts Row */}
           {(stats.overdueInvoices > 0 || stats.outstandingPayables > 0) && (

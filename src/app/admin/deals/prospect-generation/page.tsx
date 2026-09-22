@@ -3,8 +3,9 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import {
-  AlertTriangle, Building2, ChevronDown, ChevronUp, Chrome, Download, ExternalLink, EyeOff, Globe, Landmark, Library, Link2, Loader2,
+  AlertTriangle, Bookmark, Building2, ChevronDown, ChevronUp, Chrome, ClipboardCheck, Download, ExternalLink, EyeOff, FileText, Globe, Landmark, Library, Link2, Loader2,
   Mail, MapPin, Palette, Play, Plus, RefreshCw, Search, Send, Server, SlidersHorizontal, Square, Target, Trash2, TrendingUp, Users, X,
 } from "lucide-react";
 import { appConfirm } from "@/lib/app-notify";
@@ -12,6 +13,7 @@ import { DIRECTORY_TARGET, SIZE_BANDS, STOCK_EXCHANGES } from "@/lib/prospect-di
 import { PROSPECT_ISSUES, issueLabel } from "@/lib/prospect-issues";
 
 type Contact = { id: string; full_name: string; job_title: string | null; seniority: string; email: string | null; email_confidence: string; linkedin_url: string | null; source_url: string | null };
+type Competitor = { name: string; url: string; note: string; type: "direct" | "indirect" };
 type Company = {
   id: string; company_name: string; domain: string | null; website: string | null; country: string | null; hq_country: string | null; city: string | null;
   country_count: number; countries: string[];
@@ -24,7 +26,7 @@ type Company = {
   dns_contacts: Array<{ kind: string; value: string; detail: string }>;
   socials: Array<{ platform: string; url: string }>; emails: Array<{ email: string; source_url: string; kind: string }>;
   brief: string | null; pain_points: string[]; how_we_help: string[]; service_fit: Array<{ service: string; reason: string }>;
-  competitors_local: Array<{ name: string; url: string; note: string }>; competitors_global: Array<{ name: string; url: string; note: string }>;
+  competitors_local: Competitor[]; competitors_global: Competitor[];
   outreach_angle: string | null; outreach_subject: string | null; outreach_email: string | null;
   deal_score: number; priority: string; sources: string[];
   enrichment_status: string; enrichment_error: string | null; review_status: string; prospect_id: string | null;
@@ -59,16 +61,62 @@ const EMPTY_FILTERS = {
   website_status: "", activity: "", is_public: "", is_startup: "", multi_country: "",
   founded_from: "", founded_to: "", staff_from: "", staff_to: "", exchange: "", letter: "",
   has_website: "", hide_inactive: "", issues: "", reachable_decision_maker: "",
+  score_from: "", score_to: "",
 };
 
 const ACTIVITY_TONE: Record<string, string> = { active: "bg-emerald-50 text-emerald-700 border-emerald-200", dormant: "bg-amber-50 text-amber-700 border-amber-200", inactive: "bg-rose-50 text-rose-700 border-rose-200", unknown: "bg-slate-50 text-slate-600 border-slate-200" };
 const WEBSITE_TONE: Record<string, string> = { outdated: "bg-rose-50 text-rose-700 border-rose-200", dated: "bg-amber-50 text-amber-700 border-amber-200", modern: "bg-emerald-50 text-emerald-700 border-emerald-200", missing: "bg-rose-50 text-rose-700 border-rose-200", broken: "bg-rose-50 text-rose-700 border-rose-200", unknown: "bg-slate-50 text-slate-600 border-slate-200" };
 const PRIORITY_TONE: Record<string, string> = { high: "bg-[#0A4FE8] text-white", medium: "bg-blue-50 text-[#0A4FE8]", low: "bg-slate-100 text-slate-600" };
+// What the deal score is made of, so the number on a card can be read rather
+// than guessed. Kept in step with scoreDeal() in src/lib/prospect-enrichment.ts.
+const SCORE_METRIC = [
+  "Website condition, up to 35: outdated 35, dated 25, missing or broken 20, modern 8",
+  "Trading status, up to 25: trading 25, dormant 8, not trading -15",
+  "Decision makers found, up to 20: 10 each",
+  "A way to reach them, up to 10: a decision maker with an email 10, any email 5",
+  "Social presence, up to 10: two or more 10, one 5",
+];
+// The split sits on the same line the priority badge uses, so "below" is every
+// low-priority company and "above" is everything we would actually call.
+const SCORE_SPLIT = 45;
+/** Filter views held in memory so revisiting one costs nothing. */
+const LIST_CACHE_LIMIT = 40;
 const ALPHABET = "abcdefghijklmnopqrstuvwxyz".split("");
 const PAGE_SIZES = [10, 50, 100, 200];
 const AUDIT_AREA: Record<AuditFinding["area"], string> = { ai_search: "AI search", website: "Website", social: "Social branding", video: "Video" };
+type DirectoryLoad = "summary" | "companies" | "registries";
+
+function directoryErrorMessage(error: unknown) {
+  if (error instanceof DOMException && error.name === "AbortError") return "";
+  if (error instanceof TypeError || (error instanceof Error && error.message === "Failed to fetch")) {
+    return "The directory connection was interrupted. Please try again.";
+  }
+  return error instanceof Error ? error.message : "The directory could not be loaded.";
+}
+
+/** Retry only safe directory reads when the host or connection drops briefly. */
+async function getDirectoryJson(url: string, signal?: AbortSignal) {
+  let lastError: unknown;
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      const response = await fetch(url, { cache: "no-store", signal });
+      const json = await response.json().catch(() => ({}));
+      if (response.ok) return json;
+      const error = new Error(json.error || "The directory could not be loaded.");
+      if (![502, 503, 504].includes(response.status) || attempt === 1) throw error;
+      lastError = error;
+    } catch (error) {
+      if (signal?.aborted || (error instanceof DOMException && error.name === "AbortError")) throw error;
+      lastError = error;
+      if (attempt === 1) throw error;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  }
+  throw lastError instanceof Error ? lastError : new Error("The directory could not be loaded.");
+}
 
 export default function ProspectGenerationPage() {
+  const router = useRouter();
   const [totals, setTotals] = useState<Totals | null>(null);
   const [batches, setBatches] = useState<Batch[]>([]);
   const [topCountries, setTopCountries] = useState<Array<{ country: string; companies: number }>>([]);
@@ -81,9 +129,14 @@ export default function ProspectGenerationPage() {
   const [search, setSearch] = useState("");
   const listRequestRef = useRef(0);
   const listAbortRef = useRef<AbortController | null>(null);
+  const listCacheRef = useRef(new Map<string, { companies: Company[]; total: number; estimated: boolean }>());
+  const detailsRef = useRef<Record<string, Company>>({});
   const [busy, setBusy] = useState("");
   const [notice, setNotice] = useState<{ tone: "success" | "error"; text: string } | null>(null);
+  const [loadErrors, setLoadErrors] = useState<Partial<Record<DirectoryLoad, string>>>({});
   const [expanded, setExpanded] = useState<string>("");
+  // Full research records, keyed by company, fetched only when asked for.
+  const [details, setDetails] = useState<Record<string, Company>>({});
   const [compose, setCompose] = useState<Compose | null>(null);
 
   const [registries, setRegistries] = useState<Registry[]>([]);
@@ -118,19 +171,31 @@ export default function ProspectGenerationPage() {
     return params.toString();
   }, [filters, sort]);
 
-  const loadRegistries = useCallback(async () => {
-    const response = await fetch("/api/admin/deals/prospect-generation?resource=registries", { cache: "no-store" });
-    const json = await response.json().catch(() => ({}));
-    if (!response.ok) return;
-    setRegistries(json.registries || []); setRegistryRuns(json.runs || []); setBrowser(json.browser || { connected: false, hint: "" });
+  const clearLoadError = useCallback((area: DirectoryLoad) => {
+    setLoadErrors((current) => {
+      if (!current[area]) return current;
+      const next = { ...current };
+      delete next[area];
+      return next;
+    });
   }, []);
 
-  const loadSummary = useCallback(async () => {
-    const response = await fetch("/api/admin/deals/prospect-generation?resource=summary", { cache: "no-store" });
-    const json = await response.json().catch(() => ({}));
-    if (!response.ok) throw new Error(json.error || "Could not load the directory.");
-    setTotals(json.totals); setBatches(json.batches || []); setTopCountries(json.topCountries || []); setIndustries(json.industries || []);
+  const recordLoadError = useCallback((area: DirectoryLoad, error: unknown) => {
+    const message = directoryErrorMessage(error);
+    if (message) setLoadErrors((current) => ({ ...current, [area]: message }));
   }, []);
+
+  const loadRegistries = useCallback(async () => {
+    const json = await getDirectoryJson("/api/admin/deals/prospect-generation?resource=registries");
+    setRegistries(json.registries || []); setRegistryRuns(json.runs || []); setBrowser(json.browser || { connected: false, hint: "" });
+    clearLoadError("registries");
+  }, [clearLoadError]);
+
+  const loadSummary = useCallback(async () => {
+    const json = await getDirectoryJson("/api/admin/deals/prospect-generation?resource=summary");
+    setTotals(json.totals); setBatches(json.batches || []); setTopCountries(json.topCountries || []); setIndustries(json.industries || []);
+    clearLoadError("summary");
+  }, [clearLoadError]);
 
   const loadCompanies = useCallback(async () => {
     const params = new URLSearchParams(queryString);
@@ -142,36 +207,121 @@ export default function ProspectGenerationPage() {
     listAbortRef.current?.abort();
     const controller = new AbortController();
     listAbortRef.current = controller;
-    let response: Response;
+    let json: any;
     try {
-      response = await fetch(`/api/admin/deals/prospect-generation?${params}`, { cache: "no-store", signal: controller.signal });
+      json = await getDirectoryJson(`/api/admin/deals/prospect-generation?${params}`, controller.signal);
     } catch (error) {
       if (controller.signal.aborted) return;
       throw error;
     }
-    const json = await response.json().catch(() => ({}));
     if (request !== listRequestRef.current) return;
-    if (!response.ok) throw new Error(json.error || "Could not load companies.");
-    setCompanies(json.companies || []); setTotal(json.total || 0); setEstimated(Boolean(json.estimated));
+    const view = { companies: json.companies || [], total: json.total || 0, estimated: Boolean(json.estimated) };
+    // Remember this view so turning a filter back off, or stepping back a page,
+    // is instant instead of another wait on the network.
+    const cache = listCacheRef.current;
+    cache.set(params.toString(), view);
+    if (cache.size > LIST_CACHE_LIMIT) cache.delete(cache.keys().next().value as string);
+    setCompanies(view.companies); setTotal(view.total); setEstimated(view.estimated);
+    clearLoadError("companies");
+  }, [queryString, page, pageSize, clearLoadError]);
+
+  /**
+   * The company in full. A list row holds only what it displays, so anything
+   * reading the research - the expanded panel, the composer, an audit - asks
+   * for the rest here first. Already-fetched records are returned as they are.
+   */
+  const ensureDetail = useCallback(async (company: Company): Promise<Company> => {
+    const held = detailsRef.current[company.id];
+    if (held) return held;
+    const response = await fetch(`/api/admin/deals/prospect-generation?resource=company&id=${company.id}`, { cache: "no-store" });
+    const json = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(json.error || "Could not load this company.");
+    const full = { ...company, ...json.company } as Company;
+    detailsRef.current[company.id] = full;
+    setDetails((current) => ({ ...current, [company.id]: full }));
+    return full;
+  }, []);
+
+  // A pipeline timeline links back to the exact research record that created
+  // its checklist entry. Fetch that record directly, narrow the directory to
+  // it and open its details without depending on which result page it was on.
+  useEffect(() => {
+    const requested = new URLSearchParams(window.location.search).get("company")?.trim() || "";
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(requested)) return;
+    let cancelled = false;
+
+    void (async () => {
+      try {
+        const response = await fetch(`/api/admin/deals/prospect-generation?resource=company&id=${requested}`, { cache: "no-store" });
+        const json = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(json.error || "Could not load this company.");
+        if (cancelled) return;
+
+        const company = json.company as Company;
+        detailsRef.current[company.id] = company;
+        setDetails((current) => ({ ...current, [company.id]: company }));
+        setCompanies((current) => current.some((entry) => entry.id === company.id)
+          ? current.map((entry) => entry.id === company.id ? { ...entry, ...company } : entry)
+          : [company, ...current]);
+        setExpanded(company.id);
+        setPage(0);
+        setSearch(company.company_name);
+        setFilters((current) => ({ ...current, q: company.company_name }));
+        window.requestAnimationFrame(() => {
+          document.getElementById(`prospect-company-${company.id}`)?.scrollIntoView({ behavior: "smooth", block: "start" });
+        });
+      } catch (error) {
+        if (!cancelled) setNotice({ tone: "error", text: error instanceof Error ? error.message : "Could not load this company." });
+      }
+    })();
+
+    return () => { cancelled = true; };
+  }, []);
+
+  /** The view for this exact filter set if it has already been fetched. */
+  const cachedView = useCallback(() => {
+    const params = new URLSearchParams(queryString);
+    params.set("resource", "companies"); params.set("limit", String(pageSize)); params.set("offset", String(page * pageSize));
+    return listCacheRef.current.get(params.toString());
   }, [queryString, page, pageSize]);
 
   const refresh = useCallback(async () => {
-    try { await Promise.all([loadSummary(), loadCompanies(), loadRegistries()]); }
-    catch (error) { setNotice({ tone: "error", text: error instanceof Error ? error.message : "Could not load." }); }
-  }, [loadSummary, loadCompanies, loadRegistries]);
+    // Research, promotion or removal changes the rows themselves, so every
+    // remembered view and every held research record is stale.
+    listCacheRef.current.clear();
+    detailsRef.current = {};
+    setDetails({});
+    const results = await Promise.allSettled([loadSummary(), loadCompanies(), loadRegistries()]);
+    const areas: DirectoryLoad[] = ["summary", "companies", "registries"];
+    results.forEach((result, index) => {
+      if (result.status === "rejected") recordLoadError(areas[index], result.reason);
+    });
+  }, [loadSummary, loadCompanies, loadRegistries, recordLoadError]);
 
   // The summary and the registry list do not change when a filter does, so a
   // search reloads the list alone.
   useEffect(() => {
-    Promise.all([loadSummary(), loadRegistries()]).catch((error) => setNotice({ tone: "error", text: error instanceof Error ? error.message : "Could not load." }));
-  }, [loadSummary, loadRegistries]);
+    void loadSummary().catch((error) => recordLoadError("summary", error));
+    void loadRegistries().catch((error) => recordLoadError("registries", error));
+  }, [loadSummary, loadRegistries, recordLoadError]);
 
+  // A filter change paints in the same frame it is clicked. A view already
+  // fetched comes straight back from memory; anything else keeps the previous
+  // list on screen, marked as updating, rather than leaving the page looking
+  // like the click did nothing until the network answers.
   useEffect(() => {
+    const cached = cachedView();
+    if (cached) {
+      setCompanies(cached.companies); setTotal(cached.total); setEstimated(cached.estimated);
+      clearLoadError("companies");
+      setListLoading(false); setLoading(false);
+      return;
+    }
     setListLoading(true);
     loadCompanies()
-      .catch((error) => setNotice({ tone: "error", text: error instanceof Error ? error.message : "Could not load companies." }))
+      .catch((error) => recordLoadError("companies", error))
       .finally(() => { setListLoading(false); setLoading(false); });
-  }, [loadCompanies]);
+  }, [loadCompanies, cachedView, clearLoadError, recordLoadError]);
 
   // Typing runs the search as it is typed, one short pause after the last key,
   // so a name shows its matches without waiting for a request per keystroke.
@@ -195,6 +345,16 @@ export default function ProspectGenerationPage() {
     const next = activeIssues.includes(key) ? activeIssues.filter((entry) => entry !== key) : [...activeIssues, key];
     setFilter("issues", next.join(","));
   };
+
+  // The score filter is a band with two independent ends, so one set of state
+  // serves "below 50", "50 and above" and "everyone on exactly this score".
+  const setScoreBand = (from: string, to: string) => {
+    setPage(0);
+    setFilters((current) => ({ ...current, score_from: from, score_to: to }));
+  };
+  const scoreBand = filters.score_from === "" && filters.score_to === String(SCORE_SPLIT - 1) ? "below"
+    : filters.score_from === String(SCORE_SPLIT) && filters.score_to === "" ? "above"
+      : filters.score_from && filters.score_from === filters.score_to ? "exact" : "";
 
   /**
    * A summary card is a saved view of the list below it. Clicking one replaces
@@ -276,9 +436,84 @@ export default function ProspectGenerationPage() {
     finally { setBusy(""); }
   };
 
+  /**
+   * A brand audit for a company straight from the directory. The research and
+   * the write-up run server side and take a moment, so the row shows it working
+   * and then opens the finished report automatically.
+   */
+  const runAudit = async (listCompany: Company) => {
+    if (!listCompany.website) {
+      setNotice({ tone: "error", text: `${listCompany.company_name} has no public website to audit.` });
+      return;
+    }
+    setBusy(`audit:${listCompany.id}`);
+    setNotice({ tone: "success", text: `Auditing ${listCompany.company_name} across every brand touchpoint. This takes a moment.` });
+    try {
+      // The social account the audit compares against lives in the research.
+      const company = await ensureDetail(listCompany);
+      const response = await fetch("/api/admin/deals", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "generate_audit", company_id: company.id, brand_name: company.company_name,
+          target_url: company.website, social_url: company.socials?.[0]?.url || "",
+        }),
+      });
+      const json = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(json.error || "The brand audit could not be generated.");
+      const auditId = typeof json.audit?.id === "string" ? json.audit.id : "";
+      if (!auditId) throw new Error("The audit finished without a report ID.");
+      router.push(`/admin/deals/brand-audits?audit=${encodeURIComponent(auditId)}`);
+    } catch (error) {
+      setNotice({ tone: "error", text: error instanceof Error ? error.message : "The brand audit could not be generated." });
+    } finally { setBusy(""); }
+  };
+
+  /**
+   * A proposal straight from the directory. The server reads the brand, the
+   * site and what the work is about off the researched record, so nothing is
+   * retyped; the deck is still ours to edit before it goes anywhere.
+   */
+  const draftProposal = async (listCompany: Company) => {
+    if (!listCompany.website) {
+      setNotice({ tone: "error", text: `${listCompany.company_name} has no public website to build a proposal from.` });
+      return;
+    }
+    setBusy(`proposal:${listCompany.id}`);
+    setNotice({ tone: "success", text: `Researching and writing a proposal for ${listCompany.company_name}. This takes a moment.` });
+    try {
+      const company = await ensureDetail(listCompany);
+      const response = await fetch("/api/admin/deals", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "generate_proposal", company_id: company.id }),
+      });
+      const json = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(json.error || "The proposal could not be generated.");
+      const proposalId = typeof json.proposal?.id === "string" ? json.proposal.id : "";
+      if (!proposalId) throw new Error("The proposal finished without an ID.");
+      router.push(`/admin/deals/proposals?proposal=${encodeURIComponent(proposalId)}`);
+    } catch (error) {
+      setNotice({ tone: "error", text: error instanceof Error ? error.message : "The proposal could not be generated." });
+    } finally { setBusy(""); }
+  };
+
   const removeCompany = async (company: Company) => {
     if (!(await appConfirm({ title: "Remove company?", message: `Remove ${company.company_name} and its research from the directory?`, confirmLabel: "Remove" }))) return;
     await act(company.id, { action: "delete_company", id: company.id }, "Company removed.");
+  };
+
+  const refreshCompetitors = async (company: Company) => {
+    const busyKey = `competitors:${company.id}`;
+    setBusy(busyKey); setNotice(null);
+    try {
+      await post({ action: "requeue", id: company.id });
+      const json = await post({ action: "enrich_batch", id: company.id, limit: 1 });
+      const result = json.processed?.find((entry: { id: string }) => entry.id === company.id);
+      if (!result || result.status !== "enriched") throw new Error("Competitor research was queued but did not finish. Run the research queue to retry it.");
+      setNotice({ tone: "success", text: `${company.company_name}'s direct and indirect competitors were refreshed.` });
+      await refresh();
+    } catch (error) {
+      setNotice({ tone: "error", text: error instanceof Error ? error.message : "Competitor research could not be refreshed." });
+    } finally { setBusy(""); }
   };
 
   // Every address the research turned up, decision makers first, then published
@@ -296,7 +531,12 @@ export default function ProspectGenerationPage() {
   // Opening the composer is never blocked by having no address: an empty
   // recipient list is the normal starting point for a company nobody has
   // reached yet, and the composer is where an address gets found or typed in.
-  const composeEmail = (company: Company) => {
+  const composeEmail = async (listCompany: Company) => {
+    setBusy(`compose:${listCompany.id}`);
+    let company: Company;
+    try { company = await ensureDetail(listCompany); }
+    catch (error) { setNotice({ tone: "error", text: error instanceof Error ? error.message : "Could not load this company." }); return; }
+    finally { setBusy(""); }
     setCompose({
       company,
       recipients: recipientsFor(company),
@@ -407,6 +647,7 @@ export default function ProspectGenerationPage() {
 
   const progress = totals ? Math.min(100, (totals.total / DIRECTORY_TARGET) * 100) : 0;
   const activeFilterCount = Object.values(filters).filter(Boolean).length;
+  const directoryError = Object.values(loadErrors)[0];
 
   return (
     <main className="mx-auto max-w-[1550px] p-4 sm:p-7">
@@ -418,8 +659,13 @@ export default function ProspectGenerationPage() {
         </p>
       </header>
 
+      {directoryError && <div className="mb-5 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-700">
+        <span>{directoryError}</span>
+        <button type="button" onClick={() => void refresh()} className="inline-flex min-h-9 items-center gap-2 rounded-xl border border-rose-200 bg-white px-3 font-semibold hover:border-rose-300">
+          <RefreshCw className="h-4 w-4" /> Try again
+        </button>
+      </div>}
       {notice && <div className={`mb-5 rounded-2xl border p-4 text-sm ${notice.tone === "error" ? "border-rose-200 bg-rose-50 text-rose-700" : "border-emerald-200 bg-emerald-50 text-emerald-700"}`}>{notice.text}</div>}
-
       <section className="mb-6 rounded-[24px] border border-slate-200 bg-white p-5 shadow-sm sm:p-7">
         <div className="flex flex-wrap items-end justify-between gap-4">
           <div>
@@ -528,7 +774,9 @@ export default function ProspectGenerationPage() {
 
       <section id="prospect-directory" className="rounded-[24px] border border-slate-200 bg-white p-5 shadow-sm sm:p-7">
         <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-          <h2 className="font-bold text-[#07133B]">Directory <span className="text-sm font-semibold text-slate-400">({estimated ? "about " : ""}{total.toLocaleString()})</span></h2>
+          <h2 className="font-bold text-[#07133B]">Directory <span className="text-sm font-semibold text-slate-400">({estimated ? "about " : ""}{total.toLocaleString()})</span>
+            {listLoading && companies.length > 0 && <span className="ms-2 inline-flex items-center gap-1.5 align-middle text-xs font-semibold text-[#0A4FE8]"><Loader2 className="h-3 w-3 animate-spin" /> Updating</span>}
+          </h2>
           <div className="flex flex-wrap gap-2">
             <div className="relative">
               <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search name, domain, industry" className="h-10 w-56 rounded-xl border border-slate-200 pl-3 pr-9 text-sm outline-none focus:border-[#0A4FE8]" />
@@ -583,6 +831,37 @@ export default function ProspectGenerationPage() {
           </div>
         </div>
 
+        {/* The deal score, as a band. The tooltip carries what the number is
+            made of so the reader never has to take it on trust. */}
+        <div className="mb-4">
+          <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-400">Deal score</p>
+          <div className="flex flex-wrap items-center gap-2">
+            {([["below", `Below ${SCORE_SPLIT}`, "", String(SCORE_SPLIT - 1)], ["above", `${SCORE_SPLIT} and above`, String(SCORE_SPLIT), ""]] as Array<[string, string, string, string]>).map(([key, label, from, to]) => (
+              <button
+                key={key}
+                type="button"
+                onClick={() => (scoreBand === key ? setScoreBand("", "") : setScoreBand(from, to))}
+                aria-pressed={scoreBand === key}
+                title={`Deal score out of 100.\n${SCORE_METRIC.join("\n")}`}
+                className={`inline-flex min-h-10 items-center gap-2 rounded-xl border px-3 text-sm font-semibold ${scoreBand === key ? "border-[#0A4FE8] bg-[#0A4FE8] text-white" : "border-slate-200 text-slate-700 hover:border-[#0A4FE8]"}`}
+              >
+                <Target className="h-4 w-4" /> {label}
+              </button>
+            ))}
+            {scoreBand === "exact" && (
+              <span className="inline-flex min-h-10 items-center gap-2 rounded-xl border border-[#0A4FE8] bg-[#0A4FE8] px-3 text-sm font-semibold text-white">
+                <Target className="h-4 w-4" /> Scored exactly {filters.score_from}
+              </span>
+            )}
+            {(filters.score_from || filters.score_to) && (
+              <button type="button" onClick={() => setScoreBand("", "")} className="text-xs font-bold text-[#0A4FE8] hover:underline">
+                Clear score
+              </button>
+            )}
+            <span className="text-xs text-slate-400" title={SCORE_METRIC.join("\n")}>Out of 100: website condition 35, trading status 25, decision makers 20, a way to reach them 10, social presence 10</span>
+          </div>
+        </div>
+
         <div className="mb-4 flex flex-wrap gap-1">
           <button onClick={() => setFilter("letter", "")} className={`h-8 min-w-8 rounded-lg px-2 text-xs font-semibold ${filters.letter ? "text-slate-500 hover:bg-slate-100" : "bg-[#0A4FE8] text-white"}`}>All</button>
           {ALPHABET.map((letter) => <button key={letter} onClick={() => setFilter("letter", letter)} className={`h-8 min-w-8 rounded-lg px-2 text-xs font-semibold uppercase ${filters.letter === letter ? "bg-[#0A4FE8] text-white" : "text-slate-500 hover:bg-slate-100"}`}>{letter}</button>)}
@@ -606,19 +885,20 @@ export default function ProspectGenerationPage() {
           <Labelled label="Review state"><Select full value={filters.review} onChange={(value) => setFilter("review", value)} options={[["", "Any review"], ["new", "New"], ["shortlisted", "Shortlisted"], ["promoted", "Promoted"], ["rejected", "Rejected"]]} /></Labelled>
           <Labelled label="Founded between"><div className="flex gap-2"><input type="number" value={filters.founded_from} onChange={(event) => setFilter("founded_from", event.target.value)} placeholder="From" className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm outline-none focus:border-[#0A4FE8]" /><input type="number" value={filters.founded_to} onChange={(event) => setFilter("founded_to", event.target.value)} placeholder="To" className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm outline-none focus:border-[#0A4FE8]" /></div></Labelled>
           <Labelled label="Number of staff"><div className="flex gap-2"><input type="number" value={filters.staff_from} onChange={(event) => setFilter("staff_from", event.target.value)} placeholder="Min" className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm outline-none focus:border-[#0A4FE8]" /><input type="number" value={filters.staff_to} onChange={(event) => setFilter("staff_to", event.target.value)} placeholder="Max" className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm outline-none focus:border-[#0A4FE8]" /></div></Labelled>
+          <Labelled label="Deal score between"><div className="flex gap-2"><input type="number" min={0} max={100} value={filters.score_from} onChange={(event) => setFilter("score_from", event.target.value)} placeholder="Min" className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm outline-none focus:border-[#0A4FE8]" /><input type="number" min={0} max={100} value={filters.score_to} onChange={(event) => setFilter("score_to", event.target.value)} placeholder="Max" className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm outline-none focus:border-[#0A4FE8]" /></div></Labelled>
           <div className="flex items-end"><button onClick={() => { setPage(0); setSearch(""); setFilters({ ...EMPTY_FILTERS }); }} className="min-h-10 rounded-xl border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-700 hover:border-[#0A4FE8]">Clear filters</button></div>
         </div>}
 
         {loading || (listLoading && companies.length === 0) ? <p className="inline-flex items-center gap-2 text-sm text-slate-500"><Loader2 className="h-4 w-4 animate-spin" /> {filters.q ? `Searching for ${filters.q}` : "Loading companies"}</p>
           : companies.length === 0 ? <p className="rounded-2xl border border-dashed border-slate-200 p-8 text-center text-sm text-slate-500">{filters.q ? `No company matches "${filters.q}" in this view. Try clearing the filters or a shorter word.` : `No companies match this view yet. Add a list above to start building toward ${DIRECTORY_TARGET.toLocaleString()}.`}</p>
-            : <ul className="space-y-3">
+            : <ul aria-busy={listLoading} className={`space-y-3 transition-opacity duration-150 ${listLoading ? "opacity-50" : "opacity-100"}`}>
               {companies.map((company) => (
-                <li key={company.id} className="rounded-2xl border border-slate-200 p-4">
+                <li id={`prospect-company-${company.id}`} key={company.id} className="scroll-mt-6 rounded-2xl border border-slate-200 p-4">
                   <div className="flex flex-wrap items-start justify-between gap-3">
                     <div className="min-w-0">
                       <div className="flex flex-wrap items-center gap-2">
                         <h3 className="font-bold text-[#07133B]">{company.company_name}</h3>
-                        <span className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${PRIORITY_TONE[company.priority] || PRIORITY_TONE.low}`}>{company.deal_score} score</span>
+                        <button type="button" onClick={() => setScoreBand(String(company.deal_score), String(company.deal_score))} title={`Show every company scoring ${company.deal_score}.\nDeal score out of 100.\n${SCORE_METRIC.join("\n")}`} className={`rounded-full px-2.5 py-1 text-[11px] font-semibold hover:opacity-80 ${PRIORITY_TONE[company.priority] || PRIORITY_TONE.low}`}>{company.deal_score} score</button>
                         <span className={`rounded-full border px-2.5 py-1 text-[11px] font-semibold ${ACTIVITY_TONE[company.activity_status]}`}>{company.activity_status}</span>
                         <span className={`rounded-full border px-2.5 py-1 text-[11px] font-semibold ${WEBSITE_TONE[company.website_status]}`}>{company.website_status} website</span>
                         {company.country_count > 1 && <span className="inline-flex items-center gap-1 rounded-full border border-blue-200 bg-blue-50 px-2.5 py-1 text-[11px] font-semibold text-[#0A4FE8]"><MapPin className="h-3 w-3" /> Available in {company.country_count} countries</span>}
@@ -641,15 +921,67 @@ export default function ProspectGenerationPage() {
                       ].filter(Boolean).join(" · ") || "Details pending research"}</p>
                       {company.website && <a href={company.website} target="_blank" rel="noopener noreferrer" className="mt-1 inline-flex items-center gap-1 text-xs font-semibold text-[#0A4FE8]">{company.domain} <ExternalLink className="h-3 w-3" /></a>}
                     </div>
+                    {/* Below xl the labels drop away and every action becomes its
+                        icon, so a row of five buttons still fits a phone. */}
                     <div className="flex flex-wrap gap-2">
-                      {company.enrichment_status === "enriched" && !company.prospect_id && <button onClick={() => act(company.id, { action: "promote", id: company.id }, `${company.company_name} was added to the prospect checklist.`)} disabled={busy === company.id} className="inline-flex min-h-9 items-center gap-2 rounded-xl bg-[#0A4FE8] px-3 text-xs font-semibold text-white disabled:opacity-60">{busy === company.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Users className="h-3.5 w-3.5" />} Add to checklist</button>}
-                      <button onClick={() => act(company.id, { action: "update_company", id: company.id, review_status: company.review_status === "shortlisted" ? "new" : "shortlisted" })} className="min-h-9 rounded-xl border border-slate-200 px-3 text-xs font-semibold text-slate-700 hover:border-[#0A4FE8]">{company.review_status === "shortlisted" ? "Shortlisted" : "Shortlist"}</button>
-                      <button onClick={() => setExpanded(expanded === company.id ? "" : company.id)} className="inline-flex min-h-9 items-center gap-1 rounded-xl border border-slate-200 px-3 text-xs font-semibold text-slate-700 hover:border-[#0A4FE8]">{expanded === company.id ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />} Details</button>
-                      <button onClick={() => removeCompany(company)} className="inline-flex min-h-9 items-center rounded-xl border border-slate-200 px-3 text-xs font-semibold text-rose-600 hover:border-rose-300"><Trash2 className="h-3.5 w-3.5" /></button>
+                      {company.enrichment_status === "enriched" && !company.prospect_id && (
+                        <RowAction
+                          label="Add to checklist"
+                          icon={Users}
+                          primary
+                          busy={busy === company.id}
+                          onClick={() => act(company.id, { action: "promote", id: company.id }, `${company.company_name} was added to the prospect checklist.`)}
+                        />
+                      )}
+                      <RowAction
+                        label="Audit"
+                        title={`Run a full brand audit on ${company.company_name}`}
+                        icon={ClipboardCheck}
+                        busy={busy === `audit:${company.id}`}
+                        disabled={!company.website}
+                        onClick={() => runAudit(company)}
+                      />
+                      <RowAction
+                        label="Proposal"
+                        title={`Draft a proposal for ${company.company_name}`}
+                        icon={FileText}
+                        busy={busy === `proposal:${company.id}`}
+                        disabled={!company.website}
+                        onClick={() => draftProposal(company)}
+                      />
+                      <RowAction
+                        label={company.review_status === "shortlisted" ? "Shortlisted" : "Shortlist"}
+                        title={company.prospect_id
+                          ? `${company.company_name} is on the prospect checklist`
+                          : "Shortlist this company and add it to the prospect checklist"}
+                        icon={Bookmark}
+                        active={company.review_status === "shortlisted"}
+                        busy={busy === company.id}
+                        onClick={() => act(
+                          company.id,
+                          { action: "update_company", id: company.id, review_status: company.review_status === "shortlisted" ? "new" : "shortlisted" },
+                          company.review_status === "shortlisted" ? undefined : `${company.company_name} was shortlisted and added to the prospect checklist.`,
+                        )}
+                      />
+                      <RowAction
+                        label="Details"
+                        icon={expanded === company.id ? ChevronUp : ChevronDown}
+                        onClick={() => {
+                          const opening = expanded !== company.id;
+                          setExpanded(opening ? company.id : "");
+                          if (opening) void ensureDetail(company).catch((error) => setNotice({ tone: "error", text: error instanceof Error ? error.message : "Could not load this company." }));
+                        }}
+                      />
+                      <RowAction label="Remove" icon={Trash2} tone="danger" iconOnly onClick={() => removeCompany(company)} />
                     </div>
                   </div>
 
-                  {expanded === company.id && <div className="mt-4 grid gap-4 border-t border-slate-100 pt-4 lg:grid-cols-2">
+                  {/* The research arrives per company, so the panel binds to the
+                      full record and every field below reads from that. */}
+                  {expanded === company.id && ((company?: Company) => !company ? (
+                    <p className="mt-4 inline-flex items-center gap-2 border-t border-slate-100 pt-4 text-sm text-slate-500"><Loader2 className="h-4 w-4 animate-spin" /> Loading research</p>
+                  ) : (
+                    <div className="mt-4 grid gap-4 border-t border-slate-100 pt-4 lg:grid-cols-2">
                     <Block title="Brief">{company.brief || "Not researched yet."}</Block>
                     <Block title="Still trading?">{company.activity_evidence || "Not confirmed."}</Block>
                     {company.countries?.length > 0 && <Block title={`Present in ${company.countries.length} ${company.countries.length === 1 ? "country" : "countries"}`}>{company.countries.join(", ")}</Block>}
@@ -677,7 +1009,7 @@ export default function ProspectGenerationPage() {
                     {company.brand_consistency?.length > 0 && <div>
                       <p className="flex items-center gap-1.5 text-xs font-semibold text-slate-600"><Palette className="h-3.5 w-3.5 text-[#0A4FE8]" /> Brand consistency, website against social</p>
                       <ul className="mt-2 space-y-2">{company.brand_consistency.map((entry, index) => <li key={index} className="rounded-xl bg-slate-50 p-3 text-sm">
-                        <p className="font-semibold text-[#07133B]">{entry.area} <span className={`ml-1 rounded-full px-2 py-0.5 text-[11px] ${entry.status === "consistent" ? "bg-emerald-50 text-emerald-700" : entry.status === "differs" ? "bg-amber-50 text-amber-700" : "bg-slate-100 text-slate-600"}`}>{entry.status}</span></p>
+                        <p className="font-semibold text-[#07133B]">{entry.area} <span className={`ml-1 rounded-full px-2 py-0.5 text-[11px] ${entry.status === "consistent" ? "bg-emerald-50 text-emerald-700" : entry.status === "variant" ? "bg-[#0A4FE8]/10 text-[#0A4FE8]" : entry.status === "differs" ? "bg-amber-50 text-amber-700" : "bg-slate-100 text-slate-600"}`}>{entry.status === "variant" ? "brand variant" : entry.status}</span></p>
                         <p className="mt-1 text-slate-600">{entry.detail}</p>
                         {entry.evidence?.length > 0 && <p className="mt-1 flex flex-wrap gap-2">{entry.evidence.map((link) => <a key={link} href={link} target="_blank" rel="noopener noreferrer" className="text-xs font-semibold text-[#0A4FE8]">view</a>)}</p>}
                       </li>)}</ul>
@@ -690,8 +1022,28 @@ export default function ProspectGenerationPage() {
                       </li>)}</ul>
                       {(company.dns_contacts || []).length > 0 && <ul className="mt-2 space-y-1 text-sm text-slate-600">{company.dns_contacts.map((entry, index) => <li key={index}><span className="font-semibold text-[#07133B]">{entry.value}</span> {entry.detail}</li>)}</ul>}
                     </div>}
-                    <ListBlock title="Local competitors" items={(company.competitors_local || []).map((entry) => `${entry.name}${entry.note ? `: ${entry.note}` : ""}`)} />
-                    <ListBlock title="Global competitors" items={(company.competitors_global || []).map((entry) => `${entry.name}${entry.note ? `: ${entry.note}` : ""}`)} />
+                    <CompetitorBlock
+                      title="Local competitors"
+                      description="Businesses that can credibly serve the same country or local market."
+                      items={company.competitors_local || []}
+                    />
+                    <CompetitorBlock
+                      title="Global competitors"
+                      description="International or cross-border businesses competing for the same buyers."
+                      items={company.competitors_global || []}
+                    />
+                    <div className="lg:col-span-2">
+                      <button
+                        type="button"
+                        onClick={() => refreshCompetitors(company)}
+                        disabled={busy === `competitors:${company.id}` || running}
+                        className="inline-flex min-h-9 items-center gap-2 rounded-xl border border-[#0A4FE8] px-3 text-xs font-semibold text-[#0A4FE8] hover:bg-[#0A4FE8]/5 disabled:opacity-50"
+                      >
+                        {busy === `competitors:${company.id}` ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
+                        {busy === `competitors:${company.id}` ? "Checking competitors..." : "Re-check competitors"}
+                      </button>
+                      <p className="mt-1 text-xs text-slate-400">Re-runs the public research for this company and replaces the competitor lists with verified company-level results.</p>
+                    </div>
                     <div className="lg:col-span-2">
                       {company.outreach_email && <>
                         <p className="text-xs font-semibold text-slate-600">Suggested first email{company.outreach_subject ? ` - ${company.outreach_subject}` : ""}</p>
@@ -709,7 +1061,8 @@ export default function ProspectGenerationPage() {
                       <ul className="mt-1 space-y-0.5">{company.sources.slice(0, 12).map((source) => <li key={source}><a href={source} target="_blank" rel="noopener noreferrer" className="text-xs text-[#0A4FE8] break-all">{source}</a></li>)}</ul>
                     </div>}
                     {company.enrichment_error && <p className="text-xs text-rose-600 lg:col-span-2">Last research error: {company.enrichment_error}</p>}
-                  </div>}
+                    </div>
+                  ))(details[company.id])}
                 </li>
               ))}
             </ul>}
@@ -784,6 +1137,36 @@ function ListBlock({ title, items, suffix }: { title: string; items: string[]; s
     <p className="text-xs font-semibold text-slate-600">{title}</p>
     {items?.length ? <ul className="mt-1 list-disc space-y-1 pl-4 text-sm leading-6 text-slate-600">{items.map((item, index) => <li key={index}>{item}</li>)}</ul> : <p className="mt-1 text-sm text-slate-500">Nothing recorded.</p>}
     {suffix && <p className="mt-1 text-xs text-slate-400">{suffix}</p>}
+  </div>;
+}
+
+function CompetitorBlock({ title, description, items }: { title: string; description: string; items: Competitor[] }) {
+  const groups: Array<{ type: Competitor["type"]; label: string; description: string }> = [
+    { type: "direct", label: "Direct", description: "A substantially similar offer for the same customers and use case" },
+    { type: "indirect", label: "Indirect", description: "A substitute satisfying the same need or competing for the same budget" },
+  ];
+  return <div>
+    <p className="text-xs font-semibold text-slate-600">{title}</p>
+    <p className="mt-1 text-[11px] leading-5 text-slate-500">{description}</p>
+    <div className="mt-2 space-y-3">
+      {groups.map((group) => {
+        const competitors = items.filter((entry) => entry.type === group.type);
+        return <div key={group.type} className="rounded-xl border border-slate-200 bg-slate-50/70 p-3">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${group.type === "direct" ? "bg-[#0A4FE8]/10 text-[#0A4FE8]" : "bg-violet-50 text-violet-700"}`}>{group.label}</span>
+            <span className="text-[11px] text-slate-500">{group.description}</span>
+          </div>
+          {competitors.length ? <ul className="mt-2 space-y-2">
+            {competitors.map((entry) => <li key={`${entry.type}-${entry.url}`} className="text-sm leading-5 text-slate-600">
+              <a href={entry.url} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 font-semibold text-[#0A4FE8]">
+                {entry.name}<ExternalLink className="h-3 w-3" />
+              </a>
+              {entry.note && <p className="mt-0.5 text-xs leading-5 text-slate-500">{entry.note}</p>}
+            </li>)}
+          </ul> : <p className="mt-2 text-xs text-slate-500">No verified {group.label.toLowerCase()} competitor found for this scope yet.</p>}
+        </div>;
+      })}
+    </div>
   </div>;
 }
 
@@ -993,5 +1376,44 @@ function ComposeEmailModal({
         </div>
       </div>
     </div>
+  );
+}
+
+/**
+ * One action on a company row. Full label from xl up, icon alone below that,
+ * where a row of five buttons would otherwise wrap into a wall. The label never
+ * disappears entirely: it stays as the accessible name and the tooltip.
+ */
+function RowAction({ label, icon: Icon, onClick, busy, disabled, primary, active, tone, iconOnly, title }: {
+  label: string;
+  icon: React.ComponentType<{ className?: string }>;
+  onClick: () => void;
+  busy?: boolean;
+  disabled?: boolean;
+  primary?: boolean;
+  active?: boolean;
+  tone?: "danger";
+  iconOnly?: boolean;
+  title?: string;
+}) {
+  const base = primary
+    ? "bg-[#0A4FE8] text-white hover:bg-[#0846cf]"
+    : tone === "danger"
+      ? "border border-slate-200 text-rose-600 hover:border-rose-300"
+      : active
+        ? "border border-[#0A4FE8] bg-blue-50 text-[#0A4FE8]"
+        : "border border-slate-200 text-slate-700 hover:border-[#0A4FE8]";
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={busy || disabled}
+      aria-label={label}
+      title={title || label}
+      className={`inline-flex min-h-9 items-center justify-center gap-1.5 rounded-xl px-3 text-xs font-semibold disabled:opacity-50 ${base}`}
+    >
+      {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Icon className="h-3.5 w-3.5" />}
+      {!iconOnly && <span className="hidden xl:inline">{label}</span>}
+    </button>
   );
 }

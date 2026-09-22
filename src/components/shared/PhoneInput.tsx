@@ -1,9 +1,7 @@
 "use client";
 
 import React, { useState, useEffect, useRef } from "react";
-import { motion, AnimatePresence } from "framer-motion";
-import { AsYouType, CountryCode, getCountries, getCountryCallingCode } from "libphonenumber-js";
-import * as Flags from "country-flag-icons/react/3x2";
+import { AsYouType, CountryCode, getCountries, getCountryCallingCode } from "libphonenumber-js/min";
 import { ChevronDown, Search, Check } from "lucide-react";
 
 interface PhoneInputProps {
@@ -30,6 +28,10 @@ const getCountryName = (code: CountryCode) => {
     }
 };
 
+const getCountryFlag = (code: CountryCode) => String.fromCodePoint(
+    ...code.toUpperCase().split("").map((letter) => 127397 + letter.charCodeAt(0)),
+);
+
 export const PhoneInput = React.forwardRef<HTMLInputElement, PhoneInputProps>(
     ({ value = "", onChange, onBlur, name, error, disabled, className }, ref) => {
         const [isOpen, setIsOpen] = useState(false);
@@ -51,20 +53,6 @@ export const PhoneInput = React.forwardRef<HTMLInputElement, PhoneInputProps>(
             return () => document.removeEventListener("mousedown", handleClickOutside);
         }, []);
 
-        // Detect Country by IP
-        useEffect(() => {
-            if (!value) {
-                fetch("https://ipapi.co/json/")
-                    .then((res) => res.json())
-                    .then((data) => {
-                        if (data?.country_code && COUNTRIES.includes(data.country_code as CountryCode)) {
-                            setCountry(data.country_code as CountryCode);
-                        }
-                    })
-                    .catch(() => { });
-            }
-        }, [value]);
-
         // Parse existing value strictly to extract country automatically (useful for pastes)
         useEffect(() => {
             if (value && value.trim() !== "") {
@@ -82,8 +70,6 @@ export const PhoneInput = React.forwardRef<HTMLInputElement, PhoneInputProps>(
                 }
             }
         }, [value]);
-
-        const FlagComponent = Flags[country] || (() => <div className="w-full h-full bg-gray-200" />);
 
         const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
             let rawValue = e.target.value;
@@ -156,7 +142,7 @@ export const PhoneInput = React.forwardRef<HTMLInputElement, PhoneInputProps>(
                         <div className="size-5 lg:size-6 2xl:size-[30px] bg-white rounded-full flex items-center justify-center shadow-sm relative overflow-hidden shrink-0">
                             {/* Object cover and scale makes the 3x2 flag fill the circle perfectly */}
                             <div className="w-full h-full scale-[1.3] flex items-center justify-center">
-                                <FlagComponent className="w-full h-full object-cover" />
+                                <span className="text-[18px] leading-none" aria-hidden="true">{getCountryFlag(country)}</span>
                             </div>
                         </div>
                         <span className="text-brand-body text-[12px] lg:text-[13px] 2xl:text-[15px] font-medium tracking-[-0.01em]">
@@ -184,15 +170,8 @@ export const PhoneInput = React.forwardRef<HTMLInputElement, PhoneInputProps>(
                 </div>
 
                 {/* Dropdown Menu */}
-                <AnimatePresence>
-                    {isOpen && (
-                        <motion.div
-                            initial={{ opacity: 0, y: -10 }}
-                            animate={{ opacity: 1, y: 0 }}
-                            exit={{ opacity: 0, y: -10 }}
-                            transition={{ duration: 0.15 }}
-                            className="absolute top-[calc(100%+8px)] left-0 w-[300px] 2xl:w-[360px] max-h-[320px] 2xl:max-h-[400px] bg-white border border-brand-stroke rounded-[12px] 2xl:rounded-[16px] shadow-[0_12px_24px_rgba(0,0,0,0.08)] z-50 overflow-hidden flex flex-col"
-                        >
+                {isOpen && (
+                        <div className="absolute top-[calc(100%+8px)] left-0 w-[300px] 2xl:w-[360px] max-h-[320px] 2xl:max-h-[400px] bg-white border border-brand-stroke rounded-[12px] 2xl:rounded-[16px] shadow-[0_12px_24px_rgba(0,0,0,0.08)] z-50 overflow-hidden flex flex-col animate-in fade-in slide-in-from-top-1 duration-150">
                             {/* Search Sticky Header */}
                             <div className="p-3 2xl:p-4 border-b border-brand-stroke/50 bg-gray-50/50">
                                 <div className="bg-white border border-brand-stroke rounded-lg 2xl:rounded-xl px-3 py-2 2xl:py-2.5 flex items-center gap-2">
@@ -215,7 +194,6 @@ export const PhoneInput = React.forwardRef<HTMLInputElement, PhoneInputProps>(
                                     </div>
                                 ) : (
                                     filteredCountries.map((c) => {
-                                        const CFlag = Flags[c] || (() => null);
                                         const isSelected = c === country;
                                         return (
                                             <button
@@ -226,7 +204,7 @@ export const PhoneInput = React.forwardRef<HTMLInputElement, PhoneInputProps>(
                                             >
                                                 <div className="flex items-center gap-3">
                                                     <div className="size-5 2xl:size-6 rounded-sm overflow-hidden border border-brand-stroke/20 shrink-0">
-                                                        <CFlag className="w-full h-full object-cover" />
+                                                        <span className="text-[17px] leading-none" aria-hidden="true">{getCountryFlag(c)}</span>
                                                     </div>
                                                     <span className="text-brand-navy text-[13px] 2xl:text-[14px] font-medium text-left truncate max-w-[160px] 2xl:max-w-[200px]">
                                                         {getCountryName(c)}
@@ -243,9 +221,8 @@ export const PhoneInput = React.forwardRef<HTMLInputElement, PhoneInputProps>(
                                     })
                                 )}
                             </div>
-                        </motion.div>
-                    )}
-                </AnimatePresence>
+                        </div>
+                )}
             </div>
         );
     }

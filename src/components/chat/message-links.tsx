@@ -1,10 +1,11 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 
 /** Covers public URLs plus the relative cMeet links stored in chat messages. */
-const URL_REGEX = /((?:https?:\/\/|www\.)[^\s<]+[^\s<.,;:!?()]|\/meet\/[a-z0-9-]+(?:\?[^\s<]*)?)/gi;
-const MARKDOWN_OR_URL_REGEX = /(\*\*([^*\n]+)\*\*|\[([^\]\n]+)\]\((https?:\/\/[^)\s]+)\)|((?:https?:\/\/|www\.)[^\s<]+[^\s<.,;:!?()]|\/meet\/[a-z0-9-]+(?:\?[^\s<]*)?))/gi;
+const URL_REGEX = /((?:https?:\/\/|www\.)[^\s<]+[^\s<.,;:!?()]|\/meet\/[a-z0-9-]+(?:\/[a-z0-9-]+)?(?:\?[^\s<]*)?)/gi;
+const MARKDOWN_OR_URL_REGEX = /(\*\*([^*\n]+)\*\*|\[([^\]\n]+)\]\((https?:\/\/[^)\s]+)\)|((?:https?:\/\/|www\.)[^\s<]+[^\s<.,;:!?()]|\/meet\/[a-z0-9-]+(?:\/[a-z0-9-]+)?(?:\?[^\s<]*)?))/gi;
 
 function normalizeHref(raw: string): string {
     if (raw.startsWith("/")) return raw;
@@ -20,7 +21,7 @@ function normalizeHref(raw: string): string {
  */
 export function isMeetingLink(url: string): boolean {
     try {
-        return /^\/meet\/[a-z0-9-]+\/?$/i.test(new URL(url, "https://cdsspace.pro").pathname);
+        return /^\/meet\/[a-z0-9-]+(?:\/[a-z0-9-]+)?\/?$/i.test(new URL(url, "https://cdsspace.pro").pathname);
     } catch {
         return false;
     }
@@ -29,7 +30,6 @@ export function isMeetingLink(url: string): boolean {
 export function Linkified({
     text,
     className,
-    onMeetingLink,
 }: {
     text: string;
     className?: string;
@@ -61,17 +61,25 @@ export function Linkified({
             {parts.map((part, index) => {
                 if (typeof part === "string") return <span key={index}>{part}</span>;
                 if (part.kind === "bold") return <strong key={index} className="font-bold">{part.display}</strong>;
+                if (isMeetingLink(part.url)) {
+                    return (
+                        <Link
+                            key={index}
+                            href={part.url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="underline underline-offset-2 break-words hover:opacity-80"
+                        >
+                            {part.display}
+                        </Link>
+                    );
+                }
                 return (
                     <a
                         key={index}
                         href={part.url}
-                        target={onMeetingLink && isMeetingLink(part.url) ? undefined : "_blank"}
+                        target="_blank"
                         rel="noopener noreferrer"
-                        onClick={(event) => {
-                            if (!onMeetingLink || !isMeetingLink(part.url)) return;
-                            event.preventDefault();
-                            onMeetingLink(part.url);
-                        }}
                         className="underline underline-offset-2 break-words hover:opacity-80"
                     >
                         {part.display}
@@ -102,28 +110,55 @@ interface Preview {
 const cache = new Map<string, Preview | null>();
 
 /**
+ * The preview service can only fetch an absolute URL, but chat stores cMeet
+ * links as bare paths ("/meet/calm-cloud-40/..."). Sent as-is they came back
+ * "invalid url" and the card silently never appeared - which is why meeting
+ * links previewed in team chat, where they are stored absolute, and nowhere
+ * else. Resolving against the current origin fixes both, including every
+ * message already sitting in a thread.
+ */
+function absoluteTarget(url: string): string | null {
+    try {
+        // No window during server rendering; the fetch only runs in the effect.
+        const base = typeof window === "undefined" ? undefined : window.location.origin;
+        return new URL(url, base).toString();
+    } catch {
+        return null;
+    }
+}
+
+/**
  * Lightweight OG card. Fetches /api/link-preview once per URL (module-level
  * memoised), renders nothing while loading, renders nothing if the URL
  * returned no useful metadata. Kept visually compact so it doesn't
  * dominate the bubble.
  */
 export function LinkPreview({ url, variant = "light" }: { url: string; variant?: "light" | "dark" }) {
-    const [preview, setPreview] = useState<Preview | null | undefined>(
-        cache.has(url) ? (cache.get(url) as Preview | null) : undefined,
-    );
+    const [preview, setPreview] = useState<Preview | null | undefined>(() => {
+        const target = absoluteTarget(url);
+        return target && cache.has(target) ? (cache.get(target) as Preview | null) : undefined;
+    });
 
     useEffect(() => {
-        if (cache.has(url)) return;
+        const target = absoluteTarget(url);
+        if (!target) {
+            setPreview(null);
+            return;
+        }
+        if (cache.has(target)) {
+            setPreview(cache.get(target) as Preview | null);
+            return;
+        }
         let cancelled = false;
         (async () => {
             try {
-                const res = await fetch(`/api/link-preview?url=${encodeURIComponent(url)}`);
+                const res = await fetch(`/api/link-preview?url=${encodeURIComponent(target)}`);
                 const json = await res.json();
                 const p = (json?.preview as Preview) || null;
-                cache.set(url, p);
+                cache.set(target, p);
                 if (!cancelled) setPreview(p);
             } catch {
-                cache.set(url, null);
+                cache.set(target, null);
                 if (!cancelled) setPreview(null);
             }
         })();

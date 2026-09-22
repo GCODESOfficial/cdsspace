@@ -25,10 +25,12 @@ import {
 import { cn } from "@/lib/utils";
 import {
   SUBSCRIPTION_PLANS,
+  SUPREME_MAX_DESIGNS,
   type SubscriptionPlanDefinition,
   type SubscriptionPlanId,
 } from "@/lib/subscription-plans";
 import Link from "next/link";
+import { UniversalShareButton } from "@/components/share/UniversalShareButton";
 
 interface PriceRow {
   plan: SubscriptionPlanId;
@@ -59,6 +61,24 @@ const PLAN_ICONS = {
   startup: Rocket,
   scaleup: TrendingUp,
   supreme: Layers3,
+} as const;
+
+const PLAN_CARD_STYLES = {
+  startup: {
+    card: "border-[#0A4FE8] bg-[#0A4FE8] text-white hover:border-[#2868F0]",
+    icon: "bg-white/15 text-white",
+    button: "bg-white text-[#0A4FE8] hover:bg-blue-50",
+  },
+  scaleup: {
+    card: "border-[#07133B] bg-[#07133B] text-white hover:border-[#193274]",
+    icon: "bg-white/10 text-white",
+    button: "bg-white text-[#07133B] hover:bg-slate-100",
+  },
+  supreme: {
+    card: "border-[#087A55] bg-[#087A55] text-white hover:border-[#15966C]",
+    icon: "bg-white/15 text-white",
+    button: "bg-white text-[#087A55] hover:bg-emerald-50",
+  },
 } as const;
 
 function formatPrice(value: number, currency: string) {
@@ -179,6 +199,16 @@ export function SubscriptionPlanCatalog({
           <p className="mx-auto mt-4 max-w-[590px] text-[15px] leading-relaxed text-brand-body sm:text-[17px]">
             Choose a plan for your business. Prices come directly from the admin rate table in your account billing currency.
           </p>
+          <div className="mt-5 flex justify-center">
+            <UniversalShareButton
+              title="CDS Space subscription plans"
+              text="Choose a CDS Space design subscription plan for your business."
+              chatText="View the CDS Space subscription plans and choose the design capacity that suits your business."
+              url="/subscription/start"
+              label="Share plans"
+              className="min-h-10 rounded-[10px] px-4"
+            />
+          </div>
         </div>
 
         {pendingInvoice && ["sent", "overdue"].includes(pendingInvoice.status) && (
@@ -201,6 +231,7 @@ export function SubscriptionPlanCatalog({
           <div className="mt-10 grid grid-cols-1 gap-5 md:grid-cols-3 lg:gap-6">
             {SUBSCRIPTION_PLANS.map((plan) => {
               const Icon = PLAN_ICONS[plan.id];
+              const colors = PLAN_CARD_STYLES[plan.id];
               const fromPrice = startingPrice(plan.id);
               return (
                 <button
@@ -209,32 +240,32 @@ export function SubscriptionPlanCatalog({
                   data-testid={`subscription-plan-${plan.id}`}
                   onClick={() => openPlan(plan)}
                   className={cn(
-                    "group relative flex min-h-[430px] flex-col rounded-[20px] border p-6 text-left transition duration-200 hover:-translate-y-1 hover:shadow-[0_18px_44px_rgba(15,40,90,0.12)] focus:outline-none focus:ring-4 focus:ring-blue-100",
-                    plan.popular ? "border-[#0A4FE8] bg-[#0A4FE8] text-white" : "border-[#E3E8F4] bg-white text-brand-navy hover:border-[#0A4FE8]/35",
+                    "group relative flex min-h-[430px] flex-col rounded-[20px] border p-6 text-left transition duration-200 hover:-translate-y-1 hover:shadow-[0_18px_44px_rgba(15,40,90,0.18)] focus:outline-none focus:ring-4 focus:ring-blue-100",
+                    colors.card,
                   )}
                 >
-                  {plan.popular && <span className="absolute -top-3 left-1/2 -translate-x-1/2 rounded-full bg-brand-navy px-4 py-1 text-xs font-semibold text-white shadow-sm">Most popular</span>}
-                  <span className={cn("grid h-11 w-11 place-items-center rounded-[12px]", plan.popular ? "bg-white/14 text-white" : "bg-blue-50 text-[#0A4FE8]") }>
+                  {plan.popular && <span className="absolute -top-3 left-1/2 -translate-x-1/2 rounded-full bg-[#0A4FE8] px-4 py-1 text-xs font-semibold text-white shadow-sm">Most popular</span>}
+                  <span className={cn("grid h-11 w-11 place-items-center rounded-[12px]", colors.icon)}>
                     <Icon className="h-5 w-5" />
                   </span>
                   <h2 className="mt-5 text-[22px] font-semibold">{plan.name}</h2>
-                  <p className={cn("mt-2 min-h-[44px] text-sm leading-relaxed", plan.popular ? "text-white/76" : "text-brand-body")}>{plan.description}</p>
+                  <p className="mt-2 min-h-[44px] text-sm leading-relaxed text-white/75">{plan.description}</p>
                   <div className="mt-5">
                     {fromPrice > 0 ? (
-                      <><span className="text-[22px] font-semibold">From {formatPrice(fromPrice, catalog!.currency)}</span><span className={cn("ml-1 text-xs", plan.popular ? "text-white/70" : "text-brand-mute")}>/{plan.billingUnit}</span></>
+                      <><span className="text-[22px] font-semibold">From {formatPrice(fromPrice, catalog!.currency)}</span><span className="ml-1 text-xs text-white/65">/{plan.billingUnit}</span></>
                     ) : (
-                      <span className={cn("text-sm font-semibold", plan.popular ? "text-white/80" : "text-brand-blue")}>Admin price pending</span>
+                      <span className="text-sm font-semibold text-white/80">Admin price pending</span>
                     )}
                   </div>
                   <div className="mt-6 flex flex-1 flex-col gap-3">
                     {plan.features.map((feature) => (
-                      <span key={feature} className={cn("flex items-start gap-2.5 text-[13px] leading-relaxed", plan.popular ? "text-white/90" : "text-brand-body")}>
-                        <Check className={cn("mt-0.5 h-4 w-4 shrink-0", plan.popular ? "text-white" : "text-[#0A4FE8]")} /> {feature}
+                      <span key={feature} className="flex items-start gap-2.5 text-[13px] leading-relaxed text-white/90">
+                        <Check className="mt-0.5 h-4 w-4 shrink-0 text-white" /> {feature}
                       </span>
                     ))}
                   </div>
-                  <span className={cn("mt-7 inline-flex h-11 items-center justify-center rounded-[10px] text-sm font-semibold", plan.popular ? "bg-white text-[#0A4FE8]" : "bg-[#0A4FE8] text-white")}>
-                    View plan
+                  <span className={cn("mt-7 inline-flex h-11 items-center justify-center rounded-[10px] text-sm font-semibold transition-colors", colors.button)}>
+                    Own plan
                   </span>
                 </button>
               );
@@ -275,11 +306,11 @@ export function SubscriptionPlanCatalog({
                 {selectedPlan.id === "supreme" && (
                   <div>
                     <label htmlFor="subscription-quantity" className="mb-2 block text-sm font-semibold text-brand-navy">Design quantity</label>
-                    <p className="mb-3 text-xs leading-relaxed text-brand-body">Supreme is charged per design. Choose the exact number your business needs.</p>
+                    <p className="mb-3 text-xs leading-relaxed text-brand-body">Supreme is charged per design. Choose up to {SUPREME_MAX_DESIGNS} designs monthly.</p>
                     <div className="flex items-center gap-3">
                       <button type="button" aria-label="Reduce design quantity" onClick={() => setQuantity((value) => Math.max(1, value - 1))} className="grid h-11 w-11 place-items-center rounded-[10px] border border-[#E3E8F4] text-brand-navy hover:border-[#0A4FE8]/40"><Minus className="h-4 w-4" /></button>
-                      <input id="subscription-quantity" type="number" min={1} max={1000} value={quantity} onChange={(event) => setQuantity(Math.min(1000, Math.max(1, Number(event.target.value) || 1)))} className="h-11 w-24 rounded-[10px] border border-[#E3E8F4] text-center text-sm font-semibold text-brand-navy outline-none focus:border-[#0A4FE8]" />
-                      <button type="button" aria-label="Increase design quantity" onClick={() => setQuantity((value) => Math.min(1000, value + 1))} className="grid h-11 w-11 place-items-center rounded-[10px] border border-[#E3E8F4] text-brand-navy hover:border-[#0A4FE8]/40"><Plus className="h-4 w-4" /></button>
+                      <input id="subscription-quantity" type="number" min={1} max={SUPREME_MAX_DESIGNS} value={quantity} onChange={(event) => setQuantity(Math.min(SUPREME_MAX_DESIGNS, Math.max(1, Number(event.target.value) || 1)))} className="h-11 w-24 rounded-[10px] border border-[#E3E8F4] text-center text-sm font-semibold text-brand-navy outline-none focus:border-[#0A4FE8]" />
+                      <button type="button" aria-label="Increase design quantity" onClick={() => setQuantity((value) => Math.min(SUPREME_MAX_DESIGNS, value + 1))} className="grid h-11 w-11 place-items-center rounded-[10px] border border-[#E3E8F4] text-brand-navy hover:border-[#0A4FE8]/40"><Plus className="h-4 w-4" /></button>
                     </div>
                   </div>
                 )}

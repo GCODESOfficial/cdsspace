@@ -251,79 +251,68 @@ export default function InflowPage() {
           <p className="mt-1 text-sm text-gray-500">Add positive funds as they come into the business.</p>
         </div>
       ) : (
-        <div className="grid grid-cols-1 gap-5 lg:grid-cols-2 xl:grid-cols-3">
-          {inflows.map((entry) => (
-            <div key={entry.id} className={`${glassCard} p-5`}>
-              <div className="flex items-start justify-between gap-3 mb-4">
-                <div className="min-w-0">
-                  <h3 className="font-semibold text-gray-900 truncate">{entry.title}</h3>
-                  <p className="text-xs text-gray-500">{entry.source || "General inflow"}</p>
-                </div>
-                <span className="shrink-0 rounded-full bg-emerald-50 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wider text-emerald-700">
-                  credit
-                </span>
-              </div>
-              <div className="text-2xl font-bold text-gray-900">{formatMoney(convertFinanceAmount(entry.amount, entry.currency, displayCurrency, rates), displayCurrency)}</div>
-              {entry.currency !== displayCurrency && <div className="mt-0.5 text-[11px] text-gray-400">Original: {formatMoney(entry.amount, entry.currency)}</div>}
-              <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-xs text-gray-500">
-                <span>{formatDate(entry.received_on)}</span>
-                {entry.payment_method && <span>{entry.payment_method}</span>}
-                {entry.reference && <span>Ref: {entry.reference}</span>}
-              </div>
-              {entry.finance_projects && (
-                <div className="mt-3 rounded-xl bg-blue-50 px-3 py-2 text-xs font-medium text-blue-700">
-                  {entry.finance_projects.name} - {entry.finance_projects.client}
-                </div>
-              )}
-              {entry.notes && <p className="mt-3 line-clamp-2 text-sm text-gray-500">{entry.notes}</p>}
-              <div className="mt-4 flex justify-end gap-1">
-                <button onClick={() => openEdit(entry)} className="grid h-9 w-9 place-items-center rounded-lg text-gray-500 transition hover:bg-blue-50 hover:text-blue-600" aria-label="Edit inflow">
-                  <Edit2 className="w-4 h-4" />
-                </button>
-                <button onClick={() => remove(entry.id)} className="grid h-9 w-9 place-items-center rounded-lg text-gray-500 transition hover:bg-red-50 hover:text-red-600" aria-label="Delete inflow">
-                  <Trash2 className="w-4 h-4" />
-                </button>
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-
-      {!loading && inflows.length > 0 && (
-        <div className={`${glassCard} mt-6 overflow-hidden`}>
+        <div className={`${glassCard} overflow-hidden`}>
           <div className="flex items-center gap-2 border-b border-white/70 px-5 py-4">
             <ReceiptText className="w-4 h-4 text-emerald-600" />
             <h2 className="font-semibold text-gray-900">Inflow Register</h2>
           </div>
+          {/* One row per entry, carrying everything the cards did. Every inflow
+              is a credit by definition, so the per-card "credit" tag is dropped
+              rather than repeated down a column that could never say anything
+              else. */}
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[760px] text-sm">
-              <thead className="bg-white/50 text-left text-[11px] uppercase tracking-wider text-gray-500">
-                <tr>
-                  <th className="px-5 py-3">Date</th>
-                  <th className="px-5 py-3">Title</th>
-                  <th className="px-5 py-3">Source</th>
-                  <th className="px-5 py-3">Reference</th>
-                  <th className="px-5 py-3 text-right">Amount</th>
+          <table className="w-full min-w-[900px] text-sm">
+            <thead className="bg-white/50">
+              <tr className="text-left text-[11px] uppercase tracking-wider text-gray-500">
+                <th className="px-5 py-4">Inflow</th>
+                <th className="px-5 py-4">Project</th>
+                <th className="px-5 py-4">Received</th>
+                <th className="px-5 py-4">Method</th>
+                <th className="px-5 py-4">Reference</th>
+                <th className="px-5 py-4 text-right">Amount</th>
+                <th className="px-5 py-4"></th>
+              </tr>
+            </thead>
+            <tbody>
+              {inflows.map((entry) => (
+                <tr key={entry.id} className="border-t border-white/60 align-top hover:bg-white/50">
+                  <td className="px-5 py-4">
+                    <div className="font-medium text-gray-900">{entry.title}</div>
+                    <div className="text-xs text-gray-500">{entry.source || "General inflow"}</div>
+                    {/* The note is where the reason for the money lives, so it
+                        stays on the row rather than behind an edit dialog. */}
+                    {entry.notes && <div className="mt-1 max-w-[26rem] text-xs leading-5 text-gray-400">{entry.notes}</div>}
+                  </td>
+                  <td className="px-5 py-4 text-gray-500">
+                    {entry.finance_projects
+                      ? <span className="rounded-lg bg-blue-50 px-2.5 py-1 text-xs font-medium text-blue-700">{entry.finance_projects.name} - {entry.finance_projects.client}</span>
+                      : <span className="text-xs text-gray-400">-</span>}
+                  </td>
+                  <td className="px-5 py-4 whitespace-nowrap text-gray-500">{formatDate(entry.received_on)}</td>
+                  <td className="px-5 py-4 text-gray-500">{entry.payment_method || <span className="text-gray-400">-</span>}</td>
+                  <td className="px-5 py-4 text-gray-500">{entry.reference || <span className="text-gray-400">-</span>}</td>
+                  <td className="px-5 py-4 text-right font-semibold whitespace-nowrap text-emerald-700">
+                    <div>{formatMoney(convertFinanceAmount(entry.amount, entry.currency, displayCurrency, rates), displayCurrency)}</div>
+                    {entry.currency !== displayCurrency && <div className="mt-0.5 text-[11px] font-normal text-gray-400">Original: {formatMoney(entry.amount, entry.currency)}</div>}
+                  </td>
+                  <td className="px-5 py-4 text-right">
+                    <div className="flex justify-end gap-1">
+                      <button onClick={() => openEdit(entry)} className="grid h-8 w-8 place-items-center rounded-lg text-gray-400 transition hover:bg-blue-50 hover:text-blue-600" aria-label={`Edit ${entry.title}`}>
+                        <Edit2 className="w-4 h-4" />
+                      </button>
+                      <button onClick={() => remove(entry.id)} className="grid h-8 w-8 place-items-center rounded-lg text-gray-400 transition hover:bg-red-50 hover:text-red-600" aria-label={`Delete ${entry.title}`}>
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
+                  </td>
                 </tr>
-              </thead>
-              <tbody className="divide-y divide-white/60">
-                {inflows.map((entry) => (
-                  <tr key={entry.id} className="hover:bg-white/50">
-                    <td className="px-5 py-4 text-gray-500">{formatDate(entry.received_on)}</td>
-                    <td className="px-5 py-4 font-medium text-gray-900">{entry.title}</td>
-                    <td className="px-5 py-4 text-gray-500">{entry.source || "-"}</td>
-                    <td className="px-5 py-4 text-gray-500">{entry.reference || "-"}</td>
-                    <td className="px-5 py-4 text-right font-semibold text-emerald-700">
-                      <div>{formatMoney(convertFinanceAmount(entry.amount, entry.currency, displayCurrency, rates), displayCurrency)}</div>
-                      {entry.currency !== displayCurrency && <div className="mt-0.5 text-[11px] font-normal text-gray-400">Original: {formatMoney(entry.amount, entry.currency)}</div>}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+              ))}
+            </tbody>
+          </table>
           </div>
         </div>
       )}
+
     </FinanceShell>
   );
 }

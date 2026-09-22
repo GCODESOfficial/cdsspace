@@ -12,7 +12,7 @@ import {
     ExternalLink,
     Eye,
     Code,
-    Wand2,
+    PenLine,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { RichTextEditor } from "@/components/admin/RichTextEditor";
@@ -45,7 +45,7 @@ export default function LegalEditorPage() {
 
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
-    const [downloading, setDownloading] = useState(false);
+    const [downloading, setDownloading] = useState<"docx" | "pdf" | null>(null);
     const [uploading, setUploading] = useState(false);
     const [mode, setMode] = useState<ViewMode>("visual");
     const safePreview = useMemo(() => sanitizeCDocHtml(content), [content]);
@@ -53,7 +53,7 @@ export default function LegalEditorPage() {
     const fileInputRef = useRef<HTMLInputElement | null>(null);
 
     useEffect(() => {
-        if (slug !== "privacy" && slug !== "terms" && slug !== "brand-marketer-agreement") {
+        if (slug !== "privacy" && slug !== "terms" && slug !== "brand-marketer-agreement" && slug !== "aml-ctf-policy") {
             router.replace("/admin/legal");
             return;
         }
@@ -98,10 +98,11 @@ export default function LegalEditorPage() {
         }
     }
 
-    async function handleDownload() {
-        setDownloading(true);
+    async function handleDownload(format: "docx" | "pdf") {
+        setDownloading(format);
         try {
-            const res = await fetch(`/api/admin/legal/${slug}/download`);
+            const query = format === "pdf" ? "?format=pdf" : "";
+            const res = await fetch(`/api/admin/legal/${slug}/download${query}`);
             if (!res.ok) throw new Error("Download failed");
             const blob = await res.blob();
             const url = URL.createObjectURL(blob);
@@ -110,14 +111,14 @@ export default function LegalEditorPage() {
             a.download =
                 res.headers
                     .get("Content-Disposition")
-                    ?.match(/filename="?([^";]+)"?/)?.[1] ?? `${slug}.docx`;
+                    ?.match(/filename="?([^";]+)"?/)?.[1] ?? `${slug}.${format}`;
             a.click();
             URL.revokeObjectURL(url);
         } catch (e) {
             const message = e instanceof Error ? e.message : "Download failed";
             toast({ title: "Error", description: message, variant: "destructive" });
         } finally {
-            setDownloading(false);
+            setDownloading(null);
         }
     }
 
@@ -158,19 +159,27 @@ export default function LegalEditorPage() {
     }
 
     const isSeed = doc?.version === 0;
-    const publicHref = slug === "brand-marketer-agreement" ? "/legal/brand-marketer-agreement" : `/${slug}`;
-    const label = slug === "privacy" ? "Privacy Policy" : slug === "terms" ? "Terms of Service" : "Brand Marketer Agreement";
+    const publicHref =
+        slug === "brand-marketer-agreement" || slug === "aml-ctf-policy" ? `/legal/${slug}` : `/${slug}`;
+    const label =
+        slug === "privacy"
+            ? "Privacy policy"
+            : slug === "terms"
+              ? "Terms of service"
+              : slug === "brand-marketer-agreement"
+                ? "Brand marketer agreement"
+                : "AML/CTF policy";
 
     return (
-        <div className="p-8 max-w-[1400px]">
+        <div className="max-w-[1400px] p-4 sm:p-6 xl:p-8">
             {/* Header */}
-            <div className="flex items-start justify-between gap-4 mb-6">
+            <div className="mb-6 flex flex-col items-start justify-between gap-4 xl:flex-row">
                 <div className="min-w-0">
                     <Link
                         href="/admin/legal"
                         className="inline-flex items-center gap-1.5 text-sm text-gray-500 hover:text-[#0A4FE8] mb-2"
                     >
-                        <ArrowLeft className="w-4 h-4" /> Back to Legal Documents
+                        <ArrowLeft className="w-4 h-4" /> Back to legal documents
                     </Link>
                     <h1 className="text-[26px] font-bold text-[#0D1B39] flex items-center gap-3">
                         {label}
@@ -190,7 +199,7 @@ export default function LegalEditorPage() {
                     </p>
                 </div>
 
-                <div className="flex items-center gap-2 shrink-0">
+                <div className="flex shrink-0 flex-wrap items-center gap-2">
                     <Link
                         href={publicHref}
                         target="_blank"
@@ -200,12 +209,21 @@ export default function LegalEditorPage() {
                     </Link>
 
                     <button
-                        onClick={handleDownload}
-                        disabled={downloading}
+                        onClick={() => handleDownload("pdf")}
+                        disabled={downloading !== null}
                         className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl border border-gray-200 text-sm text-gray-700 hover:border-[#0A4FE8] hover:text-[#0A4FE8] disabled:opacity-60"
                     >
-                        {downloading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
-                        Download .docx
+                        {downloading === "pdf" ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
+                        Download PDF
+                    </button>
+
+                    <button
+                        onClick={() => handleDownload("docx")}
+                        disabled={downloading !== null}
+                        className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl border border-gray-200 text-sm text-gray-700 hover:border-[#0A4FE8] hover:text-[#0A4FE8] disabled:opacity-60"
+                    >
+                        {downloading === "docx" ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
+                        Download Word
                     </button>
 
                     <button
@@ -274,7 +292,7 @@ export default function LegalEditorPage() {
                             mode === "visual" ? "bg-white shadow-sm text-[#0D1B39]" : "text-gray-500"
                         }`}
                     >
-                        <Wand2 className="w-4 h-4" /> Edit
+                        <PenLine className="w-4 h-4" /> Edit
                     </button>
                     <button
                         onClick={() => setMode("preview")}
@@ -295,7 +313,7 @@ export default function LegalEditorPage() {
                     </button>
                 </div>
                 <p className="text-xs text-gray-400">
-                    Use the toolbar to format text. For a polished pass, <strong>Download .docx</strong>, edit in Word, then <strong>Upload</strong>.
+                    Use the toolbar to format text. You can also <strong>download Word</strong>, edit offline, then <strong>upload</strong>.
                 </p>
             </div>
 

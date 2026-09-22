@@ -11,11 +11,29 @@ import AdminActivityLayer from '@/components/admin/AdminActivityLayer';
 import { DashboardAutoSave } from '@/components/autosave/DashboardAutoSave';
 import AdminNotificationBell from '@/components/notifications/admin-notification-bell';
 import { ViewAsProvider, useViewAs } from '@/components/admin/view-as';
+import { IncomingCallRinger } from '@/components/team/IncomingCallRinger';
 
 interface SessionData {
   authenticated: boolean;
   role: "super_admin" | "sub_admin";
   permissions: string[];
+}
+
+const RETRYABLE_SESSION_STATUSES = new Set([408, 425, 429, 500, 502, 503, 504]);
+
+async function fetchAdminSession(attempts = 3) {
+  let response: Response | null = null;
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    try {
+      response = await fetch('/api/admin-check', { credentials: 'include', cache: 'no-store' });
+      if (!RETRYABLE_SESSION_STATUSES.has(response.status) || attempt === attempts - 1) return response;
+    } catch (error) {
+      if (attempt === attempts - 1) throw error;
+    }
+    await new Promise((resolve) => window.setTimeout(resolve, 300 * (attempt + 1)));
+  }
+  if (!response) throw new Error('Admin session request did not complete.');
+  return response;
 }
 
 /**
@@ -72,7 +90,7 @@ function AdminLayoutBody({ children }: { children: React.ReactNode }) {
     if (!hasEstablishedSession.current) setIsChecking(true);
     setSessionUnavailable(false);
 
-    fetch('/api/admin-check', { credentials: 'include', cache: 'no-store' })
+    fetchAdminSession()
       .then(async (res) => {
         if (!res.ok) {
           if (res.status === 401 || res.status === 403) {
@@ -103,7 +121,9 @@ function AdminLayoutBody({ children }: { children: React.ReactNode }) {
 
           // Sub-admins page is super-admin only. `team_members.promote`
           // also unlocks role management for delegated admins.
-          if (pathname === "/admin/sub-admins") {
+          if (pathname === "/admin/cmeet-api") {
+            routeDenied = true;
+          } else if (pathname === "/admin/sub-admins") {
             routeDenied = !(
               effectivePermissions.includes("all") ||
               effectivePermissions.includes("team_members.promote")
@@ -160,6 +180,7 @@ function AdminLayoutBody({ children }: { children: React.ReactNode }) {
   return (
     <div data-app-shell="admin" className="min-h-[100dvh] overflow-x-clip bg-[#F0F5FF]">
       <DashboardAutoSave scope="admin" />
+        <IncomingCallRinger endpoint="/api/admin/calls/incoming" />
       <AdminSidebar
         mobileOpen={isSidebarOpen}
         onMobileClose={() => setIsSidebarOpen(false)}

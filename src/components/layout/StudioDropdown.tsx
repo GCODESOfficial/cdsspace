@@ -28,19 +28,19 @@ const productCards = [
     {
         title: "Banners",
         description: "Roll-up banners for your brand.",
-        image: "/home/source/07fbbce755ed61ba1adec6b971cbda1650a2fb94.png",
+        image: "/home/img-2.svg",
         accountHref: "/dashboard/banners",
     },
     {
         title: "Merch",
         description: "View & request your merch",
-        image: "/home/source/54b250b0180289389a7faef542be363a9bb13baa.png",
+        image: "/home/img-1.svg",
         accountHref: "/dashboard/merch",
     },
     {
         title: "Brand Marketers",
         description: "Refer brands and earn 5%",
-        image: "/home/source/0b29fab281d7cfe7e98502c49ddc2794b06f2c3c.png",
+        image: "/home/img.svg",
         href: "/marketer",
     },
 ];

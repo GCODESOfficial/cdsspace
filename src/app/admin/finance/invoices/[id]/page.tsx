@@ -11,11 +11,12 @@ import { Banknote, BellRing, Copy, Download, Trash2, ExternalLink, Truck, Rocket
 import { UniversalShareButton } from "@/components/share/UniversalShareButton";
 import FinanceShell, { glassCard } from "@/components/finance/FinanceShell";
 import InvoiceDocument from "@/components/finance/InvoiceDocument";
-import { DELIVERY_SPEEDS, formatMoney, type DeliverySpeed, type FinanceInvoice, type FinanceInvoiceItem, type FinanceReceipt, type InvoicePaymentSubmission } from "@/lib/finance/types";
+import { DELIVERY_SPEEDS, formatMoney, type DeliverySpeed, type FinanceInvoice, type FinanceInvoiceItem, type FinanceInvoicePayment, type FinanceReceipt, type InvoicePaymentSubmission } from "@/lib/finance/types";
 import { buildInvoiceShareMessage } from "@/lib/finance/share";
 import DeliverySurchargeModal from "@/components/finance/DeliverySurchargeModal";
 import CreateProjectFromInvoiceModal, { type InvoiceForProject } from "@/components/finance/CreateProjectFromInvoiceModal";
 import { appAlert, appConfirm, appToast, appPrompt } from "@/lib/app-notify";
+import RecordInvoicePaymentModal from "@/components/finance/RecordInvoicePaymentModal";
 
 interface VersionRow {
   id: string;
@@ -39,6 +40,7 @@ interface PaymentReminderRow {
 
 const VERSION_ACTION_LABELS: Record<string, string> = {
   "invoice.create": "Created invoice",
+  "invoice.draft_saved": "Autosaved invoice draft",
   "invoice.update": "Updated invoice",
   "invoice.send": "Marked as sent",
   "invoice.mark_paid": "Marked as paid",
@@ -73,6 +75,8 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
   const [reviewingPayment, setReviewingPayment] = useState<string | null>(null);
   const [paymentReminders, setPaymentReminders] = useState<PaymentReminderRow[]>([]);
   const [sendingReminder, setSendingReminder] = useState(false);
+  const [payments, setPayments] = useState<FinanceInvoicePayment[]>([]);
+  const [paymentModalOpen, setPaymentModalOpen] = useState(false);
 
   const onSpeedClick = (value: DeliverySpeed) => {
     if (invoice?.delivery_speed === value) return;
@@ -122,6 +126,7 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
       setBannerOrder(d.bannerOrder ?? null);
       setPaymentSubmissions(d.paymentSubmissions ?? []);
       setPaymentReminders(d.paymentReminders ?? []);
+      setPayments(d.payments ?? []);
       setReceipt(d.receipt ?? null);
     } catch (e) {
       setLoadError(e instanceof Error ? e.message : "Network error");
@@ -183,8 +188,18 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
   };
 
   const updateStatus = async (status: string) => {
-    await fetch(`/api/admin/finance/invoices/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ status }) });
-    load();
+    if (status === "paid") {
+      setPaymentModalOpen(true);
+      return;
+    }
+    const response = await fetch(`/api/admin/finance/invoices/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ status }) });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      appAlert(data.error || "The invoice status could not be updated.");
+      await load();
+      return;
+    }
+    await load();
     // Offer to create a project once it's settled (unless already linked).
     if (status === "paid" && invoice && !(invoice as { project_id?: string | null }).project_id) {
       setProjectPrompt(invoice as unknown as InvoiceForProject);
@@ -192,7 +207,7 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
   };
 
   const reviewPayment = async (submission: InvoicePaymentSubmission, action: "confirm" | "reject") => {
-    if (action === "confirm" && !(await appConfirm(`Confirm ${formatMoney(submission.amount, submission.currency)} as received and mark this invoice paid?`))) return;
+    if (action === "confirm" && !(await appConfirm(`Confirm ${formatMoney(submission.amount, submission.currency)} as received? The invoice balance will update automatically.`))) return;
     if (action === "reject" && !(await appConfirm("Reject this transfer submission? The invoice will remain unpaid."))) return;
     setReviewingPayment(submission.id);
     try {
@@ -200,7 +215,7 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
       const data = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(data.error || "Payment review failed.");
       await load();
-      appToast({ message: action === "confirm" ? "Payment confirmed and receipt issued." : "Payment submission rejected.", kind: "success" });
+      appToast({ message: action === "confirm" ? (data.invoice?.status === "paid" ? "Payment confirmed and receipt issued." : "Part payment confirmed and balance updated.") : "Payment submission rejected.", kind: "success" });
     } catch (reason) {
       appAlert(reason instanceof Error ? reason.message : "Payment review failed.");
     } finally {
@@ -223,6 +238,12 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
 
   const publicUrl = invoice ? `${typeof window !== "undefined" ? window.location.origin : ""}/invoice/${invoice.public_token}` : "";
   const shareMessage = invoice ? buildInvoiceShareMessage(invoice.invoice_number, publicUrl) : publicUrl;
+  const invoiceCanBeSent = Boolean(
+    invoice
+      && invoice.status !== "cancelled"
+      && Number(invoice.total) > 0
+      && items.some((item) => Boolean(item.name?.trim()) && Number(item.quantity) > 0),
+  );
 
   const copyLink = () => {
     navigator.clipboard.writeText(shareMessage);
@@ -251,6 +272,7 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
       const j = await r.json().catch(() => ({}));
       if (!r.ok || !j.ok) throw new Error(j.error || "Failed to send");
       appToast({ message: `Invoice emailed to ${j.to}`, kind: "success" });
+      await load();
     } catch (e) {
       appAlert(e instanceof Error ? e.message : "Could not send the email");
     } finally {
@@ -309,7 +331,7 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
       back={{ href: "/admin/finance/invoices", label: "Invoices" }}
       actions={
         <>
-          {["sent", "overdue"].includes(invoice.status) && (
+          {["sent", "partially_paid", "overdue"].includes(invoice.status) && (
             <Button variant="outline" className="h-11 rounded-xl px-4" onClick={sendPaymentReminder} disabled={sendingReminder}>
               {sendingReminder ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> : <BellRing className="mr-1.5 h-4 w-4" />} Remind payment
             </Button>
@@ -319,11 +341,17 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
             <SelectContent>
               <SelectItem value="draft">Draft</SelectItem>
               <SelectItem value="sent">Sent</SelectItem>
+              <SelectItem value="partially_paid" disabled>Partially paid (calculated)</SelectItem>
               <SelectItem value="paid">Paid</SelectItem>
               <SelectItem value="overdue">Overdue</SelectItem>
               <SelectItem value="cancelled">Cancelled</SelectItem>
             </SelectContent>
           </Select>
+          {invoice.status !== "paid" && invoice.status !== "cancelled" && (
+            <Button className="h-11 rounded-xl bg-[#0A4FE8] px-4 text-white" onClick={() => setPaymentModalOpen(true)}>
+              <Banknote className="mr-1.5 h-4 w-4" /> Record payment
+            </Button>
+          )}
           <Button variant="outline" className="h-11 px-4 rounded-xl" onClick={() => router.push(`/admin/finance/invoices/new?draft=${id}`)}>
             <Pencil className="w-4 h-4 mr-1.5" /> Edit
           </Button>
@@ -347,16 +375,48 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
           <div className="text-sm font-mono text-gray-700 truncate">{publicUrl}</div>
         </div>
         <div className="flex gap-2 items-center">
-          <Button variant="outline" size="sm" className="rounded-lg" onClick={sendViaEmail} disabled={emailing}>
+          <Button
+            variant="outline"
+            size="sm"
+            className="rounded-lg"
+            onClick={sendViaEmail}
+            disabled={emailing || !invoiceCanBeSent}
+            title={invoiceCanBeSent ? "Email the saved invoice" : "Complete and save the invoice before emailing it"}
+          >
             {emailing ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : <Mail className="w-4 h-4 mr-1" />}Email
           </Button>
-          <Button variant="outline" size="sm" className="rounded-lg" onClick={copyLink}><Copy className="w-4 h-4 mr-1" />{copied ? "Copied" : "Copy"}</Button>
+          <Button variant="outline" size="sm" className="rounded-lg" onClick={copyLink} disabled={!invoiceCanBeSent} title={invoiceCanBeSent ? "Copy the saved invoice link" : "Complete and save the invoice before sharing it"}><Copy className="w-4 h-4 mr-1" />{copied ? "Copied" : "Copy"}</Button>
           <Link href={publicUrl} target="_blank" rel="noopener noreferrer">
             <Button variant="outline" size="sm" className="rounded-lg"><ExternalLink className="w-4 h-4 mr-1" />Open</Button>
           </Link>
-          <UniversalShareButton title={`Invoice ${invoice.invoice_number}`} text={shareMessage} url={publicUrl} className="min-h-10 rounded-lg px-3" />
+          <UniversalShareButton title={`Invoice ${invoice.invoice_number}`} text={shareMessage} url={publicUrl} disabled={!invoiceCanBeSent} className="min-h-10 rounded-lg px-3" />
         </div>
       </div>
+
+      {Number(invoice.amount_paid || 0) > 0 && (
+        <section className={`${glassCard} mb-6 p-5`}>
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+            <div><h3 className="font-semibold text-[#0D1B39]">Payment progress</h3><p className="mt-1 text-xs text-gray-500">Every confirmed payment contributes to this invoice balance.</p></div>
+            <span className="rounded-full bg-blue-50 px-3 py-1.5 text-xs font-bold text-[#0A4FE8]">{Number(invoice.payment_percentage || 0).toFixed(0)}% paid</span>
+          </div>
+          <div className="mt-4 h-2.5 overflow-hidden rounded-full bg-gray-100"><div className="h-full rounded-full bg-[#0A4FE8]" style={{ width: `${Math.min(100, Number(invoice.payment_percentage || 0))}%` }} /></div>
+          <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-3 text-center">
+            <div className="rounded-xl bg-gray-50 p-3"><p className="text-[10px] text-gray-500">Invoice total</p><p className="mt-1 text-sm font-bold text-[#0D1B39]">{formatMoney(invoice.total, invoice.currency)}</p></div>
+            <div className="rounded-xl bg-emerald-50 p-3"><p className="text-[10px] text-emerald-700">Amount paid</p><p className="mt-1 text-sm font-bold text-emerald-800">{formatMoney(invoice.amount_paid, invoice.currency)}</p></div>
+            <div className="rounded-xl bg-amber-50 p-3"><p className="text-[10px] text-amber-700">Balance due</p><p className="mt-1 text-sm font-bold text-amber-800">{formatMoney(invoice.balance_due, invoice.currency)}</p></div>
+          </div>
+          {payments.length > 0 && (
+            <div className="mt-4 divide-y divide-gray-100 rounded-xl border border-gray-100">
+              {payments.map((payment) => (
+                <div key={payment.id} className="flex flex-col gap-1 px-4 py-3 text-xs sm:flex-row sm:items-center sm:justify-between">
+                  <div><span className="font-bold text-[#0D1B39]">{formatMoney(payment.amount, payment.currency)}</span><span className="text-gray-500"> · {new Date(`${payment.paid_on}T12:00:00`).toLocaleDateString()}</span></div>
+                  <div className="text-gray-500">{payment.payment_method.replace(/_/g, " ")}{payment.payment_reference ? ` · ${payment.payment_reference}` : ""}{payment.recorded_by ? ` · ${payment.recorded_by}` : ""}</div>
+                </div>
+              ))}
+            </div>
+          )}
+        </section>
+      )}
 
       {paymentReminders.length > 0 && (
         <section id="payment-verification" className={`${glassCard} mb-6 scroll-mt-24 p-5`}>
@@ -437,7 +497,7 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
       {(paymentSubmissions.length > 0 || receipt) && (
         <section className={`${glassCard} mb-6 p-5`}>
           <div className="mb-4 flex items-center justify-between gap-3"><div><h3 className="flex items-center gap-2 font-semibold text-gray-900"><Banknote className="h-4 w-4 text-blue-600" />Payment review</h3><p className="mt-1 text-xs text-gray-500">Only admins with payment confirmation clearance can approve a transfer and start linked work.</p></div>{receipt && <Link href={`/receipt/${receipt.public_token}`} target="_blank" rel="noreferrer" className="rounded-lg bg-emerald-50 px-3 py-2 text-[11px] font-bold text-emerald-700">Open receipt</Link>}</div>
-          <div className="space-y-3">{paymentSubmissions.map((submission) => <div key={submission.id} className="rounded-2xl border border-slate-100 bg-white/80 p-4"><div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between"><div><div className="flex flex-wrap items-center gap-2"><span className={`rounded-full px-2.5 py-1 text-[9px] font-bold uppercase tracking-wider ${submission.status === "confirmed" ? "bg-emerald-50 text-emerald-700" : submission.status === "rejected" ? "bg-red-50 text-red-700" : "bg-amber-50 text-amber-700"}`}>{submission.status}</span><span className="text-sm font-black text-[#0D1B39]">{formatMoney(submission.amount, submission.currency)}</span></div><p className="mt-2 text-xs text-slate-500">Submitted {new Date(submission.submitted_at).toLocaleString()}{submission.transfer_reference ? ` · Ref: ${submission.transfer_reference}` : ""}</p>{submission.proof_file_name && <p className="mt-1 text-[11px] font-semibold text-slate-600">Proof: {submission.proof_file_name}</p>}</div><div className="flex shrink-0 flex-wrap gap-2">{submission.proof_url && <a href={submission.proof_url} target="_blank" rel="noreferrer" className="inline-flex h-9 items-center rounded-lg border border-blue-100 px-3 text-[11px] font-bold text-blue-700">View proof</a>}{submission.status === "pending" && <><button onClick={() => reviewPayment(submission, "reject")} disabled={reviewingPayment === submission.id} className="h-9 rounded-lg border border-red-100 px-3 text-[11px] font-bold text-red-600">Reject</button><button onClick={() => reviewPayment(submission, "confirm")} disabled={reviewingPayment === submission.id} className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-emerald-600 px-4 text-[11px] font-bold text-white disabled:opacity-60">{reviewingPayment === submission.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />}Confirm payment</button></>}</div></div></div>)}</div>
+          <div className="space-y-3">{paymentSubmissions.map((submission) => <div key={submission.id} className="rounded-2xl border border-slate-100 bg-white/80 p-4"><div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between"><div><div className="flex flex-wrap items-center gap-2"><span className={`rounded-full px-2.5 py-1 text-[9px] font-bold uppercase tracking-wider ${submission.status === "confirmed" ? "bg-emerald-50 text-emerald-700" : submission.status === "rejected" ? "bg-red-50 text-red-700" : "bg-amber-50 text-amber-700"}`}>{submission.status}</span><span className="text-sm font-black text-[#0D1B39]">{formatMoney(submission.amount, submission.currency)}</span></div><p className="mt-2 text-xs text-slate-500">Submitted {new Date(submission.submitted_at).toLocaleString()}{submission.transfer_reference ? ` · Ref: ${submission.transfer_reference}` : ""}</p>{submission.proof_file_name && <p className="mt-1 text-[11px] font-semibold text-slate-600">Proof: {submission.proof_file_name}</p>}</div><div className="flex shrink-0 flex-wrap gap-2">{submission.proof_url && <a href={submission.proof_url} target="_blank" rel="noreferrer" className="inline-flex h-9 items-center rounded-lg border border-blue-100 px-3 text-[11px] font-bold text-blue-700">View proof</a>}{submission.status === "pending" && submission.method === "paystack" && <span className="inline-flex h-9 items-center rounded-lg bg-blue-50 px-3 text-[11px] font-bold text-blue-700">Awaiting provider verification</span>}{submission.status === "pending" && submission.method !== "paystack" && <><button onClick={() => reviewPayment(submission, "reject")} disabled={reviewingPayment === submission.id} className="h-9 rounded-lg border border-red-100 px-3 text-[11px] font-bold text-red-600">Reject</button><button onClick={() => reviewPayment(submission, "confirm")} disabled={reviewingPayment === submission.id} className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-emerald-600 px-4 text-[11px] font-bold text-white disabled:opacity-60">{reviewingPayment === submission.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />}Confirm payment</button></>}</div></div></div>)}</div>
         </section>
       )}
 
@@ -532,6 +592,20 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
           invoice={projectPrompt}
           onClose={() => setProjectPrompt(null)}
           onCreated={() => { setProjectPrompt(null); load(); appAlert("Project created from invoice."); }}
+        />
+      )}
+
+      {paymentModalOpen && (
+        <RecordInvoicePaymentModal
+          invoice={invoice}
+          onClose={() => setPaymentModalOpen(false)}
+          onRecorded={(updated, fullyPaid) => {
+            setPaymentModalOpen(false);
+            setInvoice(updated as unknown as FinanceInvoice);
+            void load();
+            appToast({ message: fullyPaid ? "Invoice paid in full." : "Part payment recorded.", kind: "success" });
+            if (fullyPaid && !invoice.project_id) setProjectPrompt(updated as unknown as InvoiceForProject);
+          }}
         />
       )}
 

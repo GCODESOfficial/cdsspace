@@ -20,6 +20,9 @@ import {
     AlertCircle,
     Loader2,
     Check,
+    PenLine,
+    Save,
+    Layout,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { AssetHub } from "../shared/AssetHub";
@@ -39,11 +42,15 @@ const RichTextEditor = ({
     onChange,
     placeholder,
     disabled,
+    onRewrite,
+    isRewriting,
 }: {
     value: string;
     onChange: (html: string, plainText: string) => void;
     placeholder?: string;
     disabled?: boolean;
+    onRewrite: () => void;
+    isRewriting: boolean;
 }) => {
     const editorRef = useRef<HTMLDivElement>(null);
     const [issues, setIssues] = useState<SentenceIssue[]>([]);
@@ -51,12 +58,13 @@ const RichTextEditor = ({
     const [checkedAt, setCheckedAt] = useState<Date | null>(null);
     const [activeFormats, setActiveFormats] = useState<Set<string>>(new Set());
 
-    // Initialize content once
+    // Keep server-restored and AI-rewritten content in sync without moving the
+    // caret while the client is actively typing.
     useEffect(() => {
-        if (editorRef.current && !editorRef.current.innerHTML && value) {
+        if (editorRef.current && document.activeElement !== editorRef.current && editorRef.current.innerHTML !== value) {
             editorRef.current.innerHTML = value;
         }
-    }, []);
+    }, [value]);
 
     const updateActiveFormats = () => {
         const next = new Set<string>();
@@ -151,7 +159,17 @@ const RichTextEditor = ({
                     className="flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[11px] font-semibold text-brand-blue hover:bg-brand-blue/5 transition disabled:opacity-50"
                 >
                     {isChecking ? <Loader2 className="w-3 h-3 animate-spin" /> : <SpellCheck className="w-3 h-3" />}
-                    {isChecking ? "Checking..." : "Check Sentence"}
+                    {isChecking ? "Checking..." : "Check sentence"}
+                </button>
+                <button
+                    type="button"
+                    onClick={onRewrite}
+                    disabled={isRewriting || disabled || !value.trim()}
+                    className="ml-1 inline-flex items-center gap-1.5 rounded-md bg-[#0A4FE8] px-2.5 py-1 text-[11px] font-semibold text-white transition hover:bg-[#083FC0] disabled:opacity-50"
+                    title="Rewrite this design brief with AI"
+                >
+                    {isRewriting ? <Loader2 className="h-3 w-3 animate-spin" /> : <PenLine className="h-3 w-3" />}
+                    AI rewrite
                 </button>
                 {checkedAt && !isChecking && (
                     <span className={cn("text-[10px] font-medium ml-auto pr-2", issues.length === 0 ? "text-emerald-500" : "text-amber-500")}>
@@ -216,11 +234,11 @@ interface CreateRequestViewProps {
 
 const CATEGORIES = [
     { id: "carousel", name: "Carousel", icon: <GalleryHorizontal className="w-5 h-5 xl:w-6 xl:h-6 2xl:w-7 2xl:h-7" /> },
-    { id: "social_post", name: "Social Post", icon: <ImageIcon className="w-5 h-5 xl:w-6 xl:h-6 2xl:w-7 2xl:h-7" /> },
-    { id: "ad", name: "Ad Design", icon: <Megaphone className="w-5 h-5 xl:w-6 xl:h-6 2xl:w-7 2xl:h-7" /> },
-    { id: "email", name: "Email Template", icon: <Mail className="w-5 h-5 xl:w-6 xl:h-6 2xl:w-7 2xl:h-7" /> },
-    { id: "social", name: "Social Media", icon: <Share2 className="w-5 h-5 xl:w-6 xl:h-6 2xl:w-7 2xl:h-7" /> },
-    { id: "other", name: "Other Design", icon: <Type className="w-5 h-5 xl:w-6 xl:h-6 2xl:w-7 2xl:h-7" /> },
+    { id: "social_post", name: "Social post", icon: <ImageIcon className="w-5 h-5 xl:w-6 xl:h-6 2xl:w-7 2xl:h-7" /> },
+    { id: "ad", name: "Ad design", icon: <Megaphone className="w-5 h-5 xl:w-6 xl:h-6 2xl:w-7 2xl:h-7" /> },
+    { id: "email", name: "Email template", icon: <Mail className="w-5 h-5 xl:w-6 xl:h-6 2xl:w-7 2xl:h-7" /> },
+    { id: "social", name: "Social media", icon: <Share2 className="w-5 h-5 xl:w-6 xl:h-6 2xl:w-7 2xl:h-7" /> },
+    { id: "other", name: "Other design", icon: <Type className="w-5 h-5 xl:w-6 xl:h-6 2xl:w-7 2xl:h-7" /> },
 ];
 
 export const CreateRequestView = ({
@@ -236,7 +254,86 @@ export const CreateRequestView = ({
     const [title, setTitle] = useState("");
     const [category, setCategory] = useState("carousel");
     const [description, setDescription] = useState("");
+    const [aiDirection, setAiDirection] = useState("");
+    const [rewritingField, setRewritingField] = useState<"title" | "description" | null>(null);
+    const [draftState, setDraftState] = useState<"loading" | "saving" | "saved" | "error">("loading");
+    const [draftHydrated, setDraftHydrated] = useState(false);
     const isUploading = uploadedFiles.some(f => f.status === "uploading");
+
+    useEffect(() => {
+        let cancelled = false;
+        fetch("/api/requests/draft", { cache: "no-store" })
+            .then(async (response) => response.ok ? response.json() : Promise.reject(new Error("Draft load failed")))
+            .then(({ draft }) => {
+                if (cancelled) return;
+                if (draft) {
+                    setTitle(draft.title || "");
+                    setDescription(draft.description || "");
+                    setCategory(draft.category || "carousel");
+                    const restoredFiles = (draft.asset_paths || []).map((path: string) => ({
+                        name: path.split("/").pop()?.replace(/^\d+_/, "") || "Reference asset",
+                        storagePath: path,
+                        status: "success",
+                        progress: 100,
+                    }));
+                    onUpdateFiles(restoredFiles);
+                }
+                setDraftState("saved");
+            })
+            .catch(() => { if (!cancelled) setDraftState("error"); })
+            .finally(() => {
+                if (!cancelled) {
+                    setDraftHydrated(true);
+                }
+            });
+        return () => { cancelled = true; };
+    }, [onUpdateFiles]);
+
+    useEffect(() => {
+        if (!draftHydrated || isUploading) return;
+        setDraftState("saving");
+        const timer = window.setTimeout(async () => {
+            try {
+                const response = await fetch("/api/requests/draft", {
+                    method: "PUT",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        title,
+                        description,
+                        category,
+                        asset_paths: uploadedFiles.filter((file) => file.storagePath).map((file) => file.storagePath),
+                    }),
+                });
+                if (!response.ok) throw new Error("Draft save failed");
+                setDraftState("saved");
+            } catch {
+                setDraftState("error");
+            }
+        }, 700);
+        return () => window.clearTimeout(timer);
+    }, [title, description, category, uploadedFiles, draftHydrated, isUploading]);
+
+    const rewriteField = async (field: "title" | "description") => {
+        const value = field === "title" ? title : description;
+        if (!value.trim()) return;
+        setRewritingField(field);
+        try {
+            const response = await fetch("/api/requests/ai", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ field: field === "description" ? "brief" : "title", value, category, instruction: aiDirection }),
+            });
+            const data = await response.json().catch(() => ({}));
+            if (!response.ok) throw new Error(data.error || "AI rewrite failed");
+            if (field === "title") setTitle(String(data.text || "").replace(/^['\"]|['\"]$/g, ""));
+            else setDescription(String(data.text || ""));
+        } catch (error) {
+            console.error("Design request AI rewrite failed:", error);
+            setDraftState("error");
+        } finally {
+            setRewritingField(null);
+        }
+    };
 
     const handleSubmit = (e: React.FormEvent) => {
         e.preventDefault();
@@ -261,10 +358,14 @@ export const CreateRequestView = ({
                             <ArrowLeft size={16} className="text-brand-navy group-hover:-translate-x-1 transition-transform lg:w-4 lg:h-4 xl:w-[20px] xl:h-[20px] 2xl:w-[24px] 2xl:h-[24px]" />
                         </button>
                         <div className="flex flex-col">
-                            <h1 className="text-brand-navy text-[15px] lg:text-[18px] xl:text-[22px] 2xl:text-[24px] font-bold leading-tight">New Design Request</h1>
-                            <p className="text-brand-mute text-[9px] lg:text-[11px] xl:text-[13px] 2xl:text-[14px] font-medium tracking-tight mt-0.5 lg:mt-1">Fill in the details for your next design project</p>
+                            <h1 className="text-brand-navy text-[15px] lg:text-[18px] xl:text-[22px] 2xl:text-[24px] font-bold leading-tight">New design request</h1>
+                            <p className="text-brand-mute text-[9px] lg:text-[11px] xl:text-[13px] 2xl:text-[14px] font-medium tracking-tight mt-0.5 lg:mt-1">Build the brief, refine it with AI, then send it to the design team</p>
                         </div>
                     </div>
+                    <span className="inline-flex items-center gap-1.5 text-[10px] font-medium text-brand-mute">
+                        {draftState === "saving" ? <Loader2 className="h-3 w-3 animate-spin" /> : <Save className="h-3 w-3" />}
+                        {draftState === "loading" ? "Restoring draft" : draftState === "saving" ? "Saving" : draftState === "error" ? "Draft save needs attention" : "Draft saved"}
+                    </span>
                 </div>
             </div>
 
@@ -278,24 +379,34 @@ export const CreateRequestView = ({
                         <div className="flex flex-col gap-1.5 lg:gap-2.5 xl:gap-[12px]">
                             <label className="text-brand-navy text-[13px] lg:text-[15px] xl:text-[16px] 2xl:text-[18px] font-bold flex items-center gap-2 lg:gap-2.5">
                                 <Type size={14} className="text-brand-blue lg:w-4 lg:h-4 xl:w-[18px] xl:h-[18px] 2xl:w-[20px] 2xl:h-[20px]" />
-                                Project Title
+                                Project title
                             </label>
-                            <input
-                                type="text"
-                                required
-                                disabled={isSubmitting}
-                                value={title}
-                                onChange={(e) => setTitle(e.target.value)}
-                                placeholder="e.g. Fintech Dashboard Redesign"
-                                className="w-full h-[40px] lg:h-[48px] xl:h-[52px] 2xl:h-[56px] bg-brand-bg border border-brand-stroke/50 rounded-[8px] lg:rounded-[12px] xl:rounded-[14px] px-3 lg:px-4 xl:px-[16px] text-brand-navy font-medium outline-none focus:border-brand-blue/30 focus:bg-white transition-all text-[12px] lg:text-[14px] xl:text-[15px] 2xl:text-[16px] disabled:opacity-50"
-                            />
+                            <div className="relative">
+                                <input
+                                    type="text"
+                                    required
+                                    disabled={isSubmitting}
+                                    value={title}
+                                    onChange={(e) => setTitle(e.target.value)}
+                                    placeholder="e.g. Product launch social campaign"
+                                    className="w-full h-[40px] lg:h-[48px] xl:h-[52px] 2xl:h-[56px] bg-brand-bg border border-brand-stroke/50 rounded-[8px] lg:rounded-[12px] xl:rounded-[14px] pl-3 pr-11 lg:pl-4 xl:pl-[16px] text-brand-navy font-medium outline-none focus:border-brand-blue/30 focus:bg-white transition-all text-[12px] lg:text-[14px] xl:text-[15px] 2xl:text-[16px] disabled:opacity-50"
+                                />
+                                <button type="button" onClick={() => void rewriteField("title")} disabled={!title.trim() || Boolean(rewritingField) || isSubmitting} className="absolute right-2 top-1/2 grid h-7 w-7 -translate-y-1/2 place-items-center rounded-lg bg-[#0A4FE8] text-white disabled:opacity-40" title="Rewrite the title with AI">
+                                    {rewritingField === "title" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <PenLine className="h-3.5 w-3.5" />}
+                                </button>
+                            </div>
+                        </div>
+
+                        <div className="flex flex-col gap-1.5 lg:gap-2.5">
+                            <label className="text-[12px] font-semibold text-brand-navy">AI direction <span className="font-normal text-brand-mute">(optional)</span></label>
+                            <input value={aiDirection} onChange={(event) => setAiDirection(event.target.value)} placeholder="e.g. Make it concise, audience-led, and keep every required size" className="h-10 w-full rounded-[10px] border border-brand-stroke/50 bg-brand-bg px-3 text-[12px] text-brand-navy outline-none focus:border-brand-blue/30 focus:bg-white" />
                         </div>
 
                         {/* Category Selection */}
                         <div className="flex flex-col gap-1.5 lg:gap-2.5 xl:gap-[12px]">
                             <label className="text-brand-navy text-[13px] lg:text-[15px] xl:text-[16px] 2xl:text-[18px] font-bold flex items-center gap-2 lg:gap-2.5">
                                 <Layout size={14} className="text-brand-blue lg:w-4 lg:h-4 xl:w-[18px] xl:h-[18px] 2xl:w-[20px] 2xl:h-[20px]" />
-                                Design Category
+                                Design category
                             </label>
                             <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-[6px] lg:gap-[8px] xl:gap-[10px] 2xl:gap-[14px]">
                                 {CATEGORIES.map((cat) => (
@@ -328,13 +439,15 @@ export const CreateRequestView = ({
                         <div className="flex flex-col gap-1.5 lg:gap-2.5 xl:gap-[12px]">
                             <label className="text-brand-navy text-[13px] lg:text-[15px] xl:text-[16px] 2xl:text-[18px] font-bold flex items-center gap-2 lg:gap-2.5">
                                 <FileText size={14} className="text-brand-blue lg:w-4 lg:h-4 xl:w-[18px] xl:h-[18px] 2xl:w-[20px] 2xl:h-[20px]" />
-                                Design Content
+                                Design content
                             </label>
                             <RichTextEditor
                                 value={description}
                                 onChange={(html) => setDescription(html)}
                                 placeholder="Describe your design needs in detail. Include goals, target audience, and any specific requirements..."
                                 disabled={isSubmitting}
+                                onRewrite={() => void rewriteField("description")}
+                                isRewriting={rewritingField === "description"}
                             />
                         </div>
 
@@ -343,7 +456,7 @@ export const CreateRequestView = ({
                             <div className="flex items-center justify-between">
                                 <label className="text-brand-navy text-[13px] lg:text-[15px] xl:text-[16px] 2xl:text-[18px] font-bold flex items-center gap-2 lg:gap-2.5">
                                     <Upload size={14} className="text-brand-blue lg:w-4 lg:h-4 xl:w-[18px] xl:h-[18px] 2xl:w-[20px] 2xl:h-[20px]" />
-                                    Reference & Assets
+                                    Reference and assets
                                     <span className="text-brand-mute text-[9px] lg:text-[11px] xl:text-[12px] font-normal ml-2">(Optional)</span>
                                 </label>
                                 <span className="text-brand-mute text-[9px] lg:text-[11px] font-medium">{uploadedFiles.length} / 5</span>
@@ -380,12 +493,12 @@ export const CreateRequestView = ({
                                 "w-full sm:flex-2 h-9 lg:h-11 xl:h-[48px] 2xl:h-[54px] rounded-full flex items-center justify-center gap-2 lg:gap-3 text-white font-bold text-[13px] lg:text-[15px] xl:text-[16px] 2xl:text-[18px] transition-all hover:scale-[1.02] active:scale-[0.98] shadow-[0_5px_12px_rgba(0,53,193,0.15)] cursor-pointer",
                                 (isUploading || isSubmitting) ? "opacity-50 cursor-not-allowed" : ""
                             )}
-                            style={{ background: "linear-gradient(167.88deg, #0035C1 8.83%, #0575FF 86.3%)" }}
+                            style={{ background: "#0A4FE8" }}
                         >
                             {isUploading ? "Uploading..." : isSubmitting ? "Submitting..." : (
                                 <>
                                     <CheckCircle2 size={16} className="lg:w-4 lg:h-4 xl:w-[20px] xl:h-[20px]" />
-                                    Submit Request
+                                    Send for design
                                 </>
                             )}
                         </button>

@@ -16,7 +16,7 @@ export const metadata = {
 };
 
 // ISR: regenerate the page at most once per minute so admin edits appear
-// quickly without hammering Supabase on every request.
+// quickly without repeatedly querying GlashDB on every request.
 export const revalidate = 60;
 
 export default async function PrivacyPolicyPage() {
@@ -27,6 +27,7 @@ export default async function PrivacyPolicyPage() {
             title={doc.title}
             subtitle={doc.subtitle ?? undefined}
             effectiveDate={formatEffectiveDate(doc.effective_date)}
+            pdfSlug="privacy"
         >
             <div className="legal-prose" dangerouslySetInnerHTML={{ __html: doc.content }} />
         </LegalShell>

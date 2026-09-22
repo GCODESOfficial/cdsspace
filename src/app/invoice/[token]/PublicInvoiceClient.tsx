@@ -1,17 +1,18 @@
 'use client';
 
 import { useCallback, useEffect, useState } from "react";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { Footer } from "@/components/layout/Footer";
 import InvoiceDocument from "@/components/finance/InvoiceDocument";
 import InvoicePaymentPanel from "@/components/finance/InvoicePaymentPanel";
 import { UniversalShareButton } from "@/components/share/UniversalShareButton";
 import { Button } from "@/components/ui/button";
-import { Check, Download, Loader2, TicketCheck } from "lucide-react";
+import { ArrowLeft, Check, Download, Loader2, TicketCheck } from "lucide-react";
 import type { FinanceBankAccount, FinanceInvoice, FinanceInvoiceItem, FinanceReceipt, InvoicePaymentSubmission } from "@/lib/finance/types";
 import { buildInvoiceShareMessage } from "@/lib/finance/share";
 
 export default function PublicInvoiceClient({ token }: { token: string }) {
+  const router = useRouter();
   const sp = useSearchParams();
   const [invoice, setInvoice] = useState<FinanceInvoice | null>(null);
   const [items, setItems] = useState<FinanceInvoiceItem[]>([]);
@@ -93,6 +94,18 @@ export default function PublicInvoiceClient({ token }: { token: string }) {
     setMarketerSaving(false);
   };
 
+  const returnToPreviousPage = () => {
+    if (window.history.length > 1) {
+      router.back();
+      return;
+    }
+    router.push("/");
+  };
+
+  const showPaymentBackButton = invoice?.status === "paid"
+    || paymentSubmission?.status === "pending"
+    || paymentSubmission?.status === "confirmed";
+
   if (notFound) {
     return (
       <div className="min-h-screen bg-white grid place-items-center">
@@ -134,29 +147,41 @@ export default function PublicInvoiceClient({ token }: { token: string }) {
         }
       `}</style>
       <div className="min-h-screen bg-[#F5F8FF] py-10 px-4 print:bg-white print:py-0 print:px-0">
-        <div className="max-w-[820px] mx-auto mb-6 flex justify-end gap-2 no-print">
-          <UniversalShareButton
-            title={`Invoice ${invoice?.invoice_number || ""}`.trim()}
-            text={buildInvoiceShareMessage(invoice?.invoice_number, "").trim()}
-            url={`/invoice/${token}`}
-            className="h-11 px-5 rounded-xl border-blue-200 text-blue-700 hover:bg-blue-50"
-          />
-          <Button 
-            onClick={handleDownload} 
-            disabled={isDownloading}
-            className="h-11 px-5 rounded-xl bg-[#0A4FE8] shadow-lg shadow-blue-600/30 disabled:opacity-70"
-          >
-            {isDownloading ? (
-              <span className="flex items-center gap-2">
-                <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                Generating...
-              </span>
-            ) : (
-              <span className="flex items-center">
-                <Download className="w-4 h-4 mr-1.5" /> Download PDF
-              </span>
-            )}
-          </Button>
+        <div className={`no-print mx-auto mb-6 flex max-w-[820px] flex-col gap-3 sm:flex-row sm:items-center ${showPaymentBackButton ? "sm:justify-between" : "sm:justify-end"}`}>
+          {showPaymentBackButton && (
+            <Button
+              type="button"
+              variant="outline"
+              onClick={returnToPreviousPage}
+              className="h-11 justify-center border-blue-200 px-4 text-blue-700 hover:bg-blue-50 sm:justify-start"
+            >
+              <ArrowLeft className="h-4 w-4" /> Previous page
+            </Button>
+          )}
+          <div className="flex flex-col gap-2 sm:flex-row sm:justify-end">
+            <UniversalShareButton
+              title={`Invoice ${invoice?.invoice_number || ""}`.trim()}
+              text={buildInvoiceShareMessage(invoice?.invoice_number, "").trim()}
+              url={`/invoice/${token}`}
+              className="h-11 px-5 rounded-xl border-blue-200 text-blue-700 hover:bg-blue-50"
+            />
+            <Button
+              onClick={handleDownload}
+              disabled={isDownloading}
+              className="h-11 px-5 rounded-xl bg-[#0A4FE8] shadow-lg shadow-blue-600/30 disabled:opacity-70"
+            >
+              {isDownloading ? (
+                <span className="flex items-center gap-2">
+                  <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                  Generating...
+                </span>
+              ) : (
+                <span className="flex items-center">
+                  <Download className="w-4 h-4 mr-1.5" /> Download PDF
+                </span>
+              )}
+            </Button>
+          </div>
         </div>
         {invoice && (
           <InvoicePaymentPanel

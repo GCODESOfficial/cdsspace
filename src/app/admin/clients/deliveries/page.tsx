@@ -26,6 +26,7 @@ import {
 } from "lucide-react";
 import { ClientRecipientPicker } from "@/components/deliveries/ClientRecipientPicker";
 import { DeliveryFilePicker } from "@/components/deliveries/DeliveryFilePicker";
+import { ProjectDriveManager } from "@/components/deliveries/ProjectDriveManager";
 import { UniversalShareButton } from "@/components/share/UniversalShareButton";
 import { CLIENT_BILLING_CURRENCY_OPTIONS } from "@/lib/client-billing";
 import {
@@ -175,7 +176,15 @@ export default function ClientDeliveriesPage() {
     const response = await fetch("/api/admin/clients/deliveries", { cache: "no-store" });
     const json = await response.json().catch(() => ({}));
     if (!response.ok) setNotice({ tone: "error", text: json.error || "Could not load deliveries." });
-    else setData(json);
+    else {
+      setData(json);
+      setDeliveryRecipients((current) => Object.fromEntries(
+        (json.deliveries || []).map((delivery: Delivery) => [
+          delivery.id,
+          current[delivery.id] || deliveryRecipientRef(delivery),
+        ]),
+      ));
+    }
     setLoading(false);
   }, []);
 
@@ -395,6 +404,10 @@ export default function ClientDeliveriesPage() {
       return json;
     };
 
+    /** The server refused this one file (type, content or size) - skip it, keep delivering. */
+    class SkippedFileError extends Error {}
+    const isFileRejection = (status: number) => status === 400 || status === 413 || status === 415 || status === 422;
+
     const uploadFileInChunks = async (deliveryId: string, file: File, fileIndex: number, fileTotal: number) => {
       if (!file.size) throw new Error(`${file.name} is empty and cannot be uploaded.`);
       const uploadId = crypto.randomUUID();
@@ -438,8 +451,10 @@ export default function ClientDeliveriesPage() {
               lastError = result.error || (response.status === 413
                 ? "A file chunk exceeded the 48MB upload limit."
                 : "Could not upload this file chunk.");
+              if (isFileRejection(response.status)) throw new SkippedFileError(`${relativePath}: ${lastError}`);
               if (response.status < 500 && response.status !== 409) break;
             } catch (error) {
+              if (error instanceof SkippedFileError) throw error;
               lastError = error instanceof Error ? error.message : lastError;
             }
             if (attempt < 2) await new Promise((resolve) => window.setTimeout(resolve, 500 * (attempt + 1)));
@@ -460,7 +475,11 @@ export default function ClientDeliveriesPage() {
           }),
         });
         const result = await response.json().catch(() => ({}));
-        if (!response.ok) throw new Error(result.error || `Could not finish uploading ${relativePath}.`);
+        if (!response.ok) {
+          const message = result.error || `Could not finish uploading ${relativePath}.`;
+          if (isFileRejection(response.status)) throw new SkippedFileError(message);
+          throw new Error(message);
+        }
       } catch (error) {
         const cleanup = new URLSearchParams(baseParams);
         cleanup.set("chunk_index", "0");
@@ -470,6 +489,11 @@ export default function ClientDeliveriesPage() {
     };
 
     let json: DeliveryMutationResponse = {};
+    const skippedFiles: string[] = [];
+    /** Appended to every success message so the sender knows what was left out. */
+    const skippedNote = () => skippedFiles.length
+      ? ` ${skippedFiles.length} file${skippedFiles.length === 1 ? " was" : "s were"} left out: ${skippedFiles.join("; ")}`
+      : "";
     try {
       const filesToUpload = [...selectedFiles];
       if (filesToUpload.length) {
@@ -480,9 +504,18 @@ export default function ClientDeliveriesPage() {
         if (!workingDeliveryId) throw new Error("Could not prepare the delivery draft for file uploads.");
 
         for (const [index, file] of filesToUpload.entries()) {
-          await uploadFileInChunks(workingDeliveryId, file, index, filesToUpload.length);
+          try {
+            await uploadFileInChunks(workingDeliveryId, file, index, filesToUpload.length);
+          } catch (error) {
+            // One unacceptable file must not cost the client the rest of the handover.
+            if (!(error instanceof SkippedFileError)) throw error;
+            skippedFiles.push(error.message);
+          }
           const completedKey = fileSelectionKey(file);
           setSelectedFiles((current) => current.filter((candidate) => fileSelectionKey(candidate) !== completedKey));
+        }
+        if (skippedFiles.length === filesToUpload.length) {
+          throw new Error(`None of the files could be delivered:\n${skippedFiles.join("\n")}`);
         }
 
         if (intent === "send") json = await postDelivery("send", false, true);
@@ -507,7 +540,7 @@ export default function ClientDeliveriesPage() {
       setDraftId(workingDeliveryId || json.id || null);
       setSelectedFiles([]);
       setRemovedFileIds([]);
-      setNotice({ tone: "ok", text: "Draft saved. You can pick it back up any time from Saved drafts below." });
+      setNotice({ tone: "ok", text: `Draft saved. You can pick it back up any time from Saved drafts below.${skippedNote()}` });
       await load();
       return;
     }
@@ -515,7 +548,7 @@ export default function ClientDeliveriesPage() {
     if (intent === "update") {
       const updatedTitle = title;
       resetForm();
-      setNotice({ tone: "ok", text: `“${updatedTitle}” was updated without replacing its delivery record or public link.` });
+      setNotice({ tone: "ok", text: `“${updatedTitle}” was updated without replacing its delivery record or public link.${skippedNote()}` });
       await load();
       return;
     }
@@ -533,7 +566,7 @@ export default function ClientDeliveriesPage() {
         ? `${json.recipient} can now access the finished files in their account.`
         : `${json.recipient}'s files are secured. Invite or merge their account to release the delivery.`;
     }
-    setNotice({ tone: "ok", text });
+    setNotice({ tone: "ok", text: `${text}${skippedNote()}` });
     await load();
   }
 
@@ -628,10 +661,12 @@ export default function ClientDeliveriesPage() {
       </header>
 
       {notice && (
-        <div className={`mb-5 rounded-xl border px-4 py-3 text-sm ${notice.tone === "ok" ? "border-emerald-200 bg-emerald-50 text-emerald-800" : "border-rose-200 bg-rose-50 text-rose-700"}`}>
+        <div className={`mb-5 whitespace-pre-line rounded-xl border px-4 py-3 text-sm ${notice.tone === "ok" ? "border-emerald-200 bg-emerald-50 text-emerald-800" : "border-rose-200 bg-rose-50 text-rose-700"}`}>
           {notice.text}
         </div>
       )}
+
+      <ProjectDriveManager />
 
       {(data?.capabilities.create || data?.capabilities.send) && (
         <section ref={formSectionRef} className="mb-7 rounded-2xl border border-gray-100 bg-white p-5 shadow-sm sm:p-6">
@@ -744,7 +779,7 @@ export default function ClientDeliveriesPage() {
               {newProjectOpen && (
                 <div className="mt-3 grid gap-3 rounded-xl border border-blue-100 bg-blue-50/40 p-4 md:grid-cols-3">
                   <label className="text-[11px] font-semibold text-gray-600">Project name<input value={newProjectName} onChange={(event) => setNewProjectName(event.target.value)} placeholder="e.g. Dubai identity handover" className="mt-1.5 h-10 w-full rounded-lg border border-gray-200 bg-white px-3 text-xs outline-none focus:border-blue-400" /></label>
-                  <label className="text-[11px] font-semibold text-gray-600">Client<select value={newProjectClient || recipient} onChange={(event) => setNewProjectClient(event.target.value)} className="mt-1.5 h-10 w-full rounded-lg border border-gray-200 bg-white px-3 text-xs outline-none focus:border-blue-400"><option value="">Choose client</option>{(data?.clients || []).map((client) => <option key={client.id} value={clientReference(client)}>{clientName(client)}</option>)}</select></label>
+                  <div className="text-[11px] font-semibold text-gray-600">Client<div className="mt-1.5"><ClientRecipientPicker options={recipientOptions} values={[newProjectClient || recipient].filter(Boolean)} onChange={(values) => setNewProjectClient(values[0] || "")} multiple={false} /></div></div>
                   <label className="text-[11px] font-semibold text-gray-600">Currency<select value={newProjectCurrency} onChange={(event) => setNewProjectCurrency(event.target.value)} className="mt-1.5 h-10 w-full rounded-lg border border-gray-200 bg-white px-3 text-xs outline-none focus:border-blue-400">{CLIENT_BILLING_CURRENCY_OPTIONS.map((currency) => <option key={currency.code} value={currency.code}>{currency.code}: {currency.name}</option>)}</select></label>
                   <div className="md:col-span-3"><button type="button" disabled={projectSaving || newProjectName.trim().length < 3 || !(newProjectClient || recipient)} onClick={() => void createProjectOnTheGo()} className="inline-flex h-10 items-center gap-2 rounded-lg bg-[#0A4FE8] px-4 text-xs font-bold text-white disabled:opacity-50">{projectSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <FolderPlus className="h-4 w-4" />} Create and select project</button></div>
                 </div>
@@ -920,7 +955,7 @@ export default function ClientDeliveriesPage() {
                         <option value="">Choose receiving client</option>
                         {(data?.clients || []).map((client) => <option key={client.id} value={clientReference(client)}>{clientName(client)}</option>)}
                       </select>
-                      {data?.capabilities.send && <button type="button" disabled={sendingExisting || !deliveryRecipients[delivery.id]} onClick={() => void sendExistingDelivery(delivery)} className="inline-flex h-10 items-center gap-1.5 rounded-lg bg-[#0A4FE8] px-3 text-xs font-bold text-white disabled:opacity-50"><Send className="h-3.5 w-3.5" /> Send</button>}
+                      {data?.capabilities.send && <button type="button" disabled={sendingExisting || !deliveryRecipients[delivery.id]} onClick={() => void sendExistingDelivery(delivery)} className="inline-flex h-10 items-center gap-1.5 rounded-lg bg-[#0A4FE8] px-3 text-xs font-bold text-white disabled:opacity-50"><Send className="h-3.5 w-3.5" /> {delivery.status === "submitted" ? "Approve and deliver" : "Send"}</button>}
                     </div>
                   )}
                 </div>

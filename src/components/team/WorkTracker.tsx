@@ -20,6 +20,9 @@ import {
   CirclePlay,
   Code2,
   FileText,
+  Eye,
+  EyeOff,
+  GripVertical,
   Loader2,
   MessageSquare,
   Palette,
@@ -71,10 +74,73 @@ export function WorkTracker() {
   const [taskId, setTaskId] = useState("");
   const [detail, setDetail] = useState("");
   const [lastSavedAt, setLastSavedAt] = useState<string | null>(null);
+  const [hidden, setHidden] = useState(false);
+  const [position, setPosition] = useState<{ x: number; y: number } | null>(null);
+  const widgetRef = useRef<HTMLDivElement>(null);
+  const dragRef = useRef<{ pointerId: number; offsetX: number; offsetY: number } | null>(null);
   const lastInteractionAt = useRef(Date.now());
   const sessionRef = useRef<TrackingSession | null>(null);
   const contextRef = useRef({ category: "productive_work", taskId: "", detail: "" });
   const tasksRef = useRef<FocusTask[]>([]);
+
+  useEffect(() => {
+    setHidden(window.localStorage.getItem("cds.work-focus.hidden") === "true");
+    try {
+      const saved = JSON.parse(window.localStorage.getItem("cds.work-focus.position") || "null");
+      if (Number.isFinite(saved?.x) && Number.isFinite(saved?.y)) setPosition(saved);
+    } catch {
+      window.localStorage.removeItem("cds.work-focus.position");
+    }
+  }, []);
+
+  const clampPosition = useCallback((x: number, y: number) => {
+    const rect = widgetRef.current?.getBoundingClientRect();
+    const width = rect?.width || 280;
+    const height = rect?.height || 64;
+    return {
+      x: Math.max(8, Math.min(x, window.innerWidth - width - 8)),
+      y: Math.max(72, Math.min(y, window.innerHeight - height - 8)),
+    };
+  }, []);
+
+  function moveFocusWidget(event: React.PointerEvent<HTMLButtonElement>) {
+    const dragging = dragRef.current;
+    if (!dragging || dragging.pointerId !== event.pointerId) return;
+    event.preventDefault();
+    setPosition(clampPosition(event.clientX - dragging.offsetX, event.clientY - dragging.offsetY));
+  }
+
+  function finishMovingFocusWidget(event: React.PointerEvent<HTMLButtonElement>) {
+    const dragging = dragRef.current;
+    if (!dragging || dragging.pointerId !== event.pointerId) return;
+    dragRef.current = null;
+    event.currentTarget.releasePointerCapture(event.pointerId);
+    setPosition((current) => {
+      if (current) window.localStorage.setItem("cds.work-focus.position", JSON.stringify(current));
+      return current;
+    });
+  }
+
+  function hideFocusWidget() {
+    setExpanded(false);
+    setHidden(true);
+    window.localStorage.setItem("cds.work-focus.hidden", "true");
+  }
+
+  useEffect(() => {
+    if (!position || hidden) return;
+    const keepVisible = () => setPosition((current) => {
+      if (!current) return current;
+      const next = clampPosition(current.x, current.y);
+      return next.x === current.x && next.y === current.y ? current : next;
+    });
+    const frame = window.requestAnimationFrame(keepVisible);
+    window.addEventListener("resize", keepVisible);
+    return () => {
+      window.cancelAnimationFrame(frame);
+      window.removeEventListener("resize", keepVisible);
+    };
+  }, [clampPosition, expanded, hidden, position]);
 
   useEffect(() => {
     sessionRef.current = session;
@@ -323,19 +389,45 @@ export function WorkTracker() {
   const SelectedIcon = selectedCategory.icon;
   const selectedTask = tasks.find((task) => task.id === taskId);
 
+  if (hidden) {
+    return (
+      <button
+        type="button"
+        onClick={() => {
+          setHidden(false);
+          window.localStorage.setItem("cds.work-focus.hidden", "false");
+        }}
+        className="fixed right-0 top-24 z-[70] grid h-10 w-9 place-items-center rounded-l-xl border border-r-0 border-slate-200 bg-white text-[#0A4FE8] shadow-md transition hover:w-11 hover:bg-blue-50"
+        aria-label="Show work focus"
+        title="Show work focus"
+      >
+        <Eye className="h-4 w-4" />
+      </button>
+    );
+  }
+
   return (
-    <div className="fixed bottom-4 right-4 z-[70] sm:bottom-6 sm:right-6">
+    <div
+      ref={widgetRef}
+      className="fixed right-4 top-24 z-[70] flex max-w-[calc(100vw-1rem)] flex-col sm:right-6"
+      style={position ? { left: position.x, top: position.y, right: "auto" } : undefined}
+    >
       {expanded && (
-        <div className="mb-2 w-[min(92vw,390px)] overflow-hidden rounded-[22px] border border-white/80 bg-white shadow-2xl">
+        <div className="order-2 mt-2 max-h-[calc(100dvh-10rem)] w-[min(92vw,390px)] overflow-y-auto rounded-[22px] border border-white/80 bg-white shadow-2xl">
           <div className="flex items-start justify-between gap-3 bg-[#040B37] px-4 py-4 text-white">
             <div>
               <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-blue-200">Work focus</p>
               <h2 className="mt-1 text-[16px] font-bold">What are you working on?</h2>
               <p className="mt-1 text-[10.5px] text-white/60">This creates a clear activity timeline, with no screen sharing.</p>
             </div>
-            <button type="button" onClick={() => setExpanded(false)} className="rounded-lg p-1.5 text-white/60 hover:bg-white/10 hover:text-white" aria-label="Close work focus">
-              <X className="h-4 w-4" />
-            </button>
+            <div className="flex items-center gap-1">
+              <button type="button" onClick={hideFocusWidget} className="rounded-lg p-1.5 text-white/60 hover:bg-white/10 hover:text-white" aria-label="Hide work focus" title="Hide work focus">
+                <EyeOff className="h-4 w-4" />
+              </button>
+              <button type="button" onClick={() => setExpanded(false)} className="rounded-lg p-1.5 text-white/60 hover:bg-white/10 hover:text-white" aria-label="Close work focus">
+                <X className="h-4 w-4" />
+              </button>
+            </div>
           </div>
 
           <div className="space-y-4 p-4">
@@ -390,8 +482,26 @@ export function WorkTracker() {
         </div>
       )}
 
-      <button type="button" onClick={() => setExpanded((open) => !open)}
-        className="flex max-w-[88vw] items-center gap-3 rounded-2xl border border-white/80 bg-[#040B37] px-3.5 py-3 text-left text-white shadow-xl transition hover:-translate-y-0.5">
+      <div className="order-1 ml-auto flex max-w-[92vw] items-stretch overflow-hidden rounded-2xl border border-white/80 bg-[#040B37] text-white shadow-xl">
+        <button
+          type="button"
+          onPointerDown={(event) => {
+            const rect = widgetRef.current?.getBoundingClientRect();
+            if (!rect) return;
+            dragRef.current = { pointerId: event.pointerId, offsetX: event.clientX - rect.left, offsetY: event.clientY - rect.top };
+            event.currentTarget.setPointerCapture(event.pointerId);
+          }}
+          onPointerMove={moveFocusWidget}
+          onPointerUp={finishMovingFocusWidget}
+          onPointerCancel={finishMovingFocusWidget}
+          className="grid w-9 shrink-0 touch-none place-items-center border-r border-white/10 text-white/45 hover:bg-white/10 hover:text-white"
+          aria-label="Move work focus"
+          title="Drag to move"
+        >
+          <GripVertical className="h-4 w-4" />
+        </button>
+        <button type="button" onClick={() => setExpanded((open) => !open)}
+        className="flex min-w-0 flex-1 items-center gap-3 px-3.5 py-3 text-left transition hover:bg-white/5">
         <span className={`grid h-9 w-9 shrink-0 place-items-center rounded-xl ${session.status === "active" ? "bg-emerald-400/20 text-emerald-300" : "bg-amber-400/20 text-amber-300"}`}>
           {session.status === "active" ? <SelectedIcon className="h-4.5 w-4.5" /> : <CirclePause className="h-4.5 w-4.5" />}
         </span>
@@ -406,7 +516,11 @@ export function WorkTracker() {
           {lastSavedAt && <span className="block text-[9.5px] text-white/35">Saved automatically</span>}
         </span>
         <ChevronDown className={`h-4 w-4 shrink-0 text-white/50 transition ${expanded ? "rotate-180" : ""}`} />
-      </button>
+        </button>
+        <button type="button" onClick={hideFocusWidget} className="grid w-10 shrink-0 place-items-center border-l border-white/10 text-white/50 hover:bg-white/10 hover:text-white" aria-label="Hide work focus" title="Hide work focus">
+          <EyeOff className="h-4 w-4" />
+        </button>
+      </div>
     </div>
   );
 }

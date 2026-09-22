@@ -13,7 +13,7 @@ export const revalidate = 60;
 export default async function BrandMarketerAgreementPage() {
   const doc = await loadLegalDocument("brand-marketer-agreement");
   return (
-    <LegalShell title={doc.title} subtitle={doc.subtitle ?? undefined} effectiveDate={formatDate(doc.effective_date)}>
+    <LegalShell title={doc.title} subtitle={doc.subtitle ?? undefined} effectiveDate={formatDate(doc.effective_date)} pdfSlug="brand-marketer-agreement">
       <div className="legal-prose" dangerouslySetInnerHTML={{ __html: doc.content }} />
     </LegalShell>
   );

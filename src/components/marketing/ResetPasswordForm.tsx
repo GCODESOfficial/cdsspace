@@ -16,7 +16,9 @@ export function ResetPasswordForm() {
     setBusy(true);
     setNotice(null);
     try {
-      const result = await completeClientPasswordReset({ password, confirmPassword });
+      // The single-use token from the emailed link is what authorises the reset.
+      const token = typeof window === "undefined" ? null : new URLSearchParams(window.location.search).get("token");
+      const result = await completeClientPasswordReset({ password, confirmPassword, token });
       setNotice({
         ok: Boolean(result.success),
         text: result.error || "Password updated. Sign in with your new password and email code.",

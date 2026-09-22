@@ -15,7 +15,7 @@ import {
     ArrowUpRight,
     MessageSquare,
     Crown,
-    Star,
+    BadgeCheck,
     Trash2
 } from "lucide-react";
 import { RequestDetailView } from "./RequestDetailView";
@@ -249,6 +249,10 @@ export const ActiveSubscriptionView = ({
     const [newRequestFiles, setNewRequestFiles] = useState<any[]>([]);
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [designCount, setDesignCount] = useState(initialDesignCount);
+    const fixedPlanLimit = plan.toLowerCase() === "startup" ? 5 : plan.toLowerCase() === "scaleup" ? 10 : null;
+    const [quotaLimit, setQuotaLimit] = useState(
+        fixedPlanLimit || (Number.isInteger(designLimit) && Number(designLimit) > 0 ? Number(designLimit) : 1)
+    );
     const [isLoading, setIsLoading] = useState(true);
 
     useEffect(() => {
@@ -266,6 +270,11 @@ export const ActiveSubscriptionView = ({
                         versions: r.versions || [],
                         comments: r.comments || []
                     })));
+                }
+                if (data.quota) {
+                    setDesignCount(Number(data.quota.used || 0));
+                    setQuotaLimit(Number(data.quota.limit || 1));
+                    onUpdateDesignCount?.(Number(data.quota.used || 0));
                 }
             } catch (error) {
                 console.error("Failed to fetch requests:", error);
@@ -286,8 +295,8 @@ export const ActiveSubscriptionView = ({
         };
         const statusToMatch = tabToStatus[activeTab];
         const matchesTab = activeTab === "All" || req.status === statusToMatch;
-        const matchesSearch = req.title.toLowerCase().includes(searchQuery.toLowerCase()) || 
-                             req.description.toLowerCase().includes(searchQuery.toLowerCase());
+        const matchesSearch = String(req.title || "").toLowerCase().includes(searchQuery.toLowerCase()) ||
+                             String(req.description || "").toLowerCase().includes(searchQuery.toLowerCase());
         return matchesTab && matchesSearch;
     });
 
@@ -317,6 +326,10 @@ export const ActiveSubscriptionView = ({
                 }),
             });
             const data = await res.json();
+            if (!res.ok) {
+                await appAlert(data.error || "Could not submit this design request.");
+                return;
+            }
             if (data.request) {
                 setRequests(prev => [{
                     ...data.request,
@@ -328,14 +341,16 @@ export const ActiveSubscriptionView = ({
                     comments: []
                 }, ...prev]);
                 
-                const newCount = designCount + 1;
+                const newCount = Number(data.usage?.used ?? designCount + 1);
                 setDesignCount(newCount);
+                if (data.usage?.limit) setQuotaLimit(Number(data.usage.limit));
                 onUpdateDesignCount?.(newCount);
                 setNewRequestFiles([]); // Reset files after success
                 setView("list");
             }
         } catch (error) {
             console.error("Failed to create request:", error);
+            await appAlert("The design request could not be submitted. Please check your connection and try again.");
         } finally {
             setIsSubmitting(false);
         }
@@ -355,7 +370,10 @@ export const ActiveSubscriptionView = ({
                 method: "DELETE",
             });
             const data = await res.json();
-            
+            if (!res.ok) {
+                await appAlert(data.error || "Could not delete this design request.");
+                return;
+            }
             if (data.success) {
                 setRequests(prev => prev.filter(r => r.id !== reqId));
                 
@@ -374,14 +392,12 @@ export const ActiveSubscriptionView = ({
     const planLimits = {
         startup: { limit: 5, name: "Startup" },
         scaleup: { limit: 10, name: "Scaleup" },
-        supreme: { limit: 99, name: "Supreme" },
+        supreme: { limit: quotaLimit, name: "Supreme" },
     };
 
     const currentPlanKey = plan.toLowerCase() as keyof typeof planLimits;
     const currentPlan = planLimits[currentPlanKey] || planLimits.scaleup;
-    const currentLimit = Number.isInteger(designLimit) && Number(designLimit) > 0
-        ? Number(designLimit)
-        : currentPlan.limit;
+    const currentLimit = quotaLimit || currentPlan.limit;
     const progressPercentage = Math.min((designCount / currentLimit) * 100, 100);
     const isQuotaFull = designCount >= currentLimit;
 
@@ -416,7 +432,7 @@ export const ActiveSubscriptionView = ({
                             )}
                         >
                             <Plus className="w-[16px] h-[16px] xl:w-[20px] xl:h-[20px] 2xl:w-[24px] 2xl:h-[24px]" />
-                            {isQuotaFull ? "Quota Reached" : "New Design Request"}
+                            {isQuotaFull ? "Quota reached" : "New design request"}
                         </button>
                     </div>
 
@@ -507,16 +523,16 @@ export const ActiveSubscriptionView = ({
                             <div className="flex flex-col gap-[16px] xl:gap-[24px] 2xl:gap-[32px]">
                                 <div className="flex items-center gap-[12px] 2xl:gap-[16px]">
                                     <div className="w-[36px] h-[36px] xl:w-[40px] xl:h-[40px] 2xl:w-[48px] 2xl:h-[48px] bg-brand-blue rounded-[10px] 2xl:rounded-[12px] flex items-center justify-center text-white shadow-[0_8px_16px_rgba(28,78,209,0.2)]">
-                                        <Star className="w-[16px] h-[16px] xl:w-[20px] xl:h-[20px] 2xl:w-[24px] 2xl:h-[24px]" fill="currentColor" />
+                                        <BadgeCheck className="w-[16px] h-[16px] xl:w-[20px] xl:h-[20px] 2xl:w-[24px] 2xl:h-[24px]" />
                                     </div>
                                     <div className="flex flex-col">
-                                        <span className="text-brand-mute text-[10px] xl:text-[12px] 2xl:text-[14px] font-medium uppercase tracking-wider">Current Plan</span>
+                                        <span className="text-brand-mute text-[10px] xl:text-[12px] 2xl:text-[14px] font-medium">Current plan</span>
                                         <span className="text-brand-body text-[16px] xl:text-[18px] 2xl:text-[22px] font-bold">{currentPlan.name}</span>
                                     </div>
                                 </div>
                                 <div className="flex flex-col gap-[10px] xl:gap-[14px] 2xl:gap-[18px]">
                                     <div className="flex items-center justify-between text-[12px] xl:text-[14px] 2xl:text-[16px]">
-                                        <span className="text-brand-mute font-medium">Design Usage</span>
+                                        <span className="text-brand-mute font-medium">Design usage</span>
                                         <span className="text-brand-body font-bold">{designCount} / {currentLimit}</span>
                                     </div>
                                     <div className="flex flex-col gap-[8px] xl:gap-[12px] 2xl:gap-[16px]">
@@ -546,11 +562,11 @@ export const ActiveSubscriptionView = ({
                                     <span className="text-brand-body text-[13px] xl:text-[15px] 2xl:text-[17px] font-bold">{industry}</span>
                                 </div>
                                 <div className="flex items-center justify-between group">
-                                    <span className="text-brand-mute text-[12px] xl:text-[13px] 2xl:text-[15px] font-medium">Billing Cycle</span>
+                                    <span className="text-brand-mute text-[12px] xl:text-[13px] 2xl:text-[15px] font-medium">Billing cycle</span>
                                     <span className="text-brand-body text-[13px] xl:text-[15px] 2xl:text-[17px] font-bold">Monthly</span>
                                 </div>
                                 <div className="flex items-center justify-between group">
-                                    <span className="text-brand-mute text-[12px] xl:text-[13px] 2xl:text-[15px] font-medium">Next Billing</span>
+                                    <span className="text-brand-mute text-[12px] xl:text-[13px] 2xl:text-[15px] font-medium">Next billing</span>
                                     <span className="text-brand-body text-[13px] xl:text-[15px] 2xl:text-[17px] font-bold">2026-03-06</span>
                                 </div>
                             </div>
@@ -564,7 +580,7 @@ export const ActiveSubscriptionView = ({
                                 </button>
                             ) : (
                                 <div className="w-full bg-[#FFF4EB] border border-orange-200 text-[#F47A00] h-[40px] xl:h-[48px] 2xl:h-[56px] rounded-[12px] 2xl:rounded-full flex items-center justify-center gap-[8px] 2xl:gap-[10px] font-bold text-[14px] xl:text-[16px] 2xl:text-[18px]">
-                                    <Star className="text-[#F47A00] w-[16px] h-[16px] xl:w-[18px] xl:h-[18px] 2xl:w-[20px] 2xl:h-[20px]" fill="currentColor" />
+                                    <Crown className="text-[#F47A00] w-[16px] h-[16px] xl:w-[18px] xl:h-[18px] 2xl:w-[20px] 2xl:h-[20px]" />
                                     Supreme Member
                                 </div>
                             )}

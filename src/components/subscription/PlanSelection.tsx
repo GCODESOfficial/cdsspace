@@ -56,10 +56,10 @@ const plans = [
     {
         id: "supreme",
         name: "Supreme",
-        subtitle: "Unlimited",
+        subtitle: "Up to 40 monthly",
         icon: "/dashboard/subscription/crown-03.svg",
         features: [
-            "Unlimited design requests",
+            "Choose up to 40 designs monthly",
             "12-hour turnaround",
             "Unlimited revisions"
         ]

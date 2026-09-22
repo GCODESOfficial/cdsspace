@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { usePathname } from "next/navigation";
 import {
   Accessibility, X, RotateCcw, Contrast, Link2, Eye, Square, Type,
   AlignJustify, Focus, MousePointer2, Waves, Palette, Globe,
@@ -78,6 +79,12 @@ function apply(s: A11ySettings) {
 }
 
 export function AccessibilityWidget() {
+  const pathname = usePathname();
+  if (pathname.startsWith("/meet/")) return null;
+  return <AccessibilityWidgetContent />;
+}
+
+function AccessibilityWidgetContent() {
   const [open, setOpen] = useState(false);
   const [firstVisit, setFirstVisit] = useState(false);
   const [languagePrompt, setLanguagePrompt] = useState<{ locale: string; countryName: string } | null>(null);

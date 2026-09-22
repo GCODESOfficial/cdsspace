@@ -2,11 +2,12 @@
 
 import { useEffect, useState } from "react";
 import { createClient } from "@/lib/glashdb/client";
+import { rememberLastAccess, takePendingProvider } from "@/lib/last-access";
 
 /**
  * OAuth return handler (client component).
  *
- * GlashDB completes Google sign-in with the **implicit** flow: it redirects back
+ * GlashDB can complete Google or LinkedIn sign-in with the **implicit** flow: it redirects back
  * to this URL with the session in the URL *fragment* (`#access_token=…&refresh_token=…`).
  * A fragment is never sent to the server, so this MUST run in the browser. We
  * read the tokens, hand them to the GlashDB client via `setSession` (which writes
@@ -22,10 +23,20 @@ export default function AuthCallbackPage() {
       try {
         const hash = new URLSearchParams(window.location.hash.replace(/^#/, ""));
         const search = new URLSearchParams(window.location.search);
+        const oauthState = search.get("state");
 
         const oauthError =
           hash.get("error_description") || hash.get("error") || search.get("error");
         if (oauthError) {
+          // Direct Google errors must pass through the server route so it can
+          // validate state, clear one-time cookies and restore the right portal.
+          if (oauthState) {
+            const handoff = new URL("/api/auth/google/callback", window.location.origin);
+            handoff.searchParams.set("error", oauthError);
+            handoff.searchParams.set("state", oauthState);
+            window.location.replace(handoff.toString());
+            return;
+          }
           window.location.replace(`/login?error=${encodeURIComponent(oauthError)}`);
           return;
         }
@@ -34,7 +45,19 @@ export default function AuthCallbackPage() {
         const refreshToken = hash.get("refresh_token");
         const code = search.get("code");
 
+        // Direct Google OIDC returns to this already-authorized public URI.
+        // Move the credentials straight into the server-only exchange route;
+        // the one-time state and PKCE verifier remain in HttpOnly cookies.
+        if (code && oauthState) {
+          const handoff = new URL("/api/auth/google/callback", window.location.origin);
+          handoff.searchParams.set("code", code);
+          handoff.searchParams.set("state", oauthState);
+          window.location.replace(handoff.toString());
+          return;
+        }
+
         let nextPath: string;
+        let signedInEmail = "";
 
         if (accessToken && refreshToken) {
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -54,6 +77,7 @@ export default function AuthCallbackPage() {
             throw new Error("oauth_finalization_failed");
           }
           nextPath = json.next;
+          signedInEmail = typeof json.email === "string" ? json.email : "";
         } else if (code) {
           const exchange = await fetch("/api/auth/oauth/exchange", {
             method: "POST",
@@ -66,9 +90,15 @@ export default function AuthCallbackPage() {
             throw new Error("oauth_exchange_failed");
           }
           nextPath = json.next;
+          signedInEmail = typeof json.email === "string" ? json.email : "";
         } else {
           throw new Error("missing_credentials");
         }
+
+        // Sign-in worked, so the provider this browser set out with becomes the
+        // hint shown next time. An abandoned attempt never gets this far.
+        const provider = takePendingProvider();
+        if (provider && signedInEmail) rememberLastAccess({ email: signedInEmail, provider });
 
         window.location.replace(nextPath);
       } catch {

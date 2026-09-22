@@ -8,6 +8,7 @@ import {
   Users, TrendingUp, MessageSquare,
   PackageCheck,
   Mail,
+  BookOpen,
 } from "lucide-react";
 
 interface Stats {
@@ -18,6 +19,7 @@ interface Stats {
 }
 
 const SECTIONS = [
+  { href: "/admin/clients/sales-scripts", label: "Sales scripts", desc: "Approved sales, marketing and client experience wording", icon: BookOpen, tint: "bg-[#0A4FE8]" },
   { href: "/admin/clients/deliveries", label: "Client Deliveries", desc: "Send finished project files directly to clients", icon: PackageCheck, tint: "bg-[#0A4FE8]" },
   { href: "/admin/clients/list", label: "Unified Client List", desc: "Manage manual customers and platform accounts", icon: Building2, tint: "bg-[#0A4FE8]" },
   { href: "/admin/clients/mailings", label: "Client mailings", desc: "Write and send branded email campaigns", icon: Mail, tint: "bg-[#0A4FE8]" },

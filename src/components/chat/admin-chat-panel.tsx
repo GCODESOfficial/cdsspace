@@ -2,8 +2,10 @@
 
 import { useState, useEffect, useRef, useCallback } from "react";
 import dynamic from "next/dynamic";
+import Link from "next/link";
 import { appAlert, appConfirm, appPrompt } from "@/lib/app-notify";
 import { validateChatUpload } from "@/lib/chat-upload-limits";
+import { buildCMeetPath } from "@/lib/cmeet-links";
 import {
   MessageSquare,
   Send,
@@ -28,6 +30,7 @@ import {
   SmilePlus,
   ChevronUp,
   ChevronDown,
+  Sticker,
 } from "lucide-react";
 import { Linkified, LinkPreview, firstUrl } from "@/components/chat/message-links";
 import { ChatSidebarPreview } from "@/components/chat/chat-sidebar-preview";
@@ -38,6 +41,15 @@ import {
   ContextMenuSeparator,
   ContextMenuTrigger,
 } from "@/components/ui/context-menu";
+
+import { MeetingModeModal, type MeetingRequest } from "@/components/chat/MeetingModeModal";
+import { ChatStickerPicker } from "@/components/chat/ChatStickerPicker";
+import {
+  animatedNotoStickerUrl,
+  getEssentialChatSticker,
+  type ChatStickerSelection,
+  type CustomChatSticker,
+} from "@/lib/chat-stickers";
 
 const EmbeddedMeetingPanel = dynamic(
   () => import("@/components/chat/EmbeddedMeetingPanel").then((module) => module.EmbeddedMeetingPanel),
@@ -71,6 +83,18 @@ interface ChatRoom {
     username: string | null;
     linked_client_id: string | null;
   } | null;
+  /**
+   * Where this person stands in the Deals funnel, matched on their email. The
+   * API only ever sends it to admins, and it is never rendered to the client.
+   */
+  deal?: {
+    label: string;
+    tone: "hot" | "warm" | "cool" | "won" | "lost";
+    detail: string;
+    prospect_id: string | null;
+    proposal_id: string | null;
+    stage: string | null;
+  } | null;
 }
 
 interface ChatMessage {
@@ -96,6 +120,10 @@ interface ChatMessage {
   } | null;
   reactions?: Record<string, string[]>;
   reply_to_message_id?: string | null;
+  sticker_key?: string | null;
+  message_type?: string | null;
+  mime_type?: string | null;
+  metadata?: { custom_sticker?: CustomChatSticker; [key: string]: unknown };
 }
 
 function isChatImageUrl(url: string | undefined) {
@@ -124,6 +152,28 @@ function SourceBadge({ source }: { source?: MessageSource }) {
   );
 }
 
+/**
+ * Admin-only. Says what the person on the other end of the conversation is
+ * worth to Deals before anyone answers them.
+ */
+function DealBadge({ deal }: { deal: NonNullable<ChatRoom["deal"]> }) {
+  const tones: Record<NonNullable<ChatRoom["deal"]>["tone"], string> = {
+    hot: "bg-orange-500/20 text-orange-300",
+    warm: "bg-amber-500/20 text-amber-300",
+    cool: "bg-sky-500/20 text-sky-300",
+    won: "bg-emerald-500/20 text-emerald-300",
+    lost: "bg-rose-500/20 text-rose-300",
+  };
+  return (
+    <span
+      title={`${deal.detail} (visible to admins only)`}
+      className={`inline-flex shrink-0 items-center gap-1 rounded px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide ${tones[deal.tone]}`}
+    >
+      {deal.label}
+    </span>
+  );
+}
+
 interface TeamThreadLite {
   id: string;
   name: string | null;
@@ -135,6 +185,11 @@ interface PlatformClientLite {
   name: string;
   brand_name: string | null;
   email: string | null;
+}
+
+interface PendingClientPhoto {
+  url: string;
+  fileName: string;
 }
 
 export function AdminChatPanel() {
@@ -149,8 +204,14 @@ export function AdminChatPanel() {
   const [forwardMsg, setForwardMsg] = useState<ChatMessage | null>(null);
   const [actionBusy, setActionBusy] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
+  const [pendingPhoto, setPendingPhoto] = useState<PendingClientPhoto | null>(
+    null,
+  );
+  const [stickersOpen, setStickersOpen] = useState(false);
   const [startingCall, setStartingCall] = useState<"voice" | "video" | null>(null);
   const [activeMeeting, setActiveMeeting] = useState<{ url: string; title: string } | null>(null);
+  // The call buttons ask how to meet before anything is created.
+  const [meetingPrompt, setMeetingPrompt] = useState<"voice" | "video" | null>(null);
   const [showClientPicker, setShowClientPicker] = useState(false);
   const [clientPickerLoading, setClientPickerLoading] = useState(false);
   const [clientSearch, setClientSearch] = useState("");
@@ -245,6 +306,7 @@ export function AdminChatPanel() {
 
   // Fetch messages when room changes + polling
   useEffect(() => {
+    setPendingPhoto(null);
     if (selectedRoom) {
       initialScrollPending.current = true;
       renderedLastMessageId.current = null;
@@ -434,9 +496,10 @@ export function AdminChatPanel() {
   };
 
   const handleSend = async () => {
-    if (!input.trim() || !selectedRoom || isSending) return;
+    if ((!input.trim() && !pendingPhoto) || !selectedRoom || isSending) return;
 
-    const text = input.trim();
+    const photo = pendingPhoto;
+    const text = input.trim() || (photo ? `📎 ${photo.fileName}` : "");
     const replyTarget = replyingTo;
     setInput("");
     setReplyingTo(null);
@@ -449,6 +512,7 @@ export function AdminChatPanel() {
       sender_id: "admin",
       sender_role: "admin",
       message: text,
+      file_url: photo?.url,
       created_at: new Date().toISOString(),
       is_read: false,
       reply_to_message_id: replyTarget?.id || null,
@@ -458,16 +522,66 @@ export function AdminChatPanel() {
     requestAnimationFrame(() => scrollToLatest("smooth"));
 
     try {
-      await fetch("/api/chat/messages", {
+      const response = await fetch("/api/chat/messages", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ roomId: selectedRoom, message: text, replyToMessageId: replyTarget?.id || null }),
+        body: JSON.stringify({
+          roomId: selectedRoom,
+          message: text,
+          fileUrl: photo?.url,
+          replyToMessageId: replyTarget?.id || null,
+        }),
       });
+      if (!response.ok) throw new Error("Message could not be sent");
+      if (photo) setPendingPhoto(null);
       await fetchMessages();
       await fetchRooms();
     } catch (err) {
       console.error("Failed to send message:", err);
+      setInput(input.trim());
       if (replyTarget) setReplyingTo(replyTarget);
+    } finally {
+      setIsSending(false);
+    }
+  };
+
+  const sendSticker = async (sticker: ChatStickerSelection) => {
+    if (!selectedRoom?.startsWith("client_") || isSending) return;
+    const replyTarget = replyingTo;
+    const optimisticId = `temp_${Date.now()}`;
+    setStickersOpen(false);
+    setReplyingTo(null);
+    setIsSending(true);
+    setMessages((current) => [...current, {
+      id: optimisticId,
+      room_id: selectedRoom,
+      sender_id: "admin",
+      sender_role: "admin",
+      message: "Sticker",
+      file_url: sticker.attachmentUrl || undefined,
+      sticker_key: sticker.stickerKey,
+      message_type: "sticker",
+      mime_type: sticker.mimeType || null,
+      metadata: sticker.metadata || {},
+      created_at: new Date().toISOString(),
+      is_read: false,
+      reply_to_message_id: replyTarget?.id || null,
+      reactions: {},
+    }]);
+    requestAnimationFrame(() => scrollToLatest("smooth"));
+    try {
+      const response = await fetch("/api/chat/messages", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ roomId: selectedRoom, message: "Sticker", stickerKey: sticker.stickerKey, replyToMessageId: replyTarget?.id || null }),
+      });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.error || "Sticker could not be sent");
+      await Promise.all([fetchMessages(), fetchRooms()]);
+    } catch (error) {
+      setMessages((current) => current.filter((message) => message.id !== optimisticId));
+      if (replyTarget) setReplyingTo(replyTarget);
+      await appAlert(error instanceof Error ? error.message : "Sticker could not be sent");
     } finally {
       setIsSending(false);
     }
@@ -497,7 +611,7 @@ export function AdminChatPanel() {
     }
   };
 
-  const uploadDocument = async (file: File) => {
+  const uploadDocument = async (file: File, stagePhoto = false) => {
     if (!selectedRoom) return;
     const check = validateChatUpload(file.size, file.type || "");
     if (!check.ok) return appAlert(check.error);
@@ -509,6 +623,15 @@ export function AdminChatPanel() {
       const uploadResponse = await fetch("/api/chat/upload", { method: "POST", body: formData });
       const upload = await uploadResponse.json();
       if (!uploadResponse.ok || !upload.ok) throw new Error(upload.error || "Upload failed");
+
+      if (stagePhoto && file.type.startsWith("image/")) {
+        setPendingPhoto({
+          url: upload.publicUrl,
+          fileName: upload.fileName || file.name || "Pasted photo",
+        });
+        window.setTimeout(() => inputRef.current?.focus(), 50);
+        return;
+      }
 
       const sendResponse = await fetch("/api/chat/messages", {
         method: "POST",
@@ -530,36 +653,70 @@ export function AdminChatPanel() {
     }
   };
 
-  const startClientCall = async (kind: "voice" | "video") => {
+  const handlePhotoPaste = (event: React.ClipboardEvent<HTMLInputElement>) => {
+    if (!selectedRoom?.startsWith("client_") || uploading || isSending) return;
+    const photos = Array.from(event.clipboardData.items)
+      .filter((item) => item.kind === "file" && item.type.startsWith("image/"))
+      .map((item) => item.getAsFile())
+      .filter((file): file is File => Boolean(file));
+    if (photos.length === 0) return;
+
+    event.preventDefault();
+    if (pendingPhoto) {
+      void appAlert("Send or remove the current photo before pasting another one.");
+      return;
+    }
+    void uploadDocument(photos[0], true);
+  };
+
+  const clientMeetingTitle = (kind: "voice" | "video") => {
+    const clientName = selectedRoomData ? getClientName(selectedRoomData) : "Client";
+    return `${kind === "voice" ? "Voice" : "Video"} call - ${clientName}`;
+  };
+
+  /**
+   * Creates the room the reader asked for. A scheduled meeting posts its invite
+   * into the conversation and stops there; only an instant one opens the call.
+   */
+  const createClientMeeting = async (kind: "voice" | "video", request: MeetingRequest) => {
     if (!selectedRoom || startingCall || !selectedRoom.startsWith("client_")) return;
     setStartingCall(kind);
     try {
-      const clientName = selectedRoomData ? getClientName(selectedRoomData) : "Client";
+      const meetingTitle = request.title;
       const meetingResponse = await fetch("/api/cmeet", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          title: `${kind === "voice" ? "Voice" : "Video"} call - ${clientName}`,
-          audio_only: kind === "voice",
+          title: meetingTitle,
+          audio_only: request.audioOnly,
+          scheduled_for: request.scheduledFor,
+          agenda_items: request.agendaItems,
+          invited_client_user_ids: [selectedRoom.slice("client_".length)],
         }),
       });
       const meetingPayload = await meetingResponse.json();
       if (!meetingResponse.ok || !meetingPayload.ok) throw new Error(meetingPayload.error || "Could not start the call");
-      const link = `/meet/${meetingPayload.meeting.room_code}`;
+      // Absolute, matching team chat: a bare path breaks the moment it leaves
+      // the app, and the link preview service cannot fetch one.
+      const link = `${window.location.origin}${buildCMeetPath(meetingPayload.meeting.room_code, meetingTitle)}`;
+      const when = request.scheduledFor
+        ? new Date(request.scheduledFor).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })
+        : "";
       const messageResponse = await fetch("/api/chat/messages", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           roomId: selectedRoom,
-          message: `${kind === "voice" ? "📞 Voice" : "🎥 Video"} call started - join: ${link}`,
+          message: request.scheduledFor
+            ? `${kind === "voice" ? "📞" : "🎥"} ${meetingTitle} scheduled for ${when} - join: ${link}`
+            : `${kind === "voice" ? "📞 Voice" : "🎥 Video"} call started - join: ${link}`,
         }),
       });
       const messagePayload = await messageResponse.json();
       if (!messageResponse.ok) throw new Error(messagePayload.error || "Call invitation could not be sent");
-      setActiveMeeting({
-        url: link,
-        title: `${kind === "voice" ? "Voice" : "Video"} call with ${clientName}`,
-      });
+      setMeetingPrompt(null);
+      // A meeting booked for later must not drag anyone into a call now.
+      if (!request.scheduledFor) setActiveMeeting({ url: link, title: meetingTitle });
       await Promise.all([fetchMessages(), fetchRooms()]);
     } catch (error) {
       await appAlert(error instanceof Error ? error.message : "Could not start the call");
@@ -758,6 +915,7 @@ export function AdminChatPanel() {
                     </div>
                     <div className="flex items-center gap-1.5 mt-1">
                       <SourceBadge source={getRoomSource(room)} />
+                      {room.deal && <DealBadge deal={room.deal} />}
                       <ChatSidebarPreview
                         text={room.lastMessage}
                         fallback="No messages"
@@ -797,7 +955,7 @@ export function AdminChatPanel() {
 
       {/* Message Thread */}
       <div
-        className={`relative flex-1 flex flex-col bg-[#0f1740] ${
+        className={`relative flex-1 flex flex-col bg-[#10172A] ${
           !mobileShowThread ? "hidden md:flex" : "flex"
         }`}
       >
@@ -830,6 +988,7 @@ export function AdminChatPanel() {
                 <p className="text-white font-medium text-sm flex items-center gap-2">
                   {selectedRoomData ? getClientName(selectedRoomData) : selectedRoom}
                   {selectedRoomData && <SourceBadge source={getRoomSource(selectedRoomData)} />}
+                  {selectedRoomData?.deal && <DealBadge deal={selectedRoomData.deal} />}
                 </p>
                 <p className="text-gray-400 text-xs">
                   {selectedRoomData?.whatsapp
@@ -837,12 +996,20 @@ export function AdminChatPanel() {
                     : selectedRoomData?.meta
                       ? `${selectedRoomData.meta.platform === "facebook" ? "Messenger" : "Instagram"}${selectedRoomData.meta.username ? ` · @${selectedRoomData.meta.username}` : ""}`
                       : "Client"}
+                  {selectedRoomData?.deal?.proposal_id ? (
+                    <>
+                      {" · "}
+                      <Link href={`/admin/deals/proposals?proposal=${selectedRoomData.deal.proposal_id}`} className="text-[#5BA8FF] hover:underline">
+                        Open proposal
+                      </Link>
+                    </>
+                  ) : null}
                 </p>
               </div>
               {selectedRoom.startsWith("client_") && (
                 <div className="ms-auto flex items-center gap-1">
                   <button
-                    onClick={() => void startClientCall("voice")}
+                    onClick={() => setMeetingPrompt("voice")}
                     disabled={!!startingCall}
                     className="grid h-9 w-9 place-items-center rounded-xl text-gray-400 transition hover:bg-[#2a3578] hover:text-[#5BA8FF] disabled:opacity-40"
                     title="Start audio call"
@@ -850,7 +1017,7 @@ export function AdminChatPanel() {
                     {startingCall === "voice" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Phone className="h-4 w-4" />}
                   </button>
                   <button
-                    onClick={() => void startClientCall("video")}
+                    onClick={() => setMeetingPrompt("video")}
                     disabled={!!startingCall}
                     className="grid h-9 w-9 place-items-center rounded-xl text-gray-400 transition hover:bg-[#2a3578] hover:text-[#5BA8FF] disabled:opacity-40"
                     title="Start video call"
@@ -899,6 +1066,9 @@ export function AdminChatPanel() {
                         : null;
                       const previewUrl = firstUrl(msg.message);
                       const reactionEntries = Object.entries(msg.reactions || {}).filter(([, users]) => users.length > 0);
+                      const essentialSticker = getEssentialChatSticker(msg.sticker_key);
+                      const customSticker = msg.metadata?.custom_sticker || null;
+                      const isStickerMessage = Boolean(essentialSticker || customSticker || msg.message_type === "sticker");
                       return (
                         <div
                           key={msg.id}
@@ -919,11 +1089,13 @@ export function AdminChatPanel() {
                           <div
                             id={`admin-client-message-${msg.id}`}
                             dir="auto"
-                            className={`max-w-[82%] rounded-2xl px-4 py-2.5 text-start text-sm sm:max-w-[75%] ${
-                              isOwn
-                                ? "bg-[#5BA8FF] text-white rounded-br-sm"
-                                : "bg-[#1a2255] text-gray-200 rounded-bl-sm"
-                            }`}
+                            className={`max-w-[82%] rounded-2xl text-start text-sm leading-[1.55] sm:max-w-[75%] ${
+                              isStickerMessage
+                                ? "border border-transparent bg-transparent px-1 py-1 shadow-none"
+                                : isOwn
+                                ? "border-[#0A4FE8] bg-[#0A4FE8] text-white rounded-br-sm"
+                                : "border-white/10 bg-[#18213B] text-slate-200 rounded-bl-sm"
+                            } ${isStickerMessage ? "" : "border px-3.5 py-2.5 shadow-sm"}`}
                           >
                             {replyTarget && (
                               <button type="button" onClick={() => document.getElementById(`admin-client-message-${replyTarget.id}`)?.scrollIntoView({ behavior: "smooth", block: "center" })} className={`mb-2 block w-full rounded-xl border-s-2 px-3 py-2 text-start ${isOwn ? "border-white/60 bg-white/10" : "border-[#5BA8FF] bg-[#0f1740]/50"}`}>
@@ -951,18 +1123,36 @@ export function AdminChatPanel() {
                                 {bookmarked && <span className="inline-flex items-center gap-1 rounded-full bg-white/15 px-2 py-0.5 text-[9px] font-semibold"><Bookmark className="w-3 h-3" /> Saved</span>}
                               </div>
                             )}
-                            <p className="whitespace-pre-wrap break-words">
-                              {msg.deleted_at ? "Message deleted" : (
-                                <Linkified
-                                  text={msg.message}
-                                  onMeetingLink={(url) => setActiveMeeting({
-                                    url,
-                                    title: `${selectedRoomData ? getClientName(selectedRoomData) : "Client"} · cMeet call`,
-                                  })}
-                                />
-                              )}
-                            </p>
-                            {previewUrl && <LinkPreview url={previewUrl} variant="dark" />}
+                            {essentialSticker ? (
+                              <div className="min-w-[132px] bg-transparent p-1 text-center">
+                                {/* eslint-disable-next-line @next/next/no-img-element */}
+                                <img src={animatedNotoStickerUrl(essentialSticker.notoCode)} alt={essentialSticker.emoji} className={`cds-sticker-motion ${essentialSticker.motion} mx-auto h-28 w-28 object-contain`} />
+                                <p className="mt-1 text-[10px] font-medium text-slate-400">{essentialSticker.title}</p>
+                              </div>
+                            ) : customSticker ? (
+                              <div className="min-w-[132px] bg-transparent p-1 text-center">
+                                {customSticker.asset_url ? (
+                                  // eslint-disable-next-line @next/next/no-img-element
+                                  <img src={customSticker.asset_url} alt={customSticker.title} className="mx-auto h-28 w-28 object-contain" />
+                                ) : (
+                                  <div className="cds-sticker-motion cds-sticker-pop text-[72px] leading-none">{customSticker.emoji}</div>
+                                )}
+                                <p className="mt-1 text-[10px] font-medium text-slate-400">{customSticker.title}</p>
+                              </div>
+                            ) : (!msg.file_url || !msg.message.startsWith("📎 ")) && (
+                              <p className="whitespace-pre-wrap break-words">
+                                {msg.deleted_at ? "Message deleted" : (
+                                  <Linkified
+                                    text={msg.message}
+                                    onMeetingLink={(url) => setActiveMeeting({
+                                      url,
+                                      title: `${selectedRoomData ? getClientName(selectedRoomData) : "Client"} · cMeet call`,
+                                    })}
+                                  />
+                                )}
+                              </p>
+                            )}
+                            {!isStickerMessage && previewUrl && <LinkPreview url={previewUrl} variant="dark" />}
                             {translations.length > 0 && (
                               <div className={`mt-2 rounded-xl border px-3 py-2 ${isOwn ? "border-white/20 bg-white/10" : "border-[#2a3578] bg-[#0f1740]/60"}`}>
                                 {translations.map(([language, translated]) => (
@@ -973,7 +1163,7 @@ export function AdminChatPanel() {
                                 ))}
                               </div>
                             )}
-                            {msg.file_url && (
+                            {msg.file_url && !isStickerMessage && (
                               isChatImageUrl(msg.file_url) ? (
                                 <a href={msg.file_url} target="_blank" rel="noopener noreferrer" className="mt-2 block overflow-hidden rounded-xl border border-white/20 bg-white/10">
                                   {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -1041,7 +1231,7 @@ export function AdminChatPanel() {
               <button
                 type="button"
                 onClick={() => scrollToLatest("smooth")}
-                className="absolute bottom-[82px] right-4 z-20 inline-flex h-11 min-w-11 items-center justify-center gap-2 rounded-full bg-[#5BA8FF] px-3 text-xs font-semibold text-white shadow-xl shadow-black/25 transition hover:bg-[#4a97ee]"
+                className="absolute bottom-[82px] right-4 z-20 inline-flex h-11 min-w-11 items-center justify-center gap-2 rounded-full bg-[#0A4FE8] px-3 text-xs font-semibold text-white shadow-sm transition hover:bg-[#083FC0]"
                 aria-label="Go to the latest message"
                 title="Go to the latest message"
               >
@@ -1051,15 +1241,31 @@ export function AdminChatPanel() {
             )}
 
             {/* Input Area */}
-            <div className="px-5 py-4 border-t border-[#2a3578] shrink-0">
+            <div className="shrink-0 border-t border-white/10 bg-[#111832] px-4 py-3 sm:px-5">
               {replyingTo && (
-                <div className="mb-2 flex items-center gap-3 rounded-xl border border-[#2a3578] bg-[#1a2255] px-3 py-2 text-start text-white">
-                  <Reply className="h-4 w-4 shrink-0 text-[#5BA8FF]" />
-                  <div className="min-w-0 flex-1"><p className="text-[10px] font-bold text-[#9fcaff]">Replying to {replyingTo.sender_role === "admin" ? "CDS Space" : "client"}</p><p className="truncate text-[11px] text-white/55">{replyingTo.message || "Attachment"}</p></div>
+                <div className="mb-2 flex items-center gap-3 rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-start text-white">
+                  <Reply className="h-4 w-4 shrink-0 text-blue-300" />
+                  <div className="min-w-0 flex-1"><p className="text-[10px] font-semibold text-blue-200">Replying to {replyingTo.sender_role === "admin" ? "CDS Space" : "client"}</p><p className="truncate text-[11px] text-white/55">{replyingTo.message || "Attachment"}</p></div>
                   <button type="button" onClick={() => setReplyingTo(null)} className="grid h-7 w-7 place-items-center rounded-lg text-white/50 hover:bg-white/10" aria-label="Cancel reply"><X className="h-3.5 w-3.5" /></button>
                 </div>
               )}
-              <div className="flex items-center gap-3">
+              {pendingPhoto && (
+                <div className="mb-2 flex items-center gap-3 rounded-xl border border-white/10 bg-white/5 p-2 text-white">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={pendingPhoto.url} alt="Photo ready to send" className="h-16 w-16 shrink-0 rounded-lg object-cover" />
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-xs font-semibold">{pendingPhoto.fileName}</p>
+                    <p className="mt-1 text-[10px] text-white/55">Add a caption below, or send the photo as it is.</p>
+                  </div>
+                  <button type="button" onClick={() => setPendingPhoto(null)} className="grid h-8 w-8 shrink-0 place-items-center rounded-full text-white/60 hover:bg-white/10 hover:text-white" aria-label="Remove pasted photo"><X className="h-4 w-4" /></button>
+                </div>
+              )}
+              {stickersOpen && selectedRoom.startsWith("client_") && (
+                <div className="mb-2 rounded-2xl border border-white/10 bg-[#111B4B] p-3 shadow-sm">
+                  <ChatStickerPicker dark onSelect={sendSticker} />
+                </div>
+              )}
+              <div className="flex items-center gap-2">
                 <input
                   ref={fileInputRef}
                   type="file"
@@ -1071,14 +1277,19 @@ export function AdminChatPanel() {
                   }}
                 />
                 {selectedRoom.startsWith("client_") && (
-                  <button
-                    onClick={() => fileInputRef.current?.click()}
-                    disabled={uploading || isSending}
-                    className="grid h-10 w-10 shrink-0 place-items-center rounded-full border border-[#2a3578] text-gray-400 transition hover:border-[#5BA8FF] hover:text-[#5BA8FF] disabled:opacity-40"
-                    title="Send a document"
-                  >
-                    {uploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Paperclip className="h-4 w-4" />}
-                  </button>
+                  <>
+                    <button
+                      onClick={() => fileInputRef.current?.click()}
+                      disabled={uploading || isSending}
+                      className="grid h-10 w-10 shrink-0 place-items-center rounded-full border border-white/10 text-slate-400 transition hover:border-blue-400/50 hover:bg-white/5 hover:text-blue-300 disabled:opacity-40"
+                      title="Send a photo or document"
+                    >
+                      {uploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Paperclip className="h-4 w-4" />}
+                    </button>
+                    <button type="button" onClick={() => setStickersOpen((current) => !current)} disabled={isSending} className={`grid h-10 w-10 shrink-0 place-items-center rounded-full border transition disabled:opacity-40 ${stickersOpen ? "border-blue-400/50 bg-white/10 text-blue-300" : "border-white/10 text-slate-400 hover:border-blue-400/50 hover:bg-white/5 hover:text-blue-300"}`} title="Stickers" aria-label="Open stickers">
+                      <Sticker className="h-4 w-4" />
+                    </button>
+                  </>
                 )}
                 <input
                   dir="auto"
@@ -1086,16 +1297,18 @@ export function AdminChatPanel() {
                   type="text"
                   value={input}
                   onChange={(e) => setInput(e.target.value)}
+                  onPaste={handlePhotoPaste}
                   onKeyDown={handleKeyDown}
-                  placeholder="Type a message..."
-                  className="flex-1 rounded-full border border-[#2a3578] bg-[#1a2255] px-4 py-2.5 text-start text-sm text-white placeholder-gray-500 focus:border-[#5BA8FF] focus:outline-none focus:ring-1 focus:ring-[#5BA8FF]"
+                  placeholder={pendingPhoto ? "Add a caption..." : "Type a message or paste a photo..."}
+                  className="min-w-0 flex-1 rounded-full border border-white/10 bg-white/[0.06] px-4 py-2.5 text-start text-sm text-white placeholder:text-slate-500 focus:border-blue-400/60 focus:outline-none focus:ring-1 focus:ring-blue-400/30"
                 />
                 <button
                   onClick={handleSend}
-                  disabled={!input.trim() || isSending}
-                  className="w-10 h-10 rounded-full bg-[#5BA8FF] text-white flex items-center justify-center hover:bg-[#4a97ee] disabled:opacity-40 disabled:cursor-not-allowed transition-colors shrink-0"
+                  disabled={(!input.trim() && !pendingPhoto) || isSending || uploading}
+                  className="w-10 h-10 rounded-full bg-[#0A4FE8] text-white flex items-center justify-center hover:bg-[#083FC0] disabled:opacity-40 disabled:cursor-not-allowed transition-colors shrink-0 shadow-sm"
+                  aria-label="Send message"
                 >
-                  <Send className="w-4 h-4" />
+                  {isSending || uploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="w-4 h-4" />}
                 </button>
               </div>
             </div>
@@ -1146,6 +1359,14 @@ export function AdminChatPanel() {
           onClose={() => { if (!welcomeSaving && !welcomeBackfillBusy) setShowWelcomeEditor(false); }}
         />
       )}
+      <MeetingModeModal
+        open={Boolean(meetingPrompt)}
+        kind={meetingPrompt || "video"}
+        defaultTitle={clientMeetingTitle(meetingPrompt || "video")}
+        busy={Boolean(startingCall)}
+        onClose={() => { if (!startingCall) setMeetingPrompt(null); }}
+        onSubmit={(request) => createClientMeeting(meetingPrompt || "video", request)}
+      />
       {activeMeeting && (
         <EmbeddedMeetingPanel
           url={activeMeeting.url}

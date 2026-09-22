@@ -4,11 +4,11 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import NextLink from "next/link";
-import { useSearchParams } from "next/navigation";
 import { Clock3, Eye, EyeOff, History, Loader2, MailCheck, RefreshCw } from "lucide-react";
 import { loginSchema, type LoginInput } from "@/lib/validations/auth";
 import { login, resendClientLoginOtp, verifyClientLoginOtp } from "@/lib/actions/auth";
 import { BotCheck } from "@/components/security/BotCheck";
+import { readLastAccess, rememberLastAccess, type LastAccess } from "@/lib/last-access";
 import { GoogleAuthButton } from "@/components/marketing/GoogleAuthButton";
 import { LinkedInAuthButton } from "@/components/marketing/LinkedInAuthButton";
 
@@ -23,25 +23,54 @@ function oauthErrorMessage(code: string): string {
             return "LinkedIn sign-in isn't enabled for this project yet. Use email and password, or try again shortly.";
         case "linkedin_start_failed":
             return "We couldn't start LinkedIn sign-in. Please try again.";
+        case "linkedin_cancelled":
+            return "LinkedIn sign-in was cancelled. Please try again when you're ready.";
+        case "linkedin_state_failed":
+            return "The LinkedIn sign-in request expired. Please start again.";
+        case "linkedin_callback_failed":
+            return "LinkedIn sign-in couldn't be completed. Please try again.";
         case "auth_code_exchange_failed":
             return "Sign-in didn't complete. Please try again.";
+        case "verification_link_invalid":
+            return "That verification link has expired or was already used. Sign up again with the same email to receive a new one.";
         default:
             return decodeURIComponent(code).replace(/\+/g, " ");
     }
 }
 
 /**
+ * The marker on whichever provider button this browser used last. It carries
+ * the address as well as the name, because someone with a work Google and a
+ * personal one needs to know which account is waiting.
+ */
+function LastUsedBadge({ email }: { email: string }) {
+    return (
+        <span className="pointer-events-none absolute -top-3 right-3 inline-flex max-w-[calc(100%-2rem)] items-center gap-1.5 rounded-full border border-blue-200 bg-brand-blue px-3 py-1 text-[10px] font-semibold leading-none text-white shadow-sm sm:right-4">
+            Last used
+            <span className="truncate font-medium text-white/85">{email}</span>
+        </span>
+    );
+}
+
+/**
  * LoginForm - 1:1 Figma-aligned implementation with real auth logic.
  */
-export const LoginForm = () => {
+export const LoginForm = ({
+    oauthErrorParam,
+    accountState,
+    nextPath,
+    emailVerified = false,
+}: {
+    oauthErrorParam: string | null;
+    accountState: "closed" | "suspended" | null;
+    nextPath: string;
+    /** Arrived from a CDS Space verification link that was just accepted. */
+    emailVerified?: boolean;
+}) => {
     const [showPassword, setShowPassword] = useState(false);
     const [isLoading, setIsLoading] = useState(false);
-    const searchParams = useSearchParams();
-    const oauthErrorParam = searchParams.get('error');
-    const accountClosed = searchParams.get('account') === 'closed';
     const [error, setError] = useState<string | null>(oauthErrorParam ? oauthErrorMessage(oauthErrorParam) : null);
-    const nextPath = searchParams.get('next') || '/dashboard';
-    const [lastAccess, setLastAccess] = useState<{ email: string; method: string; at: string } | null>(null);
+    const [lastAccess, setLastAccess] = useState<LastAccess | null>(null);
     const [botToken, setBotToken] = useState("");
     const [botResetSignal, setBotResetSignal] = useState(0);
     const [loginEmail, setLoginEmail] = useState("");
@@ -65,15 +94,7 @@ export const LoginForm = () => {
     });
 
     useEffect(() => {
-        try {
-            const stored = window.localStorage.getItem('cds.client.lastAccess');
-            if (!stored) return;
-            const parsed = JSON.parse(stored) as { email?: string; method?: string; at?: string };
-            if (!parsed.email || !parsed.at) return;
-            setLastAccess({ email: parsed.email, method: parsed.method || 'Password sign-in', at: parsed.at });
-        } catch {
-            window.localStorage.removeItem('cds.client.lastAccess');
-        }
+        setLastAccess(readLastAccess());
     }, []);
 
     useEffect(() => {
@@ -135,8 +156,7 @@ export const LoginForm = () => {
                 return;
             }
             if (result?.success) {
-                const access = { email: loginEmail, method: 'Password and email code', at: new Date().toISOString() };
-                window.localStorage.setItem('cds.client.lastAccess', JSON.stringify(access));
+                rememberLastAccess({ email: loginEmail, provider: 'password', method: 'Email and password' });
                 window.location.replace(result.next || nextPath);
             }
         } catch {
@@ -189,13 +209,25 @@ export const LoginForm = () => {
                 </p>
             </div>
 
-            {accountClosed && (
+            {emailVerified && (
+                <div className="rounded-2xl border border-emerald-100 bg-emerald-50/80 px-4 py-3 text-[13px] leading-5 text-emerald-900">
+                    Your email address is verified. Sign in to finish setting up your CDS Space account.
+                </div>
+            )}
+
+            {accountState === "closed" && (
                 <div className="rounded-2xl border border-blue-100 bg-blue-50/70 px-4 py-3 text-[13px] leading-5 text-brand-body">
                     Your CDS Space business account has been closed and all active sessions were signed out. Previous business records remain retained for accounting and transaction-history purposes.
                 </div>
             )}
 
-            {lastAccess && !challenge && (
+            {accountState === "suspended" && (
+                <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-[13px] leading-5 text-amber-900">
+                    This account is temporarily suspended because its sign-in identity could not be verified. Use a previously connected Google or LinkedIn account, or contact support to restore access.
+                </div>
+            )}
+
+            {lastAccess?.provider === "password" && !challenge && (
                 <div className="relative mt-2 flex items-center gap-3 rounded-2xl border border-blue-100 bg-blue-50/60 p-3.5 pt-5">
                     <span className="absolute -top-3 left-4 rounded-full border border-blue-200 bg-brand-blue px-3 py-1 text-[10px] font-semibold text-white shadow-sm">
                         Last used access
@@ -211,6 +243,32 @@ export const LoginForm = () => {
                         className="shrink-0 rounded-lg border border-blue-200 bg-white px-3 py-2 text-[11px] font-bold text-brand-blue hover:bg-blue-50">
                         Use email
                     </button>
+                </div>
+            )}
+
+            {/* Social sign-in leads, because most people return the way they
+                arrived. Whichever provider this browser used last says so, with
+                the address, so nobody has to remember which account it was. */}
+            {!challenge && (
+                <div className="flex w-full flex-col gap-2.5 lg:gap-3">
+                    <div className="relative w-full" data-social-provider="google">
+                        <GoogleAuthButton label="Continue with Google" next={nextPath} />
+                        {lastAccess?.provider === "google" && <LastUsedBadge email={lastAccess.email} />}
+                    </div>
+
+                    <div className="relative w-full" data-social-provider="linkedin">
+                        <LinkedInAuthButton label="Continue with LinkedIn" next={nextPath} />
+                        {lastAccess?.provider === "linkedin" && <LastUsedBadge email={lastAccess.email} />}
+                    </div>
+                </div>
+            )}
+
+            {/* Divider */}
+            {!challenge && (
+                <div className="flex w-full items-center">
+                    <div className="h-px flex-1 bg-brand-stroke opacity-10" />
+                    <span className="px-3 text-[13px] font-medium text-brand-mute lg:px-4 lg:text-[14px] 2xl:text-[15px]">Or sign in with your email</span>
+                    <div className="h-px flex-1 bg-brand-stroke opacity-10" />
                 </div>
             )}
 
@@ -355,32 +413,10 @@ export const LoginForm = () => {
             {/* Bottom Actions */}
             {!challenge && <div className="flex flex-col gap-5 lg:gap-6 2xl:gap-[32px] items-center">
 
-                {/* Divider */}
-                <div className="w-full flex items-center">
-                    <div className="flex-1 h-px bg-brand-stroke opacity-10" />
-                    <span className="px-3 lg:px-4 text-brand-mute text-[13px] lg:text-[14px] 2xl:text-[15px] font-medium">Or</span>
-                    <div className="flex-1 h-px bg-brand-stroke opacity-10" />
-                </div>
-
-                {/* Social Login */}
-                <div className="w-full flex flex-col gap-2.5 lg:gap-3">
-                    <div className="relative w-full" data-social-provider="google">
-                        <GoogleAuthButton label="Continue with Google" next={nextPath} />
-                        <span className="absolute -top-3 right-3 inline-flex min-h-6 items-center rounded-full border border-blue-200 bg-blue-50 px-3 py-1 text-[10px] font-semibold leading-none text-brand-blue shadow-sm sm:right-4">
-                            Recommended
-                        </span>
-                    </div>
-
-
-                    <div className="relative w-full" data-social-provider="linkedin">
-                        <LinkedInAuthButton label="Continue with LinkedIn" next={nextPath} />
-                    </div>
-                </div>
-
                 {/* Signup Link */}
                 <div className="flex items-center gap-1.5 lg:gap-2 text-[13px] lg:text-[14px] 2xl:text-[15px]">
                     <span className="text-brand-body font-medium">Don't have an account?</span>
-                    <NextLink href={`/signup${searchParams.get('next') ? `?next=${searchParams.get('next')}` : ''}`} className="text-brand-blue font-semibold hover:underline decoration-2 underline-offset-4">
+                    <NextLink href={`/signup${nextPath !== "/dashboard" ? `?next=${encodeURIComponent(nextPath)}` : ""}`} className="text-brand-blue font-semibold hover:underline decoration-2 underline-offset-4">
                         Create account
                     </NextLink>
                 </div>

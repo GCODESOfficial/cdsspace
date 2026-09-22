@@ -34,7 +34,7 @@ const modules = [
   { name: "Chat/Meet", path: "/dashboard/messages", icon: MessageSquare, description: "Message the CDS Space team, share files and join project calls without leaving the portal." },
   { name: "Orders", path: "/dashboard/orders", icon: ShoppingBag, description: "See every request and its progress from draft and payment through delivery." },
   { name: "Invoices", path: "/dashboard/invoices", icon: ReceiptText, description: "Review invoices, submit transfer evidence, follow verification and download receipts." },
-  { name: "Documents", path: "/dashboard/documents", icon: FolderOpen, description: "Open and download finished project files securely, including your latest deliveries." },
+  { name: "cDrive", path: "/dashboard/cdrive", icon: FolderOpen, description: "Create project drives, collaborate on files, and open finished deliveries securely." },
   { name: "Account Config", path: "/dashboard/settings", icon: Settings, description: "Complete your profile, photo, security details, currency and payment preferences." },
 ] as const;
 

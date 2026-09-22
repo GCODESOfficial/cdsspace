@@ -13,10 +13,13 @@ import { appAlert, appConfirm, appPrompt, appToast } from "@/lib/app-notify";
 import CreateProjectFromInvoiceModal, { type InvoiceForProject } from "@/components/finance/CreateProjectFromInvoiceModal";
 import { useFinanceDisplayCurrency } from "@/components/finance/FinanceCurrencySelector";
 import { convertFinanceAmount } from "@/lib/finance/currency-display";
+import RecordInvoicePaymentModal from "@/components/finance/RecordInvoicePaymentModal";
 
 interface Row {
   id: string; invoice_number: string; client_name: string; currency: Currency;
+  client_email: string | null;
   total: number; status: string; issue_date: string; due_date: string | null;
+  amount_paid?: number; balance_due?: number; payment_percentage?: number;
   finance_projects?: { name: string; client: string } | null;
   invoice_payment_submissions?: Array<{ id: string; status: string; submitted_at: string; method: string }>;
   deleted_at?: string | null; deletion_reason?: string | null; deleted_by?: string | null;
@@ -25,6 +28,7 @@ interface Row {
 const STATUS: Record<string, string> = {
   draft:     "bg-gray-100 text-gray-700 ring-1 ring-gray-200",
   sent:      "bg-blue-50 text-blue-700 ring-1 ring-blue-200",
+  partially_paid: "bg-amber-50 text-amber-700 ring-1 ring-amber-200",
   paid:      "bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200",
   overdue:   "bg-red-50 text-red-700 ring-1 ring-red-200",
   cancelled: "bg-slate-100 text-slate-600 ring-1 ring-slate-200",
@@ -38,9 +42,11 @@ export default function InvoicesPage() {
   const [working, setWorking] = useState(false);
   const [emailingId, setEmailingId] = useState<string | null>(null);
   const [remindingId, setRemindingId] = useState<string | null>(null);
+  const [confirmingId, setConfirmingId] = useState<string | null>(null);
   const [projectPrompt, setProjectPrompt] = useState<InvoiceForProject | null>(null);
   const [isSuperAdmin, setIsSuperAdmin] = useState(false);
   const [showArchived, setShowArchived] = useState(false);
+  const [paymentInvoice, setPaymentInvoice] = useState<Row | null>(null);
   const { currency: displayCurrency, rates } = useFinanceDisplayCurrency();
 
   const load = (archived = showArchived) => {
@@ -51,17 +57,43 @@ export default function InvoicesPage() {
     load(false);
     fetch("/api/admin-check", { cache: "no-store" }).then((response) => response.ok ? response.json() : null).then((data) => setIsSuperAdmin(data?.role === "super_admin")).catch(() => undefined);
   }, []);
+  useEffect(() => {
+    const refresh = () => {
+      if (document.hidden) return;
+      fetch(`/api/admin/finance/invoices${showArchived ? "?archived=1" : ""}`, { cache: "no-store" })
+        .then((response) => response.ok ? response.json() : null)
+        .then((data) => { if (data?.invoices) setRows(data.invoices); })
+        .catch(() => undefined);
+    };
+    const timer = window.setInterval(refresh, 20_000);
+    window.addEventListener("focus", refresh);
+    return () => {
+      window.clearInterval(timer);
+      window.removeEventListener("focus", refresh);
+    };
+  }, [showArchived]);
 
-  const markPaid = async (id: string, row?: Row) => {
-    await fetch(`/api/admin/finance/invoices/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ status: "paid" }) });
-    load();
-    // Offer to spin up a project - but only if the invoice isn't already linked.
-    if (row?.finance_projects) return;
+  const confirmPayment = async (row: Row, submissionId: string) => {
+    if (!(await appConfirm(`Confirm this payment for ${row.invoice_number}? The invoice balance will update automatically.`))) return;
+    setConfirmingId(row.id);
     try {
-      const res = await fetch(`/api/admin/finance/invoices/${id}`);
-      const { invoice } = await res.json();
-      if (invoice && !invoice.project_id) setProjectPrompt(invoice as InvoiceForProject);
-    } catch { /* skip the prompt if the invoice can't be re-read */ }
+      const response = await fetch(`/api/admin/finance/invoices/${row.id}/payment/${submissionId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "confirm" }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error || "Payment confirmation failed.");
+      appToast({ message: data.invoice?.status === "paid" ? "Payment confirmed and receipt issued." : "Part payment confirmed and balance updated.", kind: "success" });
+      load();
+      if (!row.finance_projects && data.invoice && !data.invoice.project_id) {
+        setProjectPrompt(data.invoice as InvoiceForProject);
+      }
+    } catch (reason) {
+      appAlert(reason instanceof Error ? reason.message : "Payment confirmation failed.");
+    } finally {
+      setConfirmingId(null);
+    }
   };
 
   const toggleOne = (id: string) => {
@@ -145,20 +177,29 @@ export default function InvoicesPage() {
   const bulkShare = async () => {
     const messages: string[] = [];
     const origin = window.location.origin;
+    let skipped = 0;
     
     for (const id of selected) {
       const res = await fetch(`/api/admin/finance/invoices/${id}`);
-      const { invoice } = await res.json();
-      if (invoice.public_token) {
+      const { invoice, items } = await res.json();
+      const complete = invoice
+        && Number(invoice.total) > 0
+        && Array.isArray(items)
+        && items.some((item: { name?: string; quantity?: number }) => Boolean(item.name?.trim()) && Number(item.quantity) > 0);
+      if (complete && invoice.public_token) {
         messages.push(
           buildInvoiceShareMessage(invoice.invoice_number, `${origin}/invoice/${invoice.public_token}`)
         );
+      } else {
+        skipped++;
       }
     }
     
     if (messages.length > 0) {
       await navigator.clipboard.writeText(messages.join("\n\n"));
-      appAlert(`${messages.length} invoice share message(s) copied to clipboard.`);
+      appAlert(`${messages.length} invoice share message(s) copied to clipboard${skipped ? ` · ${skipped} incomplete invoice${skipped === 1 ? " was" : "s were"} skipped` : ""}.`);
+    } else if (skipped) {
+      appAlert("Complete and save the selected invoice before sharing it.");
     }
     clearSelection();
   };
@@ -175,6 +216,7 @@ export default function InvoicesPage() {
       const j = await r.json().catch(() => ({}));
       if (!r.ok || !j.ok) throw new Error(j.error || "Failed to send");
       appToast({ message: `Invoice emailed to ${j.to}`, kind: "success" });
+      load();
     } catch (e) {
       appAlert(e instanceof Error ? e.message : "Could not send the email");
     } finally {
@@ -228,13 +270,18 @@ export default function InvoicesPage() {
     r.client_name.toLowerCase().includes(search.toLowerCase())
   );
   const pendingValidation = showArchived ? [] : filtered.filter((row) => (row.invoice_payment_submissions || []).some((submission) => submission.status === "pending"));
-  const tableRows = showArchived ? filtered : filtered.filter((row) => !pendingValidation.includes(row));
+  const tableRows = filtered;
 
   const totals = rows.reduce(
     (acc, r) => {
-      const value = convertFinanceAmount(r.total, r.currency, displayCurrency, rates);
-      if (r.status === "paid") acc.paid += value;
-      else if (r.status !== "cancelled") acc.outstanding += value;
+      const paid = r.amount_paid == null ? (r.status === "paid" ? r.total : 0) : r.amount_paid;
+      const balance = r.balance_due == null
+        ? Math.max(Number(r.total) - Number(paid || 0), 0)
+        : r.balance_due;
+      acc.paid += convertFinanceAmount(paid, r.currency, displayCurrency, rates);
+      if (r.status !== "cancelled") {
+        acc.outstanding += convertFinanceAmount(balance, r.currency, displayCurrency, rates);
+      }
       return acc;
     },
     { paid: 0, outstanding: 0 }
@@ -280,7 +327,7 @@ export default function InvoicesPage() {
             <section className="mb-5 rounded-2xl border border-amber-200 bg-amber-50 p-4">
               <div className="mb-3 flex items-center gap-2 text-amber-900"><ShieldCheck className="h-5 w-5" /><h2 className="text-sm font-bold">Client payments awaiting admin validation</h2><span className="ml-auto rounded-full bg-amber-200 px-2 py-0.5 text-[11px] font-bold">{pendingValidation.length}</span></div>
               <div className="space-y-2">{pendingValidation.map((row) => <div key={row.id} className="flex flex-col gap-3 rounded-xl bg-white p-3 sm:flex-row sm:items-center">
-                <div className="min-w-0 flex-1"><p className="truncate text-[13px] font-bold text-[#0D1B39]">{row.invoice_number} · {row.client_name}</p><p className="text-[11px] text-slate-500">{formatMoney(row.total, row.currency)} · Client paid - pending admin validation</p></div>
+                <div className="min-w-0 flex-1"><p className="truncate text-[13px] font-bold text-[#0D1B39]">{row.invoice_number} · {row.client_name}</p><p className="text-[11px] text-slate-500">{formatMoney(row.total, row.currency)} · Payment submitted by client · awaiting verification</p></div>
                 <Link href={`/admin/finance/invoices/${row.id}#payment-verification`} className="shrink-0 rounded-lg bg-amber-500 px-3 py-2 text-[11px] font-bold text-white hover:bg-amber-600">Verify now</Link>
               </div>)}</div>
             </section>
@@ -358,10 +405,10 @@ export default function InvoicesPage() {
                       <td className="px-5 py-4 font-mono font-semibold text-gray-900">{r.invoice_number}</td>
                       <td className="w-[145px] max-w-[145px] px-3 py-4"><p className="truncate" title={r.client_name}>{r.client_name}</p></td>
                       <td className="px-5 py-4 text-gray-500">{formatFinanceDate(r.issue_date)}</td>
-                      <td className="px-5 py-4 font-semibold"><span>{formatMoney(convertFinanceAmount(r.total, r.currency, displayCurrency, rates), displayCurrency)}</span>{r.currency !== displayCurrency && <small className="block truncate text-[9px] font-medium text-slate-400">Original: {formatMoney(r.total, r.currency)}</small>}</td>
+                      <td className="px-5 py-4 font-semibold"><span>{formatMoney(convertFinanceAmount(r.total, r.currency, displayCurrency, rates), displayCurrency)}</span>{r.currency !== displayCurrency && <small className="block truncate text-[9px] font-medium text-slate-400">Original: {formatMoney(r.total, r.currency)}</small>}{Number(r.amount_paid || 0) > 0 && <div className="mt-1.5"><div className="h-1.5 w-24 overflow-hidden rounded-full bg-gray-100"><div className="h-full rounded-full bg-[#0A4FE8]" style={{ width: `${Math.min(100, Number(r.payment_percentage || 0))}%` }} /></div><small className="mt-1 block text-[9px] font-medium text-emerald-700">{Number(r.payment_percentage || 0).toFixed(0)}% paid · {formatMoney(r.balance_due ?? Math.max(Number(r.total) - Number(r.amount_paid || 0), 0), r.currency)} due</small></div>}</td>
                       <td className="px-5 py-4">
                         {pendingVerification ? (
-                          <span className="text-[10px] uppercase tracking-wider font-semibold px-2.5 py-1 rounded-full bg-amber-50 text-amber-700 ring-1 ring-amber-200">Paid claimed · verify</span>
+                          <span className="whitespace-nowrap rounded-full bg-amber-50 px-2.5 py-1 text-[10px] font-semibold text-amber-700 ring-1 ring-amber-200" title={`Submitted ${formatFinanceDate(pendingVerification.submitted_at)}`}>Payment submitted</span>
                         ) : (
                           <span className={`text-[10px] uppercase tracking-wider font-semibold px-2.5 py-1 rounded-full ${STATUS[r.status] ?? STATUS.draft}`}>{r.status}</span>
                         )}
@@ -370,18 +417,27 @@ export default function InvoicesPage() {
                         <div className="flex items-center justify-end gap-2">
                           {showArchived ? (
                             <button type="button" onClick={() => void restoreInvoice(r.id)} className="inline-flex items-center gap-1 whitespace-nowrap rounded-lg bg-[#0A4FE8] px-3 py-1.5 text-[11px] font-semibold text-white hover:bg-[#083FC2]"><RotateCcw className="h-3.5 w-3.5" />Restore</button>
+                          ) : pendingVerification?.method === "paystack" ? (
+                            <span className="whitespace-nowrap rounded-lg bg-blue-50 px-3 py-1.5 text-[11px] font-semibold text-blue-700">Awaiting Paystack</span>
                           ) : pendingVerification && (
-                            <Link href={`/admin/finance/invoices/${r.id}#payment-verification`} className="rounded-lg bg-amber-500 px-3 py-1.5 text-[11px] font-bold uppercase tracking-wider text-white transition hover:bg-amber-600">Verify now</Link>
-                          )}
-                          {!showArchived && r.status !== "paid" && r.status !== "cancelled" && (
                             <button
-                              onClick={() => markPaid(r.id, r)}
-                              className="text-[11px] font-semibold uppercase tracking-wider px-3 py-1.5 rounded-lg bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200 hover:bg-emerald-100 transition"
+                              type="button"
+                              onClick={() => void confirmPayment(r, pendingVerification.id)}
+                              disabled={confirmingId === r.id}
+                              className="inline-flex items-center gap-1 whitespace-nowrap rounded-lg bg-emerald-600 px-3 py-1.5 text-[11px] font-semibold text-white transition hover:bg-emerald-700 disabled:opacity-60"
                             >
-                              Mark Paid
+                              {confirmingId === r.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />} Confirm
                             </button>
                           )}
-                          {!showArchived && ["sent", "overdue"].includes(r.status) && (
+                          {!showArchived && !pendingVerification && r.status !== "paid" && r.status !== "cancelled" && (
+                            <button
+                              onClick={() => setPaymentInvoice(r)}
+                              className="text-[11px] font-semibold px-3 py-1.5 rounded-lg bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200 hover:bg-emerald-100 transition"
+                            >
+                              Record payment
+                            </button>
+                          )}
+                          {!showArchived && !pendingVerification && ["sent", "partially_paid", "overdue"].includes(r.status) && (
                             <button
                               onClick={() => void remindPayment(r)}
                               disabled={remindingId === r.id}
@@ -393,8 +449,8 @@ export default function InvoicesPage() {
                           )}
                           {!showArchived && <button
                             onClick={() => emailInvoice(r.id)}
-                            disabled={emailingId === r.id}
-                            title="Email to client"
+                            disabled={emailingId === r.id || !r.client_email || Number(r.total) <= 0 || r.status === "cancelled"}
+                            title={!r.client_email || Number(r.total) <= 0 ? "Complete and save the invoice before emailing it" : "Email the saved invoice to the client"}
                             className="inline-flex items-center gap-1 text-[11px] font-semibold uppercase tracking-wider px-3 py-1.5 rounded-lg bg-white text-gray-700 ring-1 ring-gray-200 hover:bg-gray-50 transition disabled:opacity-50"
                           >
                             {emailingId === r.id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Mail className="w-3.5 h-3.5" />} Email
@@ -410,6 +466,19 @@ export default function InvoicesPage() {
           </div>
           <ActivityPanel page="finance/invoices" title="Invoice activity" />
         </>
+      )}
+      {paymentInvoice && (
+        <RecordInvoicePaymentModal
+          invoice={paymentInvoice}
+          onClose={() => setPaymentInvoice(null)}
+          onRecorded={(updated, fullyPaid) => {
+            const current = paymentInvoice;
+            setPaymentInvoice(null);
+            load();
+            appToast({ message: fullyPaid ? "Invoice paid in full." : "Part payment recorded.", kind: "success" });
+            if (fullyPaid && current && !current.finance_projects) setProjectPrompt(updated as unknown as InvoiceForProject);
+          }}
+        />
       )}
 
       {projectPrompt && (

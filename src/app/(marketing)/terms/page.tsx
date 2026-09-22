@@ -25,6 +25,7 @@ export default async function TermsOfServicePage() {
             title={doc.title}
             subtitle={doc.subtitle ?? undefined}
             effectiveDate={formatEffectiveDate(doc.effective_date)}
+            pdfSlug="terms"
         >
             <div className="legal-prose" dangerouslySetInnerHTML={{ __html: doc.content }} />
         </LegalShell>

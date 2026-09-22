@@ -6,6 +6,13 @@ import {
     Clock, CheckCircle2, History, Building2,
 } from "lucide-react";
 import { toast } from "sonner";
+import {
+    ANNUAL_LEAVE_MAX_WORKING_DAYS,
+    annualLeaveLatestEndDate,
+    LEAVE_TYPES,
+    leaveWorkingDays,
+    validateLeavePeriod,
+} from "@/lib/timebook";
 
 const CURRENT_STATUSES = [
     { key: "available", label: "Available" },
@@ -13,7 +20,6 @@ const CURRENT_STATUSES = [
     { key: "in_meeting", label: "In meeting" },
     { key: "on_break", label: "On break" },
 ];
-const LEAVE_TYPES = ["annual", "sick", "emergency", "compassionate", "public_holiday", "unpaid"];
 const ATT_COLORS: Record<string, string> = {
     early: "bg-green-100 text-green-700", on_time: "bg-green-100 text-green-700",
     late: "bg-amber-100 text-amber-700", half_day: "bg-orange-100 text-orange-700",
@@ -118,7 +124,10 @@ export default function TimebookPage() {
                 window.dispatchEvent(new CustomEvent("cds:clocked-out"));
                 localStorage.setItem("cds:attendance-sync", JSON.stringify({ action: "clocked-out", at: Date.now() }));
             }
-            else if (action === "request_leave") toast.success("Leave requested");
+            else if (action === "request_leave") {
+                toast.success("Leave requested");
+                setLeave({ leave_type: "annual", start_date: "", end_date: "", reason: "" });
+            }
             else toast.success("Updated");
             await load();
         } catch (e) { toast.error(e instanceof Error ? e.message : "Failed"); }
@@ -127,6 +136,12 @@ export default function TimebookPage() {
 
     if (loading) return <div className="flex justify-center py-24 text-brand-body/40"><Loader2 className="h-6 w-6 animate-spin" /></div>;
     if (!data) return <div className="py-24 text-center text-brand-body/60">Could not load attendance.</div>;
+
+    const annualMaxEnd = leave.leave_type === "annual" ? annualLeaveLatestEndDate(leave.start_date) : "";
+    const leaveDays = leave.start_date && leave.end_date ? leaveWorkingDays(leave.start_date, leave.end_date) : 0;
+    const leaveError = leave.start_date && leave.end_date
+        ? validateLeavePeriod(leave.leave_type, leave.start_date, leave.end_date)
+        : null;
 
     const today = data.today;
     const clockedIn = !!today?.clock_in_at && !today?.clock_out_at;
@@ -267,15 +282,47 @@ export default function TimebookPage() {
 
                     <Card icon={<CalendarPlus className="h-4 w-4" />} title="Request leave">
                         <div className="space-y-2.5 px-5 py-4">
-                            <select value={leave.leave_type} onChange={(e) => setLeave({ ...leave, leave_type: e.target.value })} className="w-full rounded-lg border border-brand-stroke/50 px-3 py-2 text-[13px] capitalize">
+                            <select
+                                value={leave.leave_type}
+                                onChange={(e) => {
+                                    const leaveType = e.target.value;
+                                    const maxEnd = leaveType === "annual" ? annualLeaveLatestEndDate(leave.start_date) : "";
+                                    setLeave({ ...leave, leave_type: leaveType, end_date: maxEnd && leave.end_date > maxEnd ? "" : leave.end_date });
+                                }}
+                                className="w-full rounded-lg border border-brand-stroke/50 px-3 py-2 text-[13px] capitalize"
+                            >
                                 {LEAVE_TYPES.map((t) => <option key={t} value={t} className="capitalize">{t.replace(/_/g, " ")}</option>)}
                             </select>
                             <div className="grid grid-cols-2 gap-2">
-                                <input type="date" value={leave.start_date} onChange={(e) => setLeave({ ...leave, start_date: e.target.value })} className="rounded-lg border border-brand-stroke/50 px-2.5 py-2 text-[12px]" />
-                                <input type="date" value={leave.end_date} onChange={(e) => setLeave({ ...leave, end_date: e.target.value })} className="rounded-lg border border-brand-stroke/50 px-2.5 py-2 text-[12px]" />
+                                <input
+                                    type="date"
+                                    aria-label="Leave start date"
+                                    value={leave.start_date}
+                                    onChange={(e) => {
+                                        const startDate = e.target.value;
+                                        const maxEnd = leave.leave_type === "annual" ? annualLeaveLatestEndDate(startDate) : "";
+                                        setLeave({ ...leave, start_date: startDate, end_date: maxEnd && leave.end_date > maxEnd ? "" : leave.end_date });
+                                    }}
+                                    className="rounded-lg border border-brand-stroke/50 px-2.5 py-2 text-[12px]"
+                                />
+                                <input
+                                    type="date"
+                                    aria-label="Leave end date"
+                                    min={leave.start_date || undefined}
+                                    max={annualMaxEnd || undefined}
+                                    value={leave.end_date}
+                                    onChange={(e) => setLeave({ ...leave, end_date: e.target.value })}
+                                    className="rounded-lg border border-brand-stroke/50 px-2.5 py-2 text-[12px]"
+                                />
                             </div>
+                            {leave.leave_type === "annual" && (
+                                <p className={`text-[11px] ${leaveError ? "text-red-600" : "text-brand-body/60"}`}>
+                                    Annual leave is limited to {ANNUAL_LEAVE_MAX_WORKING_DAYS} working days{leave.start_date && leave.end_date ? ` · ${leaveDays} selected` : ""}.
+                                </p>
+                            )}
+                            {leaveError && leave.leave_type !== "annual" && <p className="text-[11px] text-red-600">{leaveError}</p>}
                             <textarea rows={2} value={leave.reason} onChange={(e) => setLeave({ ...leave, reason: e.target.value })} placeholder="Reason (optional)" className="w-full resize-y rounded-lg border border-brand-stroke/50 px-3 py-2 text-[13px]" />
-                            <button disabled={busy === "request_leave" || !leave.start_date || !leave.end_date} onClick={() => act("request_leave", leave)} className="w-full rounded-full bg-brand-blue px-4 py-2.5 text-[13px] font-semibold text-white disabled:opacity-60">
+                            <button disabled={busy === "request_leave" || !leave.start_date || !leave.end_date || !!leaveError} onClick={() => act("request_leave", leave)} className="w-full rounded-full bg-brand-blue px-4 py-2.5 text-[13px] font-semibold text-white disabled:opacity-60">
                                 {busy === "request_leave" ? "Requesting…" : "Request leave"}
                             </button>
                             {(data.leave_requests || []).length > 0 && (

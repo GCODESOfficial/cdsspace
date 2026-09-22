@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -62,6 +62,8 @@ export default function NewInvoicePage() {
   const draft = useDraftRecovery<any>("invoice", { skip: !!editDraftId });
   const [lastSaved, setLastSaved] = useState<Date | null>(null);
   const [isOffline, setIsOffline] = useState(false);
+  const autosaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const autosaveInFlightRef = useRef<Promise<string | null> | null>(null);
 
   // Client directory autocomplete
   const [clientMatches, setClientMatches] = useState<ClientLite[]>([]);
@@ -273,7 +275,7 @@ export default function NewInvoicePage() {
 
   // Auto-save Persistence
   useEffect(() => {
-    if (hydrating) return;
+    if (hydrating || saving) return;
     const state = {
       scope, projectId, milestoneId, periodMonth, client, currency,
       issueDate, dueDate, taxRate, discount, notes, rows,
@@ -282,7 +284,7 @@ export default function NewInvoicePage() {
     };
     draft.save(state);
 
-    const timeout = setTimeout(async () => {
+    const timeout = setTimeout(() => {
       if (!client.name || rows.length === 0 || rows.every(r => !r.name)) return;
       
       const payload = {
@@ -299,30 +301,43 @@ export default function NewInvoicePage() {
         })),
       };
 
-      try {
-        const url = draftId ? `/api/admin/finance/invoices/${draftId}` : "/api/admin/finance/invoices";
-        const method = draftId ? "PATCH" : "POST";
-        const res = await fetch(url, {
-          method, headers: { "Content-Type": "application/json", "x-cds-silent": "1" },
-          body: JSON.stringify(payload),
-        });
-        if (res.ok) {
-          const d = await res.json();
-          if (!draftId && d.invoice?.id) setDraftId(d.invoice.id);
-          setLastSaved(new Date());
+      const operation = (async () => {
+        try {
+          const url = draftId ? `/api/admin/finance/invoices/${draftId}` : "/api/admin/finance/invoices";
+          const method = draftId ? "PATCH" : "POST";
+          const res = await fetch(url, {
+            method, headers: { "Content-Type": "application/json", "x-cds-silent": "1" },
+            body: JSON.stringify(payload),
+          });
+          if (res.ok) {
+            const d = await res.json();
+            const savedDraftId = String(d.invoice?.id || draftId || "") || null;
+            if (!draftId && savedDraftId) setDraftId(savedDraftId);
+            setLastSaved(new Date());
+            return savedDraftId;
+          }
+        } catch (e) {
+          console.error("Auto-save failed", e);
         }
-      } catch (e) {
-        console.error("Auto-save failed", e);
-      }
+        return null;
+      })();
+      autosaveInFlightRef.current = operation;
+      void operation.finally(() => {
+        if (autosaveInFlightRef.current === operation) autosaveInFlightRef.current = null;
+      });
     }, 3000);
+    autosaveTimerRef.current = timeout;
 
-    return () => clearTimeout(timeout);
+    return () => {
+      clearTimeout(timeout);
+      if (autosaveTimerRef.current === timeout) autosaveTimerRef.current = null;
+    };
   }, [
     hydrating,
     scope, projectId, milestoneId, periodMonth, client, currency,
     issueDate, dueDate, taxRate, discount, notes, rows,
     paymentTerms, revisionsNote, workingHours, deliverySpeed, deliveryPeriod,
-    draftId
+    draftId, saving
   ]);
 
   // Auto-fill from milestone
@@ -364,8 +379,17 @@ export default function NewInvoicePage() {
 
     if (!client.name.trim()) { appAlert("Client name is required."); return; }
     if (cleanItems.length === 0) { appAlert("Add at least one item with a name."); return; }
+    if (total <= 0) { appAlert("Add a positive invoice amount before saving."); return; }
 
     setSaving(true);
+    if (autosaveTimerRef.current) {
+      clearTimeout(autosaveTimerRef.current);
+      autosaveTimerRef.current = null;
+    }
+    let savedDraftId = draftId;
+    if (autosaveInFlightRef.current) {
+      savedDraftId = savedDraftId || await autosaveInFlightRef.current;
+    }
     const payload = {
       project_id: projectId || null, milestone_id: milestoneId || null,
       client_name: client.name.trim(), client_email: client.email, client_address: client.address,
@@ -377,12 +401,16 @@ export default function NewInvoicePage() {
       working_hours: workingHours,
       delivery_speed: deliverySpeed,
       delivery_period: deliveryPeriod.trim() || null,
-      status: "sent", // finalize as sent
+      // Saving completes the invoice record; delivery is a separate, explicit
+      // action from the invoice page. The share endpoint marks it sent only
+      // after the email provider accepts the completed invoice.
+      status: "draft",
+      finalize: true,
       items: cleanItems,
     };
 
-    const url = draftId ? `/api/admin/finance/invoices/${draftId}` : "/api/admin/finance/invoices";
-    const method = draftId ? "PATCH" : "POST";
+    const url = savedDraftId ? `/api/admin/finance/invoices/${savedDraftId}` : "/api/admin/finance/invoices";
+    const method = savedDraftId ? "PATCH" : "POST";
 
     try {
       const r = await fetch(url, {
@@ -398,7 +426,7 @@ export default function NewInvoicePage() {
           if (d?.error) message = d.error;
         } catch {}
         // If we were PATCHing a stale draft that no longer exists, retry as fresh POST.
-        if (r.status === 404 && draftId) {
+        if (r.status === 404 && savedDraftId) {
           setDraftId(null);
           const retry = await fetch("/api/admin/finance/invoices", {
             method: "POST",
@@ -418,7 +446,7 @@ export default function NewInvoicePage() {
 
       const d = await r.json();
       draft.clear();
-      const targetId = d?.invoice?.id || draftId;
+      const targetId = d?.invoice?.id || savedDraftId;
       if (!targetId) {
         appAlert("Invoice created but no id was returned.");
         return;
@@ -432,7 +460,7 @@ export default function NewInvoicePage() {
 
   return (
     <FinanceShell
-      title="New Invoice"
+      title="New invoice"
       back={{ href: "/admin/finance/invoices", label: "Invoices" }}
       actions={
         <div className="flex items-center gap-4">
@@ -446,7 +474,7 @@ export default function NewInvoicePage() {
             </div>
           </div>
           <Button onClick={save} disabled={saving} className="h-11 px-6 rounded-xl bg-[#0A4FE8] shadow-lg shadow-blue-600/30">
-            {saving ? "Creating…" : "Create Invoice"}
+            {saving ? "Saving…" : "Save invoice"}
           </Button>
         </div>
       }

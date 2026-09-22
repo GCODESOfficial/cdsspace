@@ -3,33 +3,40 @@
 /**
  * Executive Board workspace.
  *
- * One client component drives all five views (overview, budgets, targets,
- * revenue models, vault) because they share a single board payload and the
+ * One client component drives all six views (overview, budgets, expansion
+ * budgets, targets, revenue models, vault) because they share one board payload and the
  * same save/reload cycle. Each route renders it with a fixed `view`.
  */
 
-import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import {
-  Check, ChevronDown, ChevronRight, Copy, Download, ExternalLink, FileText, Folder,
-  FolderPlus, Landmark, Link2, Loader2, Lock, Paperclip, Pencil, Plus, Rocket, ScrollText,
-  Search, ShieldCheck, Target as TargetIcon, Trash2, Unlock, Upload, Wallet, X,
+  Building2, CalendarClock, Check, ChevronDown, ChevronRight, Copy, Download, ExternalLink,
+  FileText, Folder, FolderPlus, Landmark, Link2, Loader2, Lock, MapPin, Paperclip, Pencil,
+  Plus, Rocket, ScrollText, Search, ShieldCheck, Target as TargetIcon, Trash2, Unlock,
+  Upload, Wallet, X,
 } from "lucide-react";
 import {
   BUDGET_CATEGORIES, BUDGET_STATUSES, KIND_LABELS, MODEL_STATUSES, STATUS_LABELS,
-  STEP_STATUSES, TARGET_STATUSES, VAULT_KINDS,
-  BOARD_VIEW_CURRENCIES, budgetVariance, convertMoney, currencyUnit, formatBytes, formatMoneyView, planProgress,
+  STEP_STATUSES, TARGET_STATUSES, VAULT_KINDS, EXPANSION_BUDGET_PRIORITIES,
+  EXPANSION_BUDGET_STATUSES, EXPANSION_BUDGET_TYPES, EXPANSION_TYPE_LABELS,
+  BOARD_VIEW_CURRENCIES, budgetVariance, convertMoney, currencyUnit, expansionFundingGap,
+  expansionRequirement, formatBytes, formatMoney, formatMoneyView, planProgress, summariseTargets,
   type BoardViewCurrency,
   shareIsLive, targetProgress,
-  type Budget, type RevenueModel, type RevenueStep, type Target,
+  type Budget, type ExpansionBudget, type ExpansionBudgetDraft, type RevenueModel, type RevenueStep, type Target,
   type VaultFile, type VaultFolder, type VaultShare,
 } from "@/lib/executive-board";
 import { UnsavedDraftNotice, useUnsavedDraft } from "./useUnsavedDraft";
+import { budgetPdf, budgetsPdf, expansionBudgetPdf, expansionBudgetsPdf, exportBoardToPdf, modelsPdf, overviewPdf, targetsPdf, vaultPdf } from "@/lib/executive-board-pdf";
+import { appConfirm } from "@/lib/app-notify";
 
-export type BoardView = "overview" | "budgets" | "targets" | "models" | "vault";
+export type BoardView = "overview" | "budgets" | "expansion-budgets" | "targets" | "models" | "vault";
 
 interface Board {
   budgets: Budget[];
+  expansionBudgets: ExpansionBudget[];
+  expansionDraft: ExpansionBudgetDraft | null;
   targets: Target[];
   models: RevenueModel[];
   folders: VaultFolder[];
@@ -37,7 +44,7 @@ interface Board {
   shares: VaultShare[];
 }
 
-const EMPTY: Board = { budgets: [], targets: [], models: [], folders: [], files: [], shares: [] };
+const EMPTY: Board = { budgets: [], expansionBudgets: [], expansionDraft: null, targets: [], models: [], folders: [], files: [], shares: [] };
 
 const TONE: Record<string, string> = {
   draft: "bg-slate-100 text-slate-600",
@@ -55,11 +62,23 @@ const TONE: Record<string, string> = {
   doing: "bg-amber-50 text-amber-700",
   blocked: "bg-rose-50 text-rose-700",
   done: "bg-emerald-50 text-emerald-700",
+  idea: "bg-slate-100 text-slate-600",
+  researching: "bg-violet-50 text-violet-700",
+  planned: "bg-blue-50 text-[#0A4FE8]",
+  approved: "bg-emerald-50 text-emerald-700",
+  on_hold: "bg-amber-50 text-amber-700",
+  launched: "bg-cyan-50 text-cyan-700",
+  cancelled: "bg-rose-50 text-rose-700",
+  low: "bg-slate-100 text-slate-600",
+  medium: "bg-blue-50 text-blue-700",
+  high: "bg-amber-50 text-amber-700",
+  critical: "bg-rose-50 text-rose-700",
 };
 
 const VIEW_META: Record<BoardView, { title: string; blurb: string }> = {
-  overview: { title: "Executive Board", blurb: "Budgets, targets, revenue models, and the documents behind them." },
+  overview: { title: "Executive Board", blurb: "Budgets, future expansion plans, targets, revenue models, and the documents behind them." },
   budgets: { title: "Budgets", blurb: "What we planned to spend, and what we actually spent." },
+  "expansion-budgets": { title: "Expansion budgets", blurb: "Future company investments, funding needs, and target launch dates." },
   targets: { title: "Targets", blurb: "The numbers we are holding ourselves to, and where each one stands." },
   models: { title: "Revenue models", blurb: "How we make money, and the step-by-step plan to make each one work." },
   vault: { title: "Document vault", blurb: "Legal documents, attachments, and files. Lock any of them, then share by link." },
@@ -124,7 +143,8 @@ export default function ExecutiveBoardApp({ view }: { view: BoardView }) {
       const json = await response.json().catch(() => ({}));
       if (!response.ok || !json.ok) throw new Error(json.error || "Could not load the Executive Board.");
       setBoard({
-        budgets: json.budgets || [], targets: json.targets || [], models: json.models || [],
+        budgets: json.budgets || [], expansionBudgets: json.expansionBudgets || [], expansionDraft: json.expansionDraft || null,
+        targets: json.targets || [], models: json.models || [],
         folders: json.folders || [], files: json.files || [], shares: json.shares || [],
       });
     } catch (error) {
@@ -166,11 +186,36 @@ export default function ExecutiveBoardApp({ view }: { view: BoardView }) {
 
   const meta = VIEW_META[view];
 
+  const [exporting, setExporting] = useState(false);
+
+  /**
+   * Exports whichever view is on screen, in the currency it is being read in,
+   * as the same branded document family as an invoice. jsPDF is only pulled in
+   * on the click so the board itself stays light.
+   */
+  const exportPdf = useCallback(async () => {
+    setExporting(true);
+    try {
+      const payload =
+        view === "budgets" ? budgetsPdf(board.budgets, currency)
+          : view === "expansion-budgets" ? expansionBudgetsPdf(board.expansionBudgets, currency)
+          : view === "targets" ? targetsPdf(board.targets, currency)
+            : view === "models" ? modelsPdf(board.models, currency)
+              : view === "vault" ? vaultPdf(board.files, board.folders, currency)
+                : overviewPdf(board, currency);
+      await exportBoardToPdf(payload);
+    } catch (error) {
+      setNotice({ tone: "error", text: error instanceof Error ? error.message : "The PDF could not be built." });
+    } finally {
+      setExporting(false);
+    }
+  }, [view, board, currency]);
+
   return (
     <div className="p-4 sm:p-6 lg:p-8">
       <header className="mb-6 flex flex-wrap items-end justify-between gap-3">
         <div>
-          <Link href="/admin/executive-board" className="text-[11px] font-bold uppercase tracking-[0.18em] text-[#0A4FE8] hover:underline">
+          <Link href="/admin/executive-board" className="text-xs font-semibold text-[#0A4FE8] hover:underline">
             Executive Board
           </Link>
           <h1 className="mt-1 text-2xl font-black tracking-tight text-[#07133B] sm:text-[28px]">{meta.title}</h1>
@@ -179,6 +224,16 @@ export default function ExecutiveBoardApp({ view }: { view: BoardView }) {
         <div className="flex items-center gap-3">
           {loading && <Loader2 className="h-5 w-5 animate-spin text-[#0A4FE8]" />}
           <CurrencyToggle value={currency} onChange={pickCurrency} />
+          <button
+            type="button"
+            onClick={exportPdf}
+            disabled={exporting || loading}
+            className="inline-flex h-10 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 transition hover:border-[#0A4FE8] hover:text-[#0A4FE8] disabled:opacity-50"
+            title={`Download ${meta.title} as a branded PDF`}
+          >
+            {exporting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+            {exporting ? "Building..." : "Export PDF"}
+          </button>
         </div>
       </header>
 
@@ -192,6 +247,7 @@ export default function ExecutiveBoardApp({ view }: { view: BoardView }) {
       <BoardCurrency.Provider value={currency}>
         {view === "overview" && <Overview board={board} />}
         {view === "budgets" && <Budgets board={board} busy={busy} run={run} />}
+        {view === "expansion-budgets" && <ExpansionBudgets board={board} busy={busy} run={run} />}
         {view === "targets" && <Targets board={board} busy={busy} run={run} />}
         {view === "models" && <Models board={board} busy={busy} run={run} />}
         {view === "vault" && <Vault board={board} busy={busy} run={run} reload={load} setNotice={setNotice} />}
@@ -231,7 +287,7 @@ function Card({ children, className = "" }: { children: React.ReactNode; classNa
 function Stat({ icon: Icon, label: text, value, hint }: { icon: typeof Wallet; label: string; value: string; hint?: string }) {
   return (
     <Card>
-      <div className="flex items-center gap-2 text-[11px] font-bold uppercase tracking-wider text-slate-400">
+      <div className="flex items-center gap-2 text-[11px] font-semibold text-slate-500">
         <Icon className="h-3.5 w-3.5" /> {text}
       </div>
       <p className="mt-2 text-2xl font-black tracking-tight text-[#07133B]">{value}</p>
@@ -243,7 +299,7 @@ function Stat({ icon: Icon, label: text, value, hint }: { icon: typeof Wallet; l
 function Field({ label: text, children }: { label: string; children: React.ReactNode }) {
   return (
     <label className="block">
-      <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500">{text}</span>
+      <span className="text-[11px] font-semibold text-slate-600">{text}</span>
       <div className="mt-1">{children}</div>
     </label>
   );
@@ -286,6 +342,11 @@ function Overview({ board }: { board: Board }) {
   const into = (amount: number, from: string) => convertMoney(amount, from, view) ?? Number(amount || 0);
   const planned = board.budgets.reduce((sum, b) => sum + into(Number(b.planned_amount || 0), b.currency), 0);
   const actual = board.budgets.reduce((sum, b) => sum + into(Number(b.actual_amount || 0), b.currency), 0);
+  const futureExpansions = board.expansionBudgets.filter((item) => item.status !== "launched" && item.status !== "cancelled");
+  const expansionForecast = futureExpansions.reduce(
+    (sum, item) => sum + into(expansionRequirement(item), item.currency),
+    0,
+  );
   const currency = view;
   const activeModels = board.models.filter((m) => m.status === "active").length;
   const atRisk = board.targets.filter((t) => t.status === "at_risk" || t.status === "off_track").length;
@@ -294,6 +355,7 @@ function Overview({ board }: { board: Board }) {
 
   const links: Array<{ href: string; icon: typeof Wallet; title: string; body: string }> = [
     { href: "/admin/executive-board/budgets", icon: Wallet, title: "Budgets", body: `${board.budgets.length} line${board.budgets.length === 1 ? "" : "s"} tracked` },
+    { href: "/admin/executive-board/expansion-budgets", icon: Building2, title: "Expansion budgets", body: `${futureExpansions.length} future plan${futureExpansions.length === 1 ? "" : "s"} · ${formatMoneyView(expansionForecast, view, view).primary}` },
     { href: "/admin/executive-board/targets", icon: TargetIcon, title: "Targets", body: `${board.targets.length} target${board.targets.length === 1 ? "" : "s"}, ${atRisk} needing attention` },
     { href: "/admin/executive-board/revenue-models", icon: Rocket, title: "Revenue models", body: `${board.models.length} model${board.models.length === 1 ? "" : "s"}, ${activeModels} active` },
     { href: "/admin/executive-board/vault", icon: Lock, title: "Document vault", body: `${board.files.length} file${board.files.length === 1 ? "" : "s"}, ${locked} protected` },
@@ -301,7 +363,7 @@ function Overview({ board }: { board: Board }) {
 
   return (
     <div className="space-y-6">
-      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
         <Stat
           icon={Wallet}
           label="Planned spend"
@@ -313,6 +375,12 @@ function Overview({ board }: { board: Board }) {
           label="Actual spend"
           value={formatMoneyView(actual, currency, view).primary}
           hint={`${formatMoneyView(planned - actual, currency, view).primary} variance`}
+        />
+        <Stat
+          icon={Building2}
+          label="Expansion forecast"
+          value={formatMoneyView(expansionForecast, currency, view).primary}
+          hint={`${futureExpansions.length} future plan${futureExpansions.length === 1 ? "" : "s"}`}
         />
         <Stat icon={TargetIcon} label="Targets at risk" value={String(atRisk)} hint={`of ${board.targets.length} tracked`} />
         <Stat icon={Link2} label="Live share links" value={String(liveShares)} hint={`${locked} protected files`} />
@@ -426,6 +494,7 @@ function Budgets({ board, busy, run }: { board: Board; busy: string; run: Run })
                     <td className="px-4 py-3"><Badge value={budget.status} /></td>
                     <td className="px-4 py-3">
                       <div className="flex justify-end gap-1">
+                        <button type="button" onClick={() => void exportBoardToPdf(budgetPdf(budget, view))} className="rounded-lg p-1.5 text-slate-400 hover:bg-blue-50 hover:text-[#0A4FE8]" aria-label={`Download ${budget.title} with its implementation plan`} title="Download this budget and its implementation plan"><Download className="h-4 w-4" /></button>
                         <button type="button" onClick={() => setDraft(budget)} className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100" aria-label="Edit"><Pencil className="h-4 w-4" /></button>
                         <button type="button" onClick={() => run("/api/admin/executive-board", { action: "delete_budget", id: budget.id }, "budget", "Budget removed.")} className="rounded-lg p-1.5 text-slate-400 hover:bg-rose-50 hover:text-rose-600" aria-label="Delete"><Trash2 className="h-4 w-4" /></button>
                       </div>
@@ -479,6 +548,337 @@ function Budgets({ board, busy, run }: { board: Board; busy: string; run: Run })
   );
 }
 
+/* -------------------------- Expansion budgets -------------------------- */
+
+const emptyExpansionBudget = (): Partial<ExpansionBudget> => ({
+  title: "",
+  expansion_type: "new_market",
+  location: "",
+  rationale: "",
+  target_start: "",
+  target_end: "",
+  currency: "USD",
+  estimated_amount: 0,
+  contingency_amount: 0,
+  committed_amount: 0,
+  funding_source: "",
+  owner: "",
+  priority: "medium",
+  status: "idea",
+  expected_outcome: "",
+  notes: "",
+});
+
+function boardDate(value: string | null | undefined, options: Intl.DateTimeFormatOptions = { day: "numeric", month: "short", year: "numeric" }) {
+  if (!value) return "Not set";
+  const date = new Date(`${value.slice(0, 10)}T00:00:00Z`);
+  return Number.isNaN(date.getTime()) ? value : date.toLocaleDateString(undefined, { ...options, timeZone: "UTC" });
+}
+
+function ExpansionBudgets({ board, busy, run }: { board: Board; busy: string; run: Run }) {
+  const view = useBoardCurrency();
+  const [draft, setDraft] = useState<Partial<ExpansionBudget> | null>(null);
+  const [statusFilter, setStatusFilter] = useState("all");
+  const [draftState, setDraftState] = useState<"idle" | "saving" | "saved" | "error">("idle");
+  const [restoredDraft, setRestoredDraft] = useState(false);
+  const serverDraftHandled = useRef(false);
+  const ignoreLoadedDraft = useRef(false);
+  const lastSavedSignature = useRef("");
+  const latestServerDraft = useRef<Partial<ExpansionBudget> | null>(null);
+  const pendingDraftSave = useRef<Promise<void> | null>(null);
+  const submitting = useRef(false);
+
+  const persistDraft = useCallback((payload: Partial<ExpansionBudget>, keepalive = false) => {
+    const previous = pendingDraftSave.current?.catch(() => undefined) ?? Promise.resolve();
+    const request = previous.then(async () => {
+      const response = await fetch("/api/admin/executive-board", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "save_expansion_budget_draft", payload }),
+        keepalive,
+      });
+      const json = await response.json().catch(() => ({}));
+      if (!response.ok || !json.ok) throw new Error(json.error || "Draft save failed.");
+      latestServerDraft.current = payload;
+      ignoreLoadedDraft.current = false;
+      lastSavedSignature.current = JSON.stringify(payload);
+    });
+    pendingDraftSave.current = request;
+    return request;
+  }, []);
+
+  useEffect(() => {
+    if (serverDraftHandled.current || !board.expansionDraft?.payload || draft) return;
+    serverDraftHandled.current = true;
+    const restored = { ...emptyExpansionBudget(), ...board.expansionDraft.payload };
+    latestServerDraft.current = restored;
+    lastSavedSignature.current = JSON.stringify(restored);
+    setDraft(restored);
+    setRestoredDraft(true);
+    setDraftState("saved");
+  }, [board.expansionDraft, draft]);
+
+  useEffect(() => {
+    if (!draft) return;
+    const signature = JSON.stringify(draft);
+    if (signature === lastSavedSignature.current) return;
+    setDraftState("saving");
+    const timer = window.setTimeout(() => {
+      if (submitting.current) return;
+      void persistDraft(draft)
+        .then(() => setDraftState("saved"))
+        .catch(() => setDraftState("error"));
+    }, 700);
+    return () => window.clearTimeout(timer);
+  }, [draft, persistDraft]);
+
+  useEffect(() => {
+    const saveBeforeLeaving = () => {
+      if (draft && JSON.stringify(draft) !== lastSavedSignature.current) void persistDraft(draft, true);
+    };
+    window.addEventListener("pagehide", saveBeforeLeaving);
+    return () => window.removeEventListener("pagehide", saveBeforeLeaving);
+  }, [draft, persistDraft]);
+
+  const openDraft = (next: Partial<ExpansionBudget>, restored = false) => {
+    lastSavedSignature.current = JSON.stringify(next);
+    setRestoredDraft(restored);
+    setDraftState(restored ? "saved" : "idle");
+    setDraft(next);
+  };
+
+  const startNew = () => {
+    const unfinished = latestServerDraft.current || (!ignoreLoadedDraft.current ? board.expansionDraft?.payload : null);
+    openDraft(unfinished ? { ...emptyExpansionBudget(), ...unfinished } : emptyExpansionBudget(), Boolean(unfinished));
+  };
+
+  const edit = (budget: ExpansionBudget) => {
+    const unfinished = latestServerDraft.current || (!ignoreLoadedDraft.current ? board.expansionDraft?.payload : null);
+    const matches = unfinished?.id === budget.id;
+    openDraft(matches ? { ...budget, ...unfinished } : budget, matches);
+  };
+
+  const close = () => {
+    if (draft && JSON.stringify(draft) !== lastSavedSignature.current) void persistDraft(draft, true);
+    setDraft(null);
+    setRestoredDraft(false);
+  };
+
+  const discard = async () => {
+    submitting.current = true;
+    try {
+      await pendingDraftSave.current?.catch(() => undefined);
+      const response = await fetch("/api/admin/executive-board", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "delete_expansion_budget_draft" }),
+      });
+      const json = await response.json().catch(() => ({}));
+      if (!response.ok || !json.ok) throw new Error(json.error || "Draft could not be discarded.");
+      latestServerDraft.current = null;
+      ignoreLoadedDraft.current = true;
+      lastSavedSignature.current = "";
+      setDraft(null);
+      setRestoredDraft(false);
+      setDraftState("idle");
+    } catch {
+      setDraftState("error");
+    } finally {
+      submitting.current = false;
+    }
+  };
+
+  const save = async () => {
+    if (!draft) return;
+    submitting.current = true;
+    try {
+      await pendingDraftSave.current?.catch(() => undefined);
+      const done = await run(
+        "/api/admin/executive-board",
+        { action: "save_expansion_budget", ...draft },
+        "expansion-budget",
+        "Expansion budget saved.",
+      );
+      if (done) {
+        latestServerDraft.current = null;
+        ignoreLoadedDraft.current = true;
+        lastSavedSignature.current = "";
+        setDraft(null);
+        setRestoredDraft(false);
+        setDraftState("idle");
+      } else {
+        await persistDraft(draft).catch(() => undefined);
+        setDraftState("error");
+      }
+    } finally {
+      submitting.current = false;
+    }
+  };
+
+  const remove = async (budget: ExpansionBudget) => {
+    if (!(await appConfirm(`Delete the expansion budget “${budget.title}”?`))) return;
+    await run(
+      "/api/admin/executive-board",
+      { action: "delete_expansion_budget", id: budget.id },
+      "expansion-budget",
+      "Expansion budget removed.",
+    );
+  };
+
+  const activePlans = board.expansionBudgets.filter((item) => item.status !== "launched" && item.status !== "cancelled");
+  const intoView = (amount: number, currency: string) => convertMoney(amount, currency, view) ?? Number(amount || 0);
+  const forecast = activePlans.reduce((sum, item) => sum + intoView(expansionRequirement(item), item.currency), 0);
+  const committed = activePlans.reduce((sum, item) => sum + intoView(Number(item.committed_amount || 0), item.currency), 0);
+  const gap = activePlans.reduce((sum, item) => sum + intoView(expansionFundingGap(item), item.currency), 0);
+  const today = new Date().toISOString().slice(0, 10);
+  const nextPlan = activePlans.find((item) => item.target_start >= today) || activePlans[0];
+  const visible = statusFilter === "all"
+    ? board.expansionBudgets
+    : board.expansionBudgets.filter((item) => item.status === statusFilter);
+
+  return (
+    <div className="space-y-5">
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        <Stat icon={Building2} label="Future plans" value={String(activePlans.length)} hint={`${board.expansionBudgets.length} total records`} />
+        <Stat icon={Wallet} label="Forecast requirement" value={formatMoneyView(forecast, view, view).primary} hint="Estimate plus contingency" />
+        <Stat icon={Landmark} label="Committed funding" value={formatMoneyView(committed, view, view).primary} hint={`${formatMoneyView(gap, view, view).primary} funding gap`} />
+        <Stat icon={CalendarClock} label="Next planned start" value={nextPlan ? boardDate(nextPlan.target_start, { month: "short", year: "numeric" }) : "Not scheduled"} hint={nextPlan?.title || "Add the first expansion plan"} />
+      </div>
+
+      <div className="flex flex-col gap-3 rounded-2xl border border-blue-100 bg-blue-50/60 p-4 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex items-start gap-3">
+          <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-[#0A4FE8] text-white"><Building2 className="h-5 w-5" /></span>
+          <div>
+            <p className="text-sm font-semibold text-[#07133B]">Plan investment before it reaches the operating budget</p>
+            <p className="mt-0.5 text-xs leading-5 text-slate-500">Use this pipeline for future markets, offices, hiring, products, technology, infrastructure, or acquisitions.</p>
+          </div>
+        </div>
+        <button type="button" onClick={startNew} className="inline-flex h-10 shrink-0 items-center justify-center gap-2 rounded-xl bg-[#0A4FE8] px-4 text-sm font-semibold text-white">
+          <Plus className="h-4 w-4" /> New expansion budget
+        </button>
+      </div>
+
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <p className="text-sm text-slate-500">Showing {visible.length} of {board.expansionBudgets.length} expansion plans</p>
+        <label className="flex items-center gap-2 text-xs font-medium text-slate-500">
+          Status
+          <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)} className="h-9 rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-700 outline-none focus:border-[#0A4FE8]">
+            <option value="all">All stages</option>
+            {EXPANSION_BUDGET_STATUSES.map((status) => <option key={status} value={status}>{label(status)}</option>)}
+          </select>
+        </label>
+      </div>
+
+      {visible.length === 0 ? <Empty text={board.expansionBudgets.length ? "No expansion plans match this stage." : "No expansion budgets yet. Add the first future plan."} /> : (
+        <div className="grid gap-4 xl:grid-cols-2">
+          {visible.map((budget) => {
+            const requirement = expansionRequirement(budget);
+            const fundingGap = expansionFundingGap(budget);
+            const funded = requirement > 0 ? Math.min(100, Math.round((Number(budget.committed_amount || 0) / requirement) * 100)) : 0;
+            return (
+              <Card key={budget.id} className="flex flex-col">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="flex min-w-0 items-start gap-3">
+                    <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-blue-50 text-[#0A4FE8]"><Building2 className="h-5 w-5" /></span>
+                    <div className="min-w-0">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <h2 className="font-semibold text-[#07133B]">{budget.title}</h2>
+                        <Badge value={budget.status} />
+                        <Badge value={budget.priority} />
+                      </div>
+                      <p className="mt-1 text-xs text-slate-500">{EXPANSION_TYPE_LABELS[budget.expansion_type]}{budget.location ? ` · ${budget.location}` : ""}</p>
+                    </div>
+                  </div>
+                  <div className="flex shrink-0 gap-1">
+                    <button type="button" onClick={() => void exportBoardToPdf(expansionBudgetPdf(budget, view))} className="rounded-lg p-1.5 text-slate-400 hover:bg-blue-50 hover:text-[#0A4FE8]" aria-label={`Download ${budget.title} with its implementation plan`} title="Download this plan and how it is meant to be carried out"><Download className="h-4 w-4" /></button>
+                    <button type="button" onClick={() => edit(budget)} className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-[#0A4FE8]" aria-label={`Edit ${budget.title}`}><Pencil className="h-4 w-4" /></button>
+                    <button type="button" onClick={() => void remove(budget)} className="rounded-lg p-1.5 text-slate-400 hover:bg-rose-50 hover:text-rose-600" aria-label={`Delete ${budget.title}`}><Trash2 className="h-4 w-4" /></button>
+                  </div>
+                </div>
+
+                {budget.rationale && <p className="mt-4 line-clamp-2 text-sm leading-6 text-slate-600">{budget.rationale}</p>}
+
+                <div className="mt-4 grid grid-cols-3 gap-2 rounded-xl bg-slate-50 p-3">
+                  <div><p className="text-[11px] text-slate-400">Requirement</p><Money amount={requirement} currency={budget.currency} className="mt-1 block text-sm font-semibold text-[#07133B]" /></div>
+                  <div><p className="text-[11px] text-slate-400">Committed</p><Money amount={budget.committed_amount} currency={budget.currency} className="mt-1 block text-sm font-semibold text-[#07133B]" /></div>
+                  <div><p className="text-[11px] text-slate-400">Funding gap</p><Money amount={fundingGap} currency={budget.currency} className="mt-1 block text-sm font-semibold text-[#07133B]" /></div>
+                </div>
+
+                <div className="mt-4">
+                  <div className="flex items-center justify-between text-[11px] text-slate-400"><span>Funding readiness</span><span>{funded}%</span></div>
+                  <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-slate-100"><div className="h-full rounded-full bg-[#0A4FE8]" style={{ width: `${funded}%` }} /></div>
+                </div>
+
+                <div className="mt-4 flex flex-wrap gap-x-5 gap-y-2 border-t border-slate-100 pt-4 text-xs text-slate-500">
+                  <span className="inline-flex items-center gap-1.5"><CalendarClock className="h-3.5 w-3.5 text-slate-400" /> {boardDate(budget.target_start)}{budget.target_end ? ` – ${boardDate(budget.target_end)}` : ""}</span>
+                  {budget.location && <span className="inline-flex items-center gap-1.5"><MapPin className="h-3.5 w-3.5 text-slate-400" /> {budget.location}</span>}
+                  {budget.owner && <span>Owner: {budget.owner}</span>}
+                  {budget.funding_source && <span>Funding: {budget.funding_source}</span>}
+                </div>
+              </Card>
+            );
+          })}
+        </div>
+      )}
+
+      {draft && (
+        <Modal title={draft.id ? "Edit expansion budget" : "New expansion budget"} onClose={close}>
+          {restoredDraft && (
+            <div className="mb-4 rounded-xl border border-blue-100 bg-blue-50 px-4 py-3 text-sm text-blue-800">
+              Your unfinished expansion budget was restored from the server.
+            </div>
+          )}
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div className="sm:col-span-2"><Field label="Plan title"><input className={inputClass} value={draft.title || ""} onChange={(event) => setDraft({ ...draft, title: event.target.value })} placeholder="Open a West Africa operations hub" autoFocus /></Field></div>
+            <Field label="Expansion type">
+              <select className={inputClass} value={draft.expansion_type || "new_market"} onChange={(event) => setDraft({ ...draft, expansion_type: event.target.value as ExpansionBudget["expansion_type"] })}>
+                {EXPANSION_BUDGET_TYPES.map((type) => <option key={type} value={type}>{EXPANSION_TYPE_LABELS[type]}</option>)}
+              </select>
+            </Field>
+            <Field label="Stage">
+              <select className={inputClass} value={draft.status || "idea"} onChange={(event) => setDraft({ ...draft, status: event.target.value as ExpansionBudget["status"] })}>
+                {EXPANSION_BUDGET_STATUSES.map((status) => <option key={status} value={status}>{label(status)}</option>)}
+              </select>
+            </Field>
+            <Field label="Priority">
+              <select className={inputClass} value={draft.priority || "medium"} onChange={(event) => setDraft({ ...draft, priority: event.target.value as ExpansionBudget["priority"] })}>
+                {EXPANSION_BUDGET_PRIORITIES.map((priority) => <option key={priority} value={priority}>{label(priority)}</option>)}
+              </select>
+            </Field>
+            <Field label="Location or market"><input className={inputClass} value={draft.location || ""} onChange={(event) => setDraft({ ...draft, location: event.target.value })} placeholder="Accra, Ghana" /></Field>
+            <Field label="Planned start"><input type="date" className={inputClass} value={draft.target_start || ""} onChange={(event) => setDraft({ ...draft, target_start: event.target.value })} /></Field>
+            <Field label="Planned completion"><input type="date" className={inputClass} value={draft.target_end || ""} min={draft.target_start || undefined} onChange={(event) => setDraft({ ...draft, target_end: event.target.value })} /></Field>
+            <Field label="Owner"><input className={inputClass} value={draft.owner || ""} onChange={(event) => setDraft({ ...draft, owner: event.target.value })} placeholder="Executive owner" /></Field>
+            <Field label="Currency">
+              <select className={inputClass} value={draft.currency || "USD"} onChange={(event) => setDraft({ ...draft, currency: event.target.value })}>
+                {BOARD_VIEW_CURRENCIES.map((code) => <option key={code} value={code}>{code}</option>)}
+              </select>
+            </Field>
+            <Field label="Estimated budget"><input type="number" min="0" step="0.01" className={inputClass} value={String(draft.estimated_amount ?? 0)} onChange={(event) => setDraft({ ...draft, estimated_amount: Number(event.target.value) })} /></Field>
+            <Field label="Contingency"><input type="number" min="0" step="0.01" className={inputClass} value={String(draft.contingency_amount ?? 0)} onChange={(event) => setDraft({ ...draft, contingency_amount: Number(event.target.value) })} /></Field>
+            <Field label="Funding committed"><input type="number" min="0" step="0.01" className={inputClass} value={String(draft.committed_amount ?? 0)} onChange={(event) => setDraft({ ...draft, committed_amount: Number(event.target.value) })} /></Field>
+            <Field label="Funding source"><input className={inputClass} value={draft.funding_source || ""} onChange={(event) => setDraft({ ...draft, funding_source: event.target.value })} placeholder="Retained earnings, facility, investor" /></Field>
+            <div className="sm:col-span-2"><Field label="Business rationale"><textarea rows={3} className={areaClass} value={draft.rationale || ""} onChange={(event) => setDraft({ ...draft, rationale: event.target.value })} placeholder="Why this expansion matters and why the timing is right" /></Field></div>
+            <div className="sm:col-span-2"><Field label="Expected outcome"><textarea rows={3} className={areaClass} value={draft.expected_outcome || ""} onChange={(event) => setDraft({ ...draft, expected_outcome: event.target.value })} placeholder="Revenue, reach, capacity, or strategic result expected" /></Field></div>
+            <div className="sm:col-span-2"><Field label="Notes"><textarea rows={3} className={areaClass} value={draft.notes || ""} onChange={(event) => setDraft({ ...draft, notes: event.target.value })} placeholder="Dependencies, assumptions, or board considerations" /></Field></div>
+          </div>
+          <div className="mt-4 flex flex-col-reverse gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex items-center gap-3">
+              <button type="button" onClick={() => void discard()} className="text-xs font-semibold text-slate-500 hover:text-rose-600">Discard draft</button>
+              <span className={`text-xs ${draftState === "error" ? "text-rose-600" : "text-slate-400"}`}>
+                {draftState === "saving" ? "Saving draft…" : draftState === "saved" ? "Draft saved" : draftState === "error" ? "Draft could not be saved" : "Changes autosave"}
+              </span>
+            </div>
+            <button type="button" onClick={save} disabled={busy === "expansion-budget" || !draft.title?.trim() || !draft.target_start} className="inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-[#0A4FE8] px-5 text-sm font-semibold text-white disabled:opacity-50">
+              {busy === "expansion-budget" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />} Save expansion budget
+            </button>
+          </div>
+        </Modal>
+      )}
+    </div>
+  );
+}
+
 /* ------------------------------- Targets ------------------------------- */
 
 const emptyTarget = (): Partial<Target> => ({
@@ -492,6 +892,58 @@ function monthLabel(value: string) {
   return Number.isNaN(date.getTime())
     ? value
     : date.toLocaleDateString(undefined, { month: "long", year: "numeric", timeZone: "UTC" });
+}
+
+/**
+ * The whole board in one line: everything being aimed at, what has landed, and
+ * what is still outstanding. Only money targets are added together - see
+ * summariseTargets - and anything measured in something else is reported as a
+ * count beside the totals rather than folded into them.
+ */
+function TargetsSummary({ summary }: { summary: ReturnType<typeof summariseTargets> }) {
+  const figure = (amount: number) => formatMoney(amount, summary.currency);
+  return (
+    <Card className="border-[#0A4FE8]/15 bg-gradient-to-br from-[#F5F8FF] to-white">
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-[#0A4FE8]">Where every target stands</p>
+          <p className="mt-1 text-xs text-slate-500">
+            {summary.monetary} money target{summary.monetary === 1 ? "" : "s"} added up in {summary.currency}
+            {summary.nonMonetary > 0 && `, plus ${summary.nonMonetary} measured in something else and tracked separately`}.
+          </p>
+        </div>
+        <div className="flex flex-wrap items-center gap-2 text-[11px] font-bold">
+          <span className="rounded-full bg-emerald-50 px-2.5 py-1 text-emerald-700">{summary.achievedCount} achieved</span>
+          <span className="rounded-full bg-blue-50 px-2.5 py-1 text-[#0A4FE8]">{summary.onTrackCount} on track</span>
+          <span className={`rounded-full px-2.5 py-1 ${summary.atRiskCount ? "bg-rose-50 text-rose-600" : "bg-slate-100 text-slate-500"}`}>{summary.atRiskCount} needing attention</span>
+        </div>
+      </div>
+
+      <div className="mt-4 grid gap-4 sm:grid-cols-3">
+        <div>
+          <p className="text-[11px] font-semibold text-slate-500">Total target</p>
+          <p className="mt-1 text-2xl font-black tracking-tight text-[#07133B] sm:text-3xl">{figure(summary.goal)}</p>
+        </div>
+        <div className="sm:border-l sm:border-slate-200 sm:ps-4">
+          <p className="text-[11px] font-semibold text-slate-500">Achieved so far</p>
+          <p className="mt-1 text-2xl font-black tracking-tight text-emerald-700 sm:text-3xl">{figure(summary.achieved)}</p>
+        </div>
+        <div className="sm:border-l sm:border-slate-200 sm:ps-4">
+          <p className="text-[11px] font-semibold text-slate-500">Still pending</p>
+          <p className="mt-1 text-2xl font-black tracking-tight text-[#07133B] sm:text-3xl">{figure(summary.pending)}</p>
+        </div>
+      </div>
+
+      <div className="mt-4">
+        <div className="h-2 w-full overflow-hidden rounded-full bg-white ring-1 ring-inset ring-slate-200">
+          <div className="h-full rounded-full bg-[#0A4FE8] transition-[width] duration-500" style={{ width: `${summary.progress}%` }} />
+        </div>
+        <p className="mt-1.5 text-xs text-slate-500">
+          {summary.progress}% of the total reached{summary.goal <= 0 ? ". No money target has a figure against it yet." : ""}
+        </p>
+      </div>
+    </Card>
+  );
 }
 
 function Targets({ board, busy, run }: { board: Board; busy: string; run: Run }) {
@@ -512,8 +964,12 @@ function Targets({ board, busy, run }: { board: Board; busy: string; run: Run })
     if (done) { recovery.clear(); setDraft(null); }
   };
 
+  const summary = useMemo(() => summariseTargets(board.targets, view), [board.targets, view]);
+
   return (
     <div className="space-y-4">
+      {board.targets.length > 0 && <TargetsSummary summary={summary} />}
+
       <div className="flex flex-wrap items-center justify-between gap-3">
         <p className="text-sm text-slate-500">
           Every active revenue model carries a monthly target automatically. Fill in the progress; the figure and the name follow the model.

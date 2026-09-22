@@ -150,6 +150,7 @@ export default function Footer() {
           <div className="flex md:gap-4 gap-32 mt-2 md:mt-0 ">
             <Link href="/privacy">Privacy Policy</Link>
             <Link href="/terms">Terms of Service</Link>
+            <Link href="/legal/aml-ctf-policy">AML/CTF policy</Link>
           </div>
         </div>
       </div>
@@ -158,6 +159,7 @@ export default function Footer() {
         <div className="pt-4 md:text-sm text-xs  space-y-4">
           <p> <Link href="/privacy">Privacy Policy</Link></p>
           <p> <Link href="/terms">Terms of Service</Link></p>
+          <p> <Link href="/legal/aml-ctf-policy">AML/CTF policy</Link></p>
           <p>© {new Date().getFullYear()} CDS Space | Branding Agency.</p>
         </div>
       </div>

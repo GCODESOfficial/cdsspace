@@ -11,6 +11,8 @@ interface EmailConfirmationModalProps {
     email?: string;
     initialResendSeconds?: number;
     onResend?: () => Promise<{ error?: string; message?: string; resendInSeconds?: number }>;
+    /** Checks the six-digit code. When given, the modal asks for the code instead of just saying "check your email". */
+    onVerify?: (code: string) => Promise<{ error?: string; success?: boolean }>;
 }
 
 /**
@@ -23,10 +25,27 @@ export const EmailConfirmationModal = ({
     email,
     initialResendSeconds = 60,
     onResend,
+    onVerify,
 }: EmailConfirmationModalProps) => {
     const [resendIn, setResendIn] = useState(initialResendSeconds);
     const [resending, setResending] = useState(false);
     const [notice, setNotice] = useState<string | null>(null);
+    const [code, setCode] = useState("");
+    const [verifying, setVerifying] = useState(false);
+    const [codeError, setCodeError] = useState<string | null>(null);
+
+    async function verify(value = code) {
+        if (!onVerify || verifying || !/^\d{6}$/.test(value)) return;
+        setVerifying(true);
+        setCodeError(null);
+        const result = await onVerify(value).catch(() => ({ error: "We could not check the code. Please try again." }));
+        if (result.error) {
+            setCodeError(result.error);
+            setCode("");
+            setVerifying(false);
+        }
+        // On success the page navigates away; the spinner stays until it does.
+    }
 
     // Lock body scroll when modal is open
     useEffect(() => {
@@ -42,6 +61,8 @@ export const EmailConfirmationModal = ({
         if (!isOpen) return;
         setResendIn(initialResendSeconds);
         setNotice(null);
+        setCode("");
+        setCodeError(null);
     }, [initialResendSeconds, isOpen]);
 
     useEffect(() => {
@@ -61,7 +82,8 @@ export const EmailConfirmationModal = ({
             setNotice(result.error);
             return;
         }
-        setNotice(result.message || "A new verification link has been sent.");
+        setNotice(result.message || "A new code has been sent.");
+        setCodeError(null);
         setResendIn(result.resendInSeconds || initialResendSeconds);
     }
 
@@ -114,8 +136,35 @@ export const EmailConfirmationModal = ({
                                             Check Your Email
                                         </h2>
                                         <p className="text-brand-body text-[15px] sm:text-[16px] font-medium tracking-[-0.16px] leading-normal max-w-[360px]">
-                                            A one-time verification link has been sent to your email{email ? `: ${email}` : ''}. Your client account will be activated only after you open it.
+                                            {onVerify
+                                                ? <>We sent a six-digit code to {email ? <span className="text-brand-navy">{email}</span> : "your email"}. Enter it below to confirm the address and activate your account.</>
+                                                : <>A one-time verification link has been sent to your email{email ? `: ${email}` : ''}. Your client account will be activated only after you open it.</>}
                                         </p>
+                                        {onVerify && (
+                                            <form
+                                                onSubmit={(event) => { event.preventDefault(); void verify(); }}
+                                                className="flex flex-col items-center gap-2"
+                                            >
+                                                <input
+                                                    value={code}
+                                                    onChange={(event) => {
+                                                        const next = event.target.value.replace(/\D/g, "").slice(0, 6);
+                                                        setCode(next);
+                                                        setCodeError(null);
+                                                        if (next.length === 6) void verify(next);
+                                                    }}
+                                                    inputMode="numeric"
+                                                    autoComplete="one-time-code"
+                                                    autoFocus
+                                                    disabled={verifying}
+                                                    placeholder="000000"
+                                                    aria-label="Six-digit verification code"
+                                                    aria-invalid={Boolean(codeError)}
+                                                    className={`w-full max-w-[260px] rounded-2xl border bg-brand-bg px-4 py-3 text-center font-mono text-[26px] font-semibold tracking-[0.4em] text-brand-navy outline-none placeholder:text-brand-mute/50 focus:border-[#0A4FE8] disabled:opacity-60 ${codeError ? "border-red-400" : "border-brand-stroke"}`}
+                                                />
+                                                {codeError && <p role="alert" className="text-[13px] font-medium text-red-600">{codeError}</p>}
+                                            </form>
+                                        )}
                                         {notice && <p className="text-[13px] font-medium text-brand-body">{notice}</p>}
                                         {onResend && (
                                             <button
@@ -124,7 +173,7 @@ export const EmailConfirmationModal = ({
                                                 disabled={resending || resendIn > 0}
                                                 className="text-[13px] font-semibold text-[#0A4FE8] hover:underline disabled:cursor-wait disabled:text-brand-mute disabled:no-underline"
                                             >
-                                                {resending ? "Sending…" : resendIn > 0 ? `Resend available in ${resendIn}s` : "Resend verification email"}
+                                                {resending ? "Sending…" : resendIn > 0 ? `Resend available in ${resendIn}s` : onVerify ? "Send a new code" : "Resend verification email"}
                                             </button>
                                         )}
                                     </div>
@@ -132,12 +181,15 @@ export const EmailConfirmationModal = ({
 
                                 {/* Got it Button */}
                                 <button
-                                    onClick={onClose}
-                                    className="w-full h-[56px] rounded-full p-[2px] bg-brand-bg border border-[#648EFC] shadow-[0_4px_8px_rgba(0,0,0,0.04)] group overflow-hidden cursor-pointer"
+                                    onClick={onVerify ? () => void verify() : onClose}
+                                    disabled={Boolean(onVerify) && (verifying || code.length !== 6)}
+                                    className="w-full h-[56px] rounded-full p-[2px] bg-brand-bg border border-[#648EFC] shadow-[0_4px_8px_rgba(0,0,0,0.04)] group overflow-hidden cursor-pointer disabled:cursor-not-allowed disabled:opacity-60"
                                 >
                                     <div className="w-full h-full rounded-full flex items-center justify-center transition-opacity group-hover:opacity-90 bg-[#0A4FE8]"
                                     >
-                                        <span className="text-brand-bg text-[18px] font-medium tracking-[-0.18px]">Got it</span>
+                                        <span className="text-brand-bg text-[18px] font-medium tracking-[-0.18px]">
+                                            {onVerify ? (verifying ? "Verifying…" : "Verify and continue") : "Got it"}
+                                        </span>
                                     </div>
                                 </button>
                             </div>

@@ -4,12 +4,25 @@ import Image from "next/image";
 import { useEffect, useState } from "react";
 import { CheckCircle2, CircleDollarSign, ImageIcon, Loader2, PackageCheck, Plus, Save, ToggleLeft, ToggleRight, Upload } from "lucide-react";
 import { appAlert } from "@/lib/app-notify";
-import { convertMerchPricesFromUsd, MERCH_CURRENCIES, normalizeMerchPrices, type MerchPrices, type MerchProduct } from "@/lib/merch-commerce";
+import NgnPriceInputs from "@/components/admin/NgnPriceInputs";
+import type { ClientPriceSet } from "@/lib/pricing/client-currency";
+import { MERCH_CURRENCIES, normalizeMerchPrices, type MerchPrices, type MerchProduct } from "@/lib/merch-commerce";
 
 const INPUT = "h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-[12px] text-[#0D1B39] outline-none transition focus:border-blue-400 focus:ring-4 focus:ring-blue-100";
 
+/**
+ * Merch prices are typed in Naira; every other currency follows the shared
+ * NGN-first formula. See src/lib/pricing/client-currency.ts.
+ */
 function PriceInputs({ prices, onChange }: { prices: MerchPrices; onChange: (value: MerchPrices) => void }) {
-  return <div className="space-y-2"><div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">{MERCH_CURRENCIES.map((currency) => <label key={currency} className="relative"><span className={`absolute left-3 top-1/2 -translate-y-1/2 text-[10px] font-bold ${currency === "USD" ? "text-[#0A4FE8]" : "text-slate-400"}`}>{currency}</span><input type="number" min="0" step="0.01" value={Number(prices[currency]) || ""} placeholder="Not set" onChange={(event) => { const amount = Math.max(0, Number(event.target.value) || 0); onChange(currency === "USD" ? convertMerchPricesFromUsd(amount, prices) : { ...prices, [currency]: amount }); }} className={`${INPUT} pl-12 ${currency === "USD" ? "border-blue-200 bg-blue-50/40" : ""}`} /></label>)}</div><p className="text-[10px] leading-4 text-slate-400">USD is the base price. Its equivalent is calculated for every supported currency and each result can still be adjusted manually.</p></div>;
+  return (
+    <NgnPriceInputs
+      prices={prices as ClientPriceSet}
+      onChange={(next) => onChange(next as MerchPrices)}
+      inputClassName={INPUT}
+      currencies={MERCH_CURRENCIES}
+    />
+  );
 }
 
 export default function MerchCommercePage() {

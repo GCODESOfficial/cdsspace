@@ -37,6 +37,7 @@ import {
   Loader2,
   MessageSquare,
   MoreHorizontal,
+  Package,
   Paperclip,
   Send,
   Plus,
@@ -49,7 +50,7 @@ import {
   X,
 } from "lucide-react";
 import { toast } from "sonner";
-import { appConfirm } from "@/lib/app-notify";
+import { appAlert, appConfirm } from "@/lib/app-notify";
 import {
   TASKBOARD_COLORS,
   TASK_PRIORITIES,
@@ -1384,6 +1385,36 @@ function TaskModal({ portal, task, members, boardMemberIds, lists, documents, ca
   const [postingComment, setPostingComment] = useState(false);
   const [saving, setSaving] = useState(false);
   const [duplicating, setDuplicating] = useState(false);
+  const [openingDelivery, setOpeningDelivery] = useState(false);
+
+  /**
+   * Opens the delivery draft for this task and sends the reader to it, so the
+   * finished files go through review and approval rather than through chat.
+   * Pressing it twice returns the same draft: the server will not open a rival
+   * one that the first uploader would never see.
+   */
+  const createDelivery = async () => {
+    if (openingDelivery) return;
+    setOpeningDelivery(true);
+    try {
+      const response = await fetch("/api/taskboard/delivery", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ portal, task_id: task.id }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || !payload.delivery_id) throw new Error(payload.error || "Could not open a delivery for this task.");
+      await appAlert(payload.existing
+        ? "This task already has a delivery draft. Opening it now."
+        : "Delivery draft created. Upload the design files, then submit it for review.");
+      window.location.href = portal === "admin" ? "/admin/clients/deliveries" : "/team/deliveries";
+    } catch (error) {
+      await appAlert(error instanceof Error ? error.message : "Could not open a delivery for this task.");
+    } finally {
+      setOpeningDelivery(false);
+    }
+  };
   const [uploading, setUploading] = useState(false);
   const [link, setLink] = useState({ title: "", url: "" });
   const [selectedDoc, setSelectedDoc] = useState("");
@@ -1722,6 +1753,14 @@ function TaskModal({ portal, task, members, boardMemberIds, lists, documents, ca
             <button type="button" onClick={duplicateTask} disabled={duplicating}
               className="inline-flex min-h-10 items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-[12px] font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-50 sm:justify-start">
               {duplicating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Copy className="h-4 w-4" />} Duplicate task
+            </button>
+          )}
+          {/* Only a saved task can carry a delivery, since the draft is keyed to it. */}
+          {task.id && (
+            <button type="button" onClick={createDelivery} disabled={openingDelivery}
+              title="Open a delivery draft for this task, upload the design files, then submit it for review"
+              className="inline-flex min-h-10 items-center justify-center gap-2 rounded-xl border border-[#0A4FE8]/30 bg-[#0A4FE8]/[0.04] px-3 py-2.5 text-[12px] font-semibold text-[#0A4FE8] hover:bg-[#0A4FE8]/10 disabled:opacity-50 sm:justify-start">
+              {openingDelivery ? <Loader2 className="h-4 w-4 animate-spin" /> : <Package className="h-4 w-4" />} Create delivery
             </button>
           )}
         </div>

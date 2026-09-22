@@ -1,13 +1,14 @@
 import type { Metadata } from "next";
 import { supabaseAdmin } from "@/lib/supabase";
 import { buildProductMetadata } from "@/lib/product-metadata";
+import { buildCMeetPath } from "@/lib/cmeet-links";
 import MeetClient from "./MeetClient";
 
 interface MeetingMeta {
     title: string | null;
     agenda: string | null;
     created_by: string | null;
-    created_by_admin: string | null;
+    created_by_admin: boolean | null;
     scheduled_for: string | null;
     status: string | null;
 }
@@ -49,7 +50,9 @@ export async function generateMetadata({ params }: { params: Promise<{ code: str
         product: "cMeet",
         title: host ? `${title} with ${host}` : title,
         description,
-        path: `/meet/${code}`,
+        path: buildCMeetPath(code, title),
+        image: `https://cdsspace.pro/meet/${encodeURIComponent(code)}/opengraph-image`,
+        imageAlt: `${title} on cMeet`,
     });
 }
 

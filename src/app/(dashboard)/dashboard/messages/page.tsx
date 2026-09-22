@@ -22,6 +22,7 @@ import {
   Pin,
   ChevronUp,
   ChevronDown,
+  Sticker,
 } from "lucide-react";
 import { useClientAccount } from "@/components/dashboard/ClientAccountProvider";
 import { Linkified, LinkPreview, firstUrl } from "@/components/chat/message-links";
@@ -29,6 +30,14 @@ import { ChatSidebarPreview } from "@/components/chat/chat-sidebar-preview";
 import { validateChatUpload } from "@/lib/chat-upload-limits";
 import { appAlert } from "@/lib/app-notify";
 import { initials } from "@/lib/utils";
+import { MeetingModeModal, type MeetingRequest } from "@/components/chat/MeetingModeModal";
+import { ChatStickerPicker } from "@/components/chat/ChatStickerPicker";
+import {
+  animatedNotoStickerUrl,
+  getEssentialChatSticker,
+  type ChatStickerSelection,
+  type CustomChatSticker,
+} from "@/lib/chat-stickers";
 import {
   ContextMenu,
   ContextMenuContent,
@@ -68,6 +77,17 @@ interface ClientMessage {
   starredBy?: string[];
   bookmarkedBy?: string[];
   pinnedAt?: string | null;
+  stickerKey?: string | null;
+  messageType?: string | null;
+  mimeType?: string | null;
+  metadata?: { custom_sticker?: CustomChatSticker; [key: string]: unknown };
+}
+
+interface PendingPhoto {
+  url: string;
+  fileName: string;
+  fileSizeBytes: number;
+  mimeType: string;
 }
 
 function dateLabel(value: string) {
@@ -115,7 +135,10 @@ export default function ClientMessagesPage() {
   const [loadingMessages, setLoadingMessages] = useState(false);
   const [sending, setSending] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [pendingPhoto, setPendingPhoto] = useState<PendingPhoto | null>(null);
+  const [stickersOpen, setStickersOpen] = useState(false);
   const [startingCall, setStartingCall] = useState<"voice" | "video" | null>(null);
+  const [meetingPrompt, setMeetingPrompt] = useState<"voice" | "video" | null>(null);
   const [activeMeeting, setActiveMeeting] = useState<{ url: string; title: string } | null>(null);
   const [showConversation, setShowConversation] = useState(false);
   const [replyingTo, setReplyingTo] = useState<ClientMessage | null>(null);
@@ -140,6 +163,11 @@ export default function ClientMessagesPage() {
     [threads, selectedId],
   );
   const selectedKind = selected?.kind || null;
+
+  useEffect(() => {
+    setPendingPhoto(null);
+    setStickersOpen(false);
+  }, [selectedId]);
 
   const loadThreads = useCallback(async () => {
     if (threadsRequestActive.current) return;
@@ -190,6 +218,10 @@ export default function ClientMessagesPage() {
           starredBy: message.starred_by || [],
           bookmarkedBy: message.bookmarked_by || [],
           pinnedAt: message.pinned_at || null,
+          stickerKey: message.sticker_key || null,
+          messageType: message.message_type || null,
+          mimeType: message.mime_type || null,
+          metadata: message.metadata || {},
         }));
         const byId = new Map<string, ClientMessage>(
           mapped.map((message: ClientMessage) => [message.id, message]),
@@ -243,6 +275,10 @@ export default function ClientMessagesPage() {
           starredBy: message.starred_by || [],
           bookmarkedBy: message.bookmarked_by || [],
           pinnedAt: message.pinned_at || null,
+          stickerKey: message.sticker_key || null,
+          messageType: message.message_type || null,
+          mimeType: message.mime_type || null,
+          metadata: message.metadata || {},
         }));
         const snapshot = JSON.stringify(nextMessages);
         if (snapshot !== messagesSnapshot.current) {
@@ -324,10 +360,13 @@ export default function ClientMessagesPage() {
     fileSizeBytes?: number;
     mimeType?: string;
     replyToMessageId?: string | null;
+    stickerKey?: string;
+    messageType?: string;
+    metadata?: { custom_sticker?: CustomChatSticker; [key: string]: unknown };
   }) => {
     if (!selected || sending || selected.isAnnouncementOnly) return;
     const text = (options?.text ?? input).trim();
-    if (!text && !options?.attachmentUrl) return;
+    if (!text && !options?.attachmentUrl && !options?.stickerKey) return;
 
     const replyTarget = replyingTo;
     const optimisticId = `temp-${Date.now()}`;
@@ -343,6 +382,10 @@ export default function ClientMessagesPage() {
       replyToMessageId: options?.replyToMessageId || replyTarget?.id || null,
       replyTo: replyTarget ? { id: replyTarget.id, senderName: replyTarget.senderName, text: replyTarget.text || "Attachment" } : null,
       reactions: {},
+      stickerKey: options?.stickerKey || null,
+      messageType: options?.messageType || (options?.stickerKey ? "sticker" : null),
+      mimeType: options?.mimeType || null,
+      metadata: options?.metadata || {},
     }]);
     requestAnimationFrame(() => scrollToLatest("smooth"));
     setInput("");
@@ -356,9 +399,13 @@ export default function ClientMessagesPage() {
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
               roomId: selected.id,
-              message: text || `📎 ${options?.fileName || "Attachment"}`,
+              message: text || (options?.stickerKey ? "Sticker" : `📎 ${options?.fileName || "Attachment"}`),
               fileUrl: options?.attachmentUrl,
               actor: "client",
+              stickerKey: options?.stickerKey,
+              messageType: options?.messageType || (options?.stickerKey ? "sticker" : undefined),
+              mimeType: options?.mimeType,
+              metadata: options?.metadata,
               replyToMessageId: options?.replyToMessageId || replyTarget?.id || null,
             }),
           })
@@ -367,20 +414,25 @@ export default function ClientMessagesPage() {
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
               threadId: selected.id,
-              body: text || `📎 ${options?.fileName || "Attachment"}`,
+              body: text || (options?.stickerKey ? "" : `📎 ${options?.fileName || "Attachment"}`),
               attachmentUrl: options?.attachmentUrl,
               fileName: options?.fileName,
               fileSizeBytes: options?.fileSizeBytes,
               mimeType: options?.mimeType,
               replyToMessageId: options?.replyToMessageId || replyTarget?.id || null,
+              stickerKey: options?.stickerKey,
+              messageType: options?.messageType || (options?.stickerKey ? "sticker" : undefined),
+              metadata: options?.metadata,
             }),
           });
       const payload = await response.json();
       if (!response.ok) throw new Error(payload.error || "Message could not be sent");
+      if (options?.attachmentUrl === pendingPhoto?.url) setPendingPhoto(null);
       await Promise.all([loadMessages(true), loadThreads()]);
     } catch (error) {
       setMessages((current) => current.filter((message) => message.id !== optimisticId));
-      if (!options?.attachmentUrl) setInput(text);
+      if (!options?.attachmentUrl || options.attachmentUrl === pendingPhoto?.url)
+        setInput(text.startsWith("📎 ") ? "" : text);
       if (replyTarget) setReplyingTo(replyTarget);
       await appAlert(error instanceof Error ? error.message : "Message could not be sent");
     } finally {
@@ -420,7 +472,7 @@ export default function ClientMessagesPage() {
     }
   };
 
-  const uploadFile = async (file: File) => {
+  const uploadFile = async (file: File, stagePhoto = false) => {
     if (!selected || selected.isAnnouncementOnly) return;
     const check = validateChatUpload(file.size, file.type || "");
     if (!check.ok) return appAlert(check.error);
@@ -432,6 +484,15 @@ export default function ClientMessagesPage() {
       const response = await fetch("/api/client/chat/upload", { method: "POST", body: formData });
       const payload = await response.json();
       if (!response.ok || !payload.ok) throw new Error(payload.error || "Upload failed");
+      if (stagePhoto && file.type.startsWith("image/")) {
+        setPendingPhoto({
+          url: payload.publicUrl,
+          fileName: payload.fileName || file.name || "Pasted photo",
+          fileSizeBytes: payload.fileSizeBytes || file.size,
+          mimeType: payload.mimeType || file.type || "image/jpeg",
+        });
+        return;
+      }
       await sendMessage({
         text: `📎 ${payload.fileName}`,
         attachmentUrl: payload.publicUrl,
@@ -447,21 +508,78 @@ export default function ClientMessagesPage() {
     }
   };
 
-  const startCall = async (kind: "voice" | "video") => {
+  const handlePhotoPaste = (event: React.ClipboardEvent<HTMLInputElement>) => {
+    if (!selected || selected.isAnnouncementOnly || uploading || sending) return;
+    const photos = Array.from(event.clipboardData.items)
+      .filter((item) => item.kind === "file" && item.type.startsWith("image/"))
+      .map((item) => item.getAsFile())
+      .filter((file): file is File => Boolean(file));
+    if (photos.length === 0) return;
+
+    event.preventDefault();
+    if (pendingPhoto) {
+      void appAlert("Send or remove the current photo before pasting another one.");
+      return;
+    }
+    void uploadFile(photos[0], true);
+  };
+
+  const submitMessage = () => {
+    if (!pendingPhoto) return void sendMessage();
+    void sendMessage({
+      text: input.trim() || `📎 ${pendingPhoto.fileName}`,
+      attachmentUrl: pendingPhoto.url,
+      fileName: pendingPhoto.fileName,
+      fileSizeBytes: pendingPhoto.fileSizeBytes,
+      mimeType: pendingPhoto.mimeType,
+    });
+  };
+
+  const sendSticker = async (sticker: ChatStickerSelection) => {
+    setStickersOpen(false);
+    await sendMessage({
+      stickerKey: sticker.stickerKey,
+      attachmentUrl: sticker.attachmentUrl || undefined,
+      mimeType: sticker.mimeType || undefined,
+      messageType: "sticker",
+      metadata: sticker.metadata,
+    });
+  };
+
+  const meetingTitleFor = (kind: "voice" | "video") =>
+    `${kind === "voice" ? "Voice" : "Video"} call - ${selected?.name || "CDS Space"}`;
+
+  /** The call buttons ask how to meet; nothing is created until that is answered. */
+  const startCall = (kind: "voice" | "video") => {
+    if (!selected || startingCall || selected.isAnnouncementOnly) return;
+    setMeetingPrompt(kind);
+  };
+
+  const createMeeting = async (kind: "voice" | "video", request: MeetingRequest) => {
     if (!selected || startingCall || selected.isAnnouncementOnly) return;
     setStartingCall(kind);
     try {
       const response = await fetch("/api/client/chat/call", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ kind, targetKind: selected.kind, targetId: selected.id }),
+        body: JSON.stringify({
+          kind,
+          targetKind: selected.kind,
+          targetId: selected.id,
+          title: request.title,
+          scheduled_for: request.scheduledFor,
+          agenda_items: request.agendaItems,
+        }),
       });
       const payload = await response.json();
       if (!response.ok || !payload.ok) throw new Error(payload.error || "Could not start the call");
-      setActiveMeeting({
-        url: payload.link,
-        title: `${kind === "voice" ? "Voice" : "Video"} call · ${selected.name}`,
-      });
+      setMeetingPrompt(null);
+      if (!request.scheduledFor && payload.link) {
+        setActiveMeeting({ url: payload.link, title: request.title || meetingTitleFor(kind) });
+      }
+      // A meeting booked for later posts its invite and waits; it does not
+      // pull the client into a call now.
+      await appAlert(request.scheduledFor ? "Your cMeet has been scheduled." : "Your cMeet is ready to join.");
       await Promise.all([loadMessages(true), loadThreads()]);
     } catch (error) {
       await appAlert(error instanceof Error ? error.message : "Could not start the call");
@@ -494,11 +612,11 @@ export default function ClientMessagesPage() {
   };
 
   return (
-    <div data-chat-shell className="flex h-[calc(100dvh-64px)] min-h-0 overflow-hidden rounded-[22px] border border-slate-200 bg-white shadow-[0_24px_70px_rgba(15,23,42,0.08)] sm:h-[calc(100dvh-112px)] sm:rounded-[22px] sm:border lg:h-[calc(100dvh-120px)]">
+    <div data-chat-shell className="flex h-[calc(100dvh-64px)] min-h-0 overflow-hidden rounded-[22px] border border-slate-200 bg-white shadow-sm sm:h-[calc(100dvh-112px)] sm:rounded-[22px] sm:border lg:h-[calc(100dvh-120px)]">
       <aside className={`${showConversation ? "hidden md:flex" : "flex"} w-full flex-col border-e border-slate-200 bg-white md:w-80 lg:w-[340px]`}>
         <div data-chat-sidebar-header className="flex min-h-[72px] items-center justify-between gap-4 border-b border-slate-200 px-5 py-3">
           <div data-directional-copy className="min-w-0 flex-1 text-start">
-            <h1 className="text-[15px] font-bold text-[#0D1B39]">Chat/Meet</h1>
+            <h1 className="text-[15px] font-bold text-[#0D1B39]">Chat</h1>
             <p className="mt-0.5 text-[11px] leading-4 text-slate-400">Direct messages and project groups</p>
           </div>
           <div className="grid h-10 w-10 place-items-center rounded-2xl bg-blue-50 text-[#0A4FE8]">
@@ -531,7 +649,7 @@ export default function ClientMessagesPage() {
         </div>
       </aside>
 
-      <main className={`${showConversation ? "flex" : "hidden md:flex"} relative min-w-0 flex-1 flex-col bg-[linear-gradient(135deg,#f8fbff_0%,#eef4ff_52%,#f8fafc_100%)]`}>
+      <main className={`${showConversation ? "flex" : "hidden md:flex"} relative min-w-0 flex-1 flex-col bg-slate-50`}>
         {selected ? (
           <>
             <header data-chat-thread className="flex min-h-[72px] shrink-0 items-center gap-2 border-b border-slate-200 bg-white/90 px-4 py-2 backdrop-blur-xl sm:gap-3 sm:px-5">
@@ -573,20 +691,23 @@ export default function ClientMessagesPage() {
                   <p className="mt-1 max-w-sm text-[12px] text-slate-400">Messages, documents, and call invitations stay together here.</p>
                 </div>
               ) : grouped.map((group) => (
-                <section key={group.label} className="mb-7">
-                  <div className="mb-5 flex items-center gap-3"><div className="h-px flex-1 bg-slate-200" /><span className="rounded-full bg-white px-3 py-1 text-[10px] font-semibold text-slate-400">{group.label}</span><div className="h-px flex-1 bg-slate-200" /></div>
-                  <div className="space-y-4">
+                <section key={group.label} className="mb-6">
+                  <div className="mb-4 flex items-center gap-3"><div className="h-px flex-1 bg-slate-200" /><span className="rounded-full bg-white px-3 py-1 text-[10px] font-medium text-slate-400">{group.label}</span><div className="h-px flex-1 bg-slate-200" /></div>
+                  <div className="space-y-2.5">
                     {group.items.map((message) => {
                       const viewerKey = `client:${account.userId}`;
                       const starred = (message.starredBy || []).includes(viewerKey);
                       const bookmarked = (message.bookmarkedBy || []).includes(viewerKey);
                       const previewUrl = firstUrl(message.text);
+                      const essentialSticker = getEssentialChatSticker(message.stickerKey);
+                      const customSticker = message.metadata?.custom_sticker || null;
+                      const isStickerMessage = Boolean(essentialSticker || customSticker || message.messageType === "sticker");
                       return (
                       <ContextMenu key={message.id}>
                         <ContextMenuTrigger asChild>
                       <div id={`client-message-${message.id}`} className={`flex items-end gap-2 ${message.isMine ? "justify-end" : "justify-start"}`}>
                         {!message.isMine && (
-                          <div className="grid h-8 w-8 shrink-0 place-items-center overflow-hidden rounded-xl bg-[#0A4FE8] text-[10px] font-bold text-white">
+                          <div className="grid h-8 w-8 shrink-0 place-items-center overflow-hidden rounded-full bg-[#0A4FE8] text-[10px] font-semibold text-white">
                             {selected.kind === "direct" || message.senderName === "CDS Space" ? (
                               <Image
                                 src="/favicon.png"
@@ -600,7 +721,7 @@ export default function ClientMessagesPage() {
                         )}
                         <div className={`flex max-w-[82%] flex-col sm:max-w-[72%] ${message.isMine ? "items-end" : "items-start"}`}>
                           {!message.isMine && <p className="mb-1 px-1 text-[10px] font-semibold text-slate-500">{message.senderName}</p>}
-                          <div dir="auto" className={`rounded-[20px] border px-4 py-3 text-start text-[13px] leading-6 shadow-sm ${message.isMine ? "rounded-br-md border-blue-600 bg-[#0A4FE8] text-white" : "rounded-bl-md border-slate-200 bg-white text-[#0D1B39]"}`}>
+                          <div dir="auto" className={`rounded-2xl text-start text-[13px] leading-[1.55] ${isStickerMessage ? "border border-transparent bg-transparent px-1 py-1 shadow-none" : message.isMine ? "rounded-br-md border border-[#0A4FE8] bg-[#0A4FE8] px-3.5 py-2.5 text-white shadow-sm" : "rounded-bl-md border border-slate-200 bg-white px-3.5 py-2.5 text-[#0D1B39] shadow-sm"}`}>
                             {message.pinnedAt && <span className={`mb-2 inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[9px] font-semibold ${message.isMine ? "bg-white/15 text-white" : "bg-blue-50 text-[#0A4FE8]"}`}><Pin className="h-3 w-3" />Pinned</span>}
                             {message.replyTo && (
                               <button type="button" onClick={() => document.getElementById(`client-message-${message.replyTo!.id}`)?.scrollIntoView({ behavior: "smooth", block: "center" })} className={`mb-2 block w-full rounded-xl border-s-2 px-3 py-2 text-start ${message.isMine ? "border-white/60 bg-white/10" : "border-blue-400 bg-blue-50"}`}>
@@ -608,7 +729,23 @@ export default function ClientMessagesPage() {
                                 <span className={`block max-w-sm truncate text-[11px] ${message.isMine ? "text-white/80" : "text-slate-500"}`}>{message.replyTo.text}</span>
                               </button>
                             )}
-                            {message.text && !(message.attachmentUrl && message.text.startsWith("📎 ")) && (
+                            {essentialSticker ? (
+                              <div className="min-w-[132px] bg-transparent p-1 text-center">
+                                {/* eslint-disable-next-line @next/next/no-img-element */}
+                                <img src={animatedNotoStickerUrl(essentialSticker.notoCode)} alt={essentialSticker.emoji} className={`cds-sticker-motion ${essentialSticker.motion} mx-auto h-28 w-28 object-contain`} />
+                                <p className="mt-1 text-[10px] font-medium text-slate-500">{essentialSticker.title}</p>
+                              </div>
+                            ) : customSticker ? (
+                              <div className="min-w-[132px] bg-transparent p-1 text-center">
+                                {customSticker.asset_url ? (
+                                  // eslint-disable-next-line @next/next/no-img-element
+                                  <img src={customSticker.asset_url} alt={customSticker.title} className="mx-auto h-28 w-28 object-contain" />
+                                ) : (
+                                  <div className="cds-sticker-motion cds-sticker-pop text-[72px] leading-none">{customSticker.emoji}</div>
+                                )}
+                                <p className="mt-1 text-[10px] font-medium text-slate-500">{customSticker.title}</p>
+                              </div>
+                            ) : message.text && !(message.attachmentUrl && message.text.startsWith("📎 ")) && (
                               <Linkified
                                 text={message.text}
                                 className="whitespace-pre-wrap break-words"
@@ -618,8 +755,8 @@ export default function ClientMessagesPage() {
                                 })}
                               />
                             )}
-                            {previewUrl && <LinkPreview url={previewUrl} variant={message.isMine ? "dark" : "light"} />}
-                            {message.attachmentUrl && (
+                            {!isStickerMessage && previewUrl && <LinkPreview url={previewUrl} variant={message.isMine ? "dark" : "light"} />}
+                            {message.attachmentUrl && !isStickerMessage && (
                               isImageAttachment(message.attachmentUrl) ? (
                                 <a href={message.attachmentUrl} target="_blank" rel="noopener noreferrer" className="mt-2 block overflow-hidden rounded-xl border border-white/20 bg-white/10">
                                   {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -632,7 +769,7 @@ export default function ClientMessagesPage() {
                                 </a>
                               )
                             )}
-                            <div className={`mt-1.5 flex items-center justify-end gap-1 text-[9px] ${message.isMine ? "text-blue-100" : "text-slate-400"}`}>
+                            <div className={`mt-1.5 flex items-center justify-end gap-1 text-[9px] ${message.isMine && !isStickerMessage ? "text-blue-100" : "text-slate-400"}`}>
                               {timeLabel(message.createdAt)}
                               {message.isMine && !message.pending && <CheckCheck className="h-3 w-3" />}
                               {message.pending && <Loader2 className="h-3 w-3 animate-spin" />}
@@ -668,7 +805,7 @@ export default function ClientMessagesPage() {
               <button
                 type="button"
                 onClick={() => scrollToLatest("smooth")}
-                className="absolute bottom-[84px] right-4 z-20 inline-flex h-11 min-w-11 items-center justify-center gap-2 rounded-full bg-[#0A4FE8] px-3 text-xs font-semibold text-white shadow-xl shadow-blue-900/25 transition hover:bg-[#083FC0]"
+                className="absolute bottom-[78px] right-4 z-20 inline-flex h-10 min-w-10 items-center justify-center gap-2 rounded-full bg-[#0A4FE8] px-3 text-xs font-semibold text-white shadow-sm transition hover:bg-[#083FC0]"
                 aria-label="Go to the latest message"
                 title="Go to the latest message"
               >
@@ -677,7 +814,7 @@ export default function ClientMessagesPage() {
               </button>
             )}
 
-            <footer data-chat-composer dir="ltr" className="shrink-0 border-t border-slate-200 bg-white/95 p-3 sm:p-4">
+            <footer data-chat-composer dir="ltr" className="shrink-0 border-t border-slate-200 bg-white/95 p-3">
               {selected.isAnnouncementOnly ? (
                 <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-center text-[12px] font-semibold text-amber-700">This project channel is read-only.</div>
               ) : (
@@ -689,14 +826,33 @@ export default function ClientMessagesPage() {
                       <button type="button" onClick={() => setReplyingTo(null)} className="grid h-7 w-7 place-items-center rounded-lg text-slate-400 hover:bg-white" aria-label="Cancel reply"><X className="h-3.5 w-3.5" /></button>
                     </div>
                   )}
+                  {pendingPhoto && (
+                    <div className="mb-2 flex items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 p-2">
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img src={pendingPhoto.url} alt="Photo ready to send" className="h-16 w-16 shrink-0 rounded-lg object-cover" />
+                      <div className="min-w-0 flex-1 text-start">
+                        <p className="truncate text-xs font-semibold text-slate-800">{pendingPhoto.fileName}</p>
+                        <p className="mt-1 text-[10px] text-slate-500">Add a caption below, or send the photo as it is.</p>
+                      </div>
+                      <button type="button" onClick={() => setPendingPhoto(null)} className="grid h-8 w-8 shrink-0 place-items-center rounded-full text-slate-500 hover:bg-white hover:text-slate-800" aria-label="Remove pasted photo"><X className="h-4 w-4" /></button>
+                    </div>
+                  )}
+                  {stickersOpen && (
+                    <div className="mb-2 rounded-2xl border border-slate-200 bg-white p-3 shadow-sm">
+                      <ChatStickerPicker actor="client" onSelect={sendSticker} />
+                    </div>
+                  )}
                 <div className="flex items-center gap-2">
                   <input ref={fileRef} type="file" className="hidden" accept="image/*,video/*,.pdf,.doc,.docx,.ppt,.pptx,.xls,.xlsx,.txt,.csv" onChange={(event) => { const file = event.target.files?.[0]; if (file) void uploadFile(file); }} />
-                  <button onClick={() => fileRef.current?.click()} disabled={uploading || sending} className="grid h-12 w-12 shrink-0 place-items-center rounded-2xl border border-slate-200 bg-white text-slate-500 transition hover:border-blue-200 hover:bg-blue-50 hover:text-[#0A4FE8] disabled:opacity-40" title="Send a document">
+                  <button onClick={() => fileRef.current?.click()} disabled={uploading || sending} className="grid h-11 w-11 shrink-0 place-items-center rounded-full border border-slate-200 bg-white text-slate-500 transition hover:border-blue-200 hover:bg-blue-50 hover:text-[#0A4FE8] disabled:opacity-40" title="Send a photo or document">
                     {uploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Paperclip className="h-4 w-4" />}
                   </button>
-                  <input dir="auto" value={input} onChange={(event) => setInput(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); void sendMessage(); } }} placeholder="Type a message..." className="h-12 min-w-0 flex-1 rounded-2xl border border-slate-200 bg-white px-4 text-start text-[13px] text-[#0D1B39] outline-none transition placeholder:text-slate-400 focus:border-blue-400 focus:ring-4 focus:ring-blue-100" />
-                  <button onClick={() => void sendMessage()} disabled={!input.trim() || sending} className="grid h-12 w-12 shrink-0 place-items-center rounded-2xl bg-[#0A4FE8] text-white shadow-lg shadow-blue-600/20 transition hover:bg-[#083FC0] disabled:opacity-40" aria-label="Send message">
-                    {sending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+                  <button type="button" onClick={() => setStickersOpen((current) => !current)} disabled={sending} className={`grid h-11 w-11 shrink-0 place-items-center rounded-full border transition disabled:opacity-40 ${stickersOpen ? "border-blue-200 bg-blue-50 text-[#0A4FE8]" : "border-slate-200 bg-white text-slate-500 hover:border-blue-200 hover:bg-blue-50 hover:text-[#0A4FE8]"}`} title="Stickers" aria-label="Open stickers">
+                    <Sticker className="h-4 w-4" />
+                  </button>
+                  <input dir="auto" value={input} onChange={(event) => setInput(event.target.value)} onPaste={handlePhotoPaste} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); submitMessage(); } }} placeholder={pendingPhoto ? "Add a caption..." : "Type a message or paste a photo..."} className="h-11 min-w-0 flex-1 rounded-full border border-slate-200 bg-slate-50 px-4 text-start text-[13px] text-[#0D1B39] outline-none transition placeholder:text-slate-400 focus:border-blue-300 focus:bg-white focus:ring-2 focus:ring-blue-100" />
+                  <button onClick={submitMessage} disabled={(!input.trim() && !pendingPhoto) || sending || uploading} className="grid h-11 w-11 shrink-0 place-items-center rounded-full bg-[#0A4FE8] text-white shadow-sm transition hover:bg-[#083FC0] disabled:opacity-40" aria-label={uploading ? "Sending photo" : "Send message"}>
+                    {sending || uploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
                   </button>
                 </div>
                 </div>
@@ -707,6 +863,14 @@ export default function ClientMessagesPage() {
           <div className="flex flex-1 flex-col items-center justify-center text-slate-400"><MessageSquare className="mb-3 h-10 w-10" /><p className="text-sm">Select a conversation</p></div>
         )}
       </main>
+      <MeetingModeModal
+        open={Boolean(meetingPrompt)}
+        kind={meetingPrompt || "video"}
+        defaultTitle={meetingTitleFor(meetingPrompt || "video")}
+        busy={Boolean(startingCall)}
+        onClose={() => { if (!startingCall) setMeetingPrompt(null); }}
+        onSubmit={(request) => createMeeting(meetingPrompt || "video", request)}
+      />
       {activeMeeting && (
         <EmbeddedMeetingPanel
           url={activeMeeting.url}

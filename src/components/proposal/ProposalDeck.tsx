@@ -1,3 +1,5 @@
+"use client";
+
 /**
  * Landscape CDS Space proposal deck.
  *
@@ -9,6 +11,7 @@
  * /public/proposal-svg, with one window still cropped out of an approved deck
  * export in /public/proposal.
  */
+import { createContext, useContext, useEffect, useRef } from "react";
 import {
   PROCESS_PAYOFF,
   PROCESS_PROBLEMS,
@@ -19,6 +22,73 @@ import {
   type ProposalArtKey,
   type ProposalDeck as Deck,
 } from "@/lib/proposal-deck";
+
+/**
+ * Inline editing, off by default.
+ *
+ * The same nine slides serve the client's public link and the admin's
+ * presentation view, so rather than fork the deck the editable fields are
+ * wrapped in <T>. With no provider above them (the public page) they render as
+ * plain text; inside a ProposalEditProvider they become editable in place.
+ */
+type EditContext = { editable: boolean; onChange: (path: string, value: string) => void };
+const ProposalEdit = createContext<EditContext>({ editable: false, onChange: () => {} });
+
+export function ProposalEditProvider({ onChange, children }: { onChange: (path: string, value: string) => void; children: React.ReactNode }) {
+  return (
+    <ProposalEdit.Provider value={{ editable: true, onChange }}>
+      <EditStyles />
+      <div className="cds-deck-editing">{children}</div>
+    </ProposalEdit.Provider>
+  );
+}
+
+/**
+ * One editable text field. The node is left uncontrolled while it has focus,
+ * because rewriting its content mid-edit would drop the caret to the start on
+ * every keystroke; it is only synced back from props once the caret has left.
+ */
+function T({ path, children, style, as = "span" }: { path: string; children: string; style?: React.CSSProperties; as?: "span" | "div" }) {
+  const { editable, onChange } = useContext(ProposalEdit);
+  const ref = useRef<HTMLElement>(null);
+  const focused = useRef(false);
+  const value = children ?? "";
+
+  useEffect(() => {
+    if (!editable || focused.current) return;
+    if (ref.current && ref.current.textContent !== value) ref.current.textContent = value;
+  }, [editable, value]);
+
+  if (!editable) return <>{value}</>;
+
+  const Tag = as as "span";
+  return (
+    <Tag
+      ref={ref as React.Ref<HTMLSpanElement>}
+      contentEditable
+      suppressContentEditableWarning
+      spellCheck
+      role="textbox"
+      aria-label={path.replace(/[._]/g, " ")}
+      onFocus={() => { focused.current = true; }}
+      onBlur={(event) => {
+        focused.current = false;
+        const next = (event.currentTarget.textContent || "").replace(/\s+/g, " ").trim();
+        if (next !== value) onChange(path, next);
+      }}
+      // Enter commits rather than opening a new line: every field here is one
+      // line of copy, and the lists have their own rows.
+      onKeyDown={(event) => {
+        if (event.key === "Enter") { event.preventDefault(); (event.currentTarget as HTMLElement).blur(); }
+        if (event.key === "Escape") { event.currentTarget.textContent = value; (event.currentTarget as HTMLElement).blur(); }
+      }}
+      style={{ outline: "none", cursor: "text", borderRadius: "0.25cqw", ...style }}
+      className="cds-deck-field"
+    >
+      {value}
+    </Tag>
+  );
+}
 
 const BLUE = "#0050DB";
 const DEEP = "#003BA6";
@@ -57,7 +127,7 @@ function Art({ art, className, style }: { art: ProposalArtKey; className?: strin
   );
 }
 
-function Slide({ children, dark = false, page, id, note }: { children: React.ReactNode; dark?: boolean; page?: number; id?: string; note?: string }) {
+function Slide({ children, dark = false, page, id, note }: { children: React.ReactNode; dark?: boolean; page?: number; id?: string; note?: React.ReactNode }) {
   return (
     <section
       id={id}
@@ -81,7 +151,7 @@ function Slide({ children, dark = false, page, id, note }: { children: React.Rea
   );
 }
 
-function Footer({ dark, page, note }: { dark: boolean; page: number; note?: string }) {
+function Footer({ dark, page, note }: { dark: boolean; page: number; note?: React.ReactNode }) {
   const line = dark ? "rgba(255,255,255,0.5)" : "#B9D0F7";
   return (
     <div style={{ position: "absolute", left: "7.2cqw", right: "7.2cqw", bottom: "4.4cqw", display: "flex", alignItems: "stretch", gap: "0.6cqw", fontSize: "1.05cqw" }}>
@@ -153,15 +223,15 @@ export function CoverSlide({ deck, brandName, createdAt, coverUrl }: ProposalDec
         <>
           <Art art="worldMap" style={{ left: 0, right: 0, bottom: 0, height: "70%" }} />
           <div style={{ position: "absolute", top: "9cqw", left: "7.2cqw", right: "24cqw" }}>
-            <h1 style={{ margin: 0, fontSize: "4.3cqw", lineHeight: 1.05, fontWeight: 700, letterSpacing: "-0.015em" }}>{deck.cover.title}</h1>
-            <p style={{ margin: "1.2cqw 0 0", fontSize: "1.9cqw", lineHeight: 1.35, color: "rgba(255,255,255,0.92)" }}>{deck.cover.subtitle}</p>
+            <h1 style={{ margin: 0, fontSize: "4.3cqw", lineHeight: 1.05, fontWeight: 700, letterSpacing: "-0.015em" }}><T path="cover.title">{deck.cover.title}</T></h1>
+            <p style={{ margin: "1.2cqw 0 0", fontSize: "1.9cqw", lineHeight: 1.35, color: "rgba(255,255,255,0.92)" }}><T path="cover.subtitle">{deck.cover.subtitle}</T></p>
           </div>
           <div style={{ position: "absolute", top: "8.4cqw", right: "7.2cqw", width: "9cqw" }}>
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img src="/mlogo.svg" alt="CDS Space" style={{ width: "100%", filter: "brightness(0) invert(1)" }} />
           </div>
           <div style={{ position: "absolute", left: "7.2cqw", bottom: "9cqw", fontSize: "1.2cqw", color: "rgba(255,255,255,0.9)" }}>
-            <div style={{ fontWeight: 700 }}>Prepared for {deck.cover.prepared_for || brandName}</div>
+            <div style={{ fontWeight: 700 }}>Prepared for <T path="cover.prepared_for">{deck.cover.prepared_for || brandName}</T></div>
             <div style={{ marginTop: "0.4cqw", opacity: 0.8 }}>{formatDate(createdAt)}</div>
           </div>
         </>
@@ -175,9 +245,9 @@ export function WhoWeAreSlide({ deck }: { deck: Deck }) {
     <Slide page={2}>
       <Art art="flag" style={{ right: 0, top: "4%", width: "40%", height: "78%" }} />
       <div style={{ position: "absolute", top: "8.4cqw", left: "7.2cqw", width: "50%" }}>
-        <Heading>{deck.who_we_are.heading}</Heading>
+        <Heading><T path="who_we_are.heading">{deck.who_we_are.heading}</T></Heading>
         <div style={{ marginTop: "2.4cqw", display: "grid", gap: "1.2cqw", fontSize: "1.35cqw", lineHeight: 1.55, color: "#1F2A44" }}>
-          {deck.who_we_are.body.map((paragraph, index) => <p key={index} style={{ margin: 0 }}>{paragraph}</p>)}
+          {deck.who_we_are.body.map((paragraph, index) => <p key={index} style={{ margin: 0 }}><T path={`who_we_are.body.${index}`}>{paragraph}</T></p>)}
         </div>
       </div>
     </Slide>
@@ -189,15 +259,15 @@ export function BigPictureSlide({ deck }: { deck: Deck }) {
     <Slide page={3}>
       <Art art="people" style={{ right: 0, top: "12%", width: "34%", height: "66%" }} />
       <div style={{ position: "absolute", top: "8.4cqw", left: "7.2cqw", width: "62%" }}>
-        <Heading>{deck.big_picture.heading}</Heading>
-        <p style={{ margin: "1.6cqw 0 0", fontSize: "1.35cqw", lineHeight: 1.55, color: "#1F2A44" }}>{deck.big_picture.intro}</p>
+        <Heading><T path="big_picture.heading">{deck.big_picture.heading}</T></Heading>
+        <p style={{ margin: "1.6cqw 0 0", fontSize: "1.35cqw", lineHeight: 1.55, color: "#1F2A44" }}><T path="big_picture.intro">{deck.big_picture.intro}</T></p>
         <div style={{ marginTop: "2cqw", display: "grid", gap: "1cqw" }}>
           {deck.big_picture.outcomes.map((outcome, index) => (
             <div key={index} style={{ display: "flex", gap: "1cqw", alignItems: "flex-start" }}>
               <Bullet dark={false} />
               <div>
-                <strong style={{ display: "block", fontSize: "1.4cqw", color: INK }}>{outcome.title}</strong>
-                <span style={{ display: "block", marginTop: "0.3cqw", fontSize: "1.2cqw", lineHeight: 1.5, color: "#5C6C8B" }}>{outcome.detail}</span>
+                <strong style={{ display: "block", fontSize: "1.4cqw", color: INK }}><T path={`big_picture.outcomes.${index}.title`}>{outcome.title}</T></strong>
+                <span style={{ display: "block", marginTop: "0.3cqw", fontSize: "1.2cqw", lineHeight: 1.5, color: "#5C6C8B" }}><T path={`big_picture.outcomes.${index}.detail`}>{outcome.detail}</T></span>
               </div>
             </div>
           ))}
@@ -212,13 +282,13 @@ export function RewindSlide({ deck }: { deck: Deck }) {
     <Slide dark page={4}>
       <Art art="puzzle" style={{ right: 0, top: 0, width: "34%", height: "78%" }} />
       <div style={{ position: "absolute", top: "8.4cqw", left: "7.2cqw", width: "57%" }}>
-        <Heading dark>{deck.rewind.heading}</Heading>
-        <p style={{ margin: "1.6cqw 0 0", fontSize: "1.4cqw", lineHeight: 1.55, color: "rgba(255,255,255,0.92)" }}>{deck.rewind.intro}</p>
+        <Heading dark><T path="rewind.heading">{deck.rewind.heading}</T></Heading>
+        <p style={{ margin: "1.6cqw 0 0", fontSize: "1.4cqw", lineHeight: 1.55, color: "rgba(255,255,255,0.92)" }}><T path="rewind.intro">{deck.rewind.intro}</T></p>
         <div style={{ marginTop: "1.8cqw", display: "grid", gap: "0.9cqw" }}>
           {deck.rewind.problems.map((problem, index) => (
             <div key={index} style={{ display: "flex", gap: "1cqw", alignItems: "flex-start", fontSize: "1.25cqw", lineHeight: 1.5, color: "rgba(255,255,255,0.95)" }}>
               <Bullet dark />
-              <span>{problem}</span>
+              <span><T path={`rewind.problems.${index}`}>{problem}</T></span>
             </div>
           ))}
         </div>
@@ -232,14 +302,14 @@ export function OpportunitiesSlide({ deck }: { deck: Deck }) {
   return (
     <Slide page={5}>
       <div style={{ position: "absolute", top: "8.4cqw", left: "7.2cqw", right: "7.2cqw" }}>
-        <Heading>{deck.opportunities.heading}</Heading>
-        <p style={{ margin: "1.2cqw 0 0", width: "62%", fontSize: "1.3cqw", lineHeight: 1.5, color: "#1F2A44" }}>{deck.opportunities.intro}</p>
+        <Heading><T path="opportunities.heading">{deck.opportunities.heading}</T></Heading>
+        <p style={{ margin: "1.2cqw 0 0", width: "62%", fontSize: "1.3cqw", lineHeight: 1.5, color: "#1F2A44" }}><T path="opportunities.intro">{deck.opportunities.intro}</T></p>
         <div style={{ marginTop: "1.8cqw", display: "grid", gridTemplateColumns: deck.opportunities.items.length > 2 ? "repeat(2, 1fr)" : "1fr", gap: "0.5cqw", borderRadius: "0.9cqw", overflow: "hidden" }}>
           {deck.opportunities.items.slice(0, 4).map((item, index) => (
             <div key={index} style={{ background: tones[index % tones.length], color: "#FFFFFF", padding: "1.4cqw 1.6cqw" }}>
-              <strong style={{ display: "block", fontSize: "1.35cqw" }}>{item.title}</strong>
-              <span style={{ display: "block", marginTop: "0.5cqw", fontSize: "1.1cqw", lineHeight: 1.5, color: "rgba(255,255,255,0.92)" }}>{item.detail}</span>
-              {item.value ? <span style={{ display: "inline-block", marginTop: "0.8cqw", padding: "0.35cqw 0.8cqw", borderRadius: "999px", background: "rgba(255,255,255,0.18)", fontSize: "0.95cqw", fontWeight: 700 }}>{item.value}</span> : null}
+              <strong style={{ display: "block", fontSize: "1.35cqw" }}><T path={`opportunities.items.${index}.title`}>{item.title}</T></strong>
+              <span style={{ display: "block", marginTop: "0.5cqw", fontSize: "1.1cqw", lineHeight: 1.5, color: "rgba(255,255,255,0.92)" }}><T path={`opportunities.items.${index}.detail`}>{item.detail}</T></span>
+              {item.value ? <span style={{ display: "inline-block", marginTop: "0.8cqw", padding: "0.35cqw 0.8cqw", borderRadius: "999px", background: "rgba(255,255,255,0.18)", fontSize: "0.95cqw", fontWeight: 700 }}><T path={`opportunities.items.${index}.value`}>{item.value}</T></span> : null}
             </div>
           ))}
         </div>
@@ -263,10 +333,10 @@ export function ProcessSlide({ deck }: { deck: Deck }) {
   );
 
   return (
-    <Slide page={6} note={deck.process.duration_note}>
+    <Slide page={6} note={<T path="process.duration_note">{deck.process.duration_note}</T>}>
       <div style={{ position: "absolute", top: "5.2cqw", left: "4.4cqw", right: "4.4cqw" }}>
-        <Heading>{deck.process.heading}</Heading>
-        <p style={{ margin: "0.7cqw 0 0", fontSize: "1.1cqw", color: "#1F2A44" }}>{deck.process.intro}</p>
+        <Heading><T path="process.heading">{deck.process.heading}</T></Heading>
+        <p style={{ margin: "0.7cqw 0 0", fontSize: "1.1cqw", color: "#1F2A44" }}><T path="process.intro">{deck.process.intro}</T></p>
 
         <div style={{ marginTop: "1.2cqw", display: "grid", gridTemplateColumns: "0.95fr repeat(5, 1fr) 0.95fr", gap: "0.15cqw", minHeight: "34.5cqw" }}>
           <div style={{ display: "grid", gridTemplateRows: "auto 1fr", background: "#EDF3FE" }}>
@@ -309,12 +379,12 @@ export function PayoffSlide({ deck }: { deck: Deck }) {
     <Slide dark page={7}>
       <Art art="keyhole" style={{ right: 0, top: "8%", width: "32%", height: "76%" }} />
       <div style={{ position: "absolute", top: "8.4cqw", left: "7.2cqw", width: "58%" }}>
-        <Heading dark>{deck.payoff.heading}</Heading>
-        <p style={{ margin: "1.2cqw 0 0", fontSize: "1.3cqw", lineHeight: 1.5, color: "rgba(255,255,255,0.92)" }}>{deck.payoff.intro}</p>
+        <Heading dark><T path="payoff.heading">{deck.payoff.heading}</T></Heading>
+        <p style={{ margin: "1.2cqw 0 0", fontSize: "1.3cqw", lineHeight: 1.5, color: "rgba(255,255,255,0.92)" }}><T path="payoff.intro">{deck.payoff.intro}</T></p>
         <div style={{ marginTop: "1.6cqw", display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: "0.9cqw 1.4cqw" }}>
           {deck.payoff.items.map((entry, index) => (
             <div key={index} style={{ display: "flex", gap: "0.8cqw", alignItems: "flex-start", fontSize: "1.15cqw", lineHeight: 1.4 }}>
-              <Bullet dark /><span>{entry}</span>
+              <Bullet dark /><span><T path={`payoff.items.${index}`}>{entry}</T></span>
             </div>
           ))}
         </div>
@@ -327,14 +397,14 @@ export function KickoffSlide({ deck }: { deck: Deck }) {
   return (
     <Slide page={8}>
       <div style={{ position: "absolute", top: "8.4cqw", left: "7.2cqw", right: "7.2cqw" }}>
-        <Heading>{deck.kickoff.heading}</Heading>
-        <p style={{ margin: "1cqw 0 0", fontSize: "1.3cqw", lineHeight: 1.5, color: "#1F2A44" }}>{deck.kickoff.intro}</p>
+        <Heading><T path="kickoff.heading">{deck.kickoff.heading}</T></Heading>
+        <p style={{ margin: "1cqw 0 0", fontSize: "1.3cqw", lineHeight: 1.5, color: "#1F2A44" }}><T path="kickoff.intro">{deck.kickoff.intro}</T></p>
         <div style={{ marginTop: "2cqw", display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: "0.9cqw" }}>
           {deck.kickoff.steps.slice(0, 5).map((step, index) => (
             <div key={index} style={{ borderRadius: "0.8cqw", background: index === 0 ? BLUE : "#EDF3FE", color: index === 0 ? "#FFFFFF" : INK, padding: "1.2cqw 1cqw", minHeight: "12cqw" }}>
               <span style={{ display: "grid", placeItems: "center", width: "2cqw", height: "2cqw", borderRadius: "999px", background: index === 0 ? "rgba(255,255,255,0.2)" : BLUE, color: "#FFFFFF", fontSize: "1cqw", fontWeight: 700 }}>{index + 1}</span>
-              <strong style={{ display: "block", marginTop: "0.9cqw", fontSize: "1.05cqw", lineHeight: 1.3 }}>{step.title}</strong>
-              <span style={{ display: "block", marginTop: "0.5cqw", fontSize: "0.9cqw", lineHeight: 1.45, color: index === 0 ? "rgba(255,255,255,0.9)" : "#5C6C8B" }}>{step.detail}</span>
+              <strong style={{ display: "block", marginTop: "0.9cqw", fontSize: "1.05cqw", lineHeight: 1.3 }}><T path={`kickoff.steps.${index}.title`}>{step.title}</T></strong>
+              <span style={{ display: "block", marginTop: "0.5cqw", fontSize: "0.9cqw", lineHeight: 1.45, color: index === 0 ? "rgba(255,255,255,0.9)" : "#5C6C8B" }}><T path={`kickoff.steps.${index}.detail`}>{step.detail}</T></span>
             </div>
           ))}
         </div>
@@ -348,15 +418,15 @@ export function CtaSlide({ deck }: { deck: Deck }) {
   return (
     <Slide dark>
       <div style={{ position: "absolute", top: "12cqw", left: "7.2cqw", right: "7.2cqw", maxWidth: "68%" }}>
-        <Heading dark>{deck.cta.heading}</Heading>
-        <p style={{ margin: "1.2cqw 0 0", fontSize: "1.3cqw", lineHeight: 1.55, color: "rgba(255,255,255,0.92)" }}>{deck.cta.body}</p>
+        <Heading dark><T path="cta.heading">{deck.cta.heading}</T></Heading>
+        <p style={{ margin: "1.2cqw 0 0", fontSize: "1.3cqw", lineHeight: 1.55, color: "rgba(255,255,255,0.92)" }}><T path="cta.body">{deck.cta.body}</T></p>
         <a
           href={deck.cta.primary_url}
           target="_blank"
           rel="noreferrer"
           style={{ display: "inline-block", marginTop: "1.8cqw", padding: "1cqw 2cqw", borderRadius: "999px", background: "#FFFFFF", color: BLUE, fontSize: "1.2cqw", fontWeight: 700, textDecoration: "none" }}
         >
-          {deck.cta.primary_label}
+          <T path="cta.primary_label">{deck.cta.primary_label}</T>
         </a>
         <p style={{ margin: "1.4cqw 0 0", fontSize: "1.05cqw", color: "rgba(255,255,255,0.85)" }}>
           {deck.cta.primary_url}
@@ -366,6 +436,33 @@ export function CtaSlide({ deck }: { deck: Deck }) {
       </div>
       <div style={{ position: "absolute", inset: 0, background: `linear-gradient(90deg, ${DEEP}00 0%, ${DEEP}00 100%)`, pointerEvents: "none" }} />
     </Slide>
+  );
+}
+
+/**
+ * The editing affordance. Scoped to the provider so a client reading the public
+ * link never sees a hover state on text they cannot change.
+ */
+function EditStyles() {
+  return (
+    <style>{`
+      .cds-deck-editing .cds-deck-field {
+        transition: background-color 120ms ease, box-shadow 120ms ease;
+      }
+      .cds-deck-editing .cds-deck-field:hover {
+        background-color: rgba(10,79,232,0.10);
+        box-shadow: 0 0 0 0.25cqw rgba(10,79,232,0.10);
+      }
+      .cds-deck-editing .cds-deck-field:focus {
+        background-color: rgba(255,255,255,0.92);
+        box-shadow: 0 0 0 0.25cqw #0A4FE8;
+        color: #07133B;
+      }
+      .cds-deck-editing .cds-deck-field:empty::before {
+        content: "Empty";
+        opacity: 0.45;
+      }
+    `}</style>
   );
 }
 

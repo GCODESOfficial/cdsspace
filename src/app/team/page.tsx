@@ -12,7 +12,6 @@ import {
   LogIn,
   LogOut,
   ListPlus,
-  FileText,
   ChevronDown,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
@@ -27,7 +26,6 @@ interface OverviewData {
   };
   recent_work: { id: string; title: string; category: string | null; cover_image: string | null }[];
   upcoming_meetings: { id: string; title: string; scheduled_for: string | null; room_code: string }[];
-  resume_completion?: number;
   attendance?: { clock_in_at: string | null; clock_out_at: string | null } | null;
 }
 
@@ -49,8 +47,6 @@ export default function TeamOverviewPage() {
   if (!data) return null;
 
   const { member, stats, recent_work, upcoming_meetings } = data;
-  const resumeCompletion = Math.max(0, Math.min(100, data.resume_completion ?? 0));
-
   return (
     <div className="space-y-4 max-w-[1400px]">
       {/* Hero greeting + primary actions */}
@@ -90,11 +86,10 @@ export default function TeamOverviewPage() {
           <h2 className="text-[15px] font-bold text-brand-navy">Today at a glance</h2>
           <p className="text-[12px] text-brand-body/60">A quick read on where things stand</p>
         </div>
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
           <FocusStat icon={Briefcase} label={t("overview.assignedWork")} value={String(stats.assigned_work)} accent="bg-blue-50 text-brand-blue" />
           <FocusStat icon={MessageSquare} label={t("overview.unreadMessages")} value={String(stats.unread_messages)} accent="bg-purple-50 text-purple-600" />
           <FocusStat icon={Video} label={t("overview.upcomingMeetings")} value={String(stats.upcoming_meetings)} accent="bg-amber-50 text-amber-600" />
-          <FocusResume percent={resumeCompletion} />
         </div>
       </section>
 
@@ -322,25 +317,6 @@ function FocusStat({
         </p>
       </div>
       <p className="mt-3 text-[26px] font-bold text-brand-navy tracking-tight leading-none">{value}</p>
-    </div>
-  );
-}
-
-function FocusResume({ percent }: { percent: number }) {
-  return (
-    <div className="rounded-xl bg-brand-bg/50 border border-brand-stroke/20 p-4">
-      <div className="flex items-center justify-between">
-        <span className="w-8 h-8 rounded-lg bg-amber-50 text-amber-600 flex items-center justify-center shrink-0">
-          <FileText className="w-4 h-4" />
-        </span>
-        <span className="text-[20px] font-bold text-brand-navy tracking-tight leading-none">{percent}%</span>
-      </div>
-      <p className="mt-3 text-[11px] uppercase tracking-[0.12em] font-semibold text-brand-body/50">
-        {percent >= 100 ? "Resume complete" : "Resume progress"}
-      </p>
-      <div className="mt-2 h-1.5 rounded-full bg-brand-stroke/30 overflow-hidden">
-        <div className="h-full rounded-full bg-amber-500 transition-all" style={{ width: `${percent}%` }} />
-      </div>
     </div>
   );
 }

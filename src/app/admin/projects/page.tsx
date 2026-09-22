@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { supabase } from "@/lib/supabase";
-import { ArrowDownToLine, ArrowUpRight, Briefcase, CheckCircle2, Loader2, UserCog } from "lucide-react";
+import { ArrowUpRight, Briefcase, CheckCircle2, Loader2, UserCog } from "lucide-react";
 
 interface Stats {
   totalProjects: number;
@@ -11,7 +11,6 @@ interface Stats {
   completedProjects: number;
   pausedProjects: number;
   totalContractors: number;
-  totalInflow: number;
 }
 
 interface ProjectSummary {
@@ -25,10 +24,7 @@ interface ProjectSummary {
 const SECTIONS = [
   { href: "/admin/projects/list", label: "Projects", desc: "Create & manage projects with milestones", icon: Briefcase, tint: "bg-[#0A4FE8]" },
   { href: "/admin/projects/contractors", label: "Sub-contractors", desc: "Manage sub-contractors & assignments", icon: UserCog, tint: "from-violet-500 to-purple-500" },
-  { href: "/admin/projects/subscriptions", label: "Inflow", desc: "Record positive funds received", icon: ArrowDownToLine, tint: "from-emerald-500 to-teal-500" },
 ];
-
-const formatNaira = (value: number) => `₦${value.toLocaleString("en", { maximumFractionDigits: 0 })}`;
 
 export default function ProjectsOverview() {
   const [stats, setStats] = useState<Stats | null>(null);
@@ -38,23 +34,25 @@ export default function ProjectsOverview() {
   useEffect(() => {
     async function load() {
       try {
-        const [projectsRes, contractorsRes, inflowsRes, recentRes] = await Promise.all([
+        const [projectsRes, contractorsRes, recentRes] = await Promise.all<any>([
           supabase.from("finance_projects").select("id, status"),
           supabase.from("finance_contractors").select("id"),
-          supabase.from("finance_inflows").select("amount"),
-          supabase.from("finance_projects").select("id, name, client, status, created_at").order("created_at", { ascending: false }).limit(5),
+          // Through the API, not the table: it is the server that decides
+          // whether this admin is shown the client name or a reference.
+          fetch("/api/admin/finance/projects", { cache: "no-store" })
+            .then((response) => (response.ok ? response.json() : { projects: [] }))
+            .catch(() => ({ projects: [] })),
         ]);
 
-        const projects = projectsRes.data || [];
+        const projects: Array<{ id: string; status: string }> = projectsRes.data || [];
         setStats({
           totalProjects: projects.length,
           activeProjects: projects.filter(p => p.status === "active").length,
           completedProjects: projects.filter(p => p.status === "completed").length,
           pausedProjects: projects.filter(p => p.status === "paused").length,
           totalContractors: contractorsRes.data?.length || 0,
-          totalInflow: (inflowsRes.data || []).reduce((sum, entry) => sum + Number(entry.amount || 0), 0),
         });
-        setRecentProjects(recentRes.data || []);
+        setRecentProjects((recentRes.projects || []).slice(0, 5));
       } catch (e) {
         console.error(e);
       } finally {
@@ -69,17 +67,16 @@ export default function ProjectsOverview() {
       <div className="mb-8">
         <p className="text-[#0A4FE8] text-sm font-semibold">Operations</p>
         <h1 className="text-[28px] font-bold text-[#0D1B39] tracking-tight">Projects</h1>
-        <p className="text-gray-400 text-[13px] mt-1">Manage projects, sub-contractors, and inflow records</p>
+        <p className="text-gray-400 text-[13px] mt-1">Manage projects and sub-contractors</p>
       </div>
 
       {isLoading ? (
         <div className="flex justify-center py-10"><Loader2 className="w-6 h-6 animate-spin text-blue-400" /></div>
       ) : stats && (
-        <div className="grid grid-cols-1 gap-5 mb-8 sm:grid-cols-2 xl:grid-cols-4">
+        <div className="grid grid-cols-1 gap-5 mb-8 sm:grid-cols-3">
           <StatCard icon={<Briefcase className="w-5 h-5 text-[#0A4FE8]" />} label="Total Projects" value={stats.totalProjects} bg="bg-blue-50" />
           <StatCard icon={<CheckCircle2 className="w-5 h-5 text-emerald-600" />} label="Active" value={stats.activeProjects} bg="bg-emerald-50" />
           <StatCard icon={<UserCog className="w-5 h-5 text-purple-600" />} label="Sub-contractors" value={stats.totalContractors} bg="bg-purple-50" />
-          <StatCard icon={<ArrowDownToLine className="w-5 h-5 text-emerald-600" />} label="Inflow" value={formatNaira(stats.totalInflow)} bg="bg-emerald-50" />
         </div>
       )}
 

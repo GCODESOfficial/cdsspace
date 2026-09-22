@@ -18,9 +18,10 @@ import {
   ToggleRight,
 } from "lucide-react";
 import { appAlert } from "@/lib/app-notify";
+import NgnPriceInputs from "@/components/admin/NgnPriceInputs";
+import type { ClientPriceSet } from "@/lib/pricing/client-currency";
 import {
   SALES_CURRENCIES,
-  convertSalesPricesFromUsd,
   type SalesCountry,
   type SalesBankAccount,
   type SalesDeliveryZone,
@@ -32,23 +33,18 @@ import {
 
 const INPUT = "h-10 rounded-xl border border-slate-200 bg-white px-3 text-[12px] text-[#0D1B39] outline-none transition focus:border-blue-400 focus:ring-4 focus:ring-blue-100";
 
+/**
+ * Sales prices are typed in Naira; every other currency follows the shared
+ * NGN-first formula. See src/lib/pricing/client-currency.ts.
+ */
 function PriceInputs({ prices, onChange }: { prices: SalesPrices; onChange: (prices: SalesPrices) => void }) {
-  const changePrice = (currency: (typeof SALES_CURRENCIES)[number], rawValue: string) => {
-    const amount = Math.max(0, Number(rawValue) || 0);
-    onChange(currency === "USD" ? convertSalesPricesFromUsd(amount, prices) : { ...prices, [currency]: amount });
-  };
   return (
-    <div className="space-y-2">
-      <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
-        {SALES_CURRENCIES.map((currency) => (
-          <label key={currency} className="relative">
-            <span className={`absolute left-3 top-1/2 -translate-y-1/2 text-[10px] font-bold ${currency === "USD" ? "text-[#0A4FE8]" : "text-slate-400"}`}>{currency}</span>
-            <input type="number" min="0" step="0.01" value={Number(prices?.[currency]) || ""} onChange={(event) => changePrice(currency, event.target.value)} placeholder="Not set" className={`${INPUT} w-full pl-12 ${currency === "USD" ? "border-blue-200 bg-blue-50/40" : ""}`} />
-          </label>
-        ))}
-      </div>
-      <p className="text-[10px] leading-4 text-slate-400">USD is the base price. Changing it refreshes every currency, while each converted value remains editable.</p>
-    </div>
+    <NgnPriceInputs
+      prices={prices as ClientPriceSet}
+      onChange={(next) => onChange(next as SalesPrices)}
+      inputClassName={INPUT}
+      currencies={SALES_CURRENCIES}
+    />
   );
 }
 

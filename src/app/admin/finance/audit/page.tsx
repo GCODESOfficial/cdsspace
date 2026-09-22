@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from "react";
-import { supabase } from "@/lib/supabase";
 import { useToast } from "@/hooks/use-toast";
 import {
   AlertTriangle,
@@ -42,6 +41,9 @@ import {
   YAxis,
 } from "recharts";
 import { appConfirm } from "@/lib/app-notify";
+import { useFinanceDisplayCurrency } from "@/components/finance/FinanceCurrencySelector";
+import { convertFinanceAmount } from "@/lib/finance/currency-display";
+import { formatMoney, type Currency } from "@/lib/finance/types";
 
 type ReportKey = "pl" | "balance" | "ledger";
 type ChartKey = "trend" | "mix" | "tax";
@@ -59,6 +61,41 @@ interface BankStatement {
   total_credit: number;
   total_debit: number;
   uploaded_at: string;
+  currency: string;
+  processing_status: string;
+  row_count: number;
+  matched_count: number;
+  unmatched_count: number;
+  other_inflow_count: number;
+  review_count: number;
+  duplicate_count: number;
+  processing_error?: string | null;
+  account_name?: string | null;
+}
+
+interface BankAccountOption {
+  id: string;
+  currency: string;
+  bank_name: string;
+  account_name: string;
+  account_number: string | null;
+  iban: string | null;
+}
+
+interface BankTransaction {
+  id: string;
+  txn_date: string;
+  description: string;
+  transaction_reference: string | null;
+  amount: number;
+  txn_type: "credit" | "debit";
+  balance: number | null;
+  category: string | null;
+  match_status: string;
+  match_confidence: number | null;
+  match_reason: string | null;
+  invoice_number?: string | null;
+  client_name?: string | null;
 }
 
 interface InvoiceRow {
@@ -66,6 +103,10 @@ interface InvoiceRow {
   invoice_number: string;
   client_name: string;
   total: number;
+  currency: Currency;
+  amount_paid: number | null;
+  balance_due: number | null;
+  payment_percentage: number | null;
   subtotal: number | null;
   tax_amount: number | null;
   tax_rate: number | null;
@@ -79,6 +120,7 @@ interface ExpenditureRow {
   title: string;
   category: string | null;
   amount: number;
+  currency: Currency;
   spent_on: string;
 }
 
@@ -94,9 +136,25 @@ interface InflowRow {
   notes: string | null;
 }
 
+interface InvoicePaymentRow {
+  id: string;
+  invoice_id: string;
+  amount: number;
+  currency: string;
+  paid_on: string;
+  finance_invoices: {
+    invoice_number: string;
+    client_name: string;
+    total: number;
+    subtotal: number | null;
+    tax_amount: number | null;
+  } | null;
+}
+
 interface ContractorPaymentRow {
   id: string;
   amount: number;
+  currency: Currency;
   paid_on: string;
 }
 
@@ -106,12 +164,14 @@ interface PayrollRunRow {
   period: string;
   status: string;
   total: number;
+  currency: Currency;
   created_at: string;
 }
 
 interface EmployeeRow {
   id: string;
   base_salary: number | null;
+  currency: Currency;
 }
 
 interface ChartPoint {
@@ -384,19 +444,24 @@ export default function FinancialAuditPage() {
   const [isDownloading, setIsDownloading] = useState(false);
 
   const [file, setFile] = useState<File | null>(null);
-  const [bankName, setBankName] = useState("");
-  const [accountNumber, setAccountNumber] = useState("");
-  const [periodStart, setPeriodStart] = useState("");
-  const [periodEnd, setPeriodEnd] = useState("");
+  const [bankAccounts, setBankAccounts] = useState<BankAccountOption[]>([]);
+  const [bankAccountId, setBankAccountId] = useState("");
+  const [statementNotes, setStatementNotes] = useState("");
+  const [selectedStatement, setSelectedStatement] = useState<BankStatement | null>(null);
+  const [statementTransactions, setStatementTransactions] = useState<BankTransaction[]>([]);
+  const [detailsLoading, setDetailsLoading] = useState(false);
 
   const { toast } = useToast();
-  const fmt = (n: number) => `₦${n.toLocaleString("en", { maximumFractionDigits: 0 })}`;
+  const { currency: displayCurrency, rates } = useFinanceDisplayCurrency();
+  const display = (amount: number | string | null | undefined, source: Currency | string | null | undefined) =>
+    convertFinanceAmount(amount, source, displayCurrency, rates);
+  const fmt = (n: number) => formatMoney(n, displayCurrency);
 
   const periodLabel = useMemo(() => {
     const from = safeFormatDate(startDate);
     const to = safeFormatDate(endDate);
     return `${from} - ${to}`;
-  }, [startDate, endDate]);
+  }, [startDate, endDate, displayCurrency, rates]);
 
   const yearOptions = useMemo(
     () => Array.from({ length: 8 }, (_, i) => String(CURRENT_YEAR + 1 - i)),
@@ -432,13 +497,13 @@ export default function FinancialAuditPage() {
 
   async function fetchStatements() {
     setIsFetching(true);
-    const { data } = await supabase
-      .from("finance_bank_statements")
-      .select("*")
-      .gte("uploaded_at", `${startDate}T00:00:00`)
-      .lte("uploaded_at", `${endDate}T23:59:59`)
-      .order("uploaded_at", { ascending: false });
-    setStatements(data || []);
+    const response = await fetch(`/api/admin/finance/reconciliation?from=${encodeURIComponent(startDate)}&to=${encodeURIComponent(endDate)}`, { cache: "no-store" });
+    const data = await response.json().catch(() => ({}));
+    if (response.ok) {
+      setStatements(data.statements || []);
+      setBankAccounts(data.accounts || []);
+      setBankAccountId((current) => current || data.accounts?.[0]?.id || "");
+    }
     setIsFetching(false);
   }
 
@@ -446,82 +511,68 @@ export default function FinancialAuditPage() {
     setIsReportLoading(true);
     const reportStart = safeDateKey(startDate) || initialRange.start;
     const reportEnd = safeDateKey(endDate) || reportStart;
-    const startMonth = monthKey(reportStart);
-    const endMonth = monthKey(reportEnd);
+    let response: Response;
+    try {
+      response = await fetch(`/api/admin/finance/reconciliation?report=1&from=${encodeURIComponent(reportStart)}&to=${encodeURIComponent(reportEnd)}`, { cache: "no-store" });
+    } catch {
+      setReport(null);
+      setIsReportLoading(false);
+      toast({ title: "Report unavailable", description: "The finance service could not be reached.", variant: "destructive" });
+      return;
+    }
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      setReport(null);
+      setIsReportLoading(false);
+      toast({ title: "Report unavailable", description: payload.error || "The financial report could not be loaded.", variant: "destructive" });
+      return;
+    }
+    const invoices = (payload.invoices || []) as InvoiceRow[];
+    const invoicePayments = (payload.invoicePayments || []) as InvoicePaymentRow[];
+    const inflows = (payload.inflows || []) as InflowRow[];
+    const expenditures = (payload.expenditures || []) as ExpenditureRow[];
+    const contractorPayments = (payload.contractorPayments || []) as ContractorPaymentRow[];
+    const payrollRuns = (payload.payrollRuns || []) as PayrollRunRow[];
+    const employees = (payload.employees || []) as EmployeeRow[];
 
-    const [invoicesRes, inflowsRes, expendituresRes, contractorPayRes, payrollRunsRes, employeeRes] = await Promise.all([
-      supabase
-        .from("finance_invoices")
-        .select("id, invoice_number, client_name, total, subtotal, tax_amount, tax_rate, status, issue_date, due_date")
-        .gte("issue_date", reportStart)
-        .lte("issue_date", reportEnd),
-      supabase
-        .from("finance_inflows")
-        .select("id, title, source, amount, currency, received_on, payment_method, reference, notes")
-        .gte("received_on", reportStart)
-        .lte("received_on", reportEnd),
-      supabase
-        .from("finance_expenditures")
-        .select("id, title, category, amount, spent_on")
-        .gte("spent_on", reportStart)
-        .lte("spent_on", reportEnd),
-      supabase
-        .from("finance_contractor_payments")
-        .select("id, amount, paid_on")
-        .gte("paid_on", reportStart)
-        .lte("paid_on", reportEnd),
-      supabase
-        .from("finance_payroll_runs")
-        .select("id, title, period, status, total, created_at")
-        .gte("period", startMonth)
-        .lte("period", endMonth),
-      supabase.from("finance_employees").select("id, base_salary").eq("active", true),
-    ]);
-
-    const invoices = (invoicesRes.data || []) as InvoiceRow[];
-    const inflows = (inflowsRes.data || []) as InflowRow[];
-    const expenditures = (expendituresRes.data || []) as ExpenditureRow[];
-    const contractorPayments = (contractorPayRes.data || []) as ContractorPaymentRow[];
-    const payrollRuns = (payrollRunsRes.data || []) as PayrollRunRow[];
-    const employees = (employeeRes.data || []) as EmployeeRow[];
-
-    const paidInvoices = invoices.filter((invoice) => invoice.status === "paid");
-    const invoiceRevenue = paidInvoices.reduce((sum, invoice) => sum + Number(invoice.total || 0), 0);
-    const totalInflow = inflows.reduce((sum, entry) => sum + Number(entry.amount || 0), 0);
+    const receivedForInvoice = (invoice: InvoiceRow) => Number(invoice.amount_paid ?? (invoice.status === "paid" ? invoice.total : 0));
+    const balanceForInvoice = (invoice: InvoiceRow) => Number(invoice.balance_due ?? Math.max(Number(invoice.total || 0) - receivedForInvoice(invoice), 0));
+    const invoiceRevenue = invoicePayments.reduce((sum, payment) => sum + display(payment.amount, payment.currency), 0);
+    const totalInflow = inflows.reduce((sum, entry) => sum + display(entry.amount, entry.currency), 0);
     const totalRevenue = invoiceRevenue + totalInflow;
     const outstandingReceivables = invoices
-      .filter((invoice) => invoice.status === "sent" || invoice.status === "overdue")
-      .reduce((sum, invoice) => sum + Number(invoice.total || 0), 0);
-    const operationsSpend = expenditures.reduce((sum, entry) => sum + Number(entry.amount || 0), 0);
-    const contractorPay = contractorPayments.reduce((sum, entry) => sum + Number(entry.amount || 0), 0);
-    const monthlyPayroll = employees.reduce((sum, employee) => sum + Number(employee.base_salary || 0), 0);
+      .filter((invoice) => !["paid", "cancelled", "draft"].includes(invoice.status))
+      .reduce((sum, invoice) => sum + display(balanceForInvoice(invoice), invoice.currency), 0);
+    const operationsSpend = expenditures.reduce((sum, entry) => sum + display(entry.amount, entry.currency), 0);
+    const contractorPay = contractorPayments.reduce((sum, entry) => sum + display(entry.amount, entry.currency), 0);
+    const monthlyPayroll = employees.reduce((sum, employee) => sum + display(employee.base_salary, employee.currency), 0);
     const buckets = buildMonthBuckets(reportStart, reportEnd);
 
-    paidInvoices.forEach((invoice) => {
-      const bucket = buckets.get(monthKey(invoice.issue_date));
-      if (bucket) bucket.revenue += Number(invoice.total || 0);
+    invoicePayments.forEach((payment) => {
+      const bucket = buckets.get(monthKey(payment.paid_on));
+      if (bucket) bucket.revenue += display(payment.amount, payment.currency);
     });
 
     inflows.forEach((entry) => {
       const bucket = buckets.get(monthKey(entry.received_on));
-      if (bucket) bucket.revenue += Number(entry.amount || 0);
+      if (bucket) bucket.revenue += display(entry.amount, entry.currency);
     });
 
     expenditures.forEach((entry) => {
       const bucket = buckets.get(monthKey(entry.spent_on));
-      if (bucket) bucket.operations += Number(entry.amount || 0);
+      if (bucket) bucket.operations += display(entry.amount, entry.currency);
     });
 
     contractorPayments.forEach((entry) => {
       const bucket = buckets.get(monthKey(entry.paid_on));
-      if (bucket) bucket.contractors += Number(entry.amount || 0);
+      if (bucket) bucket.contractors += display(entry.amount, entry.currency);
     });
 
-    let payroll = payrollRuns.reduce((sum, run) => sum + Number(run.total || 0), 0);
+    let payroll = payrollRuns.reduce((sum, run) => sum + display(run.total, run.currency), 0);
     if (payrollRuns.length > 0) {
       payrollRuns.forEach((run) => {
         const bucket = buckets.get(run.period);
-        if (bucket) bucket.payroll += Number(run.total || 0);
+        if (bucket) bucket.payroll += display(run.total, run.currency);
       });
     } else {
       payroll = monthlyPayroll * Math.max(1, buckets.size);
@@ -544,11 +595,19 @@ export default function FinancialAuditPage() {
     const totalAssets = totalRevenue + outstandingReceivables;
     const totalLiabilities = Math.max(0, totalExpenses - totalRevenue);
     const equity = totalAssets - totalLiabilities;
-    const taxableRevenue = paidInvoices.reduce((sum, invoice) => {
+    const taxableRevenue = invoicePayments.reduce((sum, payment) => {
+      const invoice = payment.finance_invoices;
+      if (!invoice) return sum;
       const subtotal = invoice.subtotal == null ? Number(invoice.total || 0) - Number(invoice.tax_amount || 0) : Number(invoice.subtotal || 0);
-      return sum + Math.max(0, subtotal);
+      const collectedRatio = Number(invoice.total || 0) > 0 ? Number(payment.amount || 0) / Number(invoice.total) : 0;
+      return sum + display(Math.max(0, subtotal * collectedRatio), payment.currency);
     }, 0);
-    const invoiceTax = paidInvoices.reduce((sum, invoice) => sum + Number(invoice.tax_amount || 0), 0);
+    const invoiceTax = invoicePayments.reduce((sum, payment) => {
+      const invoice = payment.finance_invoices;
+      if (!invoice) return sum;
+      const collectedRatio = Number(invoice.total || 0) > 0 ? Number(payment.amount || 0) / Number(invoice.total) : 0;
+      return sum + display(Number(invoice.tax_amount || 0) * collectedRatio, payment.currency);
+    }, 0);
     const expenseBreakdown: BreakdownPoint[] = [
       { name: "Operations", value: operationsSpend, color: "#0A4FE8" },
       { name: "Contractors", value: contractorPay, color: "#8B5CF6" },
@@ -556,39 +615,41 @@ export default function FinancialAuditPage() {
     ].filter((entry) => entry.value > 0);
 
     const ledgerRows: LedgerRow[] = [
-      ...paidInvoices.map((invoice) => ({
-        date: invoice.issue_date,
+      ...invoicePayments.map((payment) => ({
+        date: payment.paid_on,
         account: "Revenue",
-        memo: `${invoice.invoice_number} - ${invoice.client_name}`,
+        memo: payment.finance_invoices
+          ? `${payment.finance_invoices.invoice_number} - ${payment.finance_invoices.client_name}`
+          : `Invoice payment ${payment.invoice_id}`,
         debit: 0,
-        credit: Number(invoice.total || 0),
+        credit: display(payment.amount, payment.currency),
       })),
       ...inflows.map((entry) => ({
         date: entry.received_on,
         account: "Inflow",
         memo: `${entry.title}${entry.source ? ` - ${entry.source}` : ""}`,
         debit: 0,
-        credit: Number(entry.amount || 0),
+        credit: display(entry.amount, entry.currency),
       })),
       ...expenditures.map((entry) => ({
         date: entry.spent_on,
         account: entry.category || "Operating expense",
         memo: entry.title,
-        debit: Number(entry.amount || 0),
+        debit: display(entry.amount, entry.currency),
         credit: 0,
       })),
       ...contractorPayments.map((entry) => ({
         date: entry.paid_on,
         account: "Contractor payments",
         memo: "Contractor payout",
-        debit: Number(entry.amount || 0),
+        debit: display(entry.amount, entry.currency),
         credit: 0,
       })),
       ...payrollRuns.map((run) => ({
         date: `${run.period}-01`,
         account: "Payroll",
         memo: run.title,
-        debit: Number(run.total || 0),
+        debit: display(run.total, run.currency),
         credit: 0,
       })),
     ]
@@ -626,46 +687,49 @@ export default function FinancialAuditPage() {
     if (!file) return;
     setIsUploading(true);
 
-    const fileName = `${Date.now()}-${file.name}`;
-    const { error: uploadError } = await supabase.storage.from("bank-statements").upload(fileName, file, { contentType: file.type });
-
-    if (uploadError) {
-      toast({ title: "Upload failed", description: uploadError.message, variant: "destructive" });
+    if (!bankAccountId) {
+      toast({ title: "Select a bank", description: "Choose the account this statement belongs to.", variant: "destructive" });
       setIsUploading(false);
       return;
     }
-
-    const { error } = await supabase.from("finance_bank_statements").insert({
-      filename: file.name,
-      storage_path: fileName,
-      bank_name: bankName || null,
-      account_number: accountNumber || null,
-      period_start: periodStart || null,
-      period_end: periodEnd || null,
-      total_credit: 0,
-      total_debit: 0,
-    });
-
-    if (error) {
-      toast({ title: "Save failed", description: error.message, variant: "destructive" });
-    } else {
-      toast({ title: "Uploaded", description: "Bank statement saved. Auto-classification will run shortly." });
+    try {
+      const form = new FormData();
+      form.set("file", file);
+      form.set("bank_account_id", bankAccountId);
+      form.set("notes", statementNotes);
+      const response = await fetch("/api/admin/finance/reconciliation", { method: "POST", body: form });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error || "The statement could not be processed.");
+      const result = data.result;
+      toast({ title: "Statement reconciled", description: `${result.rowCount} transactions read · ${result.matchedCount} matched · ${result.otherInflowCount || 0} other inflows · ${result.reviewCount || 0} for review.` });
       setFile(null);
-      setBankName("");
-      setAccountNumber("");
-      setPeriodStart("");
-      setPeriodEnd("");
+      setStatementNotes("");
       setShowUpload(false);
-      fetchStatements();
+      await Promise.all([fetchStatements(), fetchReport()]);
+    } catch (error) {
+      toast({ title: "Reconciliation failed", description: error instanceof Error ? error.message : "The statement could not be processed.", variant: "destructive" });
+    } finally {
+      setIsUploading(false);
     }
-    setIsUploading(false);
   }
 
   async function handleDelete(statement: BankStatement) {
     if (!(await appConfirm("Delete this bank statement?"))) return;
-    if (statement.storage_path) await supabase.storage.from("bank-statements").remove([statement.storage_path]);
-    await supabase.from("finance_bank_statements").delete().eq("id", statement.id);
-    fetchStatements();
+    const response = await fetch(`/api/admin/finance/reconciliation?id=${encodeURIComponent(statement.id)}`, { method: "DELETE" });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) toast({ title: "Statement retained", description: data.error || "The statement could not be deleted.", variant: "destructive" });
+    else fetchStatements();
+  }
+
+  async function openStatement(statement: BankStatement) {
+    setSelectedStatement(statement);
+    setStatementTransactions([]);
+    setDetailsLoading(true);
+    const response = await fetch(`/api/admin/finance/reconciliation?statement_id=${encodeURIComponent(statement.id)}`, { cache: "no-store" });
+    const data = await response.json().catch(() => ({}));
+    if (response.ok) setStatementTransactions(data.transactions || []);
+    else toast({ title: "Could not load transactions", description: data.error || "Try again.", variant: "destructive" });
+    setDetailsLoading(false);
   }
 
   async function handleDownload() {
@@ -853,40 +917,17 @@ export default function FinancialAuditPage() {
           <h2 className="text-[15px] font-semibold text-[#0D1B39] mb-4 flex items-center gap-2">
             <Upload className="w-4 h-4 text-[#0A4FE8]" /> Upload Bank Statement
           </h2>
-          <p className="text-xs text-gray-500 mb-4">Upload a PDF, CSV, or Excel bank statement.</p>
+          <p className="text-xs text-gray-500 mb-4">Select the corporate bank account and upload a PDF, CSV, or Excel statement. Its period, credits, debits, invoice matches, and duplicate entries are processed automatically.</p>
           <form onSubmit={handleUpload} className="space-y-4">
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-              <Field label="Bank Name">
-                <input
-                  value={bankName}
-                  onChange={(e) => setBankName(e.target.value)}
-                  placeholder="e.g. Kuda Bank"
-                  className="w-full px-4 py-2.5 rounded-xl bg-gray-50 border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-300"
-                />
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <Field label="Bank account">
+                <select value={bankAccountId} onChange={(event) => setBankAccountId(event.target.value)} required className="h-11 w-full rounded-xl border border-gray-200 bg-gray-50 px-4 text-sm outline-none focus:border-[#0A4FE8] focus:ring-2 focus:ring-blue-100">
+                  <option value="">Select bank account</option>
+                  {bankAccounts.map((account) => <option key={account.id} value={account.id}>{account.bank_name} · {account.account_number || account.iban} · {account.currency}</option>)}
+                </select>
               </Field>
-              <Field label="Account Number">
-                <input
-                  value={accountNumber}
-                  onChange={(e) => setAccountNumber(e.target.value)}
-                  placeholder="0123456789"
-                  className="w-full px-4 py-2.5 rounded-xl bg-gray-50 border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-300"
-                />
-              </Field>
-              <Field label="Statement Start">
-                <input
-                  type="date"
-                  value={periodStart}
-                  onChange={(e) => setPeriodStart(e.target.value)}
-                  className="w-full px-4 py-2.5 rounded-xl bg-gray-50 border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-300"
-                />
-              </Field>
-              <Field label="Statement End">
-                <input
-                  type="date"
-                  value={periodEnd}
-                  onChange={(e) => setPeriodEnd(e.target.value)}
-                  className="w-full px-4 py-2.5 rounded-xl bg-gray-50 border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-300"
-                />
+              <Field label="Reconciliation note">
+                <input value={statementNotes} onChange={(event) => setStatementNotes(event.target.value)} placeholder="Optional context for finance records" className="h-11 w-full rounded-xl border border-gray-200 bg-gray-50 px-4 text-sm outline-none focus:border-[#0A4FE8] focus:ring-2 focus:ring-blue-100" />
               </Field>
             </div>
             <div>
@@ -902,11 +943,11 @@ export default function FinancialAuditPage() {
             <div className="flex gap-2">
               <button
                 type="submit"
-                disabled={isUploading || !file}
+                disabled={isUploading || !file || !bankAccountId}
                 className="flex items-center gap-2 px-6 py-2.5 bg-[#0A4FE8] text-white text-sm font-medium rounded-xl hover:bg-[#083EC0] transition disabled:opacity-50"
               >
                 {isUploading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
-                {isUploading ? "Uploading..." : "Upload & Process"}
+                {isUploading ? "Reading and reconciling…" : "Upload and reconcile"}
               </button>
               <button
                 type="button"
@@ -1052,7 +1093,7 @@ export default function FinancialAuditPage() {
                 <InsightCard label="Profit Margin" value={percent(profitMargin)} detail={`${fmt(report.netProfit)} net on ${fmt(report.totalRevenue)} revenue`} positive={report.netProfit >= 0} />
                 <InsightCard label="Expense Ratio" value={percent(expenseRatio)} detail={`${fmt(report.totalExpenses)} spend in selected period`} positive={expenseRatio <= 65} />
                 <InsightCard label="Invoice Tax Captured" value={fmt(report.invoiceTax)} detail={`${fmt(report.taxableRevenue)} taxable invoice base`} positive={report.invoiceTax > 0} />
-                <InsightCard label="Cash Collection Gap" value={fmt(report.outstandingReceivables)} detail={`${report.invoices.filter((i) => i.status === "sent" || i.status === "overdue").length} unpaid invoice(s)`} positive={report.outstandingReceivables === 0} />
+                <InsightCard label="Cash Collection Gap" value={fmt(report.outstandingReceivables)} detail={`${report.invoices.filter((i) => ["sent", "partially_paid", "overdue"].includes(i.status)).length} invoice(s) with a balance`} positive={report.outstandingReceivables === 0} />
               </div>
             </div>
           </section>
@@ -1145,7 +1186,7 @@ export default function FinancialAuditPage() {
         </>
       )}
 
-      <h2 className="text-sm font-semibold text-gray-400 uppercase tracking-wider mb-4">Uploaded Bank Statements</h2>
+      <h2 className="mb-4 text-sm font-semibold text-gray-500">Uploaded bank statements</h2>
       <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
         {isFetching ? (
           <div className="flex justify-center py-12"><Loader2 className="w-6 h-6 animate-spin text-blue-400" /></div>
@@ -1157,7 +1198,7 @@ export default function FinancialAuditPage() {
         ) : (
           <div className="divide-y divide-gray-50">
             {statements.map((statement) => (
-              <div key={statement.id} className="flex items-center gap-4 px-6 py-4 hover:bg-blue-50/30 transition">
+              <div key={statement.id} className="flex flex-col gap-4 px-6 py-4 transition hover:bg-blue-50/30 sm:flex-row sm:items-center">
                 <div className="w-10 h-10 rounded-xl bg-blue-50 flex items-center justify-center text-[#0A4FE8] flex-shrink-0">
                   <FileText className="w-5 h-5" />
                 </div>
@@ -1168,21 +1209,45 @@ export default function FinancialAuditPage() {
                     {statement.account_number && <span>•••{statement.account_number.slice(-4)}</span>}
                     {(statement.period_start || statement.period_end) && <span>{statement.period_start || "-"} to {statement.period_end || "-"}</span>}
                     <span>Uploaded {new Date(statement.uploaded_at).toLocaleDateString()}</span>
-                    <span>Cr {fmt(Number(statement.total_credit || 0))}</span>
-                    <span>Dr {fmt(Number(statement.total_debit || 0))}</span>
+                    <span className="text-emerald-700">Credit {statement.currency} {Number(statement.total_credit || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                    <span className="text-red-600">Debit {statement.currency} {Number(statement.total_debit || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                  </div>
+                  <div className="mt-2 flex flex-wrap gap-2 text-[10px] font-semibold">
+                    <span className="rounded-full bg-blue-50 px-2 py-1 text-blue-700">{statement.row_count || 0} transactions</span>
+                    <span className="rounded-full bg-emerald-50 px-2 py-1 text-emerald-700">{statement.matched_count || 0} reconciled</span>
+                    {Number(statement.other_inflow_count || 0) > 0 && <span className="rounded-full bg-emerald-50 px-2 py-1 text-emerald-700">{statement.other_inflow_count} other inflows</span>}
+                    {Number(statement.review_count || statement.unmatched_count || 0) > 0 && <span className="rounded-full bg-amber-50 px-2 py-1 text-amber-700">{statement.review_count || statement.unmatched_count} need review</span>}
+                    {Number(statement.duplicate_count || 0) > 0 && <span className="rounded-full bg-gray-100 px-2 py-1 text-gray-600">{statement.duplicate_count} duplicates skipped</span>}
                   </div>
                 </div>
-                <button
-                  onClick={() => handleDelete(statement)}
-                  className="p-2 rounded-lg text-gray-300 hover:text-red-500 hover:bg-red-50 transition"
-                >
-                  <Trash2 className="w-4 h-4" />
-                </button>
+                <div className="flex shrink-0 items-center gap-2">
+                  <span className={`rounded-full px-2.5 py-1 text-[10px] font-semibold ${statement.processing_status === "completed" ? "bg-emerald-50 text-emerald-700" : statement.processing_status === "failed" ? "bg-red-50 text-red-700" : "bg-amber-50 text-amber-700"}`}>{statement.processing_status.replace(/_/g, " ")}</span>
+                  <button onClick={() => void openStatement(statement)} className="rounded-lg bg-[#0A4FE8] px-3 py-2 text-[11px] font-semibold text-white">View details</button>
+                  {statement.processing_status === "failed" && <button onClick={() => handleDelete(statement)} className="rounded-lg p-2 text-gray-400 transition hover:bg-red-50 hover:text-red-500" aria-label="Delete failed statement"><Trash2 className="w-4 h-4" /></button>}
+                </div>
               </div>
             ))}
           </div>
         )}
       </div>
+      {selectedStatement && (
+        <div className="fixed inset-0 z-[160] grid place-items-center bg-[#06103A]/55 p-4 backdrop-blur-sm" role="dialog" aria-modal="true" aria-label="Bank statement transactions" onMouseDown={(event) => { if (event.target === event.currentTarget) setSelectedStatement(null); }}>
+          <div className="max-h-[92vh] w-full max-w-6xl overflow-hidden rounded-2xl bg-white shadow-2xl">
+            <div className="flex items-start justify-between border-b border-gray-100 px-5 py-4">
+              <div><p className="text-xs font-semibold text-[#0A4FE8]">{selectedStatement.bank_name} · {selectedStatement.currency}</p><h3 className="mt-1 text-lg font-bold text-[#0D1B39]">{selectedStatement.filename}</h3><p className="mt-1 text-xs text-gray-500">{selectedStatement.period_start || "-"} to {selectedStatement.period_end || "-"}</p></div>
+              <button type="button" onClick={() => setSelectedStatement(null)} className="rounded-full bg-gray-100 px-3 py-2 text-xs font-semibold text-gray-600">Close</button>
+            </div>
+            <div className="max-h-[75vh] overflow-auto">
+              {detailsLoading ? <div className="grid min-h-56 place-items-center"><Loader2 className="h-6 w-6 animate-spin text-[#0A4FE8]" /></div> : (
+                <table className="w-full min-w-[980px] text-left text-xs">
+                  <thead className="sticky top-0 bg-gray-50 text-gray-500"><tr><th className="px-4 py-3">Date</th><th className="px-4 py-3">Description</th><th className="px-4 py-3">Reference</th><th className="px-4 py-3 text-right">Credit</th><th className="px-4 py-3 text-right">Debit</th><th className="px-4 py-3">Reconciliation</th></tr></thead>
+                  <tbody className="divide-y divide-gray-100">{statementTransactions.map((transaction) => <tr key={transaction.id}><td className="whitespace-nowrap px-4 py-3">{transaction.txn_date}</td><td className="max-w-sm px-4 py-3"><p className="font-medium text-[#0D1B39]">{transaction.description}</p>{transaction.category && <p className="mt-1 text-[10px] text-gray-400">{transaction.category}</p>}</td><td className="px-4 py-3 font-mono text-[10px] text-gray-500">{transaction.transaction_reference || "-"}</td><td className="px-4 py-3 text-right font-semibold text-emerald-700">{transaction.txn_type === "credit" ? `${selectedStatement.currency} ${Number(transaction.amount).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : "-"}</td><td className="px-4 py-3 text-right font-semibold text-red-600">{transaction.txn_type === "debit" ? `${selectedStatement.currency} ${Number(transaction.amount).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : "-"}</td><td className="max-w-xs px-4 py-3"><span className={`rounded-full px-2 py-1 text-[10px] font-semibold ${transaction.match_status === "needs_review" ? "bg-amber-50 text-amber-700" : transaction.match_status === "already_recorded" ? "bg-blue-50 text-blue-700" : "bg-emerald-50 text-emerald-700"}`}>{transaction.match_status.replace(/_/g, " ")}</span>{transaction.invoice_number && <p className="mt-1 font-semibold text-[#0D1B39]">{transaction.invoice_number} · {transaction.client_name}</p>}{transaction.match_reason && <p className="mt-1 text-[10px] leading-4 text-gray-500">{transaction.match_reason}</p>}</td></tr>)}</tbody>
+                </table>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

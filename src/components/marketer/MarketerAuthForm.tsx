@@ -1,15 +1,54 @@
 "use client";
 
 import Image from "next/image";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { ArrowRight, Loader2 } from "lucide-react";
 import { marketerLogin, marketerSignup } from "@/lib/actions/marketer-auth";
+import { GoogleAuthButton } from "@/components/marketing/GoogleAuthButton";
+import { LinkedInAuthButton } from "@/components/marketing/LinkedInAuthButton";
+
+/** Why a social sign-in attempt bounced back here, in the visitor's words. */
+function oauthErrorMessage(code: string) {
+  switch (code) {
+    case "google_disabled":
+      return "Google sign-in is not enabled for this project yet. Use your email and password, or try again shortly.";
+    case "google_start_failed":
+      return "We could not start Google sign-in. Please try again.";
+    case "linkedin_disabled":
+      return "LinkedIn sign-in is not enabled for this project yet. Use your email and password, or try again shortly.";
+    case "linkedin_start_failed":
+      return "We could not start LinkedIn sign-in. Please try again.";
+    case "linkedin_cancelled":
+      return "LinkedIn sign-in was cancelled. Please try again when you are ready.";
+    case "linkedin_state_failed":
+      return "The LinkedIn sign-in request expired. Please start again.";
+    case "linkedin_callback_failed":
+      return "LinkedIn sign-in could not be completed. Please try again.";
+    case "auth_code_exchange_failed":
+      return "Sign-in did not complete. Please try again.";
+    default:
+      return decodeURIComponent(code).replace(/\+/g, " ");
+  }
+}
 
 export function MarketerAuthForm() {
   const [mode, setMode] = useState<"login" | "signup">("login");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+
+  // A failed social sign-in round trip returns here with a reason. Without this the
+  // visitor is bounced back to an untouched form and told nothing.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const code = params.get("error");
+    const account = params.get("account");
+    if (code) setError(oauthErrorMessage(code));
+    else if (account === "inactive") setError("This marketer account is not active.");
+    if (code || account) {
+      window.history.replaceState({}, "", window.location.pathname);
+    }
+  }, []);
 
   async function submit(formData: FormData) {
     setLoading(true);
@@ -70,6 +109,27 @@ export function MarketerAuthForm() {
               {loading ? "Please wait..." : mode === "login" ? "Sign in to marketer portal" : "Create marketer account"}
             </button>
           </form>
+          {/* Social sign-in finalises against the /marketer destination and
+              lands in this portal rather than the client dashboard. */}
+          <div className="my-6 flex items-center gap-3">
+            <span className="h-px flex-1 bg-[#DDE5F4]" />
+            <span className="text-[11px] font-semibold uppercase tracking-[0.12em] text-[#98A2B3]">or</span>
+            <span className="h-px flex-1 bg-[#DDE5F4]" />
+          </div>
+
+          <div className="space-y-3">
+            <GoogleAuthButton
+              label={mode === "login" ? "Continue with Google" : "Sign up with Google"}
+              next="/marketer"
+              className="flex h-13 w-full items-center justify-center gap-3 rounded-[12px] border border-[#DDE5F4] bg-white transition hover:border-[#075BE5]/50 hover:bg-[#F3F6FD] active:scale-[0.99]"
+            />
+            <LinkedInAuthButton
+              label={mode === "login" ? "Continue with LinkedIn" : "Sign up with LinkedIn"}
+              next="/marketer"
+              className="flex h-13 w-full items-center justify-center gap-3 rounded-[12px] border border-[#DDE5F4] bg-white transition hover:border-[#075BE5]/50 hover:bg-[#F3F6FD] active:scale-[0.99]"
+            />
+          </div>
+
           <p className="mt-6 text-center text-[11px] leading-5 text-[#98A2B3]">This portal is separate from the CDS Space client dashboard.</p>
         </div>
       </main>

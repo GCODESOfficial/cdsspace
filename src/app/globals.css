@@ -87,6 +87,46 @@
   }
 }
 
+@keyframes cds-sticker-pop {
+  0%, 100% { transform: scale(0.94) rotate(-2deg); }
+  45% { transform: scale(1.08) rotate(2deg); }
+  70% { transform: scale(1) rotate(0deg); }
+}
+
+@keyframes cds-sticker-pulse {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.09); }
+}
+
+@keyframes cds-sticker-wiggle {
+  0%, 100% { transform: rotate(-4deg); }
+  50% { transform: rotate(5deg); }
+}
+
+@keyframes cds-sticker-float {
+  0%, 100% { transform: translateY(2px); }
+  50% { transform: translateY(-5px); }
+}
+
+.cds-sticker-motion {
+  transform-origin: center;
+  will-change: transform;
+}
+
+.cds-sticker-pop { animation: cds-sticker-pop 1.8s ease-in-out infinite; }
+.cds-sticker-pulse { animation: cds-sticker-pulse 1.55s ease-in-out infinite; }
+.cds-sticker-wiggle { animation: cds-sticker-wiggle 1.2s ease-in-out infinite; }
+.cds-sticker-float { animation: cds-sticker-float 1.7s ease-in-out infinite; }
+
+@media (prefers-reduced-motion: reduce) {
+  .cds-sticker-pop,
+  .cds-sticker-pulse,
+  .cds-sticker-wiggle,
+  .cds-sticker-float {
+    animation: none;
+  }
+}
+
 :root {
   --background: #F0F5FF;
   --foreground: #040B37;
@@ -416,6 +456,47 @@ body {
 }
 .chat-textarea::-webkit-scrollbar {
   display: none;                    /* Chrome / Safari / new Edge */
+}
+
+/* cMeet participant attention states. These sit outside the media crop so
+   active-speaker waves and raised hands remain visible on compact layouts. */
+@keyframes cmeet-speaking-wave {
+  0% {
+    opacity: 0.72;
+    transform: scale(0.88);
+  }
+  72%,
+  100% {
+    opacity: 0;
+    transform: scale(1.16);
+  }
+}
+
+.cmeet-speaking-wave {
+  animation: cmeet-speaking-wave 1.45s ease-out infinite;
+  transform-origin: center;
+}
+
+@keyframes cmeet-hand-attention {
+  0%,
+  100% {
+    transform: scale(0.88);
+  }
+  50% {
+    transform: scale(1.16);
+  }
+}
+
+.cmeet-hand-attention {
+  animation: cmeet-hand-attention 1s ease-in-out infinite;
+  transform-origin: center;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cmeet-speaking-wave,
+  .cmeet-hand-attention {
+    animation: none;
+  }
 }
 
 /* Standard OS cursor everywhere; clickable elements get the hand (pointer)

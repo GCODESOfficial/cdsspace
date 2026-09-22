@@ -66,7 +66,7 @@ const MAJOR_WRITES: MajorWrite[] = [
   { prefix: "/api/admin/roles", methods: ["POST", "DELETE"], wording: "Role created." },
 
   // Money.
-  { prefix: "/api/admin/finance/invoices", wording: "Invoice created." },
+  { prefix: "/api/admin/finance/invoices", wording: "Invoice saved." },
   { prefix: "/api/admin/finance/quotations", wording: "Quotation created." },
   { prefix: "/api/admin/finance/payroll/runs", wording: "Payroll run created." },
   { prefix: "/api/finance/invoice", wording: "Payment submitted." },

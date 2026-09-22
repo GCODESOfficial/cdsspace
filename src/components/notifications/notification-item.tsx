@@ -47,7 +47,7 @@ const fallbackRoutes: Record<Notification["type"], string> = {
   new_message: "/dashboard/messages",
   status_change: "/dashboard/orders",
   new_order: "/dashboard/orders",
-  new_delivery: "/dashboard/documents",
+  new_delivery: "/dashboard/cdrive",
   brand_identity: "/dashboard/brand-identity",
   announcement: "/dashboard",
   new_client: "/admin/clients/list",
