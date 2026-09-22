@@ -68,12 +68,12 @@ const requiredContracts = [
   },
   {
     file: "src/app/api/admin-check/route.ts",
-    text: "and is_sub_admin = true",
+    text: "and m.is_sub_admin = true",
     message: "Bridged admin sessions must revalidate current team-member admin access.",
   },
   {
     file: "src/app/team/layout.tsx",
-    text: "fetch(\"/api/admin/team-bridge\"",
+    text: "fetchPortalSession(\"/api/admin/team-bridge\"",
     message: "The team shell must complete the admin-to-team handoff before redirecting to login.",
   },
   {

@@ -30,7 +30,7 @@ create table if not exists public.create_credit_accounts (
   owner_id text not null,
   monthly_credit_limit integer not null default 50,
   credits_used integer not null default 0 check (credits_used >= 0),
-  storage_limit_bytes bigint not null default 10737418240,
+  storage_limit_bytes bigint not null default 2147483648,
   storage_used_bytes bigint not null default 0 check (storage_used_bytes >= 0),
   reset_at timestamptz not null default (date_trunc('month', now()) + interval '1 month'),
   created_at timestamptz not null default now(),
