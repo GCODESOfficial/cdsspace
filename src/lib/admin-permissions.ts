@@ -623,6 +623,12 @@ export const PERMISSION_GROUPS: PermissionGroup[] = [
         description:
           "Upload files, build folders, set passwords, and issue share links",
       },
+      {
+        key: "executive_board.letterhead_manage",
+        label: "Set Company Letterhead",
+        description:
+          "Replace the CDS Space letterhead applied to every official letter",
+      },
     ],
   },
 
@@ -1051,6 +1057,28 @@ export const PERMISSION_GROUPS: PermissionGroup[] = [
         key: "team_members.edit_bank",
         label: "Edit Bank Details",
         description: "Manage each member's bank info directly",
+      },
+    ],
+  },
+  {
+    key: "hr_compliance",
+    label: "HR Compliance",
+    route: "/admin/hrm/compliance",
+    permissions: [
+      {
+        key: "hr_compliance.view",
+        label: "View personnel records",
+        description: "View confidential HR documents, queries, actions, and birthday reminders",
+      },
+      {
+        key: "hr_compliance.manage",
+        label: "Manage personnel records",
+        description: "Upload and issue HR documents, letters, queries, and decisions",
+      },
+      {
+        key: "hr_compliance.financial",
+        label: "View financial records",
+        description: "View bank details, salary history, payroll, and bank statements",
       },
     ],
   },
@@ -1630,6 +1658,7 @@ export function getPermissionForRoute(pathname: string): string | null {
   if (pathname.startsWith("/admin/screening")) return "applicants";
   if (pathname.startsWith("/admin/hrm/roles")) return "applicants";
   if (pathname.startsWith("/admin/hrm/certifications")) return "applicants";
+  if (pathname.startsWith("/admin/hrm/compliance")) return "hr_compliance";
   if (pathname.startsWith("/admin/hrm")) return "applicants";
 
   if (pathname.startsWith("/admin/taskboard")) return "team_today";

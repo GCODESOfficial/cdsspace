@@ -3,6 +3,7 @@
 /* eslint-disable @next/next/no-img-element */
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import {
   Mic, MicOff, Video, VideoOff, PhoneOff, ScreenShare, ScreenShareOff,
@@ -107,6 +108,34 @@ export function trimCaption(text: string) {
   const boundary = tail.indexOf(" ");
   // Drop the partial first word so a caption never opens mid-word.
   return (boundary === -1 ? tail : tail.slice(boundary + 1)).trimStart();
+}
+
+type SpeechAudioConstraints = MediaTrackConstraints & {
+  latency?: number | { ideal: number };
+  voiceIsolation?: boolean | { ideal: boolean };
+};
+
+/**
+ * Build a speech-first capture profile from capabilities the browser reports.
+ * Native acoustic echo cancellation needs the browser's playback reference,
+ * so it is applied at capture time rather than through a detached Web Audio
+ * graph. Voice isolation is requested on browsers that expose it.
+ */
+export function buildCMeetSpeechAudioConstraints(
+  supported: MediaTrackSupportedConstraints = navigator.mediaDevices.getSupportedConstraints(),
+): SpeechAudioConstraints {
+  const available = supported as MediaTrackSupportedConstraints & { voiceIsolation?: boolean };
+  const constraints: SpeechAudioConstraints = {
+    channelCount: { ideal: 1 },
+    sampleRate: { ideal: 48_000 },
+    sampleSize: { ideal: 16 },
+    latency: { ideal: 0.02 },
+  };
+  if (available.echoCancellation !== false) constraints.echoCancellation = { ideal: true };
+  if (available.noiseSuppression !== false) constraints.noiseSuppression = { ideal: true };
+  if (available.autoGainControl !== false) constraints.autoGainControl = { ideal: true };
+  if (available.voiceIsolation) constraints.voiceIsolation = { ideal: true };
+  return constraints;
 }
 
 type MeetingSound = "participant-joined" | "participant-left" | "message" | "hand-raised" | "host-action";
@@ -329,6 +358,8 @@ export default function MeetRoomPage() {
   const [localStream, setLocalStream] = useState<MediaStream | null>(null);
   const [micOn, setMicOn] = useState(true);
   const [camOn, setCamOn] = useState(true);
+  const micOnRef = useRef(true);
+  const camOnRef = useRef(true);
   const [sharing, setSharing] = useState(false);
   const [screenStream, setScreenStream] = useState<MediaStream | null>(null);
   const cameraTrackRef = useRef<MediaStreamTrack | null>(null); // kept so we can restore after screen-share
@@ -553,13 +584,19 @@ export default function MeetRoomPage() {
     const checkRoom = async () => {
       const response = await fetch(`/api/cmeet/${encodeURIComponent(code)}`, { cache: "no-store" }).catch(() => null);
       const payload = await response?.json().catch(() => null);
-      if (active && response?.ok && payload?.meeting?.status === "ended") {
-        await hangUp({ notice: "The host has ended this meeting.", exit: true });
+      if (active && response?.ok && payload?.meeting) {
+        if (payload.meeting.status === "ended") {
+          await hangUp({ notice: "The host has ended this meeting.", exit: true });
+          return;
+        }
+        if (typeof payload.meeting.audio_only === "boolean" && payload.meeting.audio_only !== meeting?.audio_only) {
+          await applyMeetingMode(payload.meeting.audio_only);
+        }
       }
     };
     const timer = window.setInterval(() => { void checkRoom(); }, 2_000);
     return () => { active = false; window.clearInterval(timer); };
-  }, [joined, code]);
+  }, [joined, code, meeting?.audio_only]);
 
   useEffect(() => {
     const video = pictureInPictureVideoRef.current;
@@ -831,17 +868,12 @@ export default function MeetRoomPage() {
       const compactVideo = window.matchMedia("(max-width: 767px)").matches
         || connection?.saveData
         || ["slow-2g", "2g", "3g"].includes(connection?.effectiveType || "");
+      const speechAudioConstraints = buildCMeetSpeechAudioConstraints();
       const mediaConstraints: MediaStreamConstraints = {
         // Ask the browser DSP for the same treatment Meet relies on: echo
         // cancellation, noise suppression and auto gain. Mono at 48kHz is what
         // Opus wants anyway, and halves the audio we have to ship per peer.
-        audio: audio && {
-          echoCancellation: true,
-          noiseSuppression: true,
-          autoGainControl: true,
-          channelCount: { ideal: 1 },
-          sampleRate: { ideal: 48000 },
-        },
+        audio: audio && speechAudioConstraints,
         video: wantVideo
           ? {
               width: { ideal: compactVideo ? 640 : 960, max: compactVideo ? 854 : 1280 },
@@ -861,6 +893,7 @@ export default function MeetRoomPage() {
         if (wantVideo && ["NotFoundError", "OverconstrainedError", "ConstraintNotSatisfiedError"].includes(mediaFailure?.name || "")) {
           acquiredStream = await navigator.mediaDevices.getUserMedia({ audio: mediaConstraints.audio, video: false });
           setCamOn(false);
+          camOnRef.current = false;
         } else {
           throw error;
         }
@@ -872,6 +905,10 @@ export default function MeetRoomPage() {
       stream.getAudioTracks().forEach((t) => { t.contentHint = "speech"; });
 
       cameraTrackRef.current = stream.getVideoTracks()[0] || null;
+      if (!cameraTrackRef.current) {
+        camOnRef.current = false;
+        setCamOn(false);
+      }
       setLocalStream(stream);
 
       // Ask to come in before any signaling happens. Staff and the client the
@@ -930,10 +967,10 @@ export default function MeetRoomPage() {
           if (raised) playMeetingSound("hand-raised");
         },
         onHostMuteAll: () => {
-          localStreamRef.current?.getAudioTracks().forEach((track) => { track.enabled = false; });
-          setMicOn(false);
-          playMeetingSound("host-action");
+          muteLocalByHost();
         },
+        onHostMute: () => muteLocalByHost(),
+        onHostModeChange: (audioOnly) => { void applyMeetingMode(audioOnly); },
         onHostEnd: () => { void hangUp({ notice: "The host has ended this meeting.", exit: true }); },
         onHostKicked: () => {
           forgetPeerId(code);
@@ -1009,16 +1046,76 @@ export default function MeetRoomPage() {
     if (!localStream) return;
     const next = !micOn;
     localStream.getAudioTracks().forEach((t) => (t.enabled = next));
+    micOnRef.current = next;
     setMicOn(next);
+    clientRef.current?.updateMediaState(next, camOnRef.current);
   }
 
-  function toggleCam() {
-    if (!localStreamRef.current) return;
-    const next = !camOn;
-    const camera = cameraTrackRef.current;
+  async function toggleCam() {
+    const currentStream = localStreamRef.current;
+    if (!currentStream || meeting?.audio_only) return;
+    const next = !camOnRef.current;
+    let camera = cameraTrackRef.current;
+    if (next && (!camera || camera.readyState !== "live")) {
+      if (!navigator.mediaDevices?.getUserMedia) throw new Error("This browser cannot access a camera.");
+      const cameraStream = await navigator.mediaDevices.getUserMedia({
+        audio: false,
+        video: {
+          width: { ideal: 960, max: 1280 },
+          height: { ideal: 540, max: 720 },
+          frameRate: { ideal: 24, max: 24 },
+          facingMode: "user",
+        },
+      });
+      camera = cameraStream.getVideoTracks()[0] || null;
+      if (!camera) throw new Error("No camera was found.");
+      camera.contentHint = "motion";
+      cameraTrackRef.current = camera;
+      await clientRef.current?.replaceVideoTrack(camera);
+    }
     if (camera) camera.enabled = next;
-    else localStreamRef.current.getVideoTracks().forEach((t) => (t.enabled = next));
+    camOnRef.current = next;
     setCamOn(next);
+    clientRef.current?.updateMediaState(micOnRef.current, next);
+  }
+
+  function muteLocalByHost() {
+    localStreamRef.current?.getAudioTracks().forEach((track) => { track.enabled = false; });
+    micOnRef.current = false;
+    setMicOn(false);
+    clientRef.current?.updateMediaState(false, camOnRef.current);
+    playMeetingSound("host-action");
+  }
+
+  async function applyMeetingMode(audioOnly: boolean) {
+    if (sharingTrackRef.current && audioOnly) await stopScreenShare();
+    const camera = cameraTrackRef.current;
+    if (camera) {
+      camera.enabled = false;
+      await clientRef.current?.replaceVideoTrack(null);
+      camera.stop();
+      cameraTrackRef.current = null;
+    }
+    camOnRef.current = false;
+    setCamOn(false);
+    clientRef.current?.updateMediaState(micOnRef.current, false);
+    setMeeting((value) => value ? { ...value, audio_only: audioOnly } : value);
+  }
+
+  async function switchMeetingMode() {
+    if (!code || meetingRole !== "host" || !meeting) return;
+    const audioOnly = !meeting.audio_only;
+    const response = await fetch(`/api/cmeet/${encodeURIComponent(code)}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      credentials: "include",
+      body: JSON.stringify({ audioOnly }),
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(payload.error || "Could not change the call mode.");
+    await applyMeetingMode(audioOnly);
+    clientRef.current?.hostSetMeetingMode(audioOnly);
+    playMeetingSound("host-action");
   }
 
   async function stopScreenShare() {
@@ -1383,6 +1480,12 @@ export default function MeetRoomPage() {
     playMeetingSound("host-action");
   }
 
+  function muteParticipant(peer: RemotePeer) {
+    if (meetingRole !== "host" || !peer.hasAudio) return;
+    clientRef.current?.hostMuteParticipant(peer.peerId);
+    playMeetingSound("host-action");
+  }
+
   function toggleMeetingTheme() {
     setMeetingTheme((current) => {
       const next = current === "light" ? "dark" : "light";
@@ -1404,7 +1507,6 @@ export default function MeetRoomPage() {
 
   async function minimizeMeeting() {
     const video = pictureInPictureVideoRef.current as PictureInPictureVideo | null;
-    let openedFloatingPlayer = false;
     if (video && pictureInPictureStream?.getVideoTracks().some((track) => track.readyState === "live")) {
       video.srcObject = pictureInPictureStream;
       await video.play().catch(() => undefined);
@@ -1412,10 +1514,8 @@ export default function MeetRoomPage() {
       try {
         if (pipDocument.pictureInPictureEnabled && video.requestPictureInPicture) {
           await video.requestPictureInPicture();
-          openedFloatingPlayer = true;
         } else if (video.webkitSupportsPresentationMode?.("picture-in-picture")) {
           video.webkitSetPresentationMode?.("picture-in-picture");
-          openedFloatingPlayer = true;
         }
       } catch {
         // The in-page compact card remains available when a browser blocks PiP.
@@ -1425,9 +1525,6 @@ export default function MeetRoomPage() {
     if (embeddedRef.current && window.parent !== window) {
       window.parent.postMessage({ type: "cmeet:minimize" }, window.location.origin);
     }
-    if (!openedFloatingPlayer && !embeddedRef.current) {
-      await appAlert("Your browser could not open the floating meeting window. The call is minimized inside this tab instead.");
-    }
   }
 
   /* -------- Derived: is the viewer host/admin? -------- */
@@ -1435,6 +1532,9 @@ export default function MeetRoomPage() {
   const isHost = meetingRole === "host";
   const isSuperAdmin = me?.kind === "admin" && me.is_super_admin;
   const localRoleLabel = meetingRole ? ` · ${meetingRole}` : "";
+  const participantTotal = remotes.length + 1;
+  const microphonesOn = Number(micOn) + remotes.filter((peer) => peer.hasAudio).length;
+  const camerasOn = Number(camOn) + remotes.filter((peer) => peer.hasVideo).length;
 
   /* -------- Derived: presenter + thumbnails -------- */
   const remoteSharing = useMemo(() => remotes.find((r) => r.isSharingScreen) || null, [remotes]);
@@ -1662,10 +1762,23 @@ export default function MeetRoomPage() {
             <ParticipantListDropdown
               localName={name}
               localAvatarUrl={me?.avatar_url || "/favicon.png"}
+              localHasAudio={micOn}
+              localHasVideo={camOn}
               remotes={remotes}
+              onMute={muteParticipant}
               onRemove={(peer) => void removeParticipant(peer)}
               onClose={() => setShowParticipantList(false)}
             />
+          )}
+        </div>
+        <div className={`flex items-center gap-1 ${isDark ? "text-white/65" : "text-slate-600"}`} aria-label={`${microphonesOn} of ${participantTotal} microphones on${meeting.audio_only ? "" : `, ${camerasOn} of ${participantTotal} cameras on`}`}>
+          <span className={`inline-flex h-8 items-center gap-1 rounded-xl border px-1.5 text-[10px] sm:px-2 ${isDark ? "border-white/10 bg-white/[0.06]" : "border-[#DDE5F2] bg-white"}`} title={`${microphonesOn} of ${participantTotal} microphones on`}>
+            <Mic className="h-3.5 w-3.5" /> {microphonesOn}/{participantTotal}
+          </span>
+          {!meeting.audio_only && (
+            <span className={`inline-flex h-8 items-center gap-1 rounded-xl border px-1.5 text-[10px] sm:px-2 ${isDark ? "border-white/10 bg-white/[0.06]" : "border-[#DDE5F2] bg-white"}`} title={`${camerasOn} of ${participantTotal} cameras on`}>
+              <Video className="h-3.5 w-3.5" /> {camerasOn}/{participantTotal}
+            </span>
           )}
         </div>
         <div className={`hidden items-center gap-1 rounded-full px-2 py-1 text-[10px] sm:inline-flex ${isDark ? "bg-emerald-400/10 text-emerald-200" : "bg-emerald-50 text-emerald-700"}`} title="DTLS-SRTP encrypted WebRTC media">
@@ -1697,12 +1810,22 @@ export default function MeetRoomPage() {
 
       {minimized && (
         <div className="relative z-10 flex min-h-0 flex-1 items-end justify-end p-3 sm:p-5">
-          <section className={`w-full max-w-sm overflow-hidden rounded-2xl border shadow-2xl ${isDark ? "border-[#31518D] bg-[#0A1130]" : "border-[#D7E1F0] bg-white"}`}>
-            <div className="aspect-video bg-black">
-              <VideoTile stream={localStream} muted objectFit="cover" />
+          <section aria-label="Minimized cMeet call" className={`w-full max-w-sm overflow-hidden rounded-2xl border shadow-2xl ${isDark ? "border-[#31518D] bg-[#0A1130]" : "border-[#D7E1F0] bg-white"}`}>
+            <div className="relative aspect-video bg-[#071225]">
+              {meeting.audio_only || !localStream?.getVideoTracks().length ? (
+                <div className="grid h-full place-items-center">
+                  <div className="grid h-20 w-20 place-items-center overflow-hidden rounded-full border-2 border-[#5B8CFF] bg-[#0A4FE8] text-xl font-semibold text-white shadow-lg">
+                    {me?.avatar_url
+                      ? <img src={me.kind === "admin" ? "/favicon.png" : me.avatar_url} alt="" className="h-full w-full object-cover" />
+                      : participantInitials(name)}
+                  </div>
+                </div>
+              ) : <VideoTile stream={localStream} muted objectFit="cover" />}
+              <div className="absolute bottom-2 left-2 rounded-lg bg-black/70 px-2 py-1 text-[10px] font-medium text-white">Live · {remotes.length + 1} participants</div>
             </div>
             <div className="flex items-center gap-3 p-3">
               <div className="min-w-0 flex-1"><p className="truncate text-sm font-semibold">{meeting.title}</p><p className={`text-[11px] ${isDark ? "text-white/50" : "text-slate-500"}`}>Meeting continues in the background</p></div>
+              <Link href={exitPath} target="_blank" rel="noopener noreferrer" className={`inline-flex h-9 items-center rounded-xl border px-3 text-xs font-semibold ${isDark ? "border-white/10 bg-white/5 text-white" : "border-[#DDE5F2] text-[#0D1B39]"}`}>Continue working</Link>
               <button type="button" onClick={() => void restoreMeeting()} className="inline-flex h-9 items-center gap-1.5 rounded-xl bg-[#0A4FE8] px-3 text-xs font-semibold text-white"><Maximize2 className="h-3.5 w-3.5" />Restore</button>
             </div>
           </section>
@@ -1757,12 +1880,15 @@ export default function MeetRoomPage() {
                 avatarUrl: me?.kind === "admin" ? "/favicon.png" : me?.avatar_url || null,
                 participantKind: me?.kind || "guest",
                 handRaised,
+                hasAudio: micOn,
+                hasVideo: camOn,
               }}
               remotes={remotes}
               activeSpeaker={activeSpeaker}
               localSpeaking={localSpeaking}
               captions={translation.captions ? translatedCaptions : {}}
               translationEnabled={translation.enabled}
+              onMute={isHost ? muteParticipant : undefined}
               onRemove={isHost ? (peer) => void removeParticipant(peer) : undefined}
             />
           ) : presenter ? (
@@ -1793,6 +1919,8 @@ export default function MeetRoomPage() {
                   label={`${name} (you)${localRoleLabel}`}
                   muted
                   showVideoOff={!camOn}
+                  hasAudio={micOn}
+                  hasVideo={camOn}
                   speaking={localSpeaking}
                   handRaised={handRaised}
                   language={translation.enabled ? `${languageBadge(translation.spokenLanguage)} → ${languageBadge(translation.heardLanguage)}` : undefined}
@@ -1804,9 +1932,12 @@ export default function MeetRoomPage() {
                       stream={p.stream}
                       label={`${p.name}${p.hostRole ? ` · ${p.hostRole}` : p.isHost ? " · host" : ""}`}
                       showVideoOff={!p.hasVideo}
+                      hasAudio={p.hasAudio}
+                      hasVideo={p.hasVideo}
                       speaking={activeSpeaker === p.peerId}
                       quality={p.quality}
                       handRaised={p.handRaised}
+                      onMute={isHost && p.hasAudio ? () => muteParticipant(p) : undefined}
                       onRemove={isHost ? () => void removeParticipant(p) : undefined}
                       caption={translation.enabled && translation.captions ? translatedCaptions[p.peerId]?.text : undefined}
                       language={translation.enabled ? `${languageBadge(p.spokenLanguage)} → ${languageBadge(translation.heardLanguage)}` : undefined}
@@ -1821,6 +1952,8 @@ export default function MeetRoomPage() {
                 stream: localStream,
                 label: `${name} (you)${localRoleLabel}`,
                 showVideoOff: !camOn,
+                hasAudio: micOn,
+                hasVideo: camOn,
                 language: translation.enabled ? `${languageBadge(translation.spokenLanguage)} → ${languageBadge(translation.heardLanguage)}` : "",
               }}
               remotes={remotes}
@@ -1831,6 +1964,7 @@ export default function MeetRoomPage() {
               targetLanguage={translation.heardLanguage}
               localHandRaised={handRaised}
               onShowAll={isSuperAdmin ? () => setShowParticipantList(true) : undefined}
+              onMute={isHost ? muteParticipant : undefined}
               onRemove={isHost ? (peer) => void removeParticipant(peer) : undefined}
             />
           )}
@@ -1936,6 +2070,7 @@ export default function MeetRoomPage() {
           title="Live translation"
         />
         <ControlButton dark={isDark} onClick={toggleRaisedHand} active={handRaised} icon={<Hand className="h-4 w-4" />} title={handRaised ? "Lower hand" : "Raise hand"} />
+        {isHost && <ControlButton dark={isDark} onClick={() => requestControlAction({ title: meeting.audio_only ? "Switch this room to video?" : "Switch this room to audio?", description: meeting.audio_only ? "Video mode will open for everyone with every camera off. Each participant can choose when to turn their camera on." : "Every participant camera and active screen share will stop when the room changes to audio mode.", confirmLabel: meeting.audio_only ? "Switch to video" : "Switch to audio", run: switchMeetingMode })} active={false} icon={meeting.audio_only ? <Video className="h-4 w-4" /> : <Mic className="h-4 w-4" />} title={meeting.audio_only ? "Switch to video call" : "Switch to audio call"} />}
         {isHost && <ControlButton dark={isDark} onClick={muteEveryoneElse} active={false} icon={<VolumeX className="h-4 w-4" />} title="Mute everyone else" />}
         {isHost && <ControlButton dark={isDark} onClick={() => requestControlAction({ title: recording ? "Stop and save recording?" : "Record this meeting?", description: recording ? "The recording will stop and download to this device." : "A local recording will be created in this browser and downloaded when you stop it.", confirmLabel: recording ? "Stop and save" : "Start recording", run: () => recording ? stopRecording() : startRecording() })} active={recording} icon={recording ? <CircleStop className="h-4 w-4" /> : <Circle className="h-4 w-4" />} title={recording ? "Stop and save recording" : "Record this call to your device"} />}
         {isHost && <ControlButton dark={isDark} onClick={() => requestControlAction({ title: "Take a screenshot?", description: "Your browser will ask which screen to capture, then save the screenshot to your device.", confirmLabel: "Choose a screen", run: takeScreenScreenshot })} active={capturingScreenshot} icon={capturingScreenshot ? <Loader2 className="h-4 w-4 animate-spin" /> : <Camera className="h-4 w-4" />} title="Screenshot entire screen" />}
@@ -1980,6 +2115,7 @@ export default function MeetRoomPage() {
             <MoreControlButton icon={<Languages />} label="Live translation" active={translation.enabled} onClick={() => { setShowTranslation(true); setShowMoreControls(false); }} />
             <MoreControlButton icon={<Hand />} label={handRaised ? "Lower hand" : "Raise hand"} active={handRaised} onClick={() => { toggleRaisedHand(); setShowMoreControls(false); }} />
             {isSuperAdmin && <MoreControlButton icon={<Users />} label="Participants" active={showParticipantList} onClick={() => { setShowParticipantList(true); setShowMoreControls(false); }} />}
+            {isHost && <MoreControlButton icon={meeting.audio_only ? <Video /> : <Mic />} label={meeting.audio_only ? "Switch to video" : "Switch to audio"} onClick={() => requestMoreControlAction({ title: meeting.audio_only ? "Switch this room to video?" : "Switch this room to audio?", description: meeting.audio_only ? "Video mode will open for everyone with every camera off. Each participant can choose when to turn their camera on." : "Every participant camera and active screen share will stop when the room changes to audio mode.", confirmLabel: meeting.audio_only ? "Switch to video" : "Switch to audio", run: switchMeetingMode })} />}
             {isHost && <MoreControlButton icon={<VolumeX />} label="Mute everyone" onClick={muteEveryoneElse} />}
             {isHost && <MoreControlButton icon={recording ? <CircleStop /> : <Circle />} label={recording ? "Stop recording" : "Record call"} active={recording} onClick={() => requestMoreControlAction({ title: recording ? "Stop and save recording?" : "Record this meeting?", description: recording ? "The recording will stop and download to this device." : "A local recording will be created in this browser and downloaded when you stop it.", confirmLabel: recording ? "Stop and save" : "Start recording", run: () => recording ? stopRecording() : startRecording() })} />}
             {isHost && <MoreControlButton icon={capturingScreenshot ? <Loader2 className="animate-spin" /> : <Camera />} label="Screenshot" active={capturingScreenshot} onClick={() => requestMoreControlAction({ title: "Take a screenshot?", description: "Your browser will ask which screen to capture, then save the screenshot to your device.", confirmLabel: "Choose a screen", run: takeScreenScreenshot })} />}
@@ -2161,6 +2297,8 @@ type AudioParticipant = {
   avatarUrl: string | null;
   participantKind: CMeetParticipantKind;
   handRaised: boolean;
+  hasAudio: boolean;
+  hasVideo: boolean;
 };
 
 function participantInitials(name: string) {
@@ -2179,6 +2317,7 @@ function AudioParticipantGrid({
   localSpeaking,
   captions,
   translationEnabled,
+  onMute,
   onRemove,
 }: {
   local: AudioParticipant;
@@ -2187,6 +2326,7 @@ function AudioParticipantGrid({
   localSpeaking: boolean;
   captions: Record<string, { text: string; done: boolean }>;
   translationEnabled: boolean;
+  onMute?: (peer: RemotePeer) => void;
   onRemove?: (peer: RemotePeer) => void;
 }) {
   return (
@@ -2202,10 +2342,13 @@ function AudioParticipantGrid({
               avatarUrl: peer.participantKind === "admin" ? "/favicon.png" : peer.avatarUrl,
               participantKind: peer.participantKind,
               handRaised: peer.handRaised,
+              hasAudio: peer.hasAudio,
+              hasVideo: peer.hasVideo,
             }}
             speaking={activeSpeaker === peer.peerId}
             quality={peer.quality}
             caption={translationEnabled ? captions[peer.peerId]?.text : undefined}
+            onMute={onMute && peer.hasAudio ? () => onMute(peer) : undefined}
             onRemove={onRemove ? () => onRemove(peer) : undefined}
           />
         ))}
@@ -2219,12 +2362,14 @@ function AudioParticipantBubble({
   speaking,
   quality = "good",
   caption,
+  onMute,
   onRemove,
 }: {
   participant: AudioParticipant;
   speaking: boolean;
   quality?: ConnectionQuality;
   caption?: string;
+  onMute?: () => void;
   onRemove?: () => void;
 }) {
   const [avatarFailed, setAvatarFailed] = useState(false);
@@ -2239,11 +2384,15 @@ function AudioParticipantBubble({
             <Hand className="h-4 w-4" />
           </span>
         )}
-        {onRemove && (
-          <button type="button" onClick={onRemove} className="absolute -bottom-1 -left-1 z-30 grid h-7 w-7 place-items-center rounded-full border-2 border-white bg-rose-600 text-white shadow-lg" aria-label={`Remove ${participant.name}`} title={`Remove ${participant.name}`}>
-            <XIcon className="h-3.5 w-3.5" />
-          </button>
-        )}
+        <MediaStatusBadges
+          hasAudio={participant.hasAudio}
+          hasVideo={participant.hasVideo}
+          audioOnly
+          onMute={onMute}
+          onRemove={onRemove}
+          participantName={participant.name}
+          className="-bottom-3 left-1/2 -translate-x-1/2"
+        />
         <div className={`relative h-full w-full overflow-hidden rounded-full border-2 shadow-lg transition ${isAdmin ? "bg-[#0A4FE8]" : "bg-[#0F1A4A]"} ${speaking ? "border-[#5B8CFF] ring-2 ring-[#5B8CFF]/35" : "border-white/15"}`}>
           {avatar && !avatarFailed ? (
             <img src={avatar} alt="" className={`h-full w-full ${isAdmin ? "scale-[1.18] object-contain" : "object-cover"}`} onError={() => setAvatarFailed(true)} />
@@ -2264,7 +2413,7 @@ function AudioParticipantBubble({
           )}
         </div>
       </div>
-      <p className="mt-2.5 max-w-[132px] truncate text-[11px] font-semibold sm:text-xs">{participant.label}</p>
+      <p className="mt-4 max-w-[132px] truncate text-[11px] font-semibold sm:text-xs">{participant.label}</p>
     </div>
   );
 }
@@ -2283,6 +2432,8 @@ type LocalGridParticipant = {
   stream: MediaStream | null;
   label: string;
   showVideoOff: boolean;
+  hasAudio: boolean;
+  hasVideo: boolean;
   language: string;
 };
 
@@ -2307,6 +2458,7 @@ function AdaptiveParticipantGrid({
   targetLanguage,
   localHandRaised,
   onShowAll,
+  onMute,
   onRemove,
 }: {
   local: LocalGridParticipant;
@@ -2318,6 +2470,7 @@ function AdaptiveParticipantGrid({
   targetLanguage: string;
   localHandRaised: boolean;
   onShowAll?: () => void;
+  onMute?: (peer: RemotePeer) => void;
   onRemove?: (peer: RemotePeer) => void;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -2392,6 +2545,8 @@ function AdaptiveParticipantGrid({
         label={local.label}
         muted
         showVideoOff={local.showVideoOff}
+        hasAudio={local.hasAudio}
+        hasVideo={local.hasVideo}
         handRaised={localHandRaised}
         speaking={localSpeaking}
         language={local.language}
@@ -2404,9 +2559,12 @@ function AdaptiveParticipantGrid({
           stream={peer.stream}
           label={`${peer.name}${peer.hostRole ? ` · ${peer.hostRole}` : peer.isHost ? " · host" : ""}`}
           showVideoOff={!peer.hasVideo}
+          hasAudio={peer.hasAudio}
+          hasVideo={peer.hasVideo}
           speaking={activeSpeaker === peer.peerId}
           quality={peer.quality}
           handRaised={peer.handRaised}
+          onMute={onMute && peer.hasAudio ? () => onMute(peer) : undefined}
           onRemove={onRemove ? () => onRemove(peer) : undefined}
           caption={translationEnabled ? captions[peer.peerId]?.text : undefined}
           language={translationEnabled ? `${languageBadge(peer.spokenLanguage)} → ${languageBadge(targetLanguage)}` : undefined}
@@ -2435,6 +2593,8 @@ function ParticipantTile({
   stream,
   label,
   showVideoOff = false,
+  hasAudio = true,
+  hasVideo = true,
   large = false,
   fit = false,
   speaking = false,
@@ -2442,6 +2602,7 @@ function ParticipantTile({
   language,
   handRaised = false,
   caption,
+  onMute,
   onRemove,
 }: {
   stream: MediaStream | null;
@@ -2449,6 +2610,8 @@ function ParticipantTile({
   /** Kept for call-site compatibility; every tile is muted - audio plays from RemoteAudio. */
   muted?: boolean;
   showVideoOff?: boolean;
+  hasAudio?: boolean;
+  hasVideo?: boolean;
   large?: boolean;
   fit?: boolean;
   speaking?: boolean;
@@ -2456,6 +2619,7 @@ function ParticipantTile({
   language?: string;
   handRaised?: boolean;
   caption?: string;
+  onMute?: () => void;
   onRemove?: () => void;
 }) {
   return (
@@ -2486,22 +2650,66 @@ function ParticipantTile({
           <Hand className="h-4 w-4" />
         </div>
       )}
-      {onRemove && (
-        <button type="button" onClick={onRemove} className="absolute left-2 top-2 z-30 grid h-7 w-7 place-items-center rounded-full border border-white/60 bg-rose-600 text-white shadow-lg" aria-label={`Remove ${label}`} title={`Remove ${label}`}>
-          <XIcon className="h-3.5 w-3.5" />
-        </button>
-      )}
+      <MediaStatusBadges hasAudio={hasAudio} hasVideo={hasVideo} onMute={onMute} onRemove={onRemove} participantName={label} className="bottom-2 left-1/2 -translate-x-1/2" />
       {caption && <ParticipantCaption text={caption} />}
-      <div className={`absolute bottom-2 left-2 max-w-[90%] truncate rounded-md border border-white/15 bg-[#071225]/90 px-2 py-1 font-medium text-white shadow-sm backdrop-blur-sm ${large ? "text-[11px]" : "text-[9.5px]"}`}>
+      <div className={`absolute bottom-11 left-1/2 max-w-[85%] -translate-x-1/2 truncate rounded-md border border-white/15 bg-[#071225]/90 px-2 py-1 font-medium text-white shadow-sm backdrop-blur-sm ${large ? "text-[11px]" : "text-[9.5px]"}`}>
         {label}
       </div>
     </div>
   );
 }
 
+function MediaStatusBadges({
+  hasAudio,
+  hasVideo,
+  audioOnly = false,
+  onMute,
+  onRemove,
+  participantName,
+  className,
+}: {
+  hasAudio: boolean;
+  hasVideo: boolean;
+  audioOnly?: boolean;
+  onMute?: () => void;
+  onRemove?: () => void;
+  participantName?: string;
+  className: string;
+}) {
+  const microphoneClass = `grid h-7 w-7 place-items-center rounded-full border-2 border-white shadow-md transition ${hasAudio ? "bg-[#0A4FE8] text-white" : "bg-rose-600 text-white"}`;
+  const microphoneTitle = hasAudio
+    ? onMute ? "Microphone on. Click to mute this participant." : "Microphone on"
+    : "Microphone muted";
+  const microphone = hasAudio ? <Mic className="h-3.5 w-3.5" /> : <MicOff className="h-3.5 w-3.5" />;
+
+  return (
+    <div className={`absolute z-30 flex items-center gap-1 ${className}`}>
+      {onRemove && (
+        <button type="button" onClick={onRemove} className="grid h-7 w-7 place-items-center rounded-full border-2 border-white bg-rose-600 text-white shadow-md transition hover:scale-105 hover:bg-rose-700" aria-label={`Remove ${participantName || "participant"}`} title={`Remove ${participantName || "participant"}`}>
+          <XIcon className="h-3.5 w-3.5" />
+        </button>
+      )}
+      {onMute && hasAudio ? (
+        <button type="button" onClick={onMute} className={`${microphoneClass} hover:scale-105 hover:bg-rose-600`} aria-label="Mute participant" title={microphoneTitle}>
+          {microphone}
+        </button>
+      ) : (
+        <span className={microphoneClass} aria-label={microphoneTitle} title={microphoneTitle}>
+          {microphone}
+        </span>
+      )}
+      {!audioOnly && (
+        <span className={`grid h-7 w-7 place-items-center rounded-full border-2 border-white shadow-md ${hasVideo ? "bg-[#0A4FE8] text-white" : "bg-rose-600 text-white"}`} aria-label={hasVideo ? "Camera on" : "Camera off"} title={hasVideo ? "Camera on" : "Camera off"}>
+          {hasVideo ? <Video className="h-3.5 w-3.5" /> : <VideoOff className="h-3.5 w-3.5" />}
+        </span>
+      )}
+    </div>
+  );
+}
+
 function ParticipantCaption({ text }: { text: string }) {
   return (
-    <div aria-live="polite" className="pointer-events-none absolute inset-x-2 bottom-10 z-10 max-h-[4.5em] overflow-hidden rounded-lg bg-black/80 px-2.5 py-1.5 text-center text-[10px] font-medium leading-[1.35] text-white shadow-lg backdrop-blur-sm sm:text-xs">
+    <div aria-live="polite" className="pointer-events-none absolute inset-x-2 bottom-20 z-10 max-h-[4.5em] overflow-hidden rounded-lg bg-black/80 px-2.5 py-1.5 text-center text-[10px] font-medium leading-[1.35] text-white shadow-lg backdrop-blur-sm sm:text-xs">
       {text}
     </div>
   );
@@ -2735,13 +2943,19 @@ function ParticipantListAvatar({ name, avatarUrl, isAdmin = false }: { name: str
 function ParticipantListDropdown({
   localName,
   localAvatarUrl,
+  localHasAudio,
+  localHasVideo,
   remotes,
+  onMute,
   onRemove,
   onClose,
 }: {
   localName: string;
   localAvatarUrl: string | null;
+  localHasAudio: boolean;
+  localHasVideo: boolean;
   remotes: RemotePeer[];
+  onMute: (peer: RemotePeer) => void;
   onRemove: (peer: RemotePeer) => void;
   onClose: () => void;
 }) {
@@ -2760,13 +2974,23 @@ function ParticipantListDropdown({
         <li className="flex items-center gap-3 rounded-xl px-2 py-2.5">
           <ParticipantListAvatar name={localName} avatarUrl={localAvatarUrl} isAdmin />
           <div className="min-w-0 flex-1"><p className="truncate text-sm font-medium">{localName} (you)</p><p className="text-[11px] text-white/45">Super admin · host</p></div>
+          <span className="inline-flex items-center gap-1.5 text-white/65" aria-label={`Your microphone is ${localHasAudio ? "on" : "muted"}; your camera is ${localHasVideo ? "on" : "off"}`}>
+            {localHasAudio ? <Mic className="h-3.5 w-3.5" /> : <MicOff className="h-3.5 w-3.5 text-rose-300" />}
+            {localHasVideo ? <Video className="h-3.5 w-3.5" /> : <VideoOff className="h-3.5 w-3.5 text-rose-300" />}
+          </span>
         </li>
         {remotes.map((peer) => (
           <li key={peer.peerId} className="flex items-center gap-3 rounded-xl px-2 py-2.5 hover:bg-white/5">
             <ParticipantListAvatar name={peer.name} avatarUrl={peer.participantKind === "admin" ? "/favicon.png" : peer.avatarUrl} isAdmin={peer.participantKind === "admin"} />
             <div className="min-w-0 flex-1">
               <div className="flex items-center gap-1.5"><p className="truncate text-sm font-medium">{peer.name}</p>{peer.handRaised && <Hand className="h-3.5 w-3.5 shrink-0 text-amber-300" />}</div>
-              <p className="text-[11px] text-white/45">{peer.hostRole || (peer.isHost ? "host" : peer.participantKind)} · {peer.hasAudio ? "mic on" : "mic off"}</p>
+              <p className="text-[11px] text-white/45">{peer.hostRole || (peer.isHost ? "host" : peer.participantKind)} · {peer.hasAudio ? "mic on" : "mic muted"} · {peer.hasVideo ? "camera on" : "camera off"}</p>
+            </div>
+            <div className="flex shrink-0 items-center gap-1 text-white/65" aria-label={`${peer.name}'s microphone is ${peer.hasAudio ? "on" : "muted"}; camera is ${peer.hasVideo ? "on" : "off"}`}>
+              {peer.hasAudio ? (
+                <button type="button" onClick={() => onMute(peer)} className="grid h-8 w-8 place-items-center rounded-lg border border-white/10 bg-white/5 hover:border-rose-400/40 hover:bg-rose-500/15 hover:text-rose-200" aria-label={`Mute ${peer.name}`} title={`Mute ${peer.name}`}><Mic className="h-3.5 w-3.5" /></button>
+              ) : <span className="grid h-8 w-8 place-items-center"><MicOff className="h-3.5 w-3.5 text-rose-300" /></span>}
+              {peer.hasVideo ? <Video className="h-3.5 w-3.5" /> : <VideoOff className="h-3.5 w-3.5 text-rose-300" />}
             </div>
             <button type="button" onClick={() => onRemove(peer)} className="inline-flex h-8 shrink-0 items-center gap-1 rounded-lg border border-rose-400/30 bg-rose-500/10 px-2 text-[10px] font-semibold text-rose-200 hover:bg-rose-500/20" aria-label={`Remove ${peer.name}`}>
               <XIcon className="h-3 w-3" /> Remove

@@ -4,6 +4,7 @@ import { extractFromPdf } from "@/lib/pricing/extract";
 import { extractionToNewList, matrixExtractionToNewList, mergeCurrencyIntoList } from "@/lib/pricing/merge";
 import { getPricingListById } from "@/lib/pricing/server";
 import { listKind, type PricingListKind } from "@/lib/pricing/types";
+import { assertSafeUpload, UploadSecurityError } from "@/lib/upload-security";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -34,7 +35,16 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ error: "Only .pdf files are supported." }, { status: 400 });
     }
 
-    const buffer = Buffer.from(await file.arrayBuffer());
+    let buffer: Buffer;
+    try {
+        const safe = await assertSafeUpload(file as File, { allow: ["pdf"], maxBytes: MAX_SIZE });
+        buffer = safe.buffer;
+    } catch (error) {
+        return NextResponse.json(
+            { error: error instanceof Error ? error.message : "The PDF could not be security-scanned." },
+            { status: error instanceof UploadSecurityError ? error.status : 400 },
+        );
+    }
     const listId = (form.get("listId") as string | null)?.trim() || "";
 
     // Kind comes from the form for new uploads; for a merge it follows the base.

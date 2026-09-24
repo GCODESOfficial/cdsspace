@@ -46,6 +46,17 @@ export async function GET() {
     [session.id],
   );
 
+  // Reaching the member's open dashboard means pending chat payloads have
+  // arrived at their client, even if the thread itself has not been opened.
+  await glashQuery(
+    `update public.team_chat_message_receipts
+        set delivered_at = coalesce(delivered_at, now()),
+            last_seen_at = now()
+      where team_member_id = $1::uuid
+        and delivered_at is null`,
+    [session.id],
+  ).catch(() => undefined);
+
   return NextResponse.json({
     ok: true,
     notifications: data.map((row) => ({

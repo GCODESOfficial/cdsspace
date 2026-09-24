@@ -6,6 +6,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ArrowLeft, Archive, Check, ClipboardPaste, Copy, Download, FileText, Loader2, LockKeyhole, Plus, Upload } from "lucide-react";
 import { RichDocEditor } from "@/components/cdocs/rich-doc-editor";
 import { appConfirm } from "@/lib/app-notify";
+import { offerClientStorageRequest } from "@/lib/client-storage-ui";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import type { LetterheadExportSize } from "@/lib/letterhead-pdf";
 
@@ -34,8 +35,9 @@ type AssetKind = "firstPage" | "secondPage" | "signature";
 type SaveState = "idle" | "saving" | "saved" | "error";
 type WorkspaceKind = "client" | "team" | "admin";
 
-function apiPath(path: string, workspaceKind: WorkspaceKind) {
-  return `${path}${path.includes("?") ? "&" : "?"}workspace=${workspaceKind}`;
+function apiPath(path: string, workspaceKind: WorkspaceKind, scope: "create" | "executive_board" = "create") {
+  const joined = `${path}${path.includes("?") ? "&" : "?"}workspace=${workspaceKind}`;
+  return scope === "create" ? joined : `${joined}&scope=${scope}`;
 }
 
 const ACCEPT = ".jpg,.jpeg,.png,.pdf,.svg,image/jpeg,image/png,image/svg+xml,application/pdf";
@@ -70,7 +72,23 @@ function canvasObjectUrl(canvas: HTMLCanvasElement) {
   });
 }
 
-export function LetterheadStudio({ onBack, workspaceKind }: { onBack: () => void; workspaceKind: WorkspaceKind }) {
+export function LetterheadStudio({
+  onBack,
+  workspaceKind,
+  /** Executive Board documents live apart from the per-workspace CREATE ones. */
+  scope = "create",
+  /**
+   * Company correspondence is written on the one CDS Space letterhead, so the
+   * per-document design controls are hidden rather than disabled: there is
+   * nothing to choose.
+   */
+  lockedLetterhead = false,
+}: {
+  onBack: () => void;
+  workspaceKind: WorkspaceKind;
+  scope?: "create" | "executive_board";
+  lockedLetterhead?: boolean;
+}) {
   const [items, setItems] = useState<Letterhead[]>([]);
   const [active, setActive] = useState<Letterhead | null>(null);
   const [loading, setLoading] = useState(true);
@@ -94,7 +112,7 @@ export function LetterheadStudio({ onBack, workspaceKind }: { onBack: () => void
 
   const load = useCallback(async () => {
     setLoading(true);
-    const response = await fetch(apiPath("/api/create/letterheads", workspaceKind), { cache: "no-store" });
+    const response = await fetch(apiPath("/api/create/letterheads", workspaceKind, scope), { cache: "no-store" });
     const payload = await response.json().catch(() => ({}));
     setLoading(false);
     if (!response.ok) { setError(payload.error || "Letterheads could not be loaded."); return; }
@@ -125,7 +143,7 @@ export function LetterheadStudio({ onBack, workspaceKind }: { onBack: () => void
 
   async function create() {
     setCreating(true); setError(null);
-    const response = await fetch(apiPath("/api/create/letterheads", workspaceKind), { method: "POST" });
+    const response = await fetch(apiPath("/api/create/letterheads", workspaceKind, scope), { method: "POST" });
     const payload = await response.json().catch(() => ({}));
     setCreating(false);
     if (!response.ok) { setError(payload.error || "The draft could not be created."); return; }
@@ -136,7 +154,7 @@ export function LetterheadStudio({ onBack, workspaceKind }: { onBack: () => void
   const persist = useCallback(async (draft: Letterhead): Promise<boolean> => {
     setSaveState("saving");
     try {
-      const response = await fetch(apiPath(`/api/create/letterheads/${draft.id}`, workspaceKind), {
+      const response = await fetch(apiPath(`/api/create/letterheads/${draft.id}`, workspaceKind, scope), {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -187,10 +205,13 @@ export function LetterheadStudio({ onBack, workspaceKind }: { onBack: () => void
     const form = new FormData();
     form.set("kind", kind);
     form.set("file", file);
-    const response = await fetch(apiPath(`/api/create/letterheads/${active.id}/upload`, workspaceKind), { method: "POST", body: form });
+    const response = await fetch(apiPath(`/api/create/letterheads/${active.id}/upload`, workspaceKind, scope), { method: "POST", body: form });
     const payload = await response.json().catch(() => ({}));
     setUploading(null);
-    if (!response.ok) { setError(payload.error || "The file could not be uploaded."); return; }
+    if (!response.ok) {
+      if (workspaceKind === "client" && await offerClientStorageRequest(payload.code)) return;
+      setError(payload.error || "The file could not be uploaded."); return;
+    }
     setActive(payload.letterhead);
     setItems((current) => current.map((item) => item.id === active.id ? payload.letterhead : item));
   }
@@ -204,7 +225,7 @@ export function LetterheadStudio({ onBack, workspaceKind }: { onBack: () => void
     setDuplicatingId(source.id);
     setError(null);
     try {
-      const response = await fetch(apiPath(`/api/create/letterheads/${source.id}/duplicate`, workspaceKind), { method: "POST" });
+      const response = await fetch(apiPath(`/api/create/letterheads/${source.id}/duplicate`, workspaceKind, scope), { method: "POST" });
       const payload = await response.json().catch(() => ({}));
       if (!response.ok) { setError(payload.error || "The letterhead could not be duplicated."); return; }
       setItems((current) => [payload.letterhead, ...current]);
@@ -218,7 +239,7 @@ export function LetterheadStudio({ onBack, workspaceKind }: { onBack: () => void
 
   async function archive() {
     if (!active || !(await appConfirm("Archive this letterhead document?"))) return;
-    const response = await fetch(apiPath(`/api/create/letterheads/${active.id}`, workspaceKind), { method: "DELETE" });
+    const response = await fetch(apiPath(`/api/create/letterheads/${active.id}`, workspaceKind, scope), { method: "DELETE" });
     if (!response.ok) { const payload = await response.json().catch(() => ({})); setError(payload.error || "The document could not be archived."); return; }
     setItems((current) => current.filter((item) => item.id !== active.id));
     setActive(null);
@@ -227,7 +248,7 @@ export function LetterheadStudio({ onBack, workspaceKind }: { onBack: () => void
   async function refine(mode: string) {
     if (!active) return;
     setRefining(true); setError(null);
-    const response = await fetch(apiPath(`/api/create/letterheads/${active.id}/refine`, workspaceKind), {
+    const response = await fetch(apiPath(`/api/create/letterheads/${active.id}/refine`, workspaceKind, scope), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ mode, bodyHtml: active.bodyHtml }),
@@ -263,7 +284,7 @@ export function LetterheadStudio({ onBack, workspaceKind }: { onBack: () => void
     try {
       const { exportLetterheadToPdf } = await import("@/lib/letterhead-pdf");
       await exportLetterheadToPdf(active, exportSize, originalPdfBytes.slice(0));
-      await fetch(apiPath(`/api/create/letterheads/${active.id}`, workspaceKind), {
+      await fetch(apiPath(`/api/create/letterheads/${active.id}`, workspaceKind, scope), {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: "exported" }),
@@ -358,12 +379,12 @@ export function LetterheadStudio({ onBack, workspaceKind }: { onBack: () => void
   if (!active) {
     return (
       <div className="space-y-5">
-        <button onClick={onBack} className="inline-flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-3 py-2 text-[12px] font-semibold text-gray-600 hover:bg-gray-50"><ArrowLeft className="h-3.5 w-3.5" />Back to tools</button>
-        <div className="flex flex-col gap-3 rounded-2xl border border-blue-100 bg-blue-50 p-5 sm:flex-row sm:items-center sm:justify-between">
-          <div><h2 className="text-lg font-bold text-[#07133B]">Official letterhead documents</h2><p className="mt-1 text-[13px] text-gray-600">Create, reuse, duplicate, sign, and export corporate letters with the cDocs editor.</p></div>
-          <button onClick={create} disabled={creating} className="inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-[#0A4FE8] px-5 text-[13px] font-bold text-white hover:bg-[#083EC0] disabled:opacity-60">{creating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}New letterhead</button>
+        {!lockedLetterhead && <button onClick={onBack} className="inline-flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-3 py-2 text-[12px] font-semibold text-gray-600 hover:bg-gray-50"><ArrowLeft className="h-3.5 w-3.5" />Back to tools</button>}
+        <div className={`flex flex-col gap-3 rounded-2xl border p-5 sm:flex-row sm:items-center sm:justify-between ${lockedLetterhead ? "border-slate-200 bg-white" : "border-blue-100 bg-blue-50"}`}>
+          <div><h2 className="text-lg font-bold text-[#07133B]">Official documents</h2><p className="mt-1 text-[13px] text-gray-600">Create, reuse, duplicate, sign, and export corporate letters with the approved stationery above.</p></div>
+          <button onClick={create} disabled={creating} className="inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-[#0A4FE8] px-5 text-[13px] font-bold text-white hover:bg-[#083EC0] disabled:opacity-60">{creating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}New document</button>
         </div>
-        <PrivacyNotice />
+        {!lockedLetterhead && <PrivacyNotice />}
         {error && <p className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-[12px] text-rose-700">{error}</p>}
         {items.length ? <section>
           <div className="mb-3">
@@ -413,7 +434,7 @@ export function LetterheadStudio({ onBack, workspaceKind }: { onBack: () => void
           <button onClick={openExportChoices} disabled={preparingExport || Boolean(exportingSize)} className="inline-flex items-center gap-1.5 rounded-lg bg-[#0A4FE8] px-4 py-2 text-[12px] font-bold text-white hover:bg-[#083EC0] disabled:cursor-wait disabled:opacity-65">{preparingExport ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />}{preparingExport ? "Preparing…" : "Export PDF"}</button>
         </div>
       </div>
-      <PrivacyNotice />
+      {!lockedLetterhead && <PrivacyNotice />}
       {error && <p className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-[12px] text-rose-700">{error}</p>}
 
       <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_minmax(360px,0.72fr)]">
@@ -422,6 +443,19 @@ export function LetterheadStudio({ onBack, workspaceKind }: { onBack: () => void
             <label className="text-[12px] font-semibold text-gray-600">Document title<input value={active.title} onChange={(event) => patch({ title: event.target.value })} className="mt-1.5 h-10 w-full rounded-xl border border-gray-200 bg-gray-50 px-3 text-[13px] outline-none focus:border-blue-300 focus:bg-white" /></label>
             <label className="text-[12px] font-semibold text-gray-600">Paper size<select value={active.paperSize} onChange={(event) => patch({ paperSize: event.target.value === "legal" ? "legal" : "a4" })} className="mt-1.5 h-10 w-full rounded-xl border border-gray-200 bg-white px-3 text-[13px] outline-none"><option value="a4">A4 portrait</option><option value="legal">Legal portrait</option></select></label>
           </div>
+          {lockedLetterhead ? (
+            <div className="flex items-start gap-2.5 rounded-xl border border-blue-100 bg-blue-50/70 px-3 py-2.5">
+              <LockKeyhole className="mt-0.5 h-4 w-4 shrink-0 text-[#0A4FE8]" />
+              <p className="text-[11.5px] leading-5 text-[#07133B]">
+                <span className="font-semibold">CDS Space letterhead applied.</span>{" "}
+                {active.firstPageName
+                  ? active.hasSecondPage && active.secondPageName
+                    ? "Page one uses the official first-page design, and every additional page uses the approved continuation design."
+                    : "Page one uses the official company design. No continuation design was copied into this document, so additional pages use the first-page artwork."
+                  : "No company letterhead has been set yet, so this document has plain pages. A super admin can set it from the Executive Board letterhead page."}
+              </p>
+            </div>
+          ) : (
           <div className="grid gap-3 sm:grid-cols-2">
             <AssetUpload label="First-page letterhead design" name={active.firstPageName} kind="firstPage" busy={uploading === "firstPage"} onFile={upload} />
             <div className="space-y-2">
@@ -429,6 +463,7 @@ export function LetterheadStudio({ onBack, workspaceKind }: { onBack: () => void
               {active.hasSecondPage && <AssetUpload label="Page two and later design" name={active.secondPageName} kind="secondPage" busy={uploading === "secondPage"} onFile={upload} />}
             </div>
           </div>
+          )}
           <div className="flex flex-wrap items-center gap-2 rounded-xl border border-gray-100 bg-gray-50 p-2.5">
             <span className="mr-auto text-[11px] font-semibold text-gray-500">Refine the current document with AI</span>
             {[["improve", "Improve"], ["formalize", "Make formal"], ["concise", "Make concise"], ["proofread", "Proofread"]].map(([mode, label]) => <button key={mode} disabled={refining} onClick={() => refine(mode)} className="rounded-lg border border-gray-200 bg-white px-2.5 py-1.5 text-[11px] font-semibold text-gray-600 hover:border-blue-200 hover:text-[#0A4FE8] disabled:opacity-50">{refining ? "Working…" : label}</button>)}

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { hasPermission } from "@/lib/admin-permissions";
 import { getTeamSession, type TeamSession } from "@/lib/team-auth";
 import { glashMaybeOne, glashOne, glashQuery } from "@/lib/glashdb/postgres";
+import { deliverAnnouncementByEmail } from "@/lib/announcement-delivery";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -437,6 +438,21 @@ async function notifyMembers(projectId: string, recipientIds: string[], title: s
      select unnest($1::uuid[]), $2, $3, $4, $5, true`,
     [ids, kind, title, body, `/team/work?project=${projectId}`],
   ).catch(() => []);
+  const emailRows = await glashQuery<{ email: string | null }>(
+    `select email from public.team_members
+      where id = any($1::uuid[]) and is_active = true`,
+    [ids],
+  ).catch(() => []);
+  const emails = emailRows
+    .map((row) => row.email)
+    .filter((email): email is string => Boolean(email));
+  const siteUrl = process.env.NEXT_PUBLIC_SITE_URL?.replace(/\/$/, "") || "https://cdsspace.pro";
+  await deliverAnnouncementByEmail(
+    emails,
+    title,
+    body,
+    `${siteUrl}/team/work?project=${encodeURIComponent(projectId)}`,
+  ).catch(() => ({ sent: 0, failed: emails.length }));
 }
 
 async function projectRecipients(projectId: string) {

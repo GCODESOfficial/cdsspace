@@ -3,6 +3,7 @@ import "server-only";
 import crypto from "node:crypto";
 import { glashMaybeOne, glashQuery } from "@/lib/glashdb/postgres";
 import { getGlashDbAdmin } from "@/lib/glashdb";
+import { acceptClientAccountInvite } from "@/lib/client-directory-server";
 
 /**
  * Client email verification owned by CDS Space.
@@ -183,6 +184,22 @@ export async function completeClientEmailVerification(spent: SpentVerification) 
   const confirmed = await admin.auth.admin.updateUserById(spent.user_id, { email_confirm: true }).catch((error: unknown) => ({ error }));
   if (confirmed?.error) {
     console.error("[client-email-verification] GlashDB confirmation failed", confirmed.error);
+  }
+
+  // Complete an invited client's CRM link as soon as their email is proven.
+  // Previously the invite remained pending until a later dashboard login,
+  // which made a successful account creation look like a failed invitation.
+  const inviteId = text(meta.client_invite_id);
+  if (inviteId) {
+    await acceptClientAccountInvite({
+      inviteId,
+      platformUserId: spent.user_id,
+      email: spent.email,
+    }).catch((error) => {
+      // ensureClientProfile retries this on sign-in, so verification itself is
+      // never lost because a downstream delivery migration was unavailable.
+      console.error("[client-email-verification] invite acceptance failed", error);
+    });
   }
 }
 

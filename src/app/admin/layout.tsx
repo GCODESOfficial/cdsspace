@@ -21,7 +21,7 @@ interface SessionData {
 
 const RETRYABLE_SESSION_STATUSES = new Set([408, 425, 429, 500, 502, 503, 504]);
 
-async function fetchAdminSession(attempts = 3) {
+async function fetchAdminSession(attempts = 4) {
   let response: Response | null = null;
   for (let attempt = 0; attempt < attempts; attempt += 1) {
     try {
@@ -146,6 +146,21 @@ function AdminLayoutBody({ children }: { children: React.ReactNode }) {
     };
   }, [pathname, router, isLoginPage, authCheckVersion, viewingAs]);
 
+  // Keep trying on the user's behalf. A passing database or network problem
+  // should resolve itself while they look at the screen, not wait for a tap.
+  useEffect(() => {
+    if (!sessionUnavailable) return;
+    const retry = window.setInterval(() => setAuthCheckVersion((value) => value + 1), 4_000);
+    const onVisible = () => { if (!document.hidden) setAuthCheckVersion((value) => value + 1); };
+    document.addEventListener("visibilitychange", onVisible);
+    window.addEventListener("online", onVisible);
+    return () => {
+      window.clearInterval(retry);
+      document.removeEventListener("visibilitychange", onVisible);
+      window.removeEventListener("online", onVisible);
+    };
+  }, [sessionUnavailable]);
+
   if (isChecking && !isAuthed) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-[#F0F5FF]">
@@ -159,14 +174,14 @@ function AdminLayoutBody({ children }: { children: React.ReactNode }) {
         <div className="w-full max-w-sm rounded-2xl border border-[#E4EAF5] bg-white p-6 text-center shadow-sm">
           <h1 className="text-lg font-semibold text-[#0D1B39]">Admin portal temporarily unavailable</h1>
           <p className="mt-2 text-sm leading-6 text-slate-500">
-            Your session is still active. Try the secure portal handoff again.
+            Your session is still active and we are reconnecting automatically.
           </p>
           <button
             type="button"
             onClick={() => setAuthCheckVersion((value) => value + 1)}
             className="mt-5 min-h-11 rounded-xl bg-[#0A4FE8] px-5 text-sm font-semibold text-white transition hover:bg-[#083FC0]"
           >
-            Try again
+            Try now
           </button>
         </div>
       </div>

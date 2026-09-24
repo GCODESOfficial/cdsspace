@@ -63,6 +63,42 @@ export async function GET(_req: Request, ctx: { params: Promise<{ code: string }
   });
 }
 
+export async function PATCH(req: Request, ctx: { params: Promise<{ code: string }> }) {
+  const { code } = await ctx.params;
+  const body = await req.json().catch(() => null) as { audioOnly?: unknown } | null;
+  if (!body || typeof body.audioOnly !== "boolean") {
+    return NextResponse.json({ ok: false, error: "Choose audio or video mode." }, { status: 400 });
+  }
+  const actor = await getToolActor();
+  const account = actor ? null : await getClientAccountState().catch(() => null);
+  if ((!actor && !account) || !supabaseAdmin) {
+    return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
+  }
+  const db = supabaseAdmin as any;
+  const { data: meeting } = await db
+    .from("team_meetings")
+    .select("id, created_by, created_by_client, status")
+    .eq("room_code", code)
+    .maybeSingle();
+  if (!meeting) return NextResponse.json({ ok: false, error: "Not found" }, { status: 404 });
+  if (meeting.status === "ended" || meeting.status === "cancelled") {
+    return NextResponse.json({ ok: false, error: "This meeting has ended." }, { status: 410 });
+  }
+  const actorMemberId = actor?.kind === "team" ? actor.id : actor?.memberId || null;
+  const mayChangeMode = (actor?.kind === "admin" && actor.role === "super_admin")
+    || Boolean(actorMemberId && meeting.created_by === actorMemberId)
+    || Boolean(account?.user?.id && meeting.created_by_client === account.user.id);
+  if (!mayChangeMode) {
+    return NextResponse.json({ ok: false, error: "Only the meeting host can change the call mode." }, { status: 403 });
+  }
+  const { error } = await db
+    .from("team_meetings")
+    .update({ audio_only: body.audioOnly, last_active_at: new Date().toISOString() })
+    .eq("id", meeting.id);
+  if (error) return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
+  return NextResponse.json({ ok: true, audioOnly: body.audioOnly });
+}
+
 export async function DELETE(_req: Request, ctx: { params: Promise<{ code: string }> }) {
   const { code } = await ctx.params;
   const actor = await getToolActor();

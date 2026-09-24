@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { assertPublicHttpUrl, UnsafeOutboundUrlError } from "@/lib/safe-outbound-url";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -14,11 +15,12 @@ export const dynamic = "force-dynamic";
  *   - Only http / https URLs
  *   - 6s timeout
  *   - 512KB body cap (we only need the <head>)
- *   - Response is cached for 1h (per URL) via Next's fetch cache
+ *   - Successful summaries may be cached by clients for up to 1h
  */
 
 const MAX_BYTES = 512 * 1024;
 const TIMEOUT_MS = 6000;
+const MAX_REDIRECTS = 3;
 
 const META_RE_OG_TITLE = /<meta[^>]+property=["']og:title["'][^>]+content=["']([^"']+)/i;
 const META_RE_OG_DESC = /<meta[^>]+property=["']og:description["'][^>]+content=["']([^"']+)/i;
@@ -42,6 +44,37 @@ function absolutize(candidate: string | null, base: string): string | null {
     }
 }
 
+async function safeAssetUrl(candidate: string | null, base: string) {
+    const absolute = absolutize(candidate, base);
+    if (!absolute) return null;
+    try {
+        return (await assertPublicHttpUrl(absolute)).toString();
+    } catch {
+        return null;
+    }
+}
+
+async function fetchWithSafeRedirects(initial: URL, signal: AbortSignal) {
+    let current = initial;
+    for (let redirectCount = 0; redirectCount <= MAX_REDIRECTS; redirectCount += 1) {
+        current = await assertPublicHttpUrl(current);
+        const response = await fetch(current, {
+            signal,
+            redirect: "manual",
+            headers: {
+                "user-agent": "CDSSpace-LinkPreview/1.0",
+                accept: "text/html,application/xhtml+xml",
+            },
+            cache: "no-store",
+        });
+        if (![301, 302, 303, 307, 308].includes(response.status)) return response;
+        const location = response.headers.get("location");
+        if (!location || redirectCount === MAX_REDIRECTS) throw new UnsafeOutboundUrlError("Too many redirects.");
+        current = new URL(location, current);
+    }
+    throw new UnsafeOutboundUrlError("Too many redirects.");
+}
+
 export async function GET(req: NextRequest) {
     const target = req.nextUrl.searchParams.get("url");
     if (!target) {
@@ -50,7 +83,7 @@ export async function GET(req: NextRequest) {
 
     let parsed: URL;
     try {
-        parsed = new URL(target);
+        parsed = await assertPublicHttpUrl(target);
     } catch {
         return NextResponse.json({ ok: false, error: "invalid url" }, { status: 400 });
     }
@@ -61,15 +94,7 @@ export async function GET(req: NextRequest) {
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), TIMEOUT_MS);
     try {
-        const res = await fetch(parsed.toString(), {
-            signal: ctrl.signal,
-            redirect: "follow",
-            headers: {
-                "user-agent": "CDSSpace-LinkPreview/1.0",
-                accept: "text/html,application/xhtml+xml",
-            },
-            next: { revalidate: 3600 },
-        });
+        const res = await fetchWithSafeRedirects(parsed, ctrl.signal);
 
         if (!res.ok) {
             return NextResponse.json(
@@ -105,11 +130,9 @@ export async function GET(req: NextRequest) {
             parsed.hostname;
         const description =
             extract(html, META_RE_OG_DESC) || extract(html, META_RE_DESCRIPTION) || null;
-        const image = absolutize(extract(html, META_RE_OG_IMAGE), finalUrl);
+        const image = await safeAssetUrl(extract(html, META_RE_OG_IMAGE), finalUrl);
         const siteName = extract(html, META_RE_OG_SITE) || parsed.hostname;
-        const favicon =
-            absolutize(extract(html, META_RE_ICON), finalUrl) ||
-            `${parsed.origin}/favicon.ico`;
+        const favicon = await safeAssetUrl(extract(html, META_RE_ICON), finalUrl);
 
         return NextResponse.json(
             {

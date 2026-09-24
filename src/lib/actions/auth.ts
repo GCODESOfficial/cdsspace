@@ -398,6 +398,16 @@ export async function signup(formData: AuthFormData) {
             return { error: 'We could not create the account. Please try again, or sign up with Google.' }
         }
         userId = pending.user_id;
+        if (invite) {
+            const existingUser = await accountAdmin.auth.admin.getUserById(userId).catch(() => ({ data: null }));
+            const existingMetadata = existingUser.data?.user?.user_metadata || {};
+            const patched = await accountAdmin.auth.admin.updateUserById(userId, {
+                user_metadata: { ...existingMetadata, client_invite_id: invite.id },
+            }).catch((error: unknown) => ({ error }));
+            if (patched?.error) {
+                return { error: 'We could not attach this invitation to the pending account. Please try again.' }
+            }
+        }
     }
 
     let issued: Awaited<ReturnType<typeof issueClientSignupVerification>>;

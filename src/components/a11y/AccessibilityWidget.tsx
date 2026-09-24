@@ -80,7 +80,13 @@ function apply(s: A11ySettings) {
 
 export function AccessibilityWidget() {
   const pathname = usePathname();
-  if (pathname.startsWith("/meet/")) return null;
+  const isChatPage =
+    pathname === "/team/chat" ||
+    pathname === "/admin/chat" ||
+    pathname === "/admin/messages" ||
+    pathname === "/dashboard/messages" ||
+    pathname.endsWith("/dashboard/messages");
+  if (pathname.startsWith("/meet/") || isChatPage) return null;
   return <AccessibilityWidgetContent />;
 }
 

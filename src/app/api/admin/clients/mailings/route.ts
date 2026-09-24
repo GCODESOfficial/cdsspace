@@ -111,6 +111,7 @@ export async function GET(req: NextRequest) {
         status: client.status,
         source: client.source,
         has_platform_account: client.has_platform_account,
+        platform_user_id: client.platform_user_id,
       }));
     const [draftPreview, requestedPreview] = await Promise.all([
       draft ? signedClientMailingPreview(draft.cover_storage_path) : null,

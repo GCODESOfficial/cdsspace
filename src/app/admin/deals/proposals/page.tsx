@@ -7,6 +7,7 @@ import {
   ChevronRight, Download, ExternalLink, Eye, FileImage, FileText, Loader2, Mail, PenLine, Plus, Send, Trash2, Users, X,
 } from "lucide-react";
 import ProposalDeckView, { ProposalEditProvider } from "@/components/proposal/ProposalDeck";
+import { appConfirm } from "@/lib/app-notify";
 import {
   normalizeDeck, PROPOSAL_STAGES, setDeckValue, type ProposalDeck, type ProposalStage,
 } from "@/lib/proposal-deck";
@@ -80,6 +81,7 @@ export default function DealProposalsPage() {
   const [rewritingField, setRewritingField] = useState("");
   const [notice, setNotice] = useState<{ tone: "success" | "error"; text: string } | null>(null);
   const lastSaved = useRef("");
+  const chatContextApplied = useRef(false);
 
   const selected = useMemo(() => proposals.find((item) => item.id === selectedId) || null, [proposals, selectedId]);
   const visible = useMemo(
@@ -143,6 +145,22 @@ export default function DealProposalsPage() {
   useEffect(() => {
     load().catch((error) => setNotice({ tone: "error", text: error.message })).finally(() => setLoading(false));
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (chatContextApplied.current) return;
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("action") !== "create") return;
+    chatContextApplied.current = true;
+    const brandName = (params.get("brand") || "").trim();
+    const recipientEmail = (params.get("email") || "").trim();
+    setForm((current) => ({
+      ...current,
+      brand_name: brandName || current.brand_name,
+      recipient_email: recipientEmail || current.recipient_email,
+    }));
+    setShowCreate(true);
+    setNotice({ tone: "success", text: `${brandName || "The client"} is selected. Add the opportunity and source link to generate their proposal.` });
+  }, []);
 
   useEffect(() => {
     if (!selected) { setEditor(null); return; }
@@ -345,7 +363,7 @@ export default function DealProposalsPage() {
   };
 
   const removeProposal = async () => {
-    if (!selected || !window.confirm(`Delete the ${selected.brand_name} proposal permanently?`)) return;
+    if (!selected || !(await appConfirm({ title: "Delete proposal?", message: `Delete the ${selected.brand_name} proposal permanently?`, confirmLabel: "Delete proposal", destructive: true }))) return;
     try {
       await post({ action: "delete_proposal", id: selected.id }, "delete");
       setProposals((items) => items.filter((item) => item.id !== selected.id));

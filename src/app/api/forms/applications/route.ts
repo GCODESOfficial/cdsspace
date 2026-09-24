@@ -1,7 +1,9 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase";
-import { assertCleanBuffer } from "@/lib/upload-security";
+import { assertSafeUpload, UploadSecurityError } from "@/lib/upload-security";
+import { consumeSecurityRateLimit } from "@/lib/client-login-security";
+import { SECURE_FORM_UPLOAD_BUCKET, secureFormUploadUrl } from "@/lib/secure-form-uploads";
 
 export const runtime = "nodejs";
 
@@ -13,9 +15,22 @@ function trimVal(v: unknown) {
 
 export async function POST(req: Request) {
   try {
+    const requestBytes = Number(req.headers.get("content-length") || 0);
+    if (requestBytes > 12 * 1024 * 1024) {
+      return NextResponse.json({ ok: false, error: "The application is too large." }, { status: 413 });
+    }
     const ua = req.headers.get("user-agent") ?? "";
     const fwd = req.headers.get("x-forwarded-for") ?? "";
     const ip = fwd.split(",")[0]?.trim() || null;
+    if (await consumeSecurityRateLimit({
+      bucket: "public-job-application",
+      identifier: String(ip || "unknown").slice(0, 96),
+      limit: 5,
+      windowSeconds: 60 * 60,
+      blockSeconds: 60 * 60,
+    })) {
+      return NextResponse.json({ ok: false, error: "Too many applications. Please try again later." }, { status: 429 });
+    }
 
     const ct = req.headers.get("content-type") || "";
     const fields: FlatFields = {};
@@ -50,6 +65,23 @@ export async function POST(req: Request) {
       }
     }
 
+    const safeFields = Object.fromEntries(
+      Object.entries(fields).slice(0, 100).map(([key, value]) => [key.slice(0, 120), String(value).slice(0, 12_000)]),
+    );
+    Object.keys(fields).forEach((key) => delete fields[key]);
+    Object.assign(fields, safeFields);
+    let safePortfolio: Awaited<ReturnType<typeof assertSafeUpload>> | null = null;
+    if (portfolioFile) {
+      if (portfolioFile.size > 10 * 1024 * 1024) {
+        return NextResponse.json({ ok: false, error: "Portfolio files must be 10MB or smaller." }, { status: 413 });
+      }
+      safePortfolio = await assertSafeUpload(portfolioFile, {
+        allow: ["image", "pdf", "office", "zip", "design"],
+        maxBytes: 10 * 1024 * 1024,
+        imageMaxDimension: 12_000,
+      });
+    }
+
     // 1) Insert row first to get ID
     if (!supabaseAdmin) {
       return NextResponse.json({ ok: false, error: "Supabase client not initialized." }, { status: 500 });
@@ -63,33 +95,23 @@ export async function POST(req: Request) {
     if (insertErr) throw insertErr;
 
     // 2) If a file is present, upload to storage and patch row with public URL
-    if (portfolioFile) {
-      const safeName = portfolioFile.name.replace(/[^\w.\-]+/g, "_");
-      const path = `portfolio/${inserted.id}-${Date.now()}-${safeName}`;
+    if (portfolioFile && safePortfolio) {
+      const safeName = portfolioFile.name.replace(/\.[^.]+$/, "").replace(/[^\w.\-]+/g, "_").slice(0, 120) || "portfolio";
+      const path = `applications/${inserted.id}-${Date.now()}-${safeName}.${safePortfolio.ext}`;
 
-      const portfolioBuffer = Buffer.from(await portfolioFile.arrayBuffer());
-      let cleanPortfolio = true;
-      try {
-        assertCleanBuffer(portfolioBuffer);
-      } catch {
-        cleanPortfolio = false; // public form: silently drop an unsafe attachment
-      }
-
-      if (cleanPortfolio) {
-        const { error: upErr } = await supabaseAdmin.storage
-          .from("applications")
-          .upload(path, portfolioBuffer, {
+        const applicationStorage = (supabaseAdmin as any).storage;
+        const { error: upErr } = await applicationStorage
+          .from(SECURE_FORM_UPLOAD_BUCKET)
+          .upload(path, safePortfolio.buffer, {
             cacheControl: "3600",
             upsert: false,
-            contentType: portfolioFile.type || undefined,
+            contentType: safePortfolio.contentType,
           });
 
         if (!upErr) {
-          const { data: pub } = supabaseAdmin.storage.from("applications").getPublicUrl(path);
-          const merged = { ...fields, "Portfolio File URL": pub.publicUrl };
+          const merged = { ...fields, "Portfolio File URL": secureFormUploadUrl("applications", path) };
           await supabaseAdmin.from("applications").update({ fields: merged }).eq("id", inserted.id);
         }
-      }
     }
 
     return NextResponse.json(
@@ -97,6 +119,9 @@ export async function POST(req: Request) {
       { status: 201 }
     );
   } catch (err: any) {
-    return NextResponse.json({ ok: false, error: err.message }, { status: 500 });
+    return NextResponse.json(
+      { ok: false, error: err.message },
+      { status: err instanceof UploadSecurityError ? err.status : 500 },
+    );
   }
 }

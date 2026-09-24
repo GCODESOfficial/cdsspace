@@ -5,6 +5,7 @@ import { isMissingInvoiceExtensionColumn, stripInvoiceExtensionFields } from "@/
 import { logActivity } from "@/lib/activity-log";
 import { recordResourceVersion } from "@/lib/admin-versioning";
 import { resolveClientBillingCurrency } from "@/lib/client-billing-server";
+import { INVOICE_VALID_DAYS } from "@/lib/finance/invoice-expiry";
 
 export async function GET(req: NextRequest) {
   const denied = await requireFinanceAdminAsync(req, "finance_invoices"); if (denied) return denied;
@@ -49,6 +50,13 @@ export async function POST(req: NextRequest) {
 
   const invoice_number = generateInvoiceNumber();
   const public_token = randomToken(28);
+  // A new invoice is valid for 28 days from issue. Invoices raised before this
+  // rule carry no expiry and are left alone, since nobody told those clients
+  // of a deadline.
+  const issuedOn = issue_date || new Date().toISOString().slice(0, 10);
+  const auto_cancel_at = new Date(
+    new Date(`${issuedOn}T00:00:00.000Z`).getTime() + INVOICE_VALID_DAYS * 24 * 60 * 60 * 1000,
+  ).toISOString();
 
   const sb = financeDb();
   const requestedCurrencyCode = CURRENCIES.includes(String(requestedCurrency).toUpperCase() as (typeof CURRENCIES)[number])
@@ -60,7 +68,8 @@ export async function POST(req: NextRequest) {
     client_email: client_email || null, client_address: client_address || null,
     currency, subtotal, tax_rate, tax_amount, discount, total,
     status, scope, period_month,
-    issue_date: issue_date || new Date().toISOString().slice(0, 10),
+    issue_date: issuedOn,
+    auto_cancel_at,
     due_date: due_date || null, notes: notes || null, public_token,
     // NEW: terms + delivery (fall back to DB defaults if caller omits them)
     ...(payment_terms !== undefined ? { payment_terms } : {}),

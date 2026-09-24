@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/admin-api-auth";
 import { getSupabaseAdmin } from "@/lib/supabase";
-import { sendEmail } from "@/lib/email-from";
+import { sendEmail, verifyEmailReady } from "@/lib/email-from";
 import { brandedEmailHtml } from "@/lib/email-template";
 import { logActivity } from "@/lib/activity-log";
 import {
@@ -143,13 +143,16 @@ export async function PATCH(req: NextRequest) {
     if (action === "invite") {
       const manualClientId = text(body.manual_client_id, 80);
       if (!manualClientId) return NextResponse.json({ error: "Client ID is required." }, { status: 400 });
+      const emailReadinessError = await verifyEmailReady();
+      if (emailReadinessError) {
+        console.error("[client-invite] email transport is unavailable:", emailReadinessError);
+        return NextResponse.json({ error: "Client invitations are temporarily unavailable because email delivery is offline. Please try again shortly." }, { status: 503 });
+      }
       const result = await createClientAccountInvite(manualClientId, session.email);
       const url = new URL(`${siteUrl()}/signup`);
       url.searchParams.set("email", result.client.email || "");
       url.searchParams.set("client_invite", result.rawToken);
       const inviteUrl = url.toString();
-      let emailed = true;
-      let emailError: string | null = null;
       try {
         const clientName = result.client.brand_name || result.client.name;
         const bodyHtml = `
@@ -172,8 +175,21 @@ export async function PATCH(req: NextRequest) {
           }),
         });
       } catch (error) {
-        emailed = false;
-        emailError = error instanceof Error ? error.message : "Email delivery failed.";
+        console.error("[client-invite] delivery failed:", error);
+        await logActivity({
+          action: "client.invite_failed",
+          page: "clients/list",
+          resource_type: "client",
+          resource_id: manualClientId,
+          resource_label: result.client.brand_name || result.client.name,
+          metadata: { emailed: false, invite_id: result.invite.id },
+        }).catch(() => undefined);
+        return NextResponse.json({
+          ok: false,
+          error: "The invitation email could not be delivered. The secure invitation link was copied so it can be shared manually.",
+          invite_url: inviteUrl,
+          expires_at: result.invite.expires_at,
+        }, { status: 502 });
       }
       await logActivity({
         action: "client.invite",
@@ -181,9 +197,9 @@ export async function PATCH(req: NextRequest) {
         resource_type: "client",
         resource_id: manualClientId,
         resource_label: result.client.brand_name || result.client.name,
-        metadata: { emailed, invite_id: result.invite.id },
+        metadata: { emailed: true, invite_id: result.invite.id },
       });
-      return NextResponse.json({ ok: true, emailed, email_error: emailError, invite_url: inviteUrl, expires_at: result.invite.expires_at });
+      return NextResponse.json({ ok: true, emailed: true, invite_url: inviteUrl, expires_at: result.invite.expires_at });
     }
 
     const manualClientId = text(body.manual_client_id, 80);

@@ -128,16 +128,27 @@ async function fromRow(actor: CreateActor, row: Record<string, unknown>): Promis
 }
 
 const RETURNING = `id, title, body_html, paper_size, has_second_page,
-  first_page_path, first_page_name, second_page_path, second_page_name,
-  signature_path, signature_name, signature_x, signature_y, signature_width,
+  first_page_path, first_page_name, first_page_size_bytes, second_page_path, second_page_name, second_page_size_bytes,
+  signature_path, signature_name, signature_size_bytes, signature_x, signature_y, signature_width,
   signature_page, status, last_exported_at, created_at, updated_at`;
 
-export async function listLetterheads(actor: CreateActor) {
+/**
+ * Which studio a document belongs to. Executive Board letters are company
+ * correspondence on the one CDS Space letterhead, so they are kept apart from
+ * the per-workspace documents of the CREATE tool.
+ */
+export type LetterheadScope = "create" | "executive_board";
+
+export function letterheadScope(value: unknown): LetterheadScope {
+  return value === "executive_board" ? "executive_board" : "create";
+}
+
+export async function listLetterheads(actor: CreateActor, scope: LetterheadScope = "create") {
   const rows = await glashQuery<Record<string, unknown>>(
     `select ${RETURNING} from public.create_letterheads
-      where owner_kind = $1 and owner_id = $2 and deleted_at is null and status <> 'archived'
+      where owner_kind = $1 and owner_id = $2 and scope = $3 and deleted_at is null and status <> 'archived'
       order by updated_at desc limit 60`,
-    [actor.kind, actor.id],
+    [actor.kind, actor.id, scope],
   );
   return Promise.all(rows.map((row) => fromRow(actor, row)));
 }
@@ -151,11 +162,11 @@ export async function getLetterhead(actor: CreateActor, id: string) {
   return row ? fromRow(actor, row) : null;
 }
 
-export async function createLetterhead(actor: CreateActor) {
+export async function createLetterhead(actor: CreateActor, scope: LetterheadScope = "create") {
   const row = await glashMaybeOne<Record<string, unknown>>(
-    `insert into public.create_letterheads (owner_kind, owner_id, actor_email)
-     values ($1, $2, $3) returning ${RETURNING}`,
-    [actor.kind, actor.id, actor.email],
+    `insert into public.create_letterheads (owner_kind, owner_id, actor_email, scope)
+     values ($1, $2, $3, $4) returning ${RETURNING}`,
+    [actor.kind, actor.id, actor.email, scope],
   );
   if (!row) throw new Error("The letterhead draft could not be created.");
   return fromRow(actor, row);
@@ -188,11 +199,11 @@ export async function duplicateLetterhead(actor: CreateActor, id: string) {
   const row = await glashMaybeOne<Record<string, unknown>>(
     `insert into public.create_letterheads
       (owner_kind, owner_id, actor_email, title, body_html, paper_size, has_second_page,
-       first_page_path, first_page_name, second_page_path, second_page_name,
-       signature_path, signature_name, signature_x, signature_y, signature_width, signature_page, status)
+       first_page_path, first_page_name, first_page_size_bytes, second_page_path, second_page_name, second_page_size_bytes,
+       signature_path, signature_name, signature_size_bytes, signature_x, signature_y, signature_width, signature_page, status)
      select owner_kind, owner_id, $4, left(title || ' copy', 160), body_html, paper_size, has_second_page,
-       first_page_path, first_page_name, second_page_path, second_page_name,
-       signature_path, signature_name, signature_x, signature_y, signature_width, signature_page, 'draft'
+       first_page_path, first_page_name, first_page_size_bytes, second_page_path, second_page_name, second_page_size_bytes,
+       signature_path, signature_name, signature_size_bytes, signature_x, signature_y, signature_width, signature_page, 'draft'
      from public.create_letterheads
      where id = $3::uuid and owner_kind = $1 and owner_id = $2 and deleted_at is null
      returning ${RETURNING}`,
@@ -218,20 +229,44 @@ export async function archiveLetterhead(actor: CreateActor, id: string) {
   );
 }
 
-export async function updateLetterheadAsset(actor: CreateActor, id: string, kind: "firstPage" | "secondPage" | "signature", path: string, name: string) {
+export async function getLetterheadAssetReplacement(actor: CreateActor, id: string, kind: "firstPage" | "secondPage" | "signature") {
+  const pathColumn = kind === "firstPage" ? "first_page_path" : kind === "secondPage" ? "second_page_path" : "signature_path";
+  const sizeColumn = kind === "firstPage" ? "first_page_size_bytes" : kind === "secondPage" ? "second_page_size_bytes" : "signature_size_bytes";
+  const row = await glashMaybeOne<{ path: string | null; bytes: string; reference_count: string }>(
+    `select current.${pathColumn} as path, current.${sizeColumn}::text as bytes,
+            case when current.${pathColumn} is null then 0 else (
+              select coalesce(sum(
+                coalesce((sibling.first_page_path = current.${pathColumn})::int, 0)
+                + coalesce((sibling.second_page_path = current.${pathColumn})::int, 0)
+                + coalesce((sibling.signature_path = current.${pathColumn})::int, 0)
+              ), 0) from public.create_letterheads sibling
+               where sibling.owner_kind = $1 and sibling.owner_id = $2 and sibling.deleted_at is null
+            ) end::text as reference_count
+       from public.create_letterheads current
+      where current.id = $3::uuid and current.owner_kind = $1 and current.owner_id = $2 and current.deleted_at is null`,
+    [actor.kind, actor.id, id],
+  );
+  return {
+    path: row?.path || null,
+    bytes: Number(row?.bytes || 0),
+    referenceCount: Number(row?.reference_count || 0),
+  };
+}
+
+export async function updateLetterheadAsset(actor: CreateActor, id: string, kind: "firstPage" | "secondPage" | "signature", path: string, name: string, sizeBytes: number) {
   if (!isCreatePrivateAssetPath(actor, path)) {
     throw new Error("The uploaded asset does not belong to this workspace.");
   }
   const columns = kind === "firstPage"
-    ? ["first_page_path", "first_page_name"]
+    ? ["first_page_path", "first_page_name", "first_page_size_bytes"]
     : kind === "secondPage"
-      ? ["second_page_path", "second_page_name"]
-      : ["signature_path", "signature_name"];
+      ? ["second_page_path", "second_page_name", "second_page_size_bytes"]
+      : ["signature_path", "signature_name", "signature_size_bytes"];
   const row = await glashMaybeOne<Record<string, unknown>>(
-    `update public.create_letterheads set ${columns[0]} = $4, ${columns[1]} = $5
+    `update public.create_letterheads set ${columns[0]} = $4, ${columns[1]} = $5, ${columns[2]} = $6
       where id = $3::uuid and owner_kind = $1 and owner_id = $2 and deleted_at is null
       returning ${RETURNING}`,
-    [actor.kind, actor.id, id, path, name.slice(0, 180)],
+    [actor.kind, actor.id, id, path, name.slice(0, 180), Math.max(0, Math.ceil(sizeBytes))],
   );
   if (!row) throw new Error("The uploaded asset could not be attached.");
   // Duplicated documents intentionally share immutable private assets. Keep the

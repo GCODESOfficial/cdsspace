@@ -2,6 +2,8 @@ import "server-only";
 
 import { glashMaybeOne, glashQuery } from "@/lib/glashdb/postgres";
 import { supabaseAdmin } from "@/lib/supabase";
+import { releaseClientStorageReservation, reserveClientStorage } from "@/lib/client-storage";
+import { assertSafeUpload } from "@/lib/upload-security";
 
 export const CDRIVE_BUCKET = "client-drives";
 export const CDRIVE_MAX_FILE_BYTES = 100 * 1024 * 1024;
@@ -69,25 +71,36 @@ export async function uploadDriveFile(input: {
     if (!folder) throw new Error("Folder not found in this drive.");
   }
 
+  const safe = await assertSafeUpload(input.file, {
+    allow: ["image", "pdf", "office", "zip", "design"],
+    maxBytes: CDRIVE_MAX_FILE_BYTES,
+    imageMaxDimension: 16_000,
+    imageMaxInputPixels: 160_000_000,
+  });
   const safeName = cleanFileName(input.file.name);
   const storagePath = `${input.driveId}/${crypto.randomUUID()}-${safeName}`;
-  const buffer = Buffer.from(await input.file.arrayBuffer());
-  const { error } = await (supabaseAdmin as any).storage.from(CDRIVE_BUCKET).upload(storagePath, buffer, {
-    contentType: input.file.type || "application/octet-stream",
-    upsert: false,
-  });
-  if (error) throw new Error(error.message || "Upload failed.");
+  const buffer = safe.buffer;
+  const reservationId = input.actorKind === "client"
+    ? await reserveClientStorage(input.actorId, buffer.byteLength)
+    : null;
   try {
+    const { error } = await (supabaseAdmin as any).storage.from(CDRIVE_BUCKET).upload(storagePath, buffer, {
+      contentType: safe.contentType,
+      upsert: false,
+    });
+    if (error) throw new Error(error.message || "Upload failed.");
     const [row] = await glashQuery(
       `insert into public.client_drive_files
          (drive_id, folder_id, file_name, storage_path, mime_type, file_size, uploaded_by_kind, uploaded_by_id)
        values ($1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8)
        returning id, folder_id, file_name, mime_type, file_size::text, uploaded_by_kind, created_at`,
-      [input.driveId, input.folderId || null, safeName, storagePath, input.file.type || null, input.file.size, input.actorKind, input.actorId],
+      [input.driveId, input.folderId || null, safeName, storagePath, safe.contentType, buffer.byteLength, input.actorKind, input.actorId],
     );
     return row;
   } catch (error) {
     await (supabaseAdmin as any).storage.from(CDRIVE_BUCKET).remove([storagePath]).catch(() => undefined);
     throw error;
+  } finally {
+    await releaseClientStorageReservation(reservationId).catch(() => undefined);
   }
 }

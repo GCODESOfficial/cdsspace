@@ -4,12 +4,13 @@ import { optimize } from "svgo";
 import { getGlashDbAdmin } from "@/lib/glashdb";
 import { getAdminSession } from "@/lib/admin-session";
 import { hasPermission } from "@/lib/admin-permissions";
-import { assertCleanBuffer } from "@/lib/upload-security";
+import { assertSafeUpload, UploadSecurityError } from "@/lib/upload-security";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const ALLOWED_FOLDERS = new Set(["covers", "works"]);
+const MAX_BYTES = 50 * 1024 * 1024;
 
 /**
  * Single-file upload for the portfolio "Works" feature.
@@ -46,31 +47,41 @@ export async function POST(req: NextRequest) {
   if (!(file instanceof File) || file.size === 0) {
     return NextResponse.json({ ok: false, error: "A file is required." }, { status: 400 });
   }
+  if (file.size > MAX_BYTES) return NextResponse.json({ ok: false, error: "Files must be 50MB or smaller." }, { status: 413 });
 
-  const ext = (file.name.split(".").pop() || "bin").toLowerCase();
-  const path = `${folder}/${uuidv4()}.${ext}`;
+  let safe: Awaited<ReturnType<typeof assertSafeUpload>>;
+  try {
+    safe = await assertSafeUpload(file, {
+      allow: ["image", "pdf", "design"],
+      maxBytes: MAX_BYTES,
+      imageMaxDimension: 16_000,
+      imageMaxInputPixels: 160_000_000,
+    });
+  } catch (error) {
+    return NextResponse.json(
+      { ok: false, error: error instanceof Error ? error.message : "Upload blocked." },
+      { status: error instanceof UploadSecurityError ? error.status : 400 },
+    );
+  }
+  const path = `${folder}/${uuidv4()}.${safe.ext}`;
 
   // Optimise SVGs the same way the legacy server helper did; everything else
   // uploads as-is.
-  let contentType = file.type || "application/octet-stream";
+  let contentType = safe.contentType;
   let body: Buffer;
-  if (ext === "svg") {
+  if (safe.ext === "svg") {
     try {
-      const optimized = optimize(await file.text(), { multipass: true });
-      body = Buffer.from("data" in optimized ? optimized.data : await file.text());
+      const source = safe.buffer.toString("utf8");
+      const optimized = optimize(source, { multipass: true });
+      body = Buffer.from("data" in optimized ? optimized.data : source);
       contentType = "image/svg+xml";
     } catch {
-      body = Buffer.from(await file.arrayBuffer());
+      body = safe.buffer;
     }
   } else {
-    body = Buffer.from(await file.arrayBuffer());
-    // Pin the PDF content-type so storage serves it inline (renders in the
-    // gallery <iframe>) instead of as an octet-stream download.
-    if (ext === "pdf") contentType = "application/pdf";
+    body = safe.buffer;
   }
 
-  // Reject executables / EICAR before writing to storage.
-  assertCleanBuffer(body);
   const { error } = await storage.storage.from("media").upload(path, body, { contentType, upsert: false });
   if (error) {
     return NextResponse.json({ ok: false, error: error.message || "Upload failed." }, { status: 500 });

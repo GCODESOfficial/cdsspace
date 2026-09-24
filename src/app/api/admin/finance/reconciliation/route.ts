@@ -5,7 +5,7 @@ import { callerSeesClientIdentity, financeDb, requireFinanceAdminAsync } from "@
 import { parseBankStatement } from "@/lib/finance/bank-statement-parser";
 import { reconcileBankStatement } from "@/lib/finance/reconciliation";
 import { glashMaybeOne, glashQuery } from "@/lib/glashdb/postgres";
-import { assertCleanBuffer, assertSafeUpload, UploadSecurityError } from "@/lib/upload-security";
+import { assertSecureBuffer, assertSafeUpload, UploadSecurityError } from "@/lib/upload-security";
 import { logActivity } from "@/lib/activity-log";
 
 export const runtime = "nodejs";
@@ -144,7 +144,7 @@ export async function POST(request: NextRequest) {
   try {
     if (ext === "csv") {
       buffer = Buffer.from(await file.arrayBuffer());
-      assertCleanBuffer(buffer, { activeContent: true });
+      await assertSecureBuffer(buffer, { activeContent: true, fileName: file.name });
     } else {
       const safe = await assertSafeUpload(file, { allow: ext === "pdf" ? ["pdf"] : ["office"], maxBytes: MAX_STATEMENT_BYTES });
       buffer = safe.buffer;

@@ -3,7 +3,7 @@ import { NextResponse } from "next/server";
 import { getAdminSession } from "@/lib/admin-session";
 import { hasPermission } from "@/lib/admin-permissions";
 import { supabaseAdmin } from "@/lib/supabase";
-import { assertCleanBuffer, UploadSecurityError } from "@/lib/upload-security";
+import { assertSafeUpload, UploadSecurityError } from "@/lib/upload-security";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -23,8 +23,8 @@ function parseTags(raw: FormDataEntryValue | null): string[] {
     .filter(Boolean);
 }
 
-async function extractText(file: File): Promise<string> {
-  const lower = file.name.toLowerCase();
+async function extractText(name: string, buffer: Buffer): Promise<string> {
+  const lower = name.toLowerCase();
 
   if (
     lower.endsWith(".txt") ||
@@ -33,12 +33,11 @@ async function extractText(file: File): Promise<string> {
     lower.endsWith(".json") ||
     lower.endsWith(".csv")
   ) {
-    return (await file.text()).trim();
+    return buffer.toString("utf8").trim();
   }
 
   if (lower.endsWith(".docx")) {
     const mammoth: any = await import("mammoth");
-    const buffer = Buffer.from(await file.arrayBuffer());
     const result = await mammoth.extractRawText({ buffer });
     return String(result.value || "").trim();
   }
@@ -78,30 +77,29 @@ export async function POST(req: Request) {
 
   let extractedText = "";
   let filePath: string | null = null;
+  let storedFileMime: string | null = null;
+  let storedFileSize: number | null = null;
 
   if (file) {
+    let safe: Awaited<ReturnType<typeof assertSafeUpload>>;
     try {
-      extractedText = await extractText(file);
+      safe = await assertSafeUpload(file, { allow: ["office", "design"], maxBytes: MAX_SIZE_BYTES });
+      extractedText = await extractText(file.name, safe.buffer);
     } catch (error: any) {
       return NextResponse.json(
         { ok: false, error: error?.message || "Could not extract text from that file" },
-        { status: 400 }
+        { status: error instanceof UploadSecurityError ? error.status : 400 }
       );
     }
 
-    const safeName = file.name.replace(/[^a-zA-Z0-9._-]+/g, "_");
-    filePath = `knowledge/${Date.now()}-${safeName}`;
-    const docBuffer = Buffer.from(await file.arrayBuffer());
-    try {
-      assertCleanBuffer(docBuffer);
-    } catch (e) {
-      if (e instanceof UploadSecurityError) return NextResponse.json({ ok: false, error: e.message }, { status: e.status });
-      throw e;
-    }
+    const safeName = file.name.replace(/\.[^.]+$/, "").replace(/[^a-zA-Z0-9._-]+/g, "_").slice(0, 120) || "document";
+    filePath = `knowledge/${Date.now()}-${safeName}.${safe.ext}`;
+    storedFileMime = safe.contentType;
+    storedFileSize = safe.buffer.length;
     const { error: uploadError } = await (supabaseAdmin as any).storage
       .from(BUCKET)
-      .upload(filePath, docBuffer, {
-        contentType: file.type || "application/octet-stream",
+      .upload(filePath, safe.buffer, {
+        contentType: safe.contentType,
         upsert: false,
       });
 
@@ -126,8 +124,8 @@ export async function POST(req: Request) {
       content_excerpt: contentExcerpt || null,
       file_name: file?.name || null,
       file_path: filePath,
-      file_mime: file?.type || null,
-      file_size_bytes: file?.size || null,
+      file_mime: storedFileMime,
+      file_size_bytes: storedFileSize,
       is_active: isActive,
       created_by: null,
     })

@@ -4,7 +4,7 @@ import { getGlashDbAdmin } from "@/lib/glashdb";
 import { getChatViewer } from "@/lib/team-chat-auth";
 import { validateChatUpload } from "@/lib/chat-upload-limits";
 import { canViewTeamThread, isAttachmentRestrictedThread } from "@/lib/team-chat-server";
-import { assertCleanBuffer } from "@/lib/upload-security";
+import { assertSafeUpload, UploadSecurityError } from "@/lib/upload-security";
 
 export const runtime = "nodejs";
 
@@ -44,17 +44,20 @@ export async function POST(req: Request) {
       return NextResponse.json({ ok: false, error: check.error }, { status: 413 });
     }
 
-    const buffer = Buffer.from(await file.arrayBuffer());
-    assertCleanBuffer(buffer);
-    const fileExt = file.name.split(".").pop();
-    const fileName = `${Math.random().toString(36).substring(2)}-${Date.now()}.${fileExt}`;
+    const safe = await assertSafeUpload(file, { allow: ["image", "pdf", "office", "zip", "design"], maxBytes: 50 * 1024 * 1024 });
+    if ((check.kind === "image" && safe.kind !== "image")
+      || (check.kind === "video" && !safe.contentType.startsWith("video/"))
+      || (check.kind === "other" && (safe.kind === "image" || safe.contentType.startsWith("video/")))) {
+      throw new UploadSecurityError("The file contents do not match the selected attachment type.");
+    }
+    const fileName = `${crypto.randomUUID()}.${safe.ext}`;
     const filePath = `chat-attachments/${fileName}`;
 
     const { data: upload, error: uploadError } = await db.storage
       .from("media")
-      .upload(filePath, buffer, {
-        contentType: file.type,
-        upsert: true,
+      .upload(filePath, safe.buffer, {
+        contentType: safe.contentType,
+        upsert: false,
       });
 
     if (uploadError) throw uploadError;
@@ -66,6 +69,6 @@ export async function POST(req: Request) {
     return NextResponse.json({ ok: true, publicUrl });
   } catch (err: any) {
     console.error("Upload handler error:", err);
-    return NextResponse.json({ ok: false, error: err.message }, { status: 500 });
+    return NextResponse.json({ ok: false, error: err.message }, { status: err instanceof UploadSecurityError ? err.status : 500 });
   }
 }

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getCreateActorFromRequest } from "@/lib/create-platform/session";
 import { getCreateTool, runCreateTool } from "@/lib/create-platform/server";
+import { CLIENT_STORAGE_FULL_CODE, isClientStorageFullError } from "@/lib/client-storage";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -92,9 +93,10 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ slu
     return NextResponse.json({ ok: true, ...result });
   } catch (error) {
     const message = error instanceof Error ? error.message : "CREATE could not run this tool.";
-    const status = /credits|quota/i.test(message) ? 402 : 400;
+    const storageFull = isClientStorageFullError(error);
+    const status = storageFull ? 409 : /credits|quota/i.test(message) ? 402 : 400;
     // Never leak internal stack detail to the client; log it server-side.
     if (status !== 402) console.error(`[create/run] ${slug} failed:`, error);
-    return NextResponse.json({ error: message }, { status });
+    return NextResponse.json({ error: message, ...(storageFull ? { code: CLIENT_STORAGE_FULL_CODE } : {}) }, { status });
   }
 }

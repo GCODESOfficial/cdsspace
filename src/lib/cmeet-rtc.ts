@@ -74,6 +74,8 @@ export type CMeetEvents = {
   onChat?: (msg: ChatMessage) => void;
   onError?: (err: string) => void;
   onHostMuteAll?: (from: string) => void;
+  onHostMute?: (from: string) => void;
+  onHostModeChange?: (audioOnly: boolean, from: string) => void;
   onHostEnd?: (from: string) => void;
   onHostKicked?: (from: string) => void;
   onPeerJoined?: (name: string) => void;
@@ -341,6 +343,44 @@ export class CMeetClient {
     this.send({ type: "host-mute-all", from: this.peerId, name: this.name, at: Date.now() });
   }
 
+  // A host may silence a participant, but may never turn somebody else's
+  // microphone back on. The target disables its own capture track after the
+  // server-authorized signal arrives and then publishes the resulting state.
+  hostMuteParticipant(targetPeerId: string) {
+    if (this.hostRole !== "host" || !this.peers.has(targetPeerId)) return;
+    this.send({
+      type: "host-mute",
+      from: this.peerId,
+      name: this.name,
+      to: targetPeerId,
+      at: Date.now(),
+    });
+  }
+
+  // Room mode is a host decision. Every participant receives the same mode
+  // change and turns their camera off before the video UI is exposed.
+  hostSetMeetingMode(audioOnly: boolean) {
+    if (this.hostRole !== "host") return;
+    this.send({
+      type: "host-set-mode",
+      from: this.peerId,
+      name: this.name,
+      audioOnly,
+      at: Date.now(),
+    });
+  }
+
+  /** Publish mic/camera state without renegotiating the media connection. */
+  updateMediaState(hasAudio: boolean, hasVideo: boolean) {
+    this.send({
+      type: "media-state",
+      from: this.peerId,
+      hasAudio,
+      hasVideo,
+      at: Date.now(),
+    });
+  }
+
   setHandRaised(raised: boolean) {
     this.handRaised = raised;
     this.send({
@@ -511,12 +551,7 @@ export class CMeetClient {
         destination.addTrack(track);
         changed = true;
       }
-      if (track.kind === "audio") {
-        peer.hasAudio = true;
-        this.watchAudioLevel(peerId, peer.stream);
-      } else if (track.kind === "video") {
-        peer.hasVideo = true;
-      }
+      if (track.kind === "audio") this.watchAudioLevel(peerId, peer.stream);
       track.onended = () => {
         try { destination.removeTrack(track); } catch { /* already removed */ }
         if (track.kind === "audio") peer.hasAudio = peer.stream.getAudioTracks().some(t => t.readyState === "live");
@@ -788,10 +823,30 @@ export class CMeetClient {
         this.events.onHandRaised?.(peer.peerId, peer.name, raised);
         break;
       }
+      case "media-state": {
+        const peer = this.peers.get(msg.from);
+        if (!peer) break;
+        peer.hasAudio = !!msg.hasAudio;
+        peer.hasVideo = !!msg.hasVideo;
+        this.emitRemotes();
+        break;
+      }
       case "host-mute-all": {
         const peer = this.peers.get(msg.from);
         if (!peer || peer.hostRole !== "host") break;
         this.events.onHostMuteAll?.(msg.name || msg.from);
+        break;
+      }
+      case "host-mute": {
+        const peer = this.peers.get(msg.from);
+        if (!peer || peer.hostRole !== "host") break;
+        this.events.onHostMute?.(msg.name || msg.from);
+        break;
+      }
+      case "host-set-mode": {
+        const peer = this.peers.get(msg.from);
+        if (!peer || peer.hostRole !== "host") break;
+        this.events.onHostModeChange?.(!!msg.audioOnly, msg.name || msg.from);
         break;
       }
       case "host-end": {

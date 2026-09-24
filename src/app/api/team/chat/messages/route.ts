@@ -10,9 +10,23 @@ import {
   TEAM_CHAT_MESSAGE_COLUMNS,
 } from "@/lib/team-chat-server";
 import { canShareProtectedChatResource } from "@/lib/chat-resource-permissions";
+import { glashQuery } from "@/lib/glashdb/postgres";
+import { sendEmail } from "@/lib/email-from";
+import { brandedEmailHtml } from "@/lib/email-template";
+import { sendPushToActor } from "@/lib/web-push-server";
+import { sendOrHoldNotificationEmail } from "@/lib/notification-email-batching";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+
+function escapeHtml(value: unknown) {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+}
 
 export async function GET(req: Request) {
   const viewer = await getChatViewer();
@@ -263,6 +277,9 @@ export async function POST(req: Request) {
       ? (viewer.name || "Super admin")
       : (viewer.session.full_name || "A teammate");
   const senderId = viewerMemberId(viewer);
+  const isTaskPost = Boolean(
+    metadata && typeof metadata === "object" && metadata.task_post,
+  );
 
   // "@everyone" turns the normal per-message notification into an explicit
   // mention so every participant sees they were tagged.
@@ -272,8 +289,10 @@ export async function POST(req: Request) {
     .filter((p: any) => p.team_member_id !== senderId)
     .map((p: any) => ({
       recipient_id: p.team_member_id,
-      kind: mentionsEveryone ? "chat_mention" : "chat_message",
-      title: mentionsEveryone
+      kind: isTaskPost ? "chat_task_post" : mentionsEveryone ? "chat_mention" : "chat_message",
+      title: isTaskPost
+        ? `${senderName} assigned a task · ${threadLabel}`
+        : mentionsEveryone
         ? `${senderName} mentioned everyone · ${threadLabel}`
         : `${senderName} · ${threadLabel}`,
       body: stickerKey ? "Sticker" : body?.slice(0, 120) || "Attachment",
@@ -283,6 +302,90 @@ export async function POST(req: Request) {
       actor_is_admin: viewerIsSuperAdmin(viewer),
     }));
   if (notifRows.length) await db.from("team_notifications").insert(notifRows);
+
+  const recipients = (parts || []).filter(
+    (part: any) => part.team_member_id && part.team_member_id !== senderId,
+  );
+  if (recipients.length && !scheduledFor) {
+    await glashQuery(
+      `insert into public.team_chat_message_receipts
+         (message_id, thread_id, viewer_key, viewer_kind, team_member_id)
+       select $1::uuid, $2::uuid, recipient_id::text, 'team', recipient_id
+         from unnest($3::uuid[]) as recipient_id
+       on conflict (message_id, viewer_key) do nothing`,
+      [msg.id, threadId, recipients.map((part: any) => part.team_member_id)],
+    ).catch(() => undefined);
+
+    const siteUrl = process.env.NEXT_PUBLIC_SITE_URL?.replace(/\/$/, "") || new URL(req.url).origin;
+    const chatUrl = `${siteUrl}/team/chat?thread=${encodeURIComponent(threadId)}`;
+    const summary = stickerKey ? "Sticker" : body?.trim() || "Shared an attachment";
+    const profiles = await glashQuery<{
+      id: string;
+      full_name: string | null;
+      email: string | null;
+    }>(
+      `select id, full_name, email
+         from public.team_members
+        where id = any($1::uuid[]) and is_active = true`,
+      [recipients.map((part: any) => part.team_member_id)],
+    ).catch(() => []);
+    const profileById = new Map(profiles.map((profile) => [profile.id, profile]));
+    // Delivery must not hold up the sender. Email in particular can take
+    // seconds, or stall entirely when the host blocks outbound SMTP, and the
+    // message itself is already saved.
+    void Promise.allSettled(
+      recipients.map(async (part: any) => {
+        const profile = profileById.get(part.team_member_id);
+        const email = String(profile?.email || "").trim();
+        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return;
+        const recipientName = profile?.full_name || "Team member";
+
+        // The device notice is always immediate.
+        void sendPushToActor("team", part.team_member_id, {
+          title: `${senderName} in ${threadLabel}`,
+          body: summary,
+          url: `/team/chat?thread=${threadId}`,
+          tag: `thread-${threadId}`,
+        });
+
+        // Ordinary messages are batched into one summary email, so a busy
+        // thread cannot fill an inbox. Task posts need acknowledgement, so
+        // they still go out on their own, immediately.
+        if (!isTaskPost) {
+          await sendOrHoldNotificationEmail({
+            actorKind: "team",
+            actorId: part.team_member_id,
+            email,
+            name: recipientName,
+            title: `${senderName} in ${threadLabel}`,
+            body: summary,
+            link: `/team/chat?thread=${threadId}`,
+            kind: "chat_message",
+          });
+          return;
+        }
+
+        const subject = isTaskPost
+          ? `Task post in ${threadLabel}`
+          : `New message in ${threadLabel}`;
+        await sendEmail({
+          to: email,
+          subject,
+          fromName: "CDS Space",
+          threadCategory: isTaskPost ? "team-chat-task" : "team-chat-message",
+          text: `${senderName}: ${summary}\n${chatUrl}`,
+          html: brandedEmailHtml(
+            `<h1 style="margin:0 0 14px;color:#0D1B39;font-size:22px;">${escapeHtml(subject)}</h1>
+             <p style="margin:0 0 14px;">Hello ${escapeHtml(recipientName)},</p>
+             <p style="margin:0 0 18px;"><strong>${escapeHtml(senderName)}</strong> ${isTaskPost ? "posted a task that requires your acknowledgement" : "sent a message"} in <strong>${escapeHtml(threadLabel)}</strong>.</p>
+             <div style="margin:0 0 20px;padding:14px;border:1px solid #E8EDF5;border-radius:12px;background:#F8FAFD;color:#0D1B39;">${escapeHtml(summary)}</div>
+             <a href="${escapeHtml(chatUrl)}" style="display:inline-block;border-radius:10px;background:#0A4FE8;padding:12px 20px;color:#FFFFFF;text-decoration:none;font-weight:700;">Open team chat</a>`,
+            { eyebrow: isTaskPost ? "Task post" : "Team chat", preheader: escapeHtml(summary) },
+          ),
+        });
+      }),
+    );
+  }
 
   const [message] = await hydrateTeamMessages([msg]);
 

@@ -3,6 +3,19 @@ import { getTeamSessionFromToken } from "@/lib/team-auth";
 import { adminSessionCookieOptions, signAdminCookie, verifyAdminCookie } from "@/lib/admin-session-cookie";
 import { glashMaybeOne } from "@/lib/glashdb/postgres";
 
+/**
+ * A schema problem is permanent and means what it says; anything else - a
+ * timeout, a dropped connection, a busy database - is a passing condition that
+ * must never be reported as "you are not an admin" or as a dead end.
+ */
+function isTransientDatabaseError(error: unknown) {
+  const code = String((error as { code?: unknown } | null)?.code || "");
+  const permanent = ["42P01", "42703", "42883", "42P02", "22P02"];
+  return !permanent.includes(code);
+}
+
+const RESOLVE_ATTEMPTS = 3;
+
 export interface AdminSession {
   role: "super_admin" | "sub_admin";
   email: string;
@@ -68,13 +81,18 @@ async function refreshSubAdminSession(session: AdminSession): Promise<AdminSessi
         adminRoleName: member.admin_role_name,
       };
     }
-  } catch {
-    // Compatibility fallback for databases that predate roles/role_id.
+  } catch (error) {
+    // Compatibility fallback for databases that predate roles/role_id. A real
+    // database failure is different: the cookie is still valid, so keep the
+    // admin signed in on the permissions it already carries rather than
+    // treating a transient outage as "this person is not an admin".
+    if (isTransientDatabaseError(error)) return { ...session, source: "admin_cookie" };
   }
 
   // Old admin sessions may predate stable team-member IDs. Keep their
   // normalized-email compatibility path, but refresh permissions from the
   // database instead of trusting the stale cookie payload.
+  let legacyFailed = false;
   const legacy = await glashMaybeOne<{
     email: string;
     name: string | null;
@@ -86,7 +104,11 @@ async function refreshSubAdminSession(session: AdminSession): Promise<AdminSessi
         and is_active = true
       limit 1`,
     [session.email],
-  ).catch(() => null);
+  ).catch((error) => {
+    legacyFailed = isTransientDatabaseError(error);
+    return null;
+  });
+  if (legacyFailed) return { ...session, source: "admin_cookie" };
   if (!legacy) return null;
   return {
     ...session,
@@ -176,13 +198,39 @@ export async function getAdminSessionAsync(req: NextRequest): Promise<AdminSessi
 }
 
 export async function GET(req: NextRequest) {
-  let session: AdminSession | null;
-  try {
-    session = await getAdminSessionAsync(req);
-  } catch {
+  let session: AdminSession | null = null;
+  let lastError: unknown = null;
+
+  // The portal handoff used to fail outright on a single database hiccup,
+  // stranding a signed-in admin on "temporarily unavailable" until they
+  // happened to retry at a better moment. Try a few times first.
+  for (let attempt = 0; attempt < RESOLVE_ATTEMPTS; attempt += 1) {
+    try {
+      session = await getAdminSessionAsync(req);
+      lastError = null;
+      break;
+    } catch (error) {
+      lastError = error;
+      if (!isTransientDatabaseError(error) || attempt === RESOLVE_ATTEMPTS - 1) break;
+      await new Promise((resolve) => setTimeout(resolve, 200 * (attempt + 1)));
+    }
+  }
+
+  // Last resort: the signed admin cookie is itself proof of a live session,
+  // so honour it rather than locking someone out of a portal they are signed
+  // in to. Permissions may be a few minutes stale until the database answers.
+  if (!session && lastError) {
+    const cookieOnly = getAdminSession(req);
+    if (cookieOnly) {
+      session = cookieOnly;
+      lastError = null;
+    }
+  }
+
+  if (!session && lastError) {
     return NextResponse.json(
       { authenticated: false, temporarilyUnavailable: true },
-      { status: 503 },
+      { status: 503, headers: { "Retry-After": "2" } },
     );
   }
 

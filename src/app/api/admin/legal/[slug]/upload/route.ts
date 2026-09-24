@@ -3,6 +3,7 @@ import { getAdminSessionAsync } from "@/app/api/admin-check/route";
 import { hasPermission } from "@/lib/admin-permissions";
 import { isLegalSlug } from "@/lib/legal/default-content";
 import { loadLegalDocument, upsertLegalDocument } from "@/lib/legal/server";
+import { assertSafeUpload, UploadSecurityError } from "@/lib/upload-security";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -49,8 +50,16 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ slu
         );
     }
 
-    const arrayBuffer = await file.arrayBuffer();
-    const buffer = Buffer.from(arrayBuffer);
+    let buffer: Buffer;
+    try {
+        const safe = await assertSafeUpload(file as File, { allow: ["office"], maxBytes: MAX_SIZE_BYTES });
+        buffer = safe.buffer;
+    } catch (error) {
+        return NextResponse.json(
+            { error: error instanceof Error ? error.message : "The document could not be security-scanned." },
+            { status: error instanceof UploadSecurityError ? error.status : 400 },
+        );
+    }
 
     // mammoth is pure JS and runs on the Node runtime.
     // eslint-disable-next-line @typescript-eslint/no-explicit-any

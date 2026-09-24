@@ -3,6 +3,7 @@ import { verifyUser } from "@/lib/admin-auth";
 import { getClientChatAdminActor } from "@/lib/client-chat-admin";
 import { supabaseAdmin } from "@/lib/supabase";
 import { dealTagsForEmails, type DealClientTag } from "@/lib/deal-client-tags";
+import { glashQuery } from "@/lib/glashdb/postgres";
 
 export const dynamic = "force-dynamic";
 
@@ -12,7 +13,15 @@ type RoomRow = {
   lastMessageAt: string;
   unreadCount: number;
   source: string;
-  client?: { id: string; email: string; full_name: string | null; avatar_url: string | null } | null;
+  client?: {
+    id: string;
+    email: string;
+    full_name: string | null;
+    avatar_url: string | null;
+    brand_name?: string | null;
+    birthday?: string | null;
+    manual_client_id?: string | null;
+  } | null;
   whatsapp?: { phone: string; display_name: string | null; wa_name: string | null; linked_client_id: string | null } | null;
   meta?: { platform: "facebook" | "instagram"; external_user_id: string; display_name: string | null; username: string | null; linked_client_id: string | null } | null;
   /** Admin-only. Never returned on the client branch below. */
@@ -132,10 +141,51 @@ export async function GET() {
         ((extraProfiles || []) as ClientProfileLite[]).forEach((profile) => profileMap.set(profile.id, profile));
       }
 
+      // Birthday and CRM identity live in the unified client directory rather
+      // than the authentication profile. Keep this enrichment on the admin
+      // branch so a client never receives another client's private metadata.
+      const profileIds = Array.from(profileMap.keys());
+      const profileEmails = Array.from(profileMap.values())
+        .map((profile) => String(profile.email || "").trim().toLowerCase())
+        .filter(Boolean);
+      let crmByProfile = new Map<string, { id: string; brand_name: string | null; birthday: string | null }>();
+      let crmByEmail = new Map<string, { id: string; brand_name: string | null; birthday: string | null }>();
+      try {
+        const crmClients = await glashQuery<{
+          id: string;
+          platform_user_id: string | null;
+          email: string | null;
+          brand_name: string | null;
+          birthday: string | null;
+        }>(
+          `select id, platform_user_id, email, brand_name, birthday
+             from public.clients
+            where (cardinality($1::uuid[]) > 0 and platform_user_id = any($1::uuid[]))
+               or (cardinality($2::text[]) > 0 and lower(trim(coalesce(email, ''))) = any($2::text[]))`,
+          [profileIds, profileEmails],
+        );
+        crmByProfile = new Map(crmClients.filter((client) => client.platform_user_id).map((client) => [client.platform_user_id!, client]));
+        crmByEmail = new Map(crmClients.filter((client) => client.email).map((client) => [client.email!.trim().toLowerCase(), client]));
+      } catch {
+        // CRM enrichment is helpful context, but it must never take the inbox
+        // down if the directory is temporarily unavailable.
+      }
+
+      const enrichedProfile = (profile: ClientProfileLite | null | undefined) => {
+        if (!profile) return null;
+        const crm = crmByProfile.get(profile.id) || crmByEmail.get(String(profile.email || "").trim().toLowerCase());
+        return {
+          ...profile,
+          brand_name: crm?.brand_name || null,
+          birthday: crm?.birthday ? String(crm.birthday).slice(0, 10) : null,
+          manual_client_id: crm?.id || null,
+        };
+      };
+
       const hydrated = rooms.map<RoomRow>((room) => {
         if (room.roomId.startsWith("client_")) {
           const id = room.roomId.slice("client_".length);
-          return { ...room, client: profileMap.get(id) || null };
+          return { ...room, client: enrichedProfile(profileMap.get(id)) };
         }
         if (room.roomId.startsWith("whatsapp_")) {
           const phone = room.roomId.slice("whatsapp_".length);
@@ -145,7 +195,7 @@ export async function GET() {
             whatsapp: c
               ? { phone, display_name: c.display_name, wa_name: c.wa_name, linked_client_id: c.client_id }
               : { phone, display_name: null, wa_name: null, linked_client_id: null },
-            client: c?.client_id ? profileMap.get(c.client_id) || null : null,
+            client: c?.client_id ? enrichedProfile(profileMap.get(c.client_id)) : null,
           };
         }
         if (room.roomId.startsWith("facebook_") || room.roomId.startsWith("instagram_")) {
@@ -161,7 +211,7 @@ export async function GET() {
               username: c?.username ?? null,
               linked_client_id: c?.client_id ?? null,
             },
-            client: c?.client_id ? profileMap.get(c.client_id) || null : null,
+            client: c?.client_id ? enrichedProfile(profileMap.get(c.client_id)) : null,
           };
         }
         return room;

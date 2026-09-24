@@ -3,6 +3,11 @@
 import { useEffect, useState, useRef, useCallback, useMemo } from "react";
 import Link from "next/link";
 import { Bell, Check, Loader2 } from "lucide-react";
+import { useNotificationPulse } from "@/hooks/use-notification-pulse";
+import {
+  announcePlatformNotification,
+  enablePlatformNotifications,
+} from "@/lib/platform-notification-client";
 
 interface Notification {
   id: string;
@@ -56,12 +61,6 @@ export function NotificationBell() {
   const prevUnreadCount = useRef<number>(0);
   const isFirstLoad = useRef<boolean>(true);
 
-  const playNotificationSound = useCallback(() => {
-    const audio = new Audio("/special-notification.mp3");
-    audio.volume = 0.7; // Team members get a special volume
-    audio.play().catch((err) => console.log("Audio playback failed:", err));
-  }, []);
-
   useEffect(() => {
     if (!open) return;
     const closeOnOutside = (event: PointerEvent) => {
@@ -83,7 +82,12 @@ export function NotificationBell() {
         const newUnreadCount = newItems.filter((n: Notification) => !n.read_at).length;
         
         if (!isFirstLoad.current && newUnreadCount > prevUnreadCount.current) {
-          playNotificationSound();
+          const newest = newItems.find((item: Notification) => !item.read_at);
+          announcePlatformNotification({
+            title: newest?.title || "CDS Space",
+            body: newest?.body || "You have a new team update.",
+            volume: 0.75,
+          });
         }
         
         prevUnreadCount.current = newUnreadCount;
@@ -93,13 +97,12 @@ export function NotificationBell() {
     } finally {
       setLoading(false);
     }
-  }, [playNotificationSound]);
+  }, []);
 
   useEffect(() => {
     fetchNotifications();
-    const t = setInterval(() => { if (!document.hidden) fetchNotifications(); }, 30_000);
-    return () => clearInterval(t);
   }, [fetchNotifications]);
+  useNotificationPulse("team", fetchNotifications);
 
   const unread = items.filter((n) => !n.read_at);
   const groups = useMemo(() => groupNotifications(items), [items]);
@@ -140,7 +143,10 @@ export function NotificationBell() {
   return (
     <div ref={containerRef} className="relative">
       <button
-        onClick={() => setOpen((o) => !o)}
+        onClick={() => {
+          void enablePlatformNotifications();
+          setOpen((o) => !o);
+        }}
         className="relative p-2 rounded-xl bg-white border border-brand-stroke/40 text-brand-navy hover:border-brand-blue/40 hover:text-brand-blue transition"
         aria-label="Notifications"
       >

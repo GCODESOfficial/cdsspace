@@ -2,7 +2,7 @@
 import { NextResponse } from "next/server";
 import { getClientChatContext, getClientProjectThread } from "@/lib/client-project-chat";
 import { validateChatUpload } from "@/lib/chat-upload-limits";
-import { assertCleanBuffer } from "@/lib/upload-security";
+import { assertSafeUpload, UploadSecurityError } from "@/lib/upload-security";
 
 export const runtime = "nodejs";
 
@@ -27,14 +27,16 @@ export async function POST(req: Request) {
     const check = validateChatUpload(file.size, file.type || "");
     if (!check.ok) return NextResponse.json({ ok: false, error: check.error }, { status: 413 });
 
-    const buffer = Buffer.from(await file.arrayBuffer());
-    assertCleanBuffer(buffer);
-    const rawExt = file.name.includes(".") ? file.name.split(".").pop() : "bin";
-    const ext = String(rawExt || "bin").replace(/[^a-z0-9]/gi, "").slice(0, 10) || "bin";
-    const path = `chat-attachments/client-${context.account.user.id}/${crypto.randomUUID()}.${ext}`;
+    const safe = await assertSafeUpload(file, { allow: ["image", "pdf", "office", "zip", "design"], maxBytes: 50 * 1024 * 1024 });
+    if ((check.kind === "image" && safe.kind !== "image")
+      || (check.kind === "video" && !safe.contentType.startsWith("video/"))
+      || (check.kind === "other" && (safe.kind === "image" || safe.contentType.startsWith("video/")))) {
+      throw new UploadSecurityError("The file contents do not match the selected attachment type.");
+    }
+    const path = `chat-attachments/client-${context.account.user.id}/${crypto.randomUUID()}.${safe.ext}`;
 
-    const { error } = await context.db.storage.from("media").upload(path, buffer, {
-      contentType: file.type || "application/octet-stream",
+    const { error } = await context.db.storage.from("media").upload(path, safe.buffer, {
+      contentType: safe.contentType,
       upsert: false,
     });
     if (error) throw error;
@@ -44,12 +46,11 @@ export async function POST(req: Request) {
       ok: true,
       publicUrl: data.publicUrl,
       fileName: file.name,
-      fileSizeBytes: file.size,
-      mimeType: file.type || "application/octet-stream",
+      fileSizeBytes: safe.buffer.length,
+      mimeType: safe.contentType,
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Upload failed";
-    return NextResponse.json({ ok: false, error: message }, { status: 500 });
+    return NextResponse.json({ ok: false, error: message }, { status: error instanceof UploadSecurityError ? error.status : 500 });
   }
 }
-

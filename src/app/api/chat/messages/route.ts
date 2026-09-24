@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { deliverClientNotificationById } from "@/lib/notification-delivery";
 import { verifyUser } from "@/lib/admin-auth";
 import { getClientChatAdminActor } from "@/lib/client-chat-admin";
 import { supabaseAdmin } from "@/lib/supabase";
@@ -232,13 +233,15 @@ export async function POST(request: Request) {
       // Internal: notify client
       const clientUserId = roomId.slice("client_".length);
       if (isLegacyClientUuid(clientUserId)) {
-        const { error: notificationError } = await supabaseAdmin.from("notifications").insert({
+        const { data: raisedNotice, error: notificationError } = await supabaseAdmin.from("notifications").insert({
           user_id: clientUserId,
           type: "new_message",
           title: "New message from admin",
           message: message.length > 100 ? message.substring(0, 100) + "..." : message,
           link: "/dashboard/messages",
-        });
+        }).select("id").single();
+        // Straight out to the device and inbox, rather than waiting for the sweep.
+        if (raisedNotice?.id) void deliverClientNotificationById(String(raisedNotice.id));
         if (notificationError) {
           console.error("Client chat notification failed:", notificationError.message);
         }
@@ -252,13 +255,14 @@ export async function POST(request: Request) {
         .eq("email", adminEmail)
         .maybeSingle();
       if (adminProfile?.id && isLegacyClientUuid(adminProfile.id)) {
-        const { error: notificationError } = await supabaseAdmin.from("notifications").insert({
+        const { data: raisedNotice, error: notificationError } = await supabaseAdmin.from("notifications").insert({
           user_id: adminProfile.id,
           type: "new_message",
           title: "New message from client",
           message: message.length > 100 ? message.substring(0, 100) + "..." : message,
           link: `/chat?room=${roomId}`,
-        });
+        }).select("id").single();
+        if (raisedNotice?.id) void deliverClientNotificationById(String(raisedNotice.id));
         if (notificationError) {
           console.error("Admin chat notification failed:", notificationError.message);
         }

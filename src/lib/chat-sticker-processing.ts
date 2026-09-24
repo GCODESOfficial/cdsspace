@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
 import ffmpegStatic from "ffmpeg-static";
-import { assertCleanBuffer } from "@/lib/upload-security";
+import { assertSecureBuffer } from "@/lib/upload-security";
 
 const execFileAsync = promisify(execFile);
 
@@ -42,7 +42,7 @@ export async function videoToGifSticker(file: File) {
   }
 
   const input = Buffer.from(await file.arrayBuffer());
-  assertCleanBuffer(input);
+  await assertSecureBuffer(input, { fileName: file.name });
   const workDir = await mkdtemp(path.join(tmpdir(), "cds-sticker-"));
   const inputPath = path.join(workDir, "source-video");
   const outputPath = path.join(workDir, "sticker.gif");

@@ -1,20 +1,37 @@
 import { NextRequest, NextResponse } from "next/server";
 import { v4 as uuidv4 } from "uuid";
 import { getSupabaseAdmin } from "@/lib/supabase";
-import { assertCleanBuffer } from "@/lib/upload-security";
+import { assertSafeUpload, UploadSecurityError } from "@/lib/upload-security";
+import { consumeSecurityRateLimit } from "@/lib/client-login-security";
+import { SECURE_FORM_UPLOAD_BUCKET, secureFormUploadUrl } from "@/lib/secure-form-uploads";
 import { ADMIN_FEATURE_PERMISSION_KEYS, notifyAdminFeatureEvent } from "@/lib/admin-feature-notifications";
 import { queueAdminAlert } from "@/lib/admin-alerts";
 
 export async function POST(req: NextRequest) {
   try {
+    const requestBytes = Number(req.headers.get("content-length") || 0);
+    if (requestBytes > 30 * 1024 * 1024) {
+      return NextResponse.json({ error: "The consultation request is too large." }, { status: 413 });
+    }
+    const network = (req.headers.get("cf-connecting-ip") || req.headers.get("x-forwarded-for") || "unknown")
+      .split(",")[0].trim().slice(0, 96);
+    if (await consumeSecurityRateLimit({
+      bucket: "public-consultation",
+      identifier: network,
+      limit: 5,
+      windowSeconds: 60 * 60,
+      blockSeconds: 60 * 60,
+    })) {
+      return NextResponse.json({ error: "Too many consultation requests. Please try again later." }, { status: 429 });
+    }
     const form = await req.formData();
-    const full_name = String(form.get("full_name") || "").trim();
-    const email = String(form.get("email") || "").trim();
-    const company = String(form.get("company") || "").trim() || null;
-    const message = String(form.get("message") || "").trim() || null;
-    const how_heard = String(form.get("how_heard") || "").trim() || null;
-    const whatsapp = String(form.get("whatsapp") || "").trim() || null;
-    const location = String(form.get("location") || "").trim() || null;
+    const full_name = String(form.get("full_name") || "").trim().slice(0, 160);
+    const email = String(form.get("email") || "").trim().slice(0, 320);
+    const company = String(form.get("company") || "").trim().slice(0, 200) || null;
+    const message = String(form.get("message") || "").trim().slice(0, 12_000) || null;
+    const how_heard = String(form.get("how_heard") || "").trim().slice(0, 200) || null;
+    const whatsapp = String(form.get("whatsapp") || "").trim().slice(0, 80) || null;
+    const location = String(form.get("location") || "").trim().slice(0, 200) || null;
     // Present only when the visitor arrived from the Kickoff Meet button on a
     // proposal link. Never trusted as-is: it is looked up before it is stored.
     const proposalTokenRaw = String(form.get("proposal_token") || "").trim();
@@ -60,23 +77,28 @@ export async function POST(req: NextRequest) {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const storage = (sb as any).storage;
 
-    // Upload any attached files to the public consultation-uploads bucket
+    // Store attachments privately; admins open them through the permission-
+    // checked form-upload route rather than a permanent public object URL.
     const files = form.getAll("files") as File[];
+    const actualFiles = files.filter((file) => file instanceof File && file.size > 0);
+    if (actualFiles.length > 5 || actualFiles.some((file) => file.size > 10 * 1024 * 1024)
+      || actualFiles.reduce((total, file) => total + file.size, 0) > 25 * 1024 * 1024) {
+      return NextResponse.json({ error: "Attach up to five files, 10MB each and 25MB combined." }, { status: 413 });
+    }
     const file_urls: string[] = [];
-    for (const file of files) {
-      if (!(file instanceof File) || file.size === 0) continue;
-      const ext = file.name.split(".").pop() || "bin";
-      const path = `${new Date().toISOString().slice(0, 10)}/${uuidv4()}.${ext}`;
-      const buffer = Buffer.from(await file.arrayBuffer());
-      // Public form: silently drop any attachment that looks like an executable.
-      try { assertCleanBuffer(buffer); } catch { continue; }
-      const { error: upErr } = await storage.from("consultation-uploads").upload(path, buffer, {
-        contentType: file.type || "application/octet-stream",
+    for (const file of actualFiles) {
+      const safe = await assertSafeUpload(file, {
+        allow: ["image", "pdf", "office", "zip", "design"],
+        maxBytes: 10 * 1024 * 1024,
+        imageMaxDimension: 12_000,
+      });
+      const path = `consultations/${new Date().toISOString().slice(0, 10)}/${uuidv4()}.${safe.ext}`;
+      const { error: upErr } = await storage.from(SECURE_FORM_UPLOAD_BUCKET).upload(path, safe.buffer, {
+        contentType: safe.contentType,
         upsert: false,
       });
       if (upErr) continue;
-      const { data } = storage.from("consultation-uploads").getPublicUrl(path);
-      file_urls.push(data.publicUrl);
+      file_urls.push(secureFormUploadUrl("consultations", path));
     }
 
     // Resolve the proposal before storing it, so a forged or stale token simply
@@ -156,6 +178,9 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({ ok: true });
   } catch (e) {
-    return NextResponse.json({ error: (e as Error).message }, { status: 500 });
+    return NextResponse.json(
+      { error: (e as Error).message },
+      { status: e instanceof UploadSecurityError ? e.status : 500 },
+    );
   }
 }

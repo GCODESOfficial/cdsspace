@@ -2,6 +2,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { appConfirm } from "@/lib/app-notify";
 import {
   BedDouble,
   BookOpen,
@@ -456,7 +457,7 @@ export default function TeamCompliancePortal() {
   }
 
   async function deleteMedia(media: any) {
-    if (!window.confirm(`Remove ${media.file_name}?`)) return;
+    if (!(await appConfirm(`Remove ${media.file_name}?`))) return;
     setBusy("media-delete");
     try {
       await post({ action: "delete_media", id: media.id });

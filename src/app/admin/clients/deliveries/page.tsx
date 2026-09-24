@@ -37,6 +37,7 @@ import {
 } from "@/lib/client-deliveries";
 import { absolutePublicUrl } from "@/lib/public-site";
 import { publicDeliveryPath } from "@/lib/delivery-links";
+import { appConfirm } from "@/lib/app-notify";
 
 interface Delivery {
   id: string;
@@ -166,6 +167,7 @@ export default function ClientDeliveriesPage() {
 
   const formSectionRef = useRef<HTMLDivElement | null>(null);
   const coverInputRef = useRef<HTMLInputElement | null>(null);
+  const chatContextAppliedRef = useRef(false);
 
   useEffect(() => () => {
     if (coverPreviewUrl) URL.revokeObjectURL(coverPreviewUrl);
@@ -199,6 +201,31 @@ export default function ClientDeliveriesPage() {
     })),
     [data?.clients],
   );
+
+  // Admin client chat deep-links here with the active client. Preserve the
+  // normal delivery workflow, but remove the repeated recipient search.
+  useEffect(() => {
+    if (!data || chatContextAppliedRef.current) return;
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("action") !== "delivery") return;
+    chatContextAppliedRef.current = true;
+    const platformId = params.get("client") || "";
+    const email = (params.get("email") || "").trim().toLowerCase();
+    const client = data.clients.find((candidate) =>
+      (platformId && candidate.platform_user_id === platformId)
+      || (email && candidate.email?.trim().toLowerCase() === email),
+    );
+    if (!client) {
+      setNotice({ tone: "error", text: "The client from chat could not be matched. Choose the receiving client below." });
+      return;
+    }
+    const reference = clientReference(client);
+    setRecipient(reference);
+    setExtraRecipients([]);
+    setNewProjectClient(reference);
+    setNotice({ tone: "ok", text: `${clientName(client)} is selected. Add the finished work and send when it is ready.` });
+    window.setTimeout(() => formSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 80);
+  }, [data]);
 
   const recipientValues = useMemo(
     () => [recipient, ...extraRecipients].filter(Boolean),
@@ -325,7 +352,7 @@ export default function ClientDeliveriesPage() {
   }
 
   async function deleteDraft(delivery: Delivery) {
-    if (!window.confirm(`Delete the saved draft “${delivery.title}”? Its uploaded draft files will also be removed.`)) return;
+    if (!(await appConfirm({ title: "Delete saved draft?", message: `Delete the saved draft “${delivery.title}”? Its uploaded draft files will also be removed.`, confirmLabel: "Delete draft", destructive: true }))) return;
     setDeletingDraftId(delivery.id);
     setNotice(null);
     const response = await fetch(`/api/admin/clients/deliveries?id=${encodeURIComponent(delivery.id)}`, {
@@ -366,9 +393,9 @@ export default function ClientDeliveriesPage() {
         return;
       }
     }
-    if (removedFileIds.length && !window.confirm(
+    if (removedFileIds.length && !(await appConfirm(
       `Remove ${removedFileIds.length} attached file${removedFileIds.length === 1 ? "" : "s"} from this delivery? Clients will no longer be able to access ${removedFileIds.length === 1 ? "it" : "them"} after you save.`,
-    )) return;
+    ))) return;
 
     setSavingIntent(intent);
     setNotice(null);
@@ -621,7 +648,7 @@ export default function ClientDeliveriesPage() {
     const message = action === "archive"
       ? `Archive “${delivery.title}”? It will be removed from the client account and its public link will stop working. No files will be deleted.`
       : `Restore “${delivery.title}” to the client account?`;
-    if (!window.confirm(message)) return;
+    if (!(await appConfirm(message))) return;
     setChangingArchiveId(delivery.id);
     setNotice(null);
     const response = await fetch("/api/admin/clients/deliveries", {

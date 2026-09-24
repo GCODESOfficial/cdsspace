@@ -28,7 +28,7 @@ interface Member {
 
 const RETRYABLE_SESSION_STATUSES = new Set([408, 425, 429, 500, 502, 503, 504]);
 
-async function fetchPortalSession(input: RequestInfo | URL, init?: RequestInit, attempts = 3) {
+async function fetchPortalSession(input: RequestInfo | URL, init?: RequestInit, attempts = 4) {
   let response: Response | null = null;
   for (let attempt = 0; attempt < attempts; attempt += 1) {
     try {
@@ -141,11 +141,28 @@ function TeamLayoutInner({ children }: { children: React.ReactNode }) {
   }, [isInvitePage, isLoginPage, loadSession]);
 
   const handleLogout = useCallback(async () => {
-    await fetch("/api/team/logout", { method: "POST", credentials: "include" });
-    router.replace("/team/login");
+    await fetch("/api/team/logout", { method: "POST", credentials: "include" }).catch(() => null);
+    // A full page load, not a client-side route change: the cookies this app
+    // was rendered with are gone, so the router would be navigating with a
+    // session that no longer exists.
+    window.location.replace("/team/login");
   }, [router]);
 
   if (isLoginPage || isInvitePage) return <>{children}</>;
+
+  // Keep trying on the user's behalf while they look at the screen.
+  useEffect(() => {
+    if (!sessionUnavailable) return;
+    const retry = window.setInterval(() => { void loadSession(); }, 4_000);
+    const onVisible = () => { if (!document.hidden) void loadSession(); };
+    document.addEventListener("visibilitychange", onVisible);
+    window.addEventListener("online", onVisible);
+    return () => {
+      window.clearInterval(retry);
+      document.removeEventListener("visibilitychange", onVisible);
+      window.removeEventListener("online", onVisible);
+    };
+  }, [sessionUnavailable, loadSession]);
 
   if (checking && !member) {
     return (
@@ -161,14 +178,14 @@ function TeamLayoutInner({ children }: { children: React.ReactNode }) {
         <div className="w-full max-w-sm rounded-2xl border border-brand-stroke bg-white p-6 text-center shadow-sm">
           <h1 className="text-lg font-semibold text-brand-navy">Team portal temporarily unavailable</h1>
           <p className="mt-2 text-sm leading-6 text-brand-body/70">
-            Your session is still active. Try the secure portal handoff again.
+            Your session is still active and we are reconnecting automatically.
           </p>
           <button
             type="button"
             onClick={() => void loadSession()}
             className="mt-5 min-h-11 rounded-xl bg-[#0A4FE8] px-5 text-sm font-semibold text-white transition hover:bg-[#083FC0]"
           >
-            Try again
+            Try now
           </button>
         </div>
       </div>

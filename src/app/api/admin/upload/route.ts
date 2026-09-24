@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAdminSession } from "@/lib/admin-session";
 import { getSupabaseAdmin } from "@/lib/supabase";
-import { assertCleanBuffer, UploadSecurityError } from "@/lib/upload-security";
+import { assertSafeUpload, UploadSecurityError } from "@/lib/upload-security";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -37,21 +37,28 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: false, error: "File is too large (max 25MB)." }, { status: 400 });
   }
 
-  const ext = (file.name.split(".").pop() || "bin").toLowerCase().replace(/[^a-z0-9]/g, "") || "bin";
-  const path = `${folder || "uploads"}/${crypto.randomUUID()}.${ext}`;
-  const buffer = Buffer.from(await file.arrayBuffer());
+  let safe: Awaited<ReturnType<typeof assertSafeUpload>>;
   try {
-    assertCleanBuffer(buffer);
+    safe = await assertSafeUpload(file, {
+      allow: ["image", "design"],
+      maxBytes: MAX_BYTES,
+      imageMaxDimension: 12_000,
+    });
+    const expectedMedia = mime.startsWith("image/") ? "image/" : "video/";
+    if (!safe.contentType.startsWith(expectedMedia)) {
+      throw new UploadSecurityError("The file contents do not match the selected media type.");
+    }
   } catch (e) {
     if (e instanceof UploadSecurityError) return NextResponse.json({ ok: false, error: e.message }, { status: e.status });
     throw e;
   }
+  const path = `${folder || "uploads"}/${crypto.randomUUID()}.${safe.ext}`;
 
   const { error } = await storage.storage
     .from("media")
-    .upload(path, buffer, { contentType: mime, upsert: false });
+    .upload(path, safe.buffer, { contentType: safe.contentType, upsert: false });
   if (error) return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
 
   const { data } = storage.storage.from("media").getPublicUrl(path);
-  return NextResponse.json({ ok: true, url: data.publicUrl, file_name: file.name, mime_type: mime, size_bytes: file.size });
+  return NextResponse.json({ ok: true, url: data.publicUrl, file_name: file.name, mime_type: safe.contentType, size_bytes: safe.buffer.length });
 }

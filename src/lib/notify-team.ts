@@ -8,6 +8,7 @@
  *   payroll, cmeet_invite, doc_shared, sub_admin_granted, project_assigned
  */
 import { glashQuery } from "@/lib/glashdb/postgres";
+import { deliverTeamNotificationsOutside } from "@/lib/notification-delivery";
 
 export interface NotifyInput {
     recipient_id: string;
@@ -44,6 +45,7 @@ export async function notifyTeamMember(input: NotifyInput): Promise<void> {
                 input.work_id ?? null,
             ],
         );
+        void deliverTeamNotificationsOutside([input]);
     } catch (err) {
         console.error("[notify-team] insert failed:", err);
     }
@@ -75,6 +77,7 @@ export async function notifyMany(inputs: NotifyInput[]): Promise<void> {
                 inputs.map((input) => input.work_id ? Number(input.work_id) : null),
             ],
         );
+        void deliverTeamNotificationsOutside(inputs);
     } catch (err) {
         console.error("[notify-team] bulk insert failed:", err);
     }

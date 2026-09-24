@@ -204,6 +204,41 @@ export async function ensureClientProfile(user: User): Promise<ClientProfile> {
   return profile;
 }
 
+/**
+ * A schema fault is a real answer; a timeout or dropped connection is not.
+ * Treating the second as "this account does not exist" is what turned a
+ * passing database hiccup into a client being signed out or shown a 500.
+ */
+function isTransientAccountError(error: unknown) {
+  const code = String((error as { code?: unknown } | null)?.code || "");
+  return !["42P01", "42703", "42883", "22P02"].includes(code);
+}
+
+export type ClientAccountLoad =
+  | { status: "ok"; state: ClientAccountState }
+  | { status: "signed_out" }
+  | { status: "unavailable" };
+
+/**
+ * The dashboard entry point. Distinguishes "not signed in" from "we could not
+ * reach the database just now", so an outage no longer logs a client out.
+ */
+export async function loadClientAccountState(attempts = 3): Promise<ClientAccountLoad> {
+  let lastError: unknown = null;
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    try {
+      const state = await getClientAccountState();
+      return state ? { status: "ok", state } : { status: "signed_out" };
+    } catch (error) {
+      lastError = error;
+      if (!isTransientAccountError(error) || attempt === attempts - 1) break;
+      await new Promise((resolve) => setTimeout(resolve, 200 * (attempt + 1)));
+    }
+  }
+  console.error("[client-account] account state unavailable", lastError);
+  return { status: "unavailable" };
+}
+
 export async function getClientAccountState(): Promise<ClientAccountState | null> {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const db = (await createClient()) as any;
