@@ -6,7 +6,13 @@ import jsPDF from "jspdf";
 import { installBrandFont } from "@/lib/pdf/pdf-fonts";
 import { DEFAULT_CDOC_THEME, normalizeCDocTheme, type CDocTheme } from "@/lib/cdocs-theme";
 import { parseCDocBody, type CDocSpan } from "@/lib/cdocs-markdown";
-import { isHtmlBody, parseRichHtmlToBlocks, hexToRgb, type RichBlock } from "@/lib/cdocs-html";
+import {
+  isHtmlBody,
+  parseRichHtmlToBlocks,
+  hexToRgb,
+  type RichAlignment,
+  type RichBlock,
+} from "@/lib/cdocs-html";
 
 export type CDocPdfOptions = {
   title: string;
@@ -269,12 +275,12 @@ export async function exportCDocToPdf(opts: CDocPdfOptions) {
   } else {
     /* ------------------- Rich-HTML block rendering ------------------- */
     const drawRichSpans = (
-      spans: { text: string; bold?: boolean; italic?: boolean; underline?: boolean; color?: string }[],
-      opts2: { size: number; bold?: boolean; lineGap: number; align?: "left" | "center" | "right"; indent?: number }
+      spans: { text: string; bold?: boolean; italic?: boolean; underline?: boolean; color?: string; fontSize?: number }[],
+      opts2: { size: number; bold?: boolean; lineGap: number; align?: RichAlignment; indent?: number }
     ) => {
       doc.setFontSize(opts2.size);
       const fontName = (doc as any).getFont?.()?.fontName || "helvetica";
-      type SC = { ch: string; bold: boolean; italic: boolean; underline: boolean; color?: readonly [number, number, number] };
+      type SC = { ch: string; bold: boolean; italic: boolean; underline: boolean; color?: readonly [number, number, number]; size: number };
       const chars: SC[] = [];
       for (const s of spans) {
         const bold = !!s.bold || !!opts2.bold;
@@ -282,7 +288,7 @@ export async function exportCDocToPdf(opts: CDocPdfOptions) {
         const underline = !!s.underline;
         const color = s.color ? (hexToRgb(s.color) as readonly [number, number, number]) : undefined;
         // Preserve explicit newlines (<br>)
-        for (const ch of s.text.replace(/\r\n/g, "\n")) chars.push({ ch, bold, italic, underline, color });
+        for (const ch of s.text.replace(/\r\n/g, "\n")) chars.push({ ch, bold, italic, underline, color, size: s.fontSize || opts2.size });
       }
 
       const indent = opts2.indent ?? 0;
@@ -295,6 +301,7 @@ export async function exportCDocToPdf(opts: CDocPdfOptions) {
         for (const c of l) {
           const style = c.bold && c.italic ? "bolditalic" : c.bold ? "bold" : c.italic ? "italic" : "normal";
           doc.setFont(fontName, style);
+          doc.setFontSize(c.size);
           acc += doc.getTextWidth(c.ch);
         }
         return acc;
@@ -329,10 +336,14 @@ export async function exportCDocToPdf(opts: CDocPdfOptions) {
         let startX = MARGIN_X + indent;
         if (opts2.align === "center") startX = MARGIN_X + indent + (innerMax - lineW) / 2;
         else if (opts2.align === "right") startX = MARGIN_X + indent + (innerMax - lineW);
+        const spaces = lineArr.filter((char) => char.ch === " ").length;
+        const justify = opts2.align === "justify" && lineArr !== wrapped[wrapped.length - 1] && spaces > 0;
+        const extraSpace = justify ? Math.max(0, innerMax - lineW) / spaces : 0;
         let x = startX;
         for (const c of lineArr) {
           const style = c.bold && c.italic ? "bolditalic" : c.bold ? "bold" : c.italic ? "italic" : "normal";
           doc.setFont(fontName, style);
+          doc.setFontSize(c.size);
           if (c.color) setText(c.color); else setText(palette.body);
           doc.text(c.ch, x, y);
           const wch = doc.getTextWidth(c.ch);
@@ -341,7 +352,7 @@ export async function exportCDocToPdf(opts: CDocPdfOptions) {
             doc.setLineWidth(0.2);
             doc.line(x, y + 0.6, x + wch, y + 0.6);
           }
-          x += wch;
+          x += wch + (c.ch === " " ? extraSpace : 0);
         }
         y += opts2.lineGap;
       }
@@ -388,6 +399,11 @@ export async function exportCDocToPdf(opts: CDocPdfOptions) {
         drawRichSpans(block.spans, { size: 13, bold: true, lineGap: 6.8, align: block.align });
         y += 1; continue;
       }
+      if (block.kind === "h3") {
+        y += 1;
+        drawRichSpans(block.spans, { size: 11.5, bold: true, lineGap: 6.2, align: block.align });
+        y += 1; continue;
+      }
       if (block.kind === "bullet") {
         ensureSpace(LINE_HEIGHT);
         doc.setFontSize(10); setText(palette.body);
@@ -400,6 +416,20 @@ export async function exportCDocToPdf(opts: CDocPdfOptions) {
         doc.setFontSize(10); setText(palette.body);
         doc.text(`${block.index}.`, MARGIN_X + 1, y);
         drawRichSpans(block.spans, { size: 10, lineGap: LINE_HEIGHT, indent: 7 });
+        continue;
+      }
+      if (block.kind === "blockquote") {
+        ensureSpace(LINE_HEIGHT);
+        setDraw([10, 79, 232]);
+        doc.setLineWidth(0.7);
+        doc.line(MARGIN_X + 1, y - 3.5, MARGIN_X + 1, y + 3.5);
+        drawRichSpans(block.spans, { size: 10, lineGap: LINE_HEIGHT, align: block.align, indent: 6 });
+        y += 1;
+        continue;
+      }
+      if (block.kind === "pre") {
+        drawRichSpans(block.spans, { size: 9.5, lineGap: LINE_HEIGHT, align: block.align, indent: 4 });
+        y += 2;
         continue;
       }
       // paragraph

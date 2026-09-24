@@ -1,7 +1,12 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
 import jsPDF from "jspdf";
-import { parseRichHtmlToBlocks } from "@/lib/cdocs-html";
+import {
+  hexToRgb,
+  parseRichHtmlToBlocks,
+  type RichAlignment,
+  type RichSpan,
+} from "@/lib/cdocs-html";
 import { installBrandFont } from "@/lib/pdf/pdf-fonts";
 
 export type LetterheadPdfOptions = {
@@ -59,10 +64,6 @@ async function loadImage(url: string): Promise<ImageAsset | null> {
   return asset;
 }
 
-function plainText(spans: Array<{ text: string }>) {
-  return spans.map((span) => span.text).join("").replace(/\u00a0/g, " ");
-}
-
 export async function buildLetterheadPdf(
   options: LetterheadPdfOptions,
   { includeSignature = true }: { includeSignature?: boolean } = {},
@@ -76,7 +77,8 @@ export async function buildLetterheadPdf(
   const top = 38;
   const bottom = 22;
   const maxWidth = pageWidth - (marginX * 2);
-  const lineHeight = 5.6;
+  const bodySize = 10.9;
+  const bodyLineHeight = 6.5;
   const [firstBackground, secondBackground, signature] = await Promise.all([
     options.firstPageUrl ? loadImage(options.firstPageUrl) : Promise.resolve(null),
     options.hasSecondPage && options.secondPageUrl ? loadImage(options.secondPageUrl) : Promise.resolve(null),
@@ -105,36 +107,180 @@ export async function buildLetterheadPdf(
     if (y + height > pageHeight - bottom) addPage();
   }
 
-  function drawText(text: string, size = 10, style: "normal" | "bold" | "italic" = "normal", indent = 0, prefix = "") {
-    doc.setFontSize(size);
-    const fontName = (doc as any).getFont?.()?.fontName || "helvetica";
-    doc.setFont(fontName, style);
-    doc.setTextColor(25, 32, 48);
-    const usable = maxWidth - indent;
-    const lines = doc.splitTextToSize(`${prefix}${text}`, usable) as string[];
-    for (const line of lines) {
-      ensureSpace(lineHeight + Math.max(0, size - 10) * 0.25);
-      doc.text(line, marginX + indent, y);
-      y += lineHeight + Math.max(0, size - 10) * 0.25;
+  function addVerticalSpace(height: number) {
+    // Spacing alone must never create an empty trailing page. The next
+    // rendered line/image performs the page-boundary check and starts cleanly
+    // on the continuation page when needed.
+    y += height;
+  }
+
+  type StyledChar = {
+    ch: string;
+    bold: boolean;
+    italic: boolean;
+    underline: boolean;
+    color?: readonly [number, number, number];
+    size: number;
+  };
+
+  function fontStyle(char: StyledChar) {
+    if (char.bold && char.italic) return "bolditalic";
+    if (char.bold) return "bold";
+    if (char.italic) return "italic";
+    return "normal";
+  }
+
+  function drawRichSpans(
+    spans: RichSpan[],
+    options: {
+      size: number;
+      bold?: boolean;
+      lineHeight: number;
+      align?: RichAlignment;
+      indent?: number;
+      color?: readonly [number, number, number];
+      fontName?: string;
+    },
+  ) {
+    const defaultFontName = (doc as any).getFont?.()?.fontName || "helvetica";
+    const fontName = options.fontName || defaultFontName;
+    const chars: StyledChar[] = [];
+    for (const span of spans) {
+      const parsedColor = span.color ? hexToRgb(span.color) : undefined;
+      const color = parsedColor && parsedColor.every(Number.isFinite)
+        ? parsedColor as readonly [number, number, number]
+        : options.color;
+      for (const ch of span.text.replace(/\r\n?/g, "\n").replace(/\u00a0/g, " ")) {
+        chars.push({
+          ch,
+          bold: !!span.bold || !!options.bold,
+          italic: !!span.italic,
+          underline: !!span.underline,
+          color,
+          size: span.fontSize || options.size,
+        });
+      }
     }
+
+    const indent = options.indent || 0;
+    const usableWidth = maxWidth - indent;
+    const lines: StyledChar[][] = [];
+    let line: StyledChar[] = [];
+    let lastWordBoundary = 0;
+
+    const measure = (characters: StyledChar[]) => {
+      let width = 0;
+      for (const char of characters) {
+        doc.setFont(fontName, fontStyle(char));
+        doc.setFontSize(char.size);
+        width += doc.getTextWidth(char.ch);
+      }
+      return width;
+    };
+    const flush = () => {
+      lines.push(line);
+      line = [];
+      lastWordBoundary = 0;
+    };
+
+    for (const char of chars) {
+      if (char.ch === "\n") {
+        flush();
+        continue;
+      }
+      line.push(char);
+      if (char.ch === " " || char.ch === "\t") lastWordBoundary = line.length;
+      if (measure(line) <= usableWidth) continue;
+      if (lastWordBoundary > 0 && lastWordBoundary < line.length) {
+        const carry = line.splice(lastWordBoundary);
+        flush();
+        while (carry.length && /\s/.test(carry[0].ch)) carry.shift();
+        line.push(...carry);
+      } else {
+        const carry = line.pop();
+        flush();
+        if (carry) line.push(carry);
+      }
+    }
+    if (line.length || !lines.length) flush();
+
+    lines.forEach((characters, lineIndex) => {
+      const largestSize = characters.reduce((largest, char) => Math.max(largest, char.size), options.size);
+      const lineHeight = Math.max(options.lineHeight, largestSize * 0.352778 * 1.35);
+      ensureSpace(lineHeight);
+      const lineWidth = measure(characters);
+      let x = marginX + indent;
+      if (options.align === "center") x += Math.max(0, (usableWidth - lineWidth) / 2);
+      if (options.align === "right") x += Math.max(0, usableWidth - lineWidth);
+
+      const spaces = characters.filter((char) => char.ch === " ").length;
+      const justify = options.align === "justify" && lineIndex < lines.length - 1 && spaces > 0;
+      const extraSpace = justify ? Math.max(0, usableWidth - lineWidth) / spaces : 0;
+
+      for (const char of characters) {
+        doc.setFont(fontName, fontStyle(char));
+        doc.setFontSize(char.size);
+        const color = char.color || [25, 32, 48] as const;
+        doc.setTextColor(color[0], color[1], color[2]);
+        doc.text(char.ch, x, y);
+        const charWidth = doc.getTextWidth(char.ch);
+        if (char.underline && char.ch.trim()) {
+          doc.setDrawColor(color[0], color[1], color[2]);
+          doc.setLineWidth(0.18);
+          doc.line(x, y + 0.65, x + charWidth, y + 0.65);
+        }
+        x += charWidth + (char.ch === " " ? extraSpace : 0);
+      }
+      y += lineHeight;
+    });
+
+    doc.setFont(defaultFontName, "normal");
+    doc.setFontSize(bodySize);
+    doc.setTextColor(25, 32, 48);
+  }
+
+  function drawListMarker(marker: string, spans: RichSpan[], indexWidth: number) {
+    const fontName = (doc as any).getFont?.()?.fontName || "helvetica";
+    ensureSpace(bodyLineHeight);
     doc.setFont(fontName, "normal");
+    doc.setFontSize(bodySize);
+    doc.setTextColor(25, 32, 48);
+    doc.text(marker, marginX + 1, y);
+    drawRichSpans(spans, { size: bodySize, lineHeight: bodyLineHeight, indent: indexWidth });
+    addVerticalSpace(0.8);
   }
 
   const blocks = parseRichHtmlToBlocks(options.bodyHtml || "");
   for (const block of blocks) {
-    if (block.kind === "blank") { y += lineHeight * 0.65; continue; }
+    if (block.kind === "blank") { addVerticalSpace(bodyLineHeight); continue; }
     if (block.kind === "hr") {
-      ensureSpace(7);
-      y += 2;
+      ensureSpace(8);
+      y += 2.5;
       doc.setDrawColor(200, 205, 215);
       doc.line(marginX, y, pageWidth - marginX, y);
-      y += 4;
+      y += 5.5;
       continue;
     }
-    if (block.kind === "h1") { y += 2; drawText(plainText(block.spans), 16, "bold"); y += 2; continue; }
-    if (block.kind === "h2") { y += 1; drawText(plainText(block.spans), 13, "bold"); y += 1; continue; }
-    if (block.kind === "bullet") { drawText(plainText(block.spans), 10, "normal", 4, "•  "); continue; }
-    if (block.kind === "ordered") { drawText(plainText(block.spans), 10, "normal", 4, `${block.index}.  `); continue; }
+    if (block.kind === "h1") {
+      addVerticalSpace(4.2);
+      drawRichSpans(block.spans, { size: 21.6, bold: true, lineHeight: 9.4, align: block.align });
+      addVerticalSpace(2.2);
+      continue;
+    }
+    if (block.kind === "h2") {
+      addVerticalSpace(3.8);
+      drawRichSpans(block.spans, { size: 16.8, bold: true, lineHeight: 8, align: block.align });
+      addVerticalSpace(1.8);
+      continue;
+    }
+    if (block.kind === "h3") {
+      addVerticalSpace(3.4);
+      drawRichSpans(block.spans, { size: 13.8, bold: true, lineHeight: 7.2, align: block.align });
+      addVerticalSpace(1.5);
+      continue;
+    }
+    if (block.kind === "bullet") { drawListMarker("•", block.spans, 6); continue; }
+    if (block.kind === "ordered") { drawListMarker(`${block.index}.`, block.spans, 8); continue; }
     if (block.kind === "image") {
       const asset = await loadImage(block.src);
       if (!asset) continue;
@@ -146,7 +292,37 @@ export async function buildLetterheadPdf(
       y += height + 4;
       continue;
     }
-    drawText(plainText(block.spans), 10, "normal");
+    if (block.kind === "blockquote") {
+      ensureSpace(bodyLineHeight + 3);
+      const quoteY = y - 3.5;
+      doc.setDrawColor(10, 79, 232);
+      doc.setLineWidth(0.8);
+      doc.line(marginX + 1, quoteY, marginX + 1, quoteY + bodyLineHeight + 3);
+      drawRichSpans(block.spans, {
+        size: bodySize,
+        lineHeight: bodyLineHeight,
+        align: block.align,
+        indent: 6,
+        color: [75, 85, 105],
+      });
+      addVerticalSpace(1.5);
+      continue;
+    }
+    if (block.kind === "pre") {
+      addVerticalSpace(1.8);
+      drawRichSpans(block.spans, {
+        size: 9.5,
+        lineHeight: 5.8,
+        align: block.align,
+        indent: 4,
+        color: [45, 55, 72],
+        fontName: "courier",
+      });
+      addVerticalSpace(2.2);
+      continue;
+    }
+    drawRichSpans(block.spans, { size: bodySize, lineHeight: bodyLineHeight, align: block.align });
+    addVerticalSpace(1.5);
   }
 
   if (signature && includeSignature) {
