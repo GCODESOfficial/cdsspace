@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { deliverClientNotificationById } from "@/lib/notification-delivery";
 import { getAdminSession } from "@/lib/admin-session";
 import { hasPermission } from "@/lib/admin-permissions";
 import { glashQuery } from "@/lib/glashdb/postgres";
@@ -184,11 +185,15 @@ export async function POST(req: NextRequest) {
     }
 
     if (wantInApp) {
-      await glashQuery(
+      const raised = await glashQuery<{ id: string }>(
         `insert into public.notifications (user_id, type, title, message, link)
-         select unnest($1::uuid[]), 'announcement', $2, $3, $4`,
+         select unnest($1::uuid[]), 'announcement', $2, $3, $4
+         returning id::text`,
         [recipientIds, title, message, link || "/dashboard"],
       );
+      // Push to every device at once. Email stays with the email channel below,
+      // so choosing in-app only does not email anyone.
+      for (const row of raised) void deliverClientNotificationById(row.id, { pushOnly: true });
       // Mirror into each client's dashboard Messages as a CDS Space message.
       await deliverAnnouncementToClientChat(recipientIds, title, message, imageUrl).catch(() => 0);
       channelSummary.in_app = recipientIds.length;
@@ -247,6 +252,19 @@ export async function POST(req: NextRequest) {
     );
     // Mirror into each member's chat as a CDS Space (Admin) Direct message.
     await deliverAnnouncementToTeamChat(recipientIds, title, message).catch(() => 0);
+    const emailRows = await glashQuery<{ email: string | null }>(
+      `select email from public.team_members
+        where id = any($1::uuid[]) and is_active = true`,
+      [recipientIds],
+    );
+    const emails = emailRows.map((row) => row.email).filter((email): email is string => Boolean(email));
+    channelSummary.email = await deliverAnnouncementByEmail(
+      emails,
+      title,
+      message,
+      link || `${process.env.NEXT_PUBLIC_SITE_URL?.replace(/\/$/, "") || "https://cdsspace.pro"}/team`,
+      imageUrl,
+    ).catch(() => ({ sent: 0, failed: emails.length }));
     if (!targetLabel) targetLabel = `${recipientIds.length} selected team members`;
   }
 
@@ -274,6 +292,19 @@ export async function POST(req: NextRequest) {
     );
     // Mirror into each project member's chat as a CDS Space (Admin) message.
     await deliverAnnouncementToTeamChat(recipientIds, title, message).catch(() => 0);
+    const emailRows = await glashQuery<{ email: string | null }>(
+      `select email from public.team_members
+        where id = any($1::uuid[]) and is_active = true`,
+      [recipientIds],
+    );
+    const emails = emailRows.map((row) => row.email).filter((email): email is string => Boolean(email));
+    channelSummary.email = await deliverAnnouncementByEmail(
+      emails,
+      title,
+      message,
+      link || `${process.env.NEXT_PUBLIC_SITE_URL?.replace(/\/$/, "") || "https://cdsspace.pro"}/team/work?project=${encodeURIComponent(project.id)}`,
+      imageUrl,
+    ).catch(() => ({ sent: 0, failed: emails.length }));
     targetLabel = `Project team: ${project.name}`;
   }
 

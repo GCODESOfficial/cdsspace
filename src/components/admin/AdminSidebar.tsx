@@ -7,6 +7,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { useAdminSession } from "@/hooks/use-admin-session";
 import { hasPermission } from "@/lib/admin-permissions";
 import { useViewAs } from "@/components/admin/view-as";
+import { announcePlatformNotification } from "@/lib/platform-notification-client";
 import ViewAsPicker from "@/components/admin/ViewAsPicker";
 import { AnimatePresence, motion } from "framer-motion";
 import {
@@ -496,6 +497,12 @@ const hrmNavItems = [
     permission: "team_members",
   },
   {
+    label: "HR Compliance",
+    href: "/admin/hrm/compliance",
+    icon: ClipboardCheck,
+    permission: "hr_compliance",
+  },
+  {
     label: "Attendance",
     href: "/admin/timebook",
     icon: Clock,
@@ -938,9 +945,11 @@ export default function AdminSidebar({
               new Date(newestUnreadAt.current).getTime());
 
         if (isNewMessage && count > 0) {
-          const audio = new Audio("/special-notification.mp3");
-          audio.volume = 0.8;
-          void audio.play().catch(() => {});
+          announcePlatformNotification({
+            title: "New client message",
+            body: "A client sent a new message in CDS Space.",
+            volume: 0.8,
+          });
         }
 
         unreadInitialLoad.current = false;
@@ -955,9 +964,13 @@ export default function AdminSidebar({
 
     void fetchUnread();
     const interval = window.setInterval(() => {
-      if (!document.hidden) void fetchUnread();
-    }, 8_000);
-    return () => window.clearInterval(interval);
+      void fetchUnread();
+    }, 4_000);
+    window.addEventListener("cds:notification-pulse", fetchUnread);
+    return () => {
+      window.clearInterval(interval);
+      window.removeEventListener("cds:notification-pulse", fetchUnread);
+    };
   }, [canViewClientMessages, session]);
 
   const rememberSidebarScroll = useCallback(() => {
@@ -999,9 +1012,11 @@ export default function AdminSidebar({
   }, [collapsed, onToggleCollapse]);
 
   const signOut = async () => {
-    await fetch("/api/admin-logout", { method: "POST" });
-    router.push("/admin/login");
+    await fetch("/api/admin-logout", { method: "POST" }).catch(() => null);
     onMobileClose?.();
+    // A full page load, not a client-side route change: the session this app
+    // was rendered with is gone.
+    window.location.replace("/admin/login");
   };
 
   const openTeamPortal = async () => {

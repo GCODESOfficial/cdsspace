@@ -4,8 +4,12 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { Bell } from "lucide-react";
 import { AnimatePresence, motion } from "framer-motion";
 import NotificationItem, { type Notification } from "./notification-item";
+import { useNotificationPulse } from "@/hooks/use-notification-pulse";
+import {
+  announcePlatformNotification,
+  enablePlatformNotifications,
+} from "@/lib/platform-notification-client";
 
-const POLL_INTERVAL = 10_000;
 const MAX_DISPLAY = 10;
 
 export default function AdminNotificationBell() {
@@ -16,13 +20,6 @@ export default function AdminNotificationBell() {
   const isFirstLoad = useRef<boolean>(true);
   const requestActive = useRef(false);
   const notificationsSnapshot = useRef("");
-
-  // ---------- Play Sound ----------
-  const playNotificationSound = useCallback(() => {
-    const audio = new Audio("/special-notification.mp3");
-    audio.volume = 0.8; // Admins get it slightly louder
-    audio.play().catch((err) => console.log("Audio playback failed:", err));
-  }, []);
 
   // ---------- Fetch ----------
   const fetchNotifications = useCallback(async () => {
@@ -44,7 +41,16 @@ export default function AdminNotificationBell() {
       );
 
       if (!isFirstLoad.current && hasNewAudibleNotification) {
-        playNotificationSound();
+        const newest = unreadNotifications.find(
+          (notification: Notification) =>
+            notification.type !== "new_message" &&
+            !previousUnreadIds.current.has(notification.id),
+        );
+        announcePlatformNotification({
+          title: newest?.title || "CDS Space",
+          body: newest?.message || "You have a new admin update.",
+          volume: 0.8,
+        });
       }
 
       previousUnreadIds.current = new Set(unreadNotifications.map((notification: Notification) => notification.id));
@@ -59,18 +65,12 @@ export default function AdminNotificationBell() {
     } finally {
       requestActive.current = false;
     }
-  }, [playNotificationSound]);
+  }, []);
 
   useEffect(() => {
     fetchNotifications();
-    const id = setInterval(() => { if (!document.hidden) fetchNotifications(); }, POLL_INTERVAL);
-    const onVisibilityChange = () => { if (!document.hidden) fetchNotifications(); };
-    document.addEventListener("visibilitychange", onVisibilityChange);
-    return () => {
-      clearInterval(id);
-      document.removeEventListener("visibilitychange", onVisibilityChange);
-    };
   }, [fetchNotifications]);
+  useNotificationPulse("admin", fetchNotifications);
 
   // ---------- Close on outside click ----------
   useEffect(() => {
@@ -122,7 +122,10 @@ export default function AdminNotificationBell() {
       {/* Bell trigger */}
       <button
         type="button"
-        onClick={() => setOpen((v) => !v)}
+        onClick={() => {
+          void enablePlatformNotifications();
+          setOpen((v) => !v);
+        }}
         className="relative rounded-lg p-2 transition-colors hover:bg-gray-100"
         aria-label="Notifications"
       >

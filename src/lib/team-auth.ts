@@ -53,8 +53,30 @@ export interface TeamSession {
   device_type?: TeamDeviceType;
 }
 
+/**
+ * Recently verified sessions, held per server instance.
+ *
+ * Every portal page load verifies the session token against the database, so a
+ * phone moving between pages asked the same question over and over, and a
+ * single slow answer stranded the person on "portal temporarily unavailable".
+ * A fresh answer is reused for a few seconds, and a verified session is held
+ * longer as a safety net used only while the database is failing, so an outage
+ * no longer signs anyone out. Sign-out and the daily cutoff clear it at once.
+ */
+const verifiedSessions = new Map<string, { session: TeamSession; at: number }>();
+const SESSION_CACHE_MS = 5_000;
+const SESSION_OUTAGE_GRACE_MS = 10 * 60_000;
+
+export function forgetCachedTeamSession(token?: string | null) {
+  if (token) verifiedSessions.delete(token);
+  else verifiedSessions.clear();
+}
+
 export async function getTeamSessionFromToken(token: string | undefined | null): Promise<TeamSession | null> {
   if (!token) return null;
+
+  const cached = verifiedSessions.get(token);
+  if (cached && Date.now() - cached.at < SESSION_CACHE_MS) return cached.session;
 
   let data;
   try {
@@ -87,6 +109,7 @@ export async function getTeamSessionFromToken(token: string | undefined | null):
     [token],
     );
   } catch (primaryError) {
+    if (cached && Date.now() - cached.at < SESSION_OUTAGE_GRACE_MS) return cached.session;
     // Older installations may not have the device-session table yet. Only
     // treat this as an invalid session if the legacy lookup succeeds and
     // genuinely finds no token; if both reads fail, surface a transient error
@@ -112,6 +135,7 @@ export async function getTeamSessionFromToken(token: string | undefined | null):
       "update public.team_members set session_token = null, session_expires_at = null where session_token = $1",
       [token],
     ).catch(() => []);
+    verifiedSessions.delete(token);
     return null;
   }
   if (data.session_expires_at && new Date(data.session_expires_at) < new Date()) {
@@ -119,6 +143,7 @@ export async function getTeamSessionFromToken(token: string | undefined | null):
       "update public.team_device_sessions set revoked_at = now(), revoke_reason = 'expired' where session_token = $1",
       [token],
     ).catch(() => []);
+    verifiedSessions.delete(token);
     return null;
   }
 
@@ -127,7 +152,7 @@ export async function getTeamSessionFromToken(token: string | undefined | null):
     [token],
   ).catch(() => []);
 
-  return {
+  const session: TeamSession = {
     id: data.id,
     full_name: data.full_name,
     email: data.email,
@@ -141,6 +166,8 @@ export async function getTeamSessionFromToken(token: string | undefined | null):
     language: data.language ?? "en",
     device_type: data.device_type || undefined,
   };
+  verifiedSessions.set(token, { session, at: Date.now() });
+  return session;
 }
 
 async function getLegacyTeamSessionFromToken(token: string): Promise<TeamSession | null> {

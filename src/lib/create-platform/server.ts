@@ -17,6 +17,7 @@ import {
 } from "@/lib/create-platform/catalog";
 import type { CreateActor } from "@/lib/create-platform/session";
 import { runLiveBrandNameCheck } from "@/lib/create-platform/brand-name-checker";
+import { CLIENT_STORAGE_FULL_CODE, isClientStorageFullError, releaseClientStorageReservation, reserveClientStorage } from "@/lib/client-storage";
 
 type DbTool = {
   id?: string;
@@ -420,8 +421,18 @@ export async function deleteCreateCreation(actor: CreateActor, id: string) {
 }
 
 export async function duplicateCreateCreation(actor: CreateActor, id: string) {
-  const row = await glashMaybeOne<Record<string, unknown>>(
-    `insert into public.create_creations
+  const source = await glashMaybeOne<{ file_size_bytes: string | null }>(
+    `select file_size_bytes::text from public.create_creations
+      where id = $3::uuid and owner_kind = $1 and owner_id = $2 and deleted_at is null`,
+    [actor.kind, actor.id, id],
+  );
+  if (!source) throw new Error("Could not duplicate this creation.");
+  const reservationId = actor.kind === "client"
+    ? await reserveClientStorage(actor.id, Number(source.file_size_bytes || 0))
+    : null;
+  try {
+    const row = await glashMaybeOne<Record<string, unknown>>(
+      `insert into public.create_creations
       (owner_kind, owner_id, actor_email, tool_slug, tool_name, title, status, project_id,
        input_summary, output, file_name, file_size_bytes, output_format, is_favorite)
      select owner_kind, owner_id, actor_email, tool_slug, tool_name, title || ' copy', status, project_id,
@@ -430,10 +441,13 @@ export async function duplicateCreateCreation(actor: CreateActor, id: string) {
       where id = $3::uuid and owner_kind = $1 and owner_id = $2 and deleted_at is null
       returning id, tool_slug, tool_name, title, status, project_id, input_summary, output,
                 file_name, file_size_bytes, output_format, is_favorite, created_at, updated_at`,
-    [actor.kind, actor.id, id],
-  );
-  if (!row) throw new Error("Could not duplicate this creation.");
-  return creationFromDb(row);
+      [actor.kind, actor.id, id],
+    );
+    if (!row) throw new Error("Could not duplicate this creation.");
+    return creationFromDb(row);
+  } finally {
+    await releaseClientStorageReservation(reservationId).catch(() => undefined);
+  }
 }
 
 async function consumeCredits(actor: CreateActor, cost: number) {
@@ -484,8 +498,13 @@ async function saveCreation(actor: CreateActor, tool: CreateTool, payload: {
   outputFormat?: string | null;
   projectId?: string | null;
 }) {
-  const row = await glashMaybeOne<Record<string, unknown>>(
-    `insert into public.create_creations
+  let reservationId: string | null = null;
+  try {
+    reservationId = actor.kind === "client"
+      ? await reserveClientStorage(actor.id, Number(payload.fileSizeBytes || 0))
+      : null;
+    const row = await glashMaybeOne<Record<string, unknown>>(
+      `insert into public.create_creations
       (owner_kind, owner_id, actor_email, tool_slug, tool_name, title, status, project_id,
        input_summary, output, file_name, file_size_bytes, output_format)
      values ($1, $2, $3, $4, $5, $6, $7, $8::uuid, $9::jsonb, $10::jsonb, $11, $12, $13)
@@ -505,9 +524,17 @@ async function saveCreation(actor: CreateActor, tool: CreateTool, payload: {
       payload.fileName || null,
       payload.fileSizeBytes || null,
       payload.outputFormat || null,
-    ],
-  );
-  return row ? creationFromDb(row) : null;
+      ],
+    );
+    return row ? creationFromDb(row) : null;
+  } catch (error) {
+    if (actor.kind === "client" && Number(payload.fileSizeBytes || 0) > 0) {
+      await refundCredits(actor, tool.creditCost).catch(() => undefined);
+    }
+    throw error;
+  } finally {
+    await releaseClientStorageReservation(reservationId).catch(() => undefined);
+  }
 }
 
 async function logUsage(actor: CreateActor, tool: CreateTool, input: {
@@ -743,16 +770,28 @@ export async function completeCreateJob(jobId: string, result: {
   outputFormat?: string | null;
   title?: string | null;
 }) {
-  const job = await glashMaybeOne<Record<string, unknown>>(
+  const pendingJob = await glashMaybeOne<Record<string, unknown>>(
+    `select creation_id, owner_kind, owner_id
+       from public.create_jobs
+      where id = $1::uuid and status <> 'done'`,
+    [jobId],
+  );
+  if (!pendingJob) return false;
+  let reservationId: string | null = null;
+  try {
+    reservationId = pendingJob.owner_kind === "client"
+      ? await reserveClientStorage(String(pendingJob.owner_id), Number(result.fileSizeBytes || 0))
+      : null;
+    const job = await glashMaybeOne<Record<string, unknown>>(
     `update public.create_jobs
         set status = 'done', finished_at = now(), result = $2::jsonb, error = null
       where id = $1::uuid and status <> 'done'
       returning creation_id`,
     [jobId, JSON.stringify(result.output || {})],
   );
-  if (!job) return false;
-  await glashQuery(
-    `update public.create_creations
+    if (!job) return false;
+    await glashQuery(
+      `update public.create_creations
         set status = 'ready',
             output = $2::jsonb,
             file_name = coalesce($3, file_name),
@@ -769,12 +808,21 @@ export async function completeCreateJob(jobId: string, result: {
       result.outputFormat ?? null,
       result.title ? cleanText(result.title, 140) : null,
     ],
-  );
-  return true;
+    );
+    return true;
+  } catch (error) {
+    if (isClientStorageFullError(error)) {
+      await failCreateJob(jobId, error.message, CLIENT_STORAGE_FULL_CODE);
+      return false;
+    }
+    throw error;
+  } finally {
+    await releaseClientStorageReservation(reservationId).catch(() => undefined);
+  }
 }
 
 /** Worker reports failure: mark the creation failed and refund the credits that were charged. */
-export async function failCreateJob(jobId: string, message: string) {
+export async function failCreateJob(jobId: string, message: string, code?: string) {
   const job = await glashMaybeOne<Record<string, unknown>>(
     `update public.create_jobs
         set status = 'failed', finished_at = now(), error = $2
@@ -786,10 +834,10 @@ export async function failCreateJob(jobId: string, message: string) {
   await glashQuery(
     `update public.create_creations
         set status = 'failed',
-            output = jsonb_build_object('kind', 'report', 'title', title, 'text', $2::text),
+            output = jsonb_build_object('kind', 'report', 'title', title, 'text', $2::text, 'code', $3::text),
             updated_at = now()
       where id = $1::uuid`,
-    [String(job.creation_id), cleanText(message, 500) || "Processing failed."],
+    [String(job.creation_id), cleanText(message, 500) || "Processing failed.", code || null],
   );
   // Refund the reserved credits so a failed run does not cost the user.
   const cost = Number(job.credit_cost || 0);

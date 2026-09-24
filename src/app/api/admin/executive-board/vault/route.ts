@@ -3,7 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/admin-api-auth";
 import { glashMaybeOne, glashQuery } from "@/lib/glashdb/postgres";
 import { getSupabaseAdmin } from "@/lib/supabase";
-import { assertCleanBuffer, UploadSecurityError } from "@/lib/upload-security";
+import { assertSafeUpload, UploadSecurityError } from "@/lib/upload-security";
 import { hashDocPassword } from "@/lib/protect-docs";
 import { logActivity } from "@/lib/activity-log";
 import { VAULT_KINDS } from "@/lib/executive-board";
@@ -100,9 +100,9 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: false, error: "Files are limited to 50MB." }, { status: 413 });
     }
 
-    const buffer = Buffer.from(await file.arrayBuffer());
+    let safe: Awaited<ReturnType<typeof assertSafeUpload>>;
     try {
-      assertCleanBuffer(buffer);
+      safe = await assertSafeUpload(file, { allow: ["image", "pdf", "office", "zip", "design"], maxBytes: MAX_BYTES });
     } catch (error) {
       if (error instanceof UploadSecurityError) {
         return NextResponse.json({ ok: false, error: error.message }, { status: error.status });
@@ -111,9 +111,9 @@ export async function POST(req: NextRequest) {
     }
 
     const storage = (getSupabaseAdmin() as any).storage;
-    const path = `${new Date().toISOString().slice(0, 10)}/${crypto.randomUUID()}-${safeName(file.name)}`;
-    const { error: uploadError } = await storage.from(BUCKET).upload(path, buffer, {
-      contentType: file.type || "application/octet-stream",
+    const path = `${new Date().toISOString().slice(0, 10)}/${crypto.randomUUID()}-${safeName(file.name.replace(/\.[^.]+$/, ""))}.${safe.ext}`;
+    const { error: uploadError } = await storage.from(BUCKET).upload(path, safe.buffer, {
+      contentType: safe.contentType,
       upsert: false,
     });
     if (uploadError) return NextResponse.json({ ok: false, error: uploadError.message }, { status: 500 });
@@ -131,8 +131,8 @@ export async function POST(req: NextRequest) {
         (VAULT_KINDS as readonly string[]).includes(kind) ? kind : "attachment",
         path,
         file.name.slice(0, 200),
-        file.type || null,
-        buffer.byteLength,
+        safe.contentType,
+        safe.buffer.byteLength,
         password ? await hashDocPassword(password) : null,
         session.email,
       ],
@@ -144,7 +144,7 @@ export async function POST(req: NextRequest) {
       resource_type: "executive_vault_file",
       resource_id: row?.id,
       resource_label: title || file.name,
-      metadata: { protected: !!password, size: buffer.byteLength },
+      metadata: { protected: !!password, size: safe.buffer.byteLength },
     });
     return NextResponse.json({ ok: true, id: row?.id }, { status: 201 });
   }

@@ -102,6 +102,8 @@ export interface FinanceInvoice {
   period_month: string | null;
   issue_date: string;
   due_date: string | null;
+  /** When an unpaid invoice expires. Null on invoices raised before the 28 day rule. */
+  auto_cancel_at?: string | null;
   notes: string | null;
   public_token: string;
   marketer_code?: string | null;

@@ -5,6 +5,7 @@ import { appAlert, appPrompt } from "@/lib/app-notify";
 import { motion, AnimatePresence } from "framer-motion";
 import { Bookmark, ChevronDown, Languages, Loader2, MessageSquare, Pin, Send, Star, X } from "lucide-react";
 import { useClientAccount } from "@/components/dashboard/ClientAccountProvider";
+import { PlatformMediaViewer } from "@/components/media/PlatformMediaViewer";
 
 interface ChatMessage {
   id: string;
@@ -20,6 +21,15 @@ interface ChatMessage {
   bookmarked_by?: string[];
   translated?: Record<string, string>;
   deleted_at?: string | null;
+}
+
+function isImageUrl(url: string | undefined) {
+  if (!url) return false;
+  try {
+    return /\.(png|jpe?g|webp|gif)$/i.test(new URL(url, window.location.origin).pathname);
+  } catch {
+    return false;
+  }
 }
 
 export function ChatWidget() {
@@ -66,8 +76,12 @@ export function ChatWidget() {
   // Initial fetch + polling
   useEffect(() => {
     fetchMessages();
-    const interval = setInterval(() => { if (!document.hidden) fetchMessages(); }, 10000);
-    return () => clearInterval(interval);
+    const interval = setInterval(fetchMessages, 4_000);
+    window.addEventListener("cds:notification-pulse", fetchMessages);
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener("cds:notification-pulse", fetchMessages);
+    };
   }, [fetchMessages]);
 
   const scrollToLatest = useCallback((behavior: ScrollBehavior = "smooth") => {
@@ -317,16 +331,23 @@ export function ChatWidget() {
                             </div>
                           )}
                           {msg.file_url && (
-                            <a
-                              href={msg.file_url}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className={`text-xs underline mt-1 block ${
-                                isOwn ? "text-blue-200" : "text-blue-600"
-                              }`}
-                            >
-                              Attachment
-                            </a>
+                            isImageUrl(msg.file_url) ? (
+                              <PlatformMediaViewer url={msg.file_url} title="Chat image" triggerClassName="mt-2 block w-full overflow-hidden rounded-xl border border-white/20 bg-white/10">
+                                {/* eslint-disable-next-line @next/next/no-img-element */}
+                                <img src={msg.file_url} alt="Chat image" className="max-h-64 w-full object-contain" />
+                              </PlatformMediaViewer>
+                            ) : (
+                              <a
+                                href={msg.file_url}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className={`text-xs underline mt-1 block ${
+                                  isOwn ? "text-blue-200" : "text-blue-600"
+                                }`}
+                              >
+                                Attachment
+                              </a>
+                            )
                           )}
                           <p
                             className={`text-[10px] mt-1 ${

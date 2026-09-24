@@ -4,6 +4,7 @@ const OPTIONAL_INVOICE_EXTENSION_FIELDS = [
   "working_hours",
   "delivery_speed",
   "delivery_period",
+  "auto_cancel_at",
 ] as const;
 
 type InvoiceExtensionField = (typeof OPTIONAL_INVOICE_EXTENSION_FIELDS)[number];

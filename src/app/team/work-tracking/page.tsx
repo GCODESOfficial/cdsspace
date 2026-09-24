@@ -12,6 +12,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { Loader2, Send, CheckCircle2, CalendarRange, FileText, Lock, Pencil, X, Paperclip, Upload, Link2, ShieldCheck, FolderOpen } from "lucide-react";
 import { toast } from "sonner";
+import { PlatformMediaViewer } from "@/components/media/PlatformMediaViewer";
 
 type SelfReport = {
   id?: string;
@@ -34,6 +35,10 @@ type ReportAttachment = {
   mime_type?: string | null;
   size_bytes?: number | null;
 };
+
+function isImageAttachment(attachment: ReportAttachment) {
+  return attachment.mime_type?.startsWith("image/") || /\.(png|jpe?g|webp|gif)(?:$|[?#])/i.test(attachment.external_url || "") || /\.(png|jpe?g|webp|gif)$/i.test(attachment.title);
+}
 
 type DocumentOption = { id: string; title: string; slug?: string };
 
@@ -368,7 +373,11 @@ function AttachmentList({ attachments, onRemove }: { attachments: ReportAttachme
         return (
           <div key={attachment.id || `${attachment.source_kind}-${attachment.source_id || attachment.storage_path || attachment.external_url}-${index}`} className="flex min-w-0 items-center gap-2 rounded-xl border border-brand-stroke/40 bg-white px-3 py-2.5">
             <Icon className="h-4 w-4 shrink-0 text-brand-blue" />
-            {href ? (
+            {href && isImageAttachment(attachment) ? (
+              <PlatformMediaViewer url={href} title={attachment.title} detail={attachment.size_bytes ? `${Math.max(1, Math.round(attachment.size_bytes / 1024))} KB` : undefined} triggerClassName="min-w-0 flex-1 truncate text-left text-[12px] font-medium text-brand-navy hover:text-brand-blue hover:underline">
+                {attachment.title}
+              </PlatformMediaViewer>
+            ) : href ? (
               <a href={href} target="_blank" rel="noreferrer" className="min-w-0 flex-1 truncate text-[12px] font-medium text-brand-navy hover:text-brand-blue hover:underline">{attachment.title}</a>
             ) : (
               <span className="min-w-0 flex-1 truncate text-[12px] font-medium text-brand-navy">{attachment.title}</span>

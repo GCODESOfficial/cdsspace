@@ -9,6 +9,7 @@ import {
   Clock, Activity, Building2, KanbanSquare,
   GraduationCap, BadgeDollarSign, BarChart3, KeyRound, CalendarClock,
   UserPlus, X, Copy, Check, Plane,
+  ClipboardCheck,
 } from "lucide-react";
 import { toast } from "sonner";
 import {
@@ -46,6 +47,7 @@ type Member = { id: string; full_name: string; department?: string | null };
 // sub-admin can't open (super admins see all); the target pages guard too.
 const MODULES = [
   { href: "/admin/team-members", label: "Team Members", desc: "Roster, profiles & invites", icon: Users, tint: "bg-[#0A4FE8]", perm: "team_members" },
+  { href: "/admin/hrm/compliance", label: "HR Compliance", desc: "Personnel documents, queries, letters & reminders", icon: ClipboardCheck, tint: "bg-[#0A4FE8]", perm: "hr_compliance" },
   { href: "/admin/taskboard", label: "Taskboard", desc: "Shared lists, tasks, people & documents", icon: KanbanSquare, tint: "bg-[#0A4FE8]", perm: "team_today" },
   { href: "/admin/timebook", label: "Attendance", desc: "Check-ins, schedules, leave & geofence", icon: Clock, tint: "from-teal-500 to-emerald-500", perm: "timebook" },
   { href: "/admin/work-tracking", label: "Work Activity", desc: "Live focus, task context & evidence", icon: Activity, tint: "from-amber-500 to-orange-500", perm: "work_tracking" },

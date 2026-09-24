@@ -4,7 +4,8 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   DndContext,
   KeyboardSensor,
-  PointerSensor,
+  MouseSensor,
+  TouchSensor,
   closestCorners,
   useSensor,
   useSensors,
@@ -51,6 +52,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { appAlert, appConfirm } from "@/lib/app-notify";
+import { PlatformMediaViewer } from "@/components/media/PlatformMediaViewer";
 import {
   TASKBOARD_COLORS,
   TASK_PRIORITIES,
@@ -86,6 +88,10 @@ const taskDndId = (id: string) => `task:${id}`;
 const listDndId = (id: string) => `list:${id}`;
 const rawId = (id: string) => id.slice(id.indexOf(":") + 1);
 
+function isImageAttachment(attachment: TaskboardAttachment) {
+  return attachment.mime_type?.startsWith("image/") || /\.(png|jpe?g|webp|gif)(?:$|[?#])/i.test(attachment.url) || /\.(png|jpe?g|webp|gif)$/i.test(attachment.title);
+}
+
 function initials(name: string) {
   return name.split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]?.toUpperCase()).join("");
 }
@@ -114,6 +120,10 @@ function findTaskList(lists: TaskboardList[], taskId: string) {
   return lists.find((list) => list.tasks.some((task) => task.id === taskId)) || null;
 }
 
+function taskListElementId(id: string) {
+  return `taskboard-list-${id}`;
+}
+
 export function Taskboard({ portal }: Props) {
   const [data, setData] = useState<TaskboardPayload | null>(null);
   const [lists, setLists] = useState<TaskboardList[]>([]);
@@ -124,9 +134,21 @@ export function Taskboard({ portal }: Props) {
   const [newListTitle, setNewListTitle] = useState("");
   const [addingList, setAddingList] = useState(false);
   const sensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
+    // Mouse users can begin dragging after a short movement. Touch users must
+    // deliberately hold first, so ordinary vertical and horizontal swipes are
+    // never mistaken for a task drag.
+    useSensor(MouseSensor, { activationConstraint: { distance: 6 } }),
+    useSensor(TouchSensor, { activationConstraint: { delay: 220, tolerance: 8 } }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
   );
+
+  const scrollToList = useCallback((listId: string) => {
+    document.getElementById(taskListElementId(listId))?.scrollIntoView({
+      behavior: "smooth",
+      block: "nearest",
+      inline: "start",
+    });
+  }, []);
 
   const load = useCallback(async (boardId?: string, quiet = false) => {
     if (!quiet) setLoading(true);
@@ -321,7 +343,7 @@ export function Taskboard({ portal }: Props) {
   }
 
   return (
-    <div className="min-h-[calc(100dvh-80px)] w-full min-w-0 max-w-full overflow-hidden bg-[#F4F7FD]">
+    <div className="min-h-[calc(100dvh-80px)] w-full min-w-0 max-w-full overflow-x-hidden bg-[#F4F7FD]">
       <header className="px-4 pt-4 md:px-7">
         <div className="mx-auto flex max-w-[1800px] flex-col gap-4 rounded-2xl border border-slate-100 bg-white px-4 py-4 shadow-sm md:px-6 xl:flex-row xl:items-center xl:justify-between">
           <div className="min-w-0">
@@ -354,7 +376,7 @@ export function Taskboard({ portal }: Props) {
                 />
               )}
               {boardMenuOpen && (
-                <div className="absolute left-0 top-full z-40 mt-2 w-[300px] overflow-hidden rounded-2xl border border-slate-100 bg-white p-2 shadow-xl">
+                <div className="absolute left-0 top-full z-40 mt-2 w-[min(300px,calc(100vw-2rem))] overflow-hidden rounded-2xl border border-slate-100 bg-white p-2 shadow-xl">
                   <p className="px-3 py-2 text-[10px] font-bold uppercase tracking-wide text-slate-400">Your boards</p>
                   {(data?.boards || []).map((board) => (
                     <button
@@ -394,31 +416,31 @@ export function Taskboard({ portal }: Props) {
             </p>
           </div>
 
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="-mx-1 flex flex-nowrap items-center gap-2 overflow-x-auto px-1 pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden sm:mx-0 sm:flex-wrap sm:overflow-visible sm:px-0 sm:pb-0">
             {portal === "admin" && (
               <button type="button" onClick={() => setModal({ type: "board" })}
-                className="inline-flex h-10 items-center gap-2 rounded-xl bg-[#0A4FE8] px-4 text-[12px] font-bold text-white shadow-md shadow-blue-200 hover:bg-[#083EC0]">
+                className="inline-flex h-10 shrink-0 items-center gap-2 rounded-xl bg-[#0A4FE8] px-4 text-[12px] font-bold text-white shadow-md shadow-blue-200 hover:bg-[#083EC0]">
                 <Plus className="h-4 w-4" /> New board
               </button>
             )}
             <button type="button" onClick={() => void load(data?.board?.id, true)}
-              className="inline-flex h-10 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 text-[12px] font-semibold text-slate-600 hover:bg-slate-50">
+              className="inline-flex h-10 shrink-0 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 text-[12px] font-semibold text-slate-600 hover:bg-slate-50">
               <RefreshCw className="h-4 w-4" /> Refresh
             </button>
             {data?.board && (
               <>
                 <button type="button" onClick={() => setModal({ type: "activity" })}
-                  className="inline-flex h-10 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 text-[12px] font-semibold text-slate-600 hover:bg-slate-50">
+                  className="inline-flex h-10 shrink-0 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 text-[12px] font-semibold text-slate-600 hover:bg-slate-50">
                   <Activity className="h-4 w-4" /> Activity
                 </button>
                 <button type="button" onClick={() => setModal({ type: "members" })}
-                  className="inline-flex h-10 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 text-[12px] font-semibold text-slate-600 hover:bg-slate-50">
+                  className="inline-flex h-10 shrink-0 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 text-[12px] font-semibold text-slate-600 hover:bg-slate-50">
                   <Users className="h-4 w-4" /> Members
                   <span className="rounded-full bg-slate-100 px-1.5 py-0.5 text-[10px]">{data.members.length}</span>
                 </button>
                 {data.viewer.can_add_list && (
                   <button type="button" onClick={() => setAddingList(true)}
-                    className="inline-flex h-10 items-center gap-2 rounded-xl border border-blue-200 bg-blue-50 px-4 text-[12px] font-bold text-[#0A4FE8] hover:bg-blue-100">
+                    className="inline-flex h-10 shrink-0 items-center gap-2 rounded-xl border border-blue-200 bg-blue-50 px-4 text-[12px] font-bold text-[#0A4FE8] hover:bg-blue-100">
                     <ListPlus className="h-4 w-4" /> Add list
                   </button>
                 )}
@@ -462,9 +484,38 @@ export function Taskboard({ portal }: Props) {
           onDragOver={onDragOver}
           onDragEnd={onDragEnd}
         >
-          <div className="w-full min-w-0 overflow-auto overscroll-contain px-4 py-5 md:px-7 lg:h-[calc(100dvh-230px)] lg:min-h-[420px]">
+          {lists.length > 0 && (
+            <nav className="px-4 pt-3 md:px-7 lg:hidden" aria-label="Taskboard lists">
+              <div className="rounded-2xl border border-blue-100 bg-white p-2.5 shadow-sm">
+                <div className="flex items-center justify-between gap-3 px-1">
+                  <span className="text-[11px] font-semibold text-[#0D1B39]">Jump to a list</span>
+                  <span className="text-[10px] text-slate-400">Swipe sideways or tap</span>
+                </div>
+                <div className="mt-2 flex snap-x snap-mandatory gap-2 overflow-x-auto overscroll-x-contain pb-0.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+                  {lists.map((list) => (
+                    <button
+                      key={list.id}
+                      type="button"
+                      onClick={() => scrollToList(list.id)}
+                      className="inline-flex min-h-9 shrink-0 snap-start items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 text-[11.5px] font-semibold text-slate-600 active:border-blue-300 active:bg-blue-50 active:text-[#0A4FE8]"
+                    >
+                      <span className="max-w-[150px] truncate">{list.title}</span>
+                      <span className="rounded-full bg-white px-1.5 py-0.5 text-[9.5px] font-bold text-slate-500">
+                        {list.tasks.filter((task) => !task.completed_at).length}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </nav>
+          )}
+          <div
+            data-testid="taskboard-scroll-area"
+            className="w-full min-w-0 snap-x snap-proximity scroll-smooth scroll-px-4 overflow-x-auto overflow-y-hidden overscroll-x-contain px-4 pb-6 pt-3 [scrollbar-width:thin] md:scroll-px-7 md:px-7 lg:h-[calc(100dvh-230px)] lg:min-h-[420px] lg:snap-none lg:overflow-auto lg:overscroll-contain lg:py-5"
+            style={{ WebkitOverflowScrolling: "touch" }}
+          >
             <SortableContext items={lists.map((list) => listDndId(list.id))} strategy={horizontalListSortingStrategy}>
-              <div className="flex w-max min-w-full items-start gap-4 pb-4">
+              <div className="flex w-max min-w-full items-start gap-3 pb-4 sm:gap-4">
                 {lists.map((list) => (
                   <TaskList
                     key={list.id}
@@ -674,13 +725,15 @@ function TaskList({
 
   return (
     <section
+      id={taskListElementId(list.id)}
+      data-taskboard-list={list.id}
       ref={setNodeRef}
       style={style}
-      className={`w-[310px] shrink-0 rounded-2xl border border-slate-200/70 bg-slate-100 p-2.5 shadow-sm ${isDragging ? "opacity-60" : ""}`}
+      className={`w-[calc(100vw-2.5rem)] min-w-[272px] max-w-[310px] shrink-0 scroll-mx-4 snap-start rounded-2xl border border-slate-200/70 bg-slate-100 p-2.5 shadow-sm sm:w-[310px] sm:min-w-[310px] md:scroll-mx-7 lg:snap-none ${isDragging ? "opacity-60" : ""}`}
     >
       <div className="mb-2 flex items-center gap-1.5 px-1.5">
         {canReorder ? (
-          <button type="button" {...attributes} {...listeners} className="cursor-grab rounded-lg p-1.5 text-slate-400 hover:bg-white active:cursor-grabbing" aria-label={`Move ${list.title}`}>
+          <button type="button" {...attributes} {...listeners} className="touch-none cursor-grab rounded-lg p-1.5 text-slate-400 hover:bg-white active:cursor-grabbing" aria-label={`Move ${list.title}`}>
             <GripVertical className="h-4 w-4" />
           </button>
         ) : (
@@ -902,7 +955,7 @@ function TaskCard({
       ref={setNodeRef}
       style={style}
       onClick={onOpen}
-      className={`group cursor-pointer rounded-xl border border-white bg-white p-3 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md ${isDragging ? "opacity-60 shadow-xl" : ""}`}
+      className={`group touch-manipulation cursor-pointer rounded-xl border border-white bg-white p-3 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md ${isDragging ? "opacity-60 shadow-xl" : ""}`}
     >
       <div className="flex items-start gap-2">
         <button type="button" onClick={toggleComplete} disabled={completionSaving}
@@ -922,7 +975,7 @@ function TaskCard({
         </div>
         {!disableDrag && (
           <button type="button" {...attributes} {...listeners} onClick={(event) => event.stopPropagation()}
-            className="cursor-grab rounded p-1 text-slate-300 opacity-0 transition group-hover:opacity-100 active:cursor-grabbing" aria-label={`Move ${task.title}`}>
+            className="grid h-8 w-8 shrink-0 touch-none cursor-grab place-items-center rounded-lg text-slate-300 opacity-100 transition hover:bg-slate-50 active:cursor-grabbing sm:h-auto sm:w-auto sm:rounded sm:p-1 sm:opacity-0 sm:group-hover:opacity-100" aria-label={`Move ${task.title}`}>
             <GripVertical className="h-4 w-4" />
           </button>
         )}
@@ -1634,9 +1687,15 @@ function TaskModal({ portal, task, members, boardMemberIds, lists, documents, ca
                         ? <File className="h-4 w-4" />
                         : <FileText className="h-4 w-4" />}
                   </span>
-                  <a href={attachment.url} target="_blank" rel="noopener noreferrer" className="min-w-0 flex-1 truncate text-[11.5px] font-semibold text-slate-600 hover:text-[#0A4FE8] hover:underline">
-                    {attachment.title}
-                  </a>
+                  {isImageAttachment(attachment) ? (
+                    <PlatformMediaViewer url={attachment.url} title={attachment.title} detail={attachment.size_bytes ? `${Math.max(1, Math.round(attachment.size_bytes / 1024))} KB` : undefined} triggerClassName="min-w-0 flex-1 truncate text-left text-[11.5px] font-semibold text-slate-600 hover:text-[#0A4FE8] hover:underline">
+                      {attachment.title}
+                    </PlatformMediaViewer>
+                  ) : (
+                    <a href={attachment.url} target="_blank" rel="noopener noreferrer" className="min-w-0 flex-1 truncate text-[11.5px] font-semibold text-slate-600 hover:text-[#0A4FE8] hover:underline">
+                      {attachment.title}
+                    </a>
+                  )}
                   <button type="button" onClick={() => void removeAttachment(attachment)} className="rounded-lg p-1.5 text-slate-300 hover:bg-rose-50 hover:text-rose-600" aria-label={`Remove ${attachment.title}`}>
                     <X className="h-3.5 w-3.5" />
                   </button>

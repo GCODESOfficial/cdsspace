@@ -45,6 +45,7 @@ export async function getGmailAccessToken(creds: GmailApiCreds): Promise<string>
 
   const res = await fetch("https://oauth2.googleapis.com/token", {
     method: "POST",
+    signal: AbortSignal.timeout(10_000),
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body: new URLSearchParams({
       client_id: creds.clientId,
@@ -66,7 +67,18 @@ export async function getGmailAccessToken(creds: GmailApiCreds): Promise<string>
 /** Validate the refresh token can mint an access token. Returns null or an error string. */
 export async function verifyGmailApi(creds: GmailApiCreds): Promise<string | null> {
   try {
-    await getGmailAccessToken(creds);
+    const token = await getGmailAccessToken(creds);
+    const response = await fetch(`https://oauth2.googleapis.com/tokeninfo?access_token=${encodeURIComponent(token)}`, {
+      signal: AbortSignal.timeout(10_000),
+    });
+    const body = (await response.json().catch(() => null)) as { scope?: string; error_description?: string } | null;
+    if (!response.ok) {
+      return `Gmail API auth failed: ${body?.error_description || `token inspection responded ${response.status}`}`;
+    }
+    const scopes = new Set(String(body?.scope || "").split(/\s+/).filter(Boolean));
+    if (!scopes.has("https://www.googleapis.com/auth/gmail.send") && !scopes.has("https://mail.google.com/")) {
+      return "Gmail API auth failed: the refresh token does not include Gmail send permission.";
+    }
     return null;
   } catch (e) {
     return `Gmail API auth failed: ${e instanceof Error ? e.message : "unknown error"}`;
@@ -89,6 +101,7 @@ export function createGmailApiTransport(creds: GmailApiCreds) {
             "https://gmail.googleapis.com/gmail/v1/users/me/messages/send",
             {
               method: "POST",
+              signal: AbortSignal.timeout(15_000),
               headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
               body: JSON.stringify({ raw: raw.toString("base64url") }),
             },

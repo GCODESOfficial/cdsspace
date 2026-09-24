@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getGlashDbAdmin } from "@/lib/glashdb";
 import { glashMaybeOne } from "@/lib/glashdb/postgres";
-import { assertCleanBuffer } from "@/lib/upload-security";
+import { assertSafeUpload, UploadSecurityError } from "@/lib/upload-security";
 import {
   canEditBoard,
   getTaskboardViewer,
@@ -44,14 +44,13 @@ export async function POST(req: NextRequest) {
 
   try {
     const db = getGlashDbAdmin() as any;
-    const safeName = cleanFileName(file.name);
-    const storagePath = `taskboards/${task.board_id}/${task.id}/${crypto.randomUUID()}-${safeName}`;
-    const buffer = Buffer.from(await file.arrayBuffer());
-    assertCleanBuffer(buffer);
+    const safe = await assertSafeUpload(file, { allow: ["image", "pdf", "office", "zip", "design"], maxBytes: MAX_FILE_BYTES });
+    const safeName = cleanFileName(file.name.replace(/\.[^.]+$/, ""));
+    const storagePath = `taskboards/${task.board_id}/${task.id}/${crypto.randomUUID()}-${safeName}.${safe.ext}`;
     const { error } = await db.storage
       .from("media")
-      .upload(storagePath, buffer, {
-        contentType: file.type || "application/octet-stream",
+      .upload(storagePath, safe.buffer, {
+        contentType: safe.contentType,
         upsert: false,
       });
     if (error) throw new Error(error.message);
@@ -67,8 +66,8 @@ export async function POST(req: NextRequest) {
         file.name.slice(0, 180),
         data.publicUrl,
         storagePath,
-        file.type || null,
-        file.size,
+        safe.contentType,
+        safe.buffer.length,
         viewer.kind,
         viewer.id,
       ],
@@ -83,7 +82,7 @@ export async function POST(req: NextRequest) {
   } catch (error) {
     return NextResponse.json(
       { ok: false, error: error instanceof Error ? error.message : "Upload failed." },
-      { status: 500 },
+      { status: error instanceof UploadSecurityError ? error.status : 500 },
     );
   }
 }

@@ -35,7 +35,7 @@ test("live translation remains editable after joining", () => {
 test("captions are attached to participant tiles instead of the page footer", () => {
   assert.match(meetClient, /caption=\{translation\.enabled && translation\.captions/);
   assert.match(meetClient, /function ParticipantCaption/);
-  assert.match(meetClient, /absolute inset-x-2 bottom-10/);
+  assert.match(meetClient, /absolute inset-x-2 bottom-20/);
   assert.doesNotMatch(meetClient, /fixed inset-x-3 bottom-\[82px\]/);
 });
 
@@ -51,7 +51,7 @@ test("raised hands and host mute-all travel over room signaling", () => {
   assert.match(rtcClient, /if \(this\.hostRole !== "host"\) return/);
   assert.match(rtcClient, /case "host-mute-all"/);
   assert.match(meetClient, /onHostMuteAll:/);
-  assert.match(signalRoute, /hostControlTypes = new Set\(\["host-mute-all", "host-end", "host-kick"\]\)/);
+  assert.match(signalRoute, /hostControlTypes = new Set\(\["host-mute", "host-mute-all", "host-set-mode", "host-end", "host-kick"\]\)/);
   assert.match(signalRoute, /meeting\?\.created_by === actorMemberId/);
   assert.match(signalRoute, /Only the meeting host can use this control/);
   assert.match(meetClient, /cmeet-hand-attention absolute -right-[^\n]+-top-3/);
@@ -77,9 +77,9 @@ test("super admins get the full participant list while hosts can remove peers", 
 
 test("host end is flushed immediately and every participant follows ended room state", () => {
   assert.match(rtcClient, /async hostEnd\(\)[\s\S]*await this\.transport\?\.flush\(\)/);
-  assert.match(signalClient, /\["leave", "host-end", "host-kick", "host-mute-all"\]/);
+  assert.match(signalClient, /\["leave", "host-end", "host-kick", "host-mute", "host-mute-all", "host-set-mode"\]/);
   assert.match(meetClient, /await clientRef\.current\?\.hostEnd\(\)/);
-  assert.match(meetClient, /payload\?\.meeting\?\.status === "ended"[\s\S]*The host has ended this meeting/);
+  assert.match(meetClient, /payload\.meeting\.status === "ended"[\s\S]*The host has ended this meeting/);
 });
 
 test("participant grid adapts to desktop, phone and tablet orientation", () => {
@@ -142,4 +142,51 @@ test("voice-only calls use compact profile circles and the CDS favicon for admin
   assert.match(meetClient, /participant\.participantKind === "admin" \? "\/favicon\.png"/);
   assert.match(rtcClient, /avatarUrl: this\.avatarUrl/);
   assert.match(rtcClient, /participantKind: this\.participantKind/);
+});
+
+test("mic and camera state stays synchronized and hosts can mute one participant", () => {
+  assert.match(rtcClient, /updateMediaState\(hasAudio: boolean, hasVideo: boolean\)/);
+  assert.match(rtcClient, /type: "media-state"/);
+  assert.match(rtcClient, /case "media-state"/);
+  assert.match(rtcClient, /hostMuteParticipant\(targetPeerId: string\)/);
+  assert.match(rtcClient, /type: "host-mute"/);
+  assert.match(rtcClient, /case "host-mute"/);
+  assert.match(meetClient, /function MediaStatusBadges/);
+  assert.match(meetClient, /clientRef\.current\?\.updateMediaState\(next, camOnRef\.current\)/);
+  assert.match(meetClient, /clientRef\.current\?\.hostMuteParticipant\(peer\.peerId\)/);
+  assert.match(meetClient, /Microphone on\. Click to mute this participant/);
+});
+
+test("speech capture requests browser echo, noise and gain processing", () => {
+  assert.match(meetClient, /function buildCMeetSpeechAudioConstraints/);
+  assert.match(meetClient, /constraints\.echoCancellation = \{ ideal: true \}/);
+  assert.match(meetClient, /constraints\.noiseSuppression = \{ ideal: true \}/);
+  assert.match(meetClient, /constraints\.autoGainControl = \{ ideal: true \}/);
+  assert.match(meetClient, /constraints\.voiceIsolation = \{ ideal: true \}/);
+  assert.match(rtcClient, /useinbandfec=1;usedtx=1;stereo=0/);
+});
+
+test("minimize has a non-blocking fallback on every device", () => {
+  assert.match(meetClient, /aria-label="Minimized cMeet call"/);
+  assert.match(meetClient, /target="_blank".*Continue working/);
+  assert.doesNotMatch(meetClient, /browser could not open the floating meeting window/);
+  assert.match(meetClient, /setMinimized\(true\)/);
+});
+
+test("participant actions are centered in one line", () => {
+  assert.match(meetClient, /className="-bottom-3 left-1\/2 -translate-x-1\/2"/);
+  assert.match(meetClient, /className="bottom-2 left-1\/2 -translate-x-1\/2"/);
+  assert.match(meetClient, /onRemove=\{onRemove\}/);
+});
+
+test("hosts can switch the whole room between audio and video with cameras off", () => {
+  assert.match(roomRoute, /export async function PATCH/);
+  assert.match(roomRoute, /audio_only: body\.audioOnly/);
+  assert.match(rtcClient, /hostSetMeetingMode\(audioOnly: boolean\)/);
+  assert.match(rtcClient, /type: "host-set-mode"/);
+  assert.match(rtcClient, /case "host-set-mode"/);
+  assert.match(meetClient, /async function switchMeetingMode/);
+  assert.match(meetClient, /await clientRef\.current\?\.replaceVideoTrack\(null\)/);
+  assert.match(meetClient, /camOnRef\.current = false/);
+  assert.match(meetClient, /Video mode will open for everyone with every camera off/);
 });

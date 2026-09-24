@@ -186,7 +186,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ cod
   // Controls that affect somebody else's call must be authorized on the
   // server. Hiding these buttons from participants is useful UX, but without
   // this check a participant could forge the same signaling payload manually.
-  const hostControlTypes = new Set(["host-mute-all", "host-end", "host-kick"]);
+  const hostControlTypes = new Set(["host-mute", "host-mute-all", "host-set-mode", "host-end", "host-kick"]);
   const hasHostControl = normalized.some((message) => {
     const payload = message?.payload as Record<string, unknown> | undefined;
     return hostControlTypes.has(String(payload?.type || ""));

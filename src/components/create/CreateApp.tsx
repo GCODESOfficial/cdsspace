@@ -10,6 +10,7 @@ import {
 import type { LucideIcon } from "lucide-react";
 import Link from "next/link";
 import { LetterheadStudio } from "@/components/create/LetterheadStudio";
+import { offerClientStorageRequest } from "@/lib/client-storage-ui";
 
 /* ---------- Types (mirror /api/create/session) ---------- */
 type Role = "client" | "team" | "admin";
@@ -177,12 +178,6 @@ function fieldDefault(f: Field): string {
   if (f.type === "select") return f.options[0];
   return "";
 }
-function fmtBytes(bytes: number) {
-  if (!bytes || bytes < 0) return "0 B";
-  const u = ["B", "KB", "MB", "GB", "TB"]; let v = bytes, i = 0;
-  while (v >= 1024 && i < u.length - 1) { v /= 1024; i += 1; }
-  return `${v >= 10 || i === 0 ? v.toFixed(0) : v.toFixed(1)} ${u[i]}`;
-}
 function initials(name: string) {
   return name.split(/\s+/).filter(Boolean).slice(0, 2).map((p) => p[0]?.toUpperCase()).join("") || "U";
 }
@@ -294,6 +289,7 @@ export function CreateApp({
   const [collapsed, setCollapsed] = useState(workspaceKind === "client");
   const [theme, setTheme] = useState<"light" | "dark">(initialTheme);
   const searchRef = useRef<HTMLInputElement | null>(null);
+  const storagePromptedCreationIds = useRef(new Set<string>());
   const railStorageKey = `create_rail_collapsed_${workspaceKind}`;
 
   useEffect(() => {
@@ -352,6 +348,13 @@ export function CreateApp({
       if (!res.ok) return;
       const json = await res.json().catch(() => ({}));
       if (json.ok && Array.isArray(json.creations)) {
+        if (workspaceKind === "client") {
+          const exhausted = (json.creations as Creation[]).find((creation) => creation.status === "failed" && creation.output?.code === "CLIENT_STORAGE_FULL" && !storagePromptedCreationIds.current.has(creation.id));
+          if (exhausted) {
+            storagePromptedCreationIds.current.add(exhausted.id);
+            void offerClientStorageRequest("CLIENT_STORAGE_FULL");
+          }
+        }
         setData((d) => (d ? { ...d, recentCreations: json.creations } : d));
       }
     }, 6000);
@@ -480,7 +483,6 @@ export function CreateApp({
             {credit && (
               <div className="hidden items-center gap-2 lg:flex">
                 <span className="rounded-lg bg-blue-50 px-2.5 py-1.5 text-[11px] font-bold text-[#0A4FE8]">{actor?.kind === "admin" ? "Premium" : `${Math.max(0, credit.monthlyCreditLimit - credit.creditsUsed)} credits`}</span>
-                <span className="rounded-lg bg-gray-100 px-2.5 py-1.5 text-[11px] font-semibold text-gray-500">{fmtBytes(credit.storageUsedBytes)} / {fmtBytes(credit.storageLimitBytes)}</span>
               </div>
             )}
             {letterheadTool && <button onClick={() => setActiveTool(letterheadTool)} className="grid h-9 w-9 place-items-center rounded-xl bg-blue-50 text-[#0A4FE8] md:hidden" aria-label="Create letterhead"><FileText className="h-[18px] w-[18px]" /></button>}
@@ -690,7 +692,9 @@ function CreationCard({ workspaceKind, c, compact = false, dark = false, onReloa
   const value = typeof c.output?.value === "string" ? c.output.value : "";
   const subtitle = value && value !== c.title ? value : c.toolName;
   async function act(action: "duplicate" | "delete") {
-    await fetch(createApiPath("/api/create/creations", workspaceKind), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action, id: c.id }) });
+    const response = await fetch(createApiPath("/api/create/creations", workspaceKind), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action, id: c.id }) });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok && workspaceKind === "client" && await offerClientStorageRequest(payload.code)) return;
     onReload?.();
   }
   return (
@@ -756,10 +760,12 @@ function CreationsView({ workspaceKind, data, dark, onBack, reload }: { workspac
     if (!selected.length) return;
     setBusy(action);
     try {
-      await fetch(createApiPath("/api/create/creations", workspaceKind), {
+      const response = await fetch(createApiPath("/api/create/creations", workspaceKind), {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action, ids: selected }),
       });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok && workspaceKind === "client" && await offerClientStorageRequest(payload.code)) return;
       clear();
       reload();
     } finally { setBusy(null); }
@@ -1012,7 +1018,10 @@ function ToolPage({ workspaceKind, tool, onBack, onSaved }: { workspaceKind: Rol
     const res = await fetch(createApiPath(`/api/create/tools/${tool.slug}/run`, workspaceKind), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(values) });
     const json = await res.json().catch(() => ({}));
     setRunning(false);
-    if (!res.ok) { setError(json.error || "CREATE could not run this tool."); return; }
+    if (!res.ok) {
+      if (workspaceKind === "client" && await offerClientStorageRequest(json.code)) return;
+      setError(json.error || "CREATE could not run this tool."); return;
+    }
     setResult({ status: json.status, output: json.output || {}, fileName: json.creation?.fileName || undefined });
     onSaved();
   }

@@ -16,6 +16,7 @@ import {
   ChevronDown, ChevronUp, CalendarRange, CheckCircle2, XCircle, Paperclip, ExternalLink,
 } from "lucide-react";
 import { toast } from "sonner";
+import { PlatformMediaViewer } from "@/components/media/PlatformMediaViewer";
 
 type Row = {
   member: { id: string; full_name: string; role_title: string | null; department: string | null };
@@ -306,11 +307,19 @@ function FragmentRow({ row, open, onToggle, acting, runAction }: {
                       <div className="pt-1">
                         <p className="mb-1.5 flex items-center gap-1.5 text-[11px] font-semibold text-gray-500"><Paperclip className="h-3.5 w-3.5" /> Supporting documents</p>
                         <div className="flex flex-wrap gap-1.5">
-                          {row.self_report.attachments.map((attachment: any) => (
-                            <a key={attachment.id} href={`/api/team/work-tracking/attachments/${attachment.id}`} target="_blank" rel="noreferrer" className="inline-flex max-w-full items-center gap-1 rounded-lg border border-blue-100 bg-blue-50 px-2.5 py-1 text-[11px] font-semibold text-[#0A4FE8] hover:bg-blue-100">
-                              <span className="truncate">{attachment.title}</span><ExternalLink className="h-3 w-3 shrink-0" />
-                            </a>
-                          ))}
+                          {row.self_report.attachments.map((attachment: any) => {
+                            const url = `/api/team/work-tracking/attachments/${attachment.id}`;
+                            const isImage = String(attachment.mime_type || "").startsWith("image/") || /\.(png|jpe?g|webp|gif)$/i.test(String(attachment.title || ""));
+                            return isImage ? (
+                              <PlatformMediaViewer key={attachment.id} url={url} title={attachment.title || "Supporting image"} triggerClassName="inline-flex max-w-full items-center gap-1 rounded-lg border border-blue-100 bg-blue-50 px-2.5 py-1 text-left text-[11px] font-semibold text-[#0A4FE8] hover:bg-blue-100">
+                                <span className="truncate">{attachment.title}</span>
+                              </PlatformMediaViewer>
+                            ) : (
+                              <a key={attachment.id} href={url} target="_blank" rel="noreferrer" className="inline-flex max-w-full items-center gap-1 rounded-lg border border-blue-100 bg-blue-50 px-2.5 py-1 text-[11px] font-semibold text-[#0A4FE8] hover:bg-blue-100">
+                                <span className="truncate">{attachment.title}</span><ExternalLink className="h-3 w-3 shrink-0" />
+                              </a>
+                            );
+                          })}
                         </div>
                       </div>
                     )}

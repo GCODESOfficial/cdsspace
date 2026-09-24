@@ -6,6 +6,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ArrowLeft, Archive, Check, ClipboardPaste, Copy, Download, FileText, Loader2, LockKeyhole, Plus, Upload } from "lucide-react";
 import { RichDocEditor } from "@/components/cdocs/rich-doc-editor";
 import { appConfirm } from "@/lib/app-notify";
+import { offerClientStorageRequest } from "@/lib/client-storage-ui";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import type { LetterheadExportSize } from "@/lib/letterhead-pdf";
 
@@ -190,7 +191,10 @@ export function LetterheadStudio({ onBack, workspaceKind }: { onBack: () => void
     const response = await fetch(apiPath(`/api/create/letterheads/${active.id}/upload`, workspaceKind), { method: "POST", body: form });
     const payload = await response.json().catch(() => ({}));
     setUploading(null);
-    if (!response.ok) { setError(payload.error || "The file could not be uploaded."); return; }
+    if (!response.ok) {
+      if (workspaceKind === "client" && await offerClientStorageRequest(payload.code)) return;
+      setError(payload.error || "The file could not be uploaded."); return;
+    }
     setActive(payload.letterhead);
     setItems((current) => current.map((item) => item.id === active.id ? payload.letterhead : item));
   }

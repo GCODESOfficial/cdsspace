@@ -3,7 +3,7 @@ import { randomUUID } from "crypto";
 import { getGlashDbAdmin } from "@/lib/glashdb";
 import { glashMaybeOne } from "@/lib/glashdb/postgres";
 import {
-  assertCleanBuffer,
+  assertSecureBuffer,
   assertSafeImage,
   UploadSecurityError,
 } from "@/lib/upload-security";
@@ -70,7 +70,7 @@ export async function uploadSopMedia(input: {
         413,
       );
     buffer = Buffer.from(await input.file.arrayBuffer());
-    assertCleanBuffer(buffer, { activeContent: true });
+    await assertSecureBuffer(buffer, { activeContent: true, fileName: input.file.name });
     const safe = sniffVideo(buffer);
     contentType = safe.contentType;
     ext = safe.ext;

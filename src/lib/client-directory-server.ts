@@ -238,6 +238,9 @@ export async function createClientAccountInvite(clientId: string, invitedBy: str
   if (client.platform_user_id) throw new Error("This client already has a linked platform account.");
   const email = normalizedEmail(client.email);
   if (!email) throw new Error("Add the client's email address before sending an invite.");
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/i.test(email)) {
+    throw new Error("Add a valid client email address before sending an invite.");
+  }
   const existingProfile = await glashMaybeOne<{ id: string }>(
     "select id from public.profiles where lower(trim(email)) = $1 limit 1",
     [email],

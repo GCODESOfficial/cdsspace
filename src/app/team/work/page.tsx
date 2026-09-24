@@ -44,6 +44,17 @@ import {
 import { AnimatePresence, motion } from "framer-motion";
 import { appAlert, appConfirm } from "@/lib/app-notify";
 import { BRAND_BRIEF_FIELD_LABELS } from "@/lib/brand-brief";
+import { PlatformMediaViewer } from "@/components/media/PlatformMediaViewer";
+
+function isImageResource(url: string | null, title?: string | null) {
+  if (!url) return false;
+  try {
+    const pathname = new URL(url, "https://cdsspace.pro").pathname;
+    return /\.(png|jpe?g|webp|gif)$/i.test(pathname) || /\.(png|jpe?g|webp|gif)$/i.test(title || "");
+  } catch {
+    return /\.(png|jpe?g|webp|gif)$/i.test(url) || /\.(png|jpe?g|webp|gif)$/i.test(title || "");
+  }
+}
 
 type ProjectStatus = "new" | "active" | "paused" | "delayed" | "awaiting_client" | "under_review" | "completed" | "archived";
 type TaskStatus = "not_started" | "in_progress" | "under_review" | "needs_revision" | "approved" | "completed" | "delayed";
@@ -1822,12 +1833,16 @@ function FilesTab({ documents, form, setForm, onSubmit, working, brief, canManag
           {Object.entries(grouped).map(([folder, docs]) => (
             <Panel key={folder} title={folder} icon={FileUp}>
               <div className="space-y-2">
-                {docs.map((document) => (
-                  <a key={document.id} href={document.file_url || "#"} target="_blank" rel="noreferrer" className="block rounded-2xl bg-brand-bg/70 px-3 py-2.5 transition hover:bg-blue-50">
-                    <p className="truncate text-[13px] font-bold text-brand-navy">{document.title}</p>
-                    <p className="text-[11px] text-brand-body/55">{label(document.visibility)} · {formatDate(document.created_at.slice(0, 10))}</p>
-                  </a>
-                ))}
+                {docs.map((document) => {
+                  const content = <><p className="truncate text-[13px] font-bold text-brand-navy">{document.title}</p><p className="text-[11px] text-brand-body/55">{label(document.visibility)} · {formatDate(document.created_at.slice(0, 10))}</p></>;
+                  return isImageResource(document.file_url, document.title) && document.file_url ? (
+                    <PlatformMediaViewer key={document.id} url={document.file_url} title={document.title} detail={`${label(document.visibility)} · ${formatDate(document.created_at.slice(0, 10))}`} triggerClassName="block w-full rounded-2xl bg-brand-bg/70 px-3 py-2.5 text-left transition hover:bg-blue-50">
+                      {content}
+                    </PlatformMediaViewer>
+                  ) : (
+                    <a key={document.id} href={document.file_url || "#"} target="_blank" rel="noreferrer" className="block rounded-2xl bg-brand-bg/70 px-3 py-2.5 transition hover:bg-blue-50">{content}</a>
+                  );
+                })}
               </div>
             </Panel>
           ))}

@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button";
 import { ArrowLeft, Check, Download, Loader2, TicketCheck } from "lucide-react";
 import type { FinanceBankAccount, FinanceInvoice, FinanceInvoiceItem, FinanceReceipt, InvoicePaymentSubmission } from "@/lib/finance/types";
 import { buildInvoiceShareMessage } from "@/lib/finance/share";
+import { INVOICE_VALID_DAYS, invoiceExpiryLabel, invoiceHasExpired } from "@/lib/finance/invoice-expiry";
 
 export default function PublicInvoiceClient({ token }: { token: string }) {
   const router = useRouter();
@@ -183,6 +184,28 @@ export default function PublicInvoiceClient({ token }: { token: string }) {
             </Button>
           </div>
         </div>
+        {invoice?.auto_cancel_at && invoice.status !== "paid" && invoice.status !== "cancelled" && (
+          <section className="no-print mx-auto mb-6 max-w-[820px] rounded-[16px] border border-amber-200 bg-amber-50 px-5 py-4">
+            <p className="text-[13px] font-semibold text-amber-900">
+              This invoice is valid until {invoiceExpiryLabel(invoice.auto_cancel_at)}
+            </p>
+            <p className="mt-1 text-[12px] leading-5 text-amber-800">
+              This invoice remains valid for {INVOICE_VALID_DAYS} days from the date it was issued. We kindly ask that
+              payment be completed within this period. If you have any questions or need assistance, please contact
+              us, and we will be happy to help.
+            </p>
+          </section>
+        )}
+        {invoice?.status === "cancelled" && invoice.auto_cancel_at && invoiceHasExpired(invoice.auto_cancel_at) && (
+          <section className="no-print mx-auto mb-6 max-w-[820px] rounded-[16px] border border-slate-200 bg-slate-50 px-5 py-4">
+            <p className="text-[13px] font-semibold text-slate-700">
+              This invoice expired on {invoiceExpiryLabel(invoice.auto_cancel_at)} and has been cancelled.
+            </p>
+            <p className="mt-1 text-[12px] leading-5 text-slate-600">
+              Contact CDS Space if you would still like to go ahead, and a fresh invoice will be raised.
+            </p>
+          </section>
+        )}
         {invoice && (
           <InvoicePaymentPanel
             token={token}

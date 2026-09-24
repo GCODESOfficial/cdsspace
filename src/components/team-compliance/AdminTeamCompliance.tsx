@@ -27,6 +27,7 @@ import {
   X,
 } from "lucide-react";
 import { UniversalShareButton } from "@/components/share/UniversalShareButton";
+import { appConfirm } from "@/lib/app-notify";
 
 type Section = "overview" | "sops" | "library" | "approvals";
 type SaveState = "idle" | "saving" | "saved" | "error";
@@ -456,9 +457,9 @@ export default function AdminTeamCompliance({ section }: { section: Section }) {
 
   async function deleteSop(sop: any) {
     if (
-      !window.confirm(
+      !(await appConfirm(
         `Delete “${sop.title || "Untitled SOP"}” and its attachments?`,
-      )
+      ))
     )
       return;
     setBusy(`delete-${sop.id}`);
@@ -475,7 +476,7 @@ export default function AdminTeamCompliance({ section }: { section: Section }) {
   }
 
   async function deleteMedia(media: any) {
-    if (!sopEditor || !window.confirm(`Remove ${media.file_name}?`)) return;
+    if (!sopEditor || !(await appConfirm(`Remove ${media.file_name}?`))) return;
     setBusy("media-delete");
     try {
       await post({ action: "delete_media", id: media.id });
@@ -531,9 +532,9 @@ export default function AdminTeamCompliance({ section }: { section: Section }) {
 
   async function deleteBook(book: any) {
     if (
-      !window.confirm(
+      !(await appConfirm(
         `Delete ${book.inventory_number}: ${book.title || "Untitled book"}?`,
-      )
+      ))
     )
       return;
     setBusy(`book-delete-${book.id}`);

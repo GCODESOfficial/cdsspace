@@ -2,7 +2,7 @@ import { v4 as uuidv4 } from "uuid";
 import { getGlashDbAdmin } from "@/lib/glashdb";
 import { mediaKindFromMime, type MediaKind } from "@/lib/content-hub/shared";
 import { validateContentHubUpload } from "@/lib/content-hub/upload-limits";
-import { assertCleanBuffer } from "@/lib/upload-security";
+import { assertSafeUpload, UploadSecurityError } from "@/lib/upload-security";
 
 export interface UploadedContentHubFile {
   url: string;
@@ -10,11 +10,6 @@ export interface UploadedContentHubFile {
   file_name: string;
   mime_type: string | null;
   size_bytes: number;
-}
-
-function cleanExt(fileName: string) {
-  const ext = (fileName.split(".").pop() || "bin").toLowerCase().replace(/[^a-z0-9]/g, "");
-  return ext || "bin";
 }
 
 export async function uploadContentHubFile(file: File, folder = "content-hub"): Promise<UploadedContentHubFile> {
@@ -26,15 +21,19 @@ export async function uploadContentHubFile(file: File, folder = "content-hub"): 
   const storage: any = getGlashDbAdmin();
   if (!storage) throw new Error("Storage not configured");
 
-  const path = `${folder.replace(/^\/+|\/+$/g, "")}/${uuidv4()}.${cleanExt(file.name)}`;
-  const buffer = Buffer.from(await file.arrayBuffer());
-  // Reject executables / EICAR before anything is written to storage.
-  assertCleanBuffer(buffer);
-  const contentType = file.type || "application/octet-stream";
+  const maxBytes = validation.kind === "video" ? 100 * 1024 * 1024 : validation.kind === "image" ? 10 * 1024 * 1024 : 25 * 1024 * 1024;
+  if (file.size > maxBytes) throw new UploadSecurityError("This file is too large for the content library.", 413);
+  const safe = await assertSafeUpload(file, { allow: ["image", "pdf", "office", "zip", "design"], maxBytes });
+  if ((validation.kind === "image" && safe.kind !== "image")
+    || (validation.kind === "video" && !safe.contentType.startsWith("video/"))) {
+    throw new UploadSecurityError("The file contents do not match the selected media type.");
+  }
+  const path = `${folder.replace(/^\/+|\/+$/g, "")}/${uuidv4()}.${safe.ext}`;
+  const contentType = safe.contentType;
 
   const { error } = await storage.storage
     .from("media")
-    .upload(path, buffer, { contentType, upsert: false });
+    .upload(path, safe.buffer, { contentType, upsert: false });
   if (error) throw new Error(error.message);
 
   const { data } = storage.storage.from("media").getPublicUrl(path);
@@ -42,7 +41,7 @@ export async function uploadContentHubFile(file: File, folder = "content-hub"): 
     url: data.publicUrl,
     kind: mediaKindFromMime(contentType),
     file_name: file.name,
-    mime_type: file.type || null,
-    size_bytes: file.size,
+    mime_type: contentType,
+    size_bytes: safe.buffer.length,
   };
 }

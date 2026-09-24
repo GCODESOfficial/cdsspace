@@ -4,12 +4,12 @@ import { hasPermission } from "@/lib/admin-permissions";
 import { isLegalSlug } from "@/lib/legal/default-content";
 import { buildLegalPdf, legalPdfFileName } from "@/lib/legal/pdf";
 import { loadLegalDocument } from "@/lib/legal/server";
+import { parseRichText } from "@/lib/rich-text";
 
 export const runtime = "nodejs";
 
 /**
- * Generates a .docx from the current HTML content. Uses `html-to-docx`, a
- * pure-JS package that writes an Office Open XML file in-memory.
+ * Generates a .docx from the current sanitized legal content.
  *
  * The returned Blob/Buffer is a valid .docx that opens in Word, Pages, and
  * Google Docs. After editing, the admin can re-upload via the sibling
@@ -39,31 +39,37 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ slug
         });
     }
 
-    // html-to-docx has no TypeScript types bundled, and different versions
-    // export as default vs named. Resolve either shape.
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const htmlToDocxModule: any = await import("html-to-docx");
-    const htmlToDocx = htmlToDocxModule.default ?? htmlToDocxModule;
-
-    const fullHtml = `
-        <!DOCTYPE html>
-        <html>
-            <head><meta charset="utf-8"><title>${escapeHtml(doc.title)}</title></head>
-            <body>
-                <h1>${escapeHtml(doc.title)}</h1>
-                ${doc.subtitle ? `<p><em>${escapeHtml(doc.subtitle)}</em></p>` : ""}
-                <p><strong>Effective date:</strong> ${escapeHtml(formatDate(doc.effective_date))}</p>
-                <hr/>
-                ${doc.content}
-            </body>
-        </html>
-    `;
-
-    const buffer: Buffer = await htmlToDocx(fullHtml, null, {
-        table: { row: { cantSplit: true } },
-        footer: false,
-        pageNumber: false,
-    });
+    // Build OOXML directly instead of passing HTML and embedded image URLs to
+    // a converter. This keeps document export away from vulnerable image
+    // sniffers and prevents an admin-authored document from triggering an
+    // unexpected server-side fetch.
+    const { Document, HeadingLevel, Packer, Paragraph, TextRun } = await import("docx");
+    const children = [
+        new Paragraph({ text: doc.title, heading: HeadingLevel.TITLE }),
+        ...(doc.subtitle ? [new Paragraph({ children: [new TextRun({ text: doc.subtitle, italics: true })] })] : []),
+        new Paragraph({
+            children: [
+                new TextRun({ text: "Effective date: ", bold: true }),
+                new TextRun(formatDate(doc.effective_date)),
+            ],
+            spacing: { after: 240 },
+        }),
+    ];
+    for (const node of parseRichText(doc.content)) {
+        if (node.kind === "paragraph") {
+            children.push(new Paragraph({ text: node.text, spacing: { after: 160 } }));
+            continue;
+        }
+        node.items.forEach((item, index) => {
+            children.push(new Paragraph({
+                text: node.ordered ? `${index + 1}. ${item}` : item,
+                ...(node.ordered ? {} : { bullet: { level: 0 } }),
+                spacing: { after: 80 },
+            }));
+        });
+    }
+    const document = new Document({ sections: [{ children }] });
+    const buffer = await Packer.toBuffer(document);
 
     const filename = `cds-space-${slug}-v${doc.version}-${doc.effective_date}.docx`;
 
@@ -75,15 +81,6 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ slug
             "Cache-Control": "no-store",
         },
     });
-}
-
-function escapeHtml(input: string) {
-    return input
-        .replace(/&/g, "&amp;")
-        .replace(/</g, "&lt;")
-        .replace(/>/g, "&gt;")
-        .replace(/"/g, "&quot;")
-        .replace(/'/g, "&#39;");
 }
 
 function formatDate(iso: string) {

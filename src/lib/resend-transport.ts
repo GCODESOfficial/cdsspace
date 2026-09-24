@@ -85,6 +85,7 @@ export function createResendHttpTransport(apiKey: string) {
 
       fetch("https://api.resend.com/emails", {
         method: "POST",
+        signal: AbortSignal.timeout(15_000),
         headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       })

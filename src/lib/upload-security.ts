@@ -1,5 +1,6 @@
 import "server-only";
-import sharp from "sharp";
+import sharp, { type Metadata } from "sharp";
+import { MalwareScanError, scanBufferForMalware } from "@/lib/malware-scanner";
 
 /**
  * Centralised upload-security gate.
@@ -51,10 +52,17 @@ type DocKind = "pdf" | "zip" | "ole";
 
 type UploadFamily = "image" | "pdf" | "office" | "zip" | "design";
 
+const DANGEROUS_ARCHIVE_EXTENSIONS = new Set([
+  "apk", "app", "bat", "bin", "class", "cmd", "com", "cpl", "deb", "dll", "dmg", "drv",
+  "exe", "gadget", "hta", "img", "iso", "jar", "js", "jse", "lnk", "msp", "msi", "pif",
+  "ps1", "psm1", "reg", "rpm", "scr", "sys", "url", "vbe", "vbs", "wsf", "wsh",
+]);
+const MACRO_OFFICE_EXTENSIONS = new Set(["docm", "dotm", "xlsm", "xltm", "xlam", "pptm", "potm", "ppam", "ppsm"]);
+
 const OFFICE_ZIP_EXTENSIONS = new Set(["docx", "docm", "xlsx", "xlsm", "pptx", "pptm", "odt", "ods", "odp", "pages", "numbers", "key"]);
 const DESIGN_ZIP_EXTENSIONS = new Set(["idml", "sketch", "xd"]);
 const DESIGN_ARCHIVE_EXTENSIONS = new Set(["7z", "rar", "gz", "tar"]);
-const DESIGN_TEXT_EXTENSIONS = new Set(["txt", "md", "csv", "json"]);
+const DESIGN_TEXT_EXTENSIONS = new Set(["txt", "md", "markdown", "csv", "json"]);
 const DESIGN_OPAQUE_EXTENSIONS = new Set(["fig", "afdesign", "afphoto", "afpub"]);
 const DESIGN_BINARY_EXTENSIONS = new Set([
   "ai", "psd", "psb", "eps", "ps", "indd", "cdr",
@@ -63,6 +71,14 @@ const DESIGN_BINARY_EXTENSIONS = new Set([
   "mp4", "mov", "m4v", "webm", "mkv", "avi",
   "mp3", "wav", "m4a", "aac",
 ]);
+
+const VERIFIED_BINARY_CONTENT_TYPES: Record<string, string> = {
+  tif: "image/tiff", tiff: "image/tiff", bmp: "image/bmp", heic: "image/heic", heif: "image/heif",
+  ttf: "font/ttf", otf: "font/otf", woff: "font/woff", woff2: "font/woff2",
+  mp4: "video/mp4", mov: "video/quicktime", m4v: "video/x-m4v", webm: "video/webm",
+  mkv: "video/x-matroska", avi: "video/x-msvideo",
+  mp3: "audio/mpeg", wav: "audio/wav", m4a: "audio/mp4", aac: "audio/aac",
+};
 
 function uploadExtension(file: unknown) {
   const candidate = file as { name?: unknown } | null;
@@ -74,6 +90,22 @@ function uploadExtension(file: unknown) {
   return dot > 0 && dot < name.length - 1 ? name.slice(dot + 1).replace(/[^a-z0-9]/g, "") : "";
 }
 
+function uploadName(file: unknown) {
+  const candidate = file as { name?: unknown } | null;
+  return typeof candidate?.name === "string" ? candidate.name.trim() : "upload";
+}
+
+function assertSafeFilename(name: string) {
+  if (!name || name.length > 220) throw new UploadSecurityError("The file name is invalid.", 400);
+  if (/[\u0000-\u001f\u007f\u202a-\u202e\u2066-\u2069]/.test(name) || /[. ]$/.test(name)) {
+    throw new UploadSecurityError("The file name contains unsafe characters.", 400);
+  }
+  const parts = name.toLowerCase().split(".").filter(Boolean);
+  if (parts.slice(0, -1).some((part) => DANGEROUS_ARCHIVE_EXTENSIONS.has(part))) {
+    throw new UploadSecurityError("Double-extension executable files are not allowed.");
+  }
+}
+
 function startsWithAscii(buffer: Buffer, value: string, offset = 0) {
   return buffer.length >= offset + value.length && buffer.subarray(offset, offset + value.length).toString("latin1") === value;
 }
@@ -83,7 +115,7 @@ function validateSafeSvg(buffer: Buffer) {
   if (!/^<\?xml\b[^>]*>\s*<svg\b|^<svg\b/i.test(markup.slice(0, 4096))) {
     throw new UploadSecurityError("The SVG file does not contain valid SVG markup.");
   }
-  if (/<script\b|<foreignObject\b|<iframe\b|<object\b|<embed\b|<!ENTITY\b|\son[a-z]+\s*=|javascript\s*:|@import\b/i.test(markup)) {
+  if (/<script\b|<foreignObject\b|<iframe\b|<object\b|<embed\b|<!ENTITY\b|\son[a-z]+\s*=|javascript\s*:|@import\b|(?:href|xlink:href)\s*=\s*["'](?:https?:|\/\/|data:text\/html)/i.test(markup)) {
     throw new UploadSecurityError("Blocked: the SVG contains active or externally executable content.");
   }
 }
@@ -148,7 +180,7 @@ function hasDesignSignature(buffer: Buffer, ext: string) {
 function safeDesignAsset(buffer: Buffer, ext: string): SafeUpload {
   if (ext === "svg") {
     validateSafeSvg(buffer);
-    return { buffer, contentType: "application/octet-stream", ext, kind: "document" };
+    return { buffer, contentType: "image/svg+xml", ext, kind: "document" };
   }
   if (DESIGN_TEXT_EXTENSIONS.has(ext)) {
     if (buffer.includes(0)) throw new UploadSecurityError(`The .${ext} file is not a valid text asset.`);
@@ -166,7 +198,7 @@ function safeDesignAsset(buffer: Buffer, ext: string): SafeUpload {
   }
   if (DESIGN_BINARY_EXTENSIONS.has(ext)) {
     if (!hasDesignSignature(buffer, ext)) throw new UploadSecurityError(`The .${ext} delivery asset could not be verified.`);
-    return { buffer, contentType: "application/octet-stream", ext, kind: "document" };
+    return { buffer, contentType: VERIFIED_BINARY_CONTENT_TYPES[ext] || "application/octet-stream", ext, kind: "document" };
   }
   if (DESIGN_OPAQUE_EXTENSIONS.has(ext)) {
     return { buffer, contentType: "application/octet-stream", ext, kind: "document" };
@@ -198,7 +230,119 @@ export function scanForActiveContent(buffer: Buffer): string | null {
   if (head.includes("<?php")) return "embedded PHP";
   if (head.includes("<!doctype html") || head.includes("<html")) return "HTML markup";
   if (head.includes("<svg")) return "SVG markup (scriptable)";
+  if (/<(?:iframe|object|embed|meta)\b|\son[a-z]+\s*=|javascript\s*:|data\s*:\s*text\/html/i.test(head)) return "browser-executable markup";
   return null;
+}
+
+function validatePdfStructure(buffer: Buffer) {
+  const text = buffer.toString("latin1");
+  const riskyToken = /\/(?:JavaScript|JS|Launch|OpenAction|AA|RichMedia|EmbeddedFile|XFA)\b/i.exec(text);
+  if (riskyToken) {
+    throw new UploadSecurityError(`Blocked: the PDF contains active content (${riskyToken[0]}).`);
+  }
+  if (/\/Encrypt\b/.test(text)) {
+    throw new UploadSecurityError("Encrypted PDFs cannot be security-scanned. Upload an unlocked copy.");
+  }
+  const eof = text.lastIndexOf("%%EOF");
+  if (eof < 0 || eof < text.length - 4096) {
+    throw new UploadSecurityError("The PDF is incomplete or has an unverifiable trailing payload.");
+  }
+  if (/[^\x00\x09\x0a\x0c\x0d\x20]/.test(text.slice(eof + 5))) {
+    throw new UploadSecurityError("The PDF has data appended after its final marker.");
+  }
+}
+
+interface ZipInspection {
+  names: string[];
+  expandedBytes: number;
+}
+
+function findEndOfCentralDirectory(buffer: Buffer) {
+  const min = Math.max(0, buffer.length - 65_557);
+  for (let offset = buffer.length - 22; offset >= min; offset -= 1) {
+    if (buffer.readUInt32LE(offset) === 0x06054b50) return offset;
+  }
+  return -1;
+}
+
+function inspectZip(buffer: Buffer, maxExpandedBytes: number): ZipInspection {
+  const eocd = findEndOfCentralDirectory(buffer);
+  if (eocd < 0 || eocd + 22 > buffer.length) throw new UploadSecurityError("The ZIP archive is incomplete.");
+
+  const diskNumber = buffer.readUInt16LE(eocd + 4);
+  const centralDisk = buffer.readUInt16LE(eocd + 6);
+  const entryCount = buffer.readUInt16LE(eocd + 10);
+  const centralSize = buffer.readUInt32LE(eocd + 12);
+  const centralOffset = buffer.readUInt32LE(eocd + 16);
+  if (diskNumber !== 0 || centralDisk !== 0) throw new UploadSecurityError("Multi-volume ZIP archives are not allowed.");
+  if (entryCount === 0xffff || centralSize === 0xffffffff || centralOffset === 0xffffffff) {
+    throw new UploadSecurityError("ZIP64 archives are not accepted at this upload gateway.");
+  }
+  if (entryCount > 5_000) throw new UploadSecurityError("The ZIP contains too many files.", 413);
+  if (centralOffset + centralSize > eocd || centralOffset > buffer.length) {
+    throw new UploadSecurityError("The ZIP central directory is invalid.");
+  }
+
+  const names: string[] = [];
+  let expandedBytes = 0;
+  let compressedBytes = 0;
+  let offset = centralOffset;
+  for (let index = 0; index < entryCount; index += 1) {
+    if (offset + 46 > buffer.length || buffer.readUInt32LE(offset) !== 0x02014b50) {
+      throw new UploadSecurityError("The ZIP central directory is malformed.");
+    }
+    const flags = buffer.readUInt16LE(offset + 8);
+    const compressed = buffer.readUInt32LE(offset + 20);
+    const expanded = buffer.readUInt32LE(offset + 24);
+    const nameLength = buffer.readUInt16LE(offset + 28);
+    const extraLength = buffer.readUInt16LE(offset + 30);
+    const commentLength = buffer.readUInt16LE(offset + 32);
+    const externalAttributes = buffer.readUInt32LE(offset + 38);
+    const next = offset + 46 + nameLength + extraLength + commentLength;
+    if (next > buffer.length || !nameLength) throw new UploadSecurityError("The ZIP contains an invalid entry.");
+    if (flags & 0x0001) throw new UploadSecurityError("Password-protected ZIP entries cannot be security-scanned.");
+
+    const rawName = buffer.subarray(offset + 46, offset + 46 + nameLength).toString("utf8");
+    const normalized = rawName.replace(/\\/g, "/");
+    if (
+      !normalized || normalized.includes("\0") || normalized.startsWith("/") ||
+      /^[a-z]:\//i.test(normalized) || normalized.split("/").includes("..")
+    ) {
+      throw new UploadSecurityError("The ZIP contains an unsafe file path.");
+    }
+    const leaf = normalized.split("/").pop() || "";
+    const ext = leaf.includes(".") ? leaf.split(".").pop()!.toLowerCase() : "";
+    if (DANGEROUS_ARCHIVE_EXTENSIONS.has(ext)) {
+      throw new UploadSecurityError(`The ZIP contains a blocked executable file (.${ext}).`);
+    }
+    if (/\bvbaProject\.bin$/i.test(normalized) || /\/embeddings\/.*\.(?:bin|ole)$/i.test(normalized)) {
+      throw new UploadSecurityError("The archive contains macros or an embedded executable object.");
+    }
+
+    const unixMode = externalAttributes >>> 16;
+    if ((unixMode & 0xf000) === 0xa000) throw new UploadSecurityError("Symbolic links are not allowed in ZIP uploads.");
+    if (compressed === 0 && expanded > 0) throw new UploadSecurityError("The ZIP has a suspicious compression ratio.");
+    if (compressed > 0 && expanded / compressed > 200) throw new UploadSecurityError("The ZIP may be a decompression bomb.", 413);
+
+    expandedBytes += expanded;
+    compressedBytes += compressed;
+    if (expandedBytes > maxExpandedBytes) throw new UploadSecurityError("The expanded ZIP is too large.", 413);
+    names.push(normalized);
+    offset = next;
+  }
+  if (compressedBytes > 0 && expandedBytes / compressedBytes > 100) {
+    throw new UploadSecurityError("The ZIP has an unsafe overall compression ratio.", 413);
+  }
+  return { names, expandedBytes };
+}
+
+async function runMalwareScan(buffer: Buffer) {
+  try {
+    return await scanBufferForMalware(buffer);
+  } catch (error) {
+    if (error instanceof MalwareScanError) throw new UploadSecurityError(error.message, error.status);
+    throw new UploadSecurityError("The malware scanner could not verify this upload.", 503);
+  }
 }
 
 /**
@@ -218,6 +362,25 @@ export function assertCleanBuffer(buffer: Buffer, opts: { activeContent?: boolea
   }
 }
 
+/**
+ * Full type-agnostic security gate for routes that accept several media kinds.
+ * It layers local signatures and structural checks with an external ClamAV
+ * scan when configured. Configure UPLOAD_MALWARE_SCAN_MODE=required to fail
+ * closed when the scanner service is unavailable.
+ */
+export async function assertSecureBuffer(
+  buffer: Buffer,
+  opts: { activeContent?: boolean; fileName?: string; maxExpandedBytes?: number } = {},
+) {
+  if (opts.fileName) assertSafeFilename(opts.fileName);
+  assertCleanBuffer(buffer, { activeContent: opts.activeContent !== false });
+  if (startsWithAscii(buffer, "%PDF-")) validatePdfStructure(buffer);
+  if (DOC_MAGIC[1].test(buffer)) {
+    inspectZip(buffer, opts.maxExpandedBytes ?? Math.min(Math.max(buffer.length * 40, 100 * 1024 * 1024), 1024 * 1024 * 1024));
+  }
+  return runMalwareScan(buffer);
+}
+
 export interface SafeImage {
   buffer: Buffer;
   contentType: RasterType;
@@ -235,7 +398,7 @@ const MAX_DIMENSION = 12000; // guard against decompression bombs
  */
 export async function assertSafeImage(
   file: Blob | { arrayBuffer: () => Promise<ArrayBuffer>; type?: string; size?: number },
-  opts: { maxBytes?: number; maxDimension?: number | null; maxInputPixels?: number; preserveOriginal?: boolean } = {},
+  opts: { maxBytes?: number; maxDimension?: number | null; maxInputPixels?: number; preserveOriginal?: boolean; skipMalwareScan?: boolean } = {},
 ): Promise<SafeImage> {
   const maxBytes = opts.maxBytes ?? DEFAULT_IMAGE_MAX;
   const buffer = Buffer.from(await file.arrayBuffer());
@@ -245,14 +408,13 @@ export async function assertSafeImage(
     throw new UploadSecurityError(`Image is larger than the ${Math.floor(maxBytes / 1024 / 1024)}MB limit.`, 413);
   }
 
-  const executable = scanForExecutable(buffer);
-  if (executable) throw new UploadSecurityError(`Blocked: the file looks like a ${executable}, not an image.`);
+  if (!opts.skipMalwareScan) await assertSecureBuffer(buffer);
 
   const sniff = IMAGE_MAGIC.find((m) => m.test(buffer));
   if (!sniff) throw new UploadSecurityError("Only PNG, JPEG, WEBP or GIF images are allowed.");
 
   const maxInputPixels = opts.maxInputPixels ?? MAX_DIMENSION * MAX_DIMENSION;
-  let meta: sharp.Metadata;
+  let meta: Metadata;
   try {
     meta = await sharp(buffer, { animated: sniff.type === "image/gif", limitInputPixels: maxInputPixels }).metadata();
   } catch {
@@ -317,14 +479,15 @@ export async function assertSafeUpload(
   const maxBytes = opts.maxBytes ?? 25 * 1024 * 1024;
   const buffer = Buffer.from(await file.arrayBuffer());
   const originalExt = uploadExtension(file);
+  const originalName = uploadName(file);
 
   if (!buffer.length) throw new UploadSecurityError("The uploaded file is empty.");
   if (buffer.length > maxBytes) {
     throw new UploadSecurityError(`File is larger than the ${Math.floor(maxBytes / 1024 / 1024)}MB limit.`, 413);
   }
 
-  const executable = scanForExecutable(buffer);
-  if (executable) throw new UploadSecurityError(`Blocked: the file contains a ${executable}.`);
+  assertSafeFilename(originalName);
+  await assertSecureBuffer(buffer, { fileName: originalName, activeContent: false });
 
   // Image branch: re-use the strict image pipeline (which itself re-encodes).
   if (opts.allow.includes("image") && IMAGE_MAGIC.some((m) => m.test(buffer))) {
@@ -333,6 +496,7 @@ export async function assertSafeUpload(
       maxDimension: opts.imageMaxDimension,
       maxInputPixels: opts.imageMaxInputPixels,
       preserveOriginal: opts.preserveImageBytes,
+      skipMalwareScan: true,
     });
     return { buffer: img.buffer, contentType: img.contentType, ext: img.ext, kind: "image", width: img.width, height: img.height };
   }
@@ -358,6 +522,13 @@ export async function assertSafeUpload(
     const wantsZip = opts.allow.includes("zip");
     const wantsDesign = opts.allow.includes("design");
     if (!wantsOffice && !wantsZip && !wantsDesign) throw new UploadSecurityError("This document type is not allowed here.");
+    if (MACRO_OFFICE_EXTENSIONS.has(originalExt)) {
+      throw new UploadSecurityError("Macro-enabled Office files are not allowed. Save a macro-free copy first.");
+    }
+    if (doc.kind === "ole") {
+      throw new UploadSecurityError("Legacy Office files cannot be safely inspected. Save the file as DOCX, XLSX or PPTX first.");
+    }
+    const zip = inspectZip(buffer, Math.min(Math.max(maxBytes * 40, 100 * 1024 * 1024), 1024 * 1024 * 1024));
     if (doc.kind === "zip" && wantsDesign && DESIGN_ZIP_EXTENSIONS.has(originalExt)) {
       return { buffer, contentType: "application/octet-stream", ext: originalExt, kind: "document" };
     }
@@ -365,15 +536,13 @@ export async function assertSafeUpload(
       return { buffer, contentType: "application/zip", ext: "zip", kind: "zip" };
     }
     if (doc.kind === "zip" && wantsOffice && OFFICE_ZIP_EXTENSIONS.has(originalExt)) {
+      const family = originalExt.startsWith("doc") ? "word/" : originalExt.startsWith("xls") ? "xl/" : originalExt.startsWith("ppt") ? "ppt/" : "";
+      if (family && (!zip.names.includes("[Content_Types].xml") || !zip.names.some((name) => name.startsWith(family)))) {
+        throw new UploadSecurityError("The Office document structure does not match its file extension.");
+      }
       return { buffer, contentType: "application/zip", ext: originalExt, kind: "office" };
     }
-    if (doc.kind === "ole" && !wantsOffice) throw new UploadSecurityError("This document type is not allowed here.");
-    return {
-      buffer,
-      contentType: doc.kind === "ole" ? "application/vnd.ms-office" : "application/zip",
-      ext: originalExt || doc.ext,
-      kind: doc.kind === "ole" || wantsOffice ? "office" : "zip",
-    };
+    throw new UploadSecurityError("The archive contents do not match an allowed file extension.");
   }
 
   throw new UploadSecurityError("This file type is not allowed here.");

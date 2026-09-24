@@ -4,8 +4,12 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { Bell } from "lucide-react";
 import { AnimatePresence, motion } from "framer-motion";
 import NotificationItem, { type Notification } from "./notification-item";
+import { useNotificationPulse } from "@/hooks/use-notification-pulse";
+import {
+  announcePlatformNotification,
+  enablePlatformNotifications,
+} from "@/lib/platform-notification-client";
 
-const POLL_INTERVAL = 10_000;
 const MAX_DISPLAY = 10;
 
 export default function NotificationBell() {
@@ -16,13 +20,6 @@ export default function NotificationBell() {
   const isFirstLoad = useRef<boolean>(true);
   const requestActive = useRef(false);
   const notificationsSnapshot = useRef("");
-
-  // ---------- Play Sound ----------
-  const playNotificationSound = useCallback(() => {
-    const audio = new Audio("/special-notification.mp3");
-    audio.volume = 0.6;
-    audio.play().catch((err) => console.log("Audio playback failed:", err));
-  }, []);
 
   // ---------- Fetch ----------
   const fetchNotifications = useCallback(async () => {
@@ -39,7 +36,12 @@ export default function NotificationBell() {
       const newUnreadCount = newNotifications.filter((n: Notification) => !n.is_read).length;
       
       if (!isFirstLoad.current && newUnreadCount > prevUnreadCount.current) {
-        playNotificationSound();
+        const newest = newNotifications.find((item: Notification) => !item.is_read);
+        announcePlatformNotification({
+          title: newest?.title || "CDS Space",
+          body: newest?.message || "You have a new client update.",
+          volume: 0.7,
+        });
       }
       
       prevUnreadCount.current = newUnreadCount;
@@ -54,18 +56,12 @@ export default function NotificationBell() {
     } finally {
       requestActive.current = false;
     }
-  }, [playNotificationSound]);
+  }, []);
 
   useEffect(() => {
     fetchNotifications();
-    const id = setInterval(() => { if (!document.hidden) fetchNotifications(); }, POLL_INTERVAL);
-    const onVisibilityChange = () => { if (!document.hidden) fetchNotifications(); };
-    document.addEventListener("visibilitychange", onVisibilityChange);
-    return () => {
-      clearInterval(id);
-      document.removeEventListener("visibilitychange", onVisibilityChange);
-    };
   }, [fetchNotifications]);
+  useNotificationPulse("client", fetchNotifications);
 
   // ---------- Close on outside click ----------
   useEffect(() => {
@@ -117,7 +113,10 @@ export default function NotificationBell() {
       {/* Bell trigger */}
       <button
         type="button"
-        onClick={() => setOpen((v) => !v)}
+        onClick={() => {
+          void enablePlatformNotifications();
+          setOpen((v) => !v);
+        }}
         className="relative p-2 rounded-lg hover:bg-gray-100 transition-colors"
         aria-label="Notifications"
       >

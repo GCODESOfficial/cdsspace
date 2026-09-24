@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { getGlashDbAdmin } from "@/lib/glashdb";
 import { getTeamSession } from "@/lib/team-auth";
-import { assertCleanBuffer, UploadSecurityError } from "@/lib/upload-security";
+import { assertSecureBuffer, UploadSecurityError } from "@/lib/upload-security";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -27,7 +27,7 @@ export async function POST(req: NextRequest) {
 
   try {
     const buffer = Buffer.from(await file.arrayBuffer());
-    assertCleanBuffer(buffer, { activeContent: true });
+    await assertSecureBuffer(buffer, { activeContent: true, fileName: file.name });
     if (buffer.subarray(0, 5).toString("latin1") !== "%PDF-") {
       return NextResponse.json({ ok: false, error: "Only a valid PDF document can be uploaded." }, { status: 415 });
     }

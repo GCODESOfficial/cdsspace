@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getClientAccountState } from "@/lib/client-account";
 import { cleanDriveName, getClientDriveAccess, loadDriveContents, uploadDriveFile } from "@/lib/cdrive";
 import { glashMaybeOne, glashQuery } from "@/lib/glashdb/postgres";
+import { CLIENT_STORAGE_FULL_CODE, isClientStorageFullError } from "@/lib/client-storage";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -17,7 +18,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
   const { id } = await params;
   const auth = await context(id);
   if (!auth) return NextResponse.json({ ok: false, error: "Drive not found" }, { status: 404 });
-  const drive = await glashMaybeOne(`select id, name, description, project_id, created_by_kind, status, created_at, updated_at from public.client_drives where id = $1::uuid`, [id]);
+  const drive = await glashMaybeOne(`select id, public_token, name, description, project_id, created_by_kind, status, created_at, updated_at from public.client_drives where id = $1::uuid`, [id]);
   return NextResponse.json({ ok: true, drive: { ...drive, access_level: auth.access.access_level }, ...(await loadDriveContents(id)) });
 }
 
@@ -56,6 +57,10 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     await glashQuery(`update public.client_drives set updated_at = now() where id = $1::uuid`, [id]);
     return NextResponse.json({ ok: true, file: result }, { status: 201 });
   } catch (error) {
-    return NextResponse.json({ ok: false, error: error instanceof Error ? error.message : "cDrive update failed" }, { status: 400 });
+    return NextResponse.json({
+      ok: false,
+      error: error instanceof Error ? error.message : "cDrive update failed",
+      ...(isClientStorageFullError(error) ? { code: CLIENT_STORAGE_FULL_CODE } : {}),
+    }, { status: isClientStorageFullError(error) ? 409 : 400 });
   }
 }

@@ -68,7 +68,7 @@ const nextConfig: NextConfig = {
   // Allow an isolated verification build while a developer server owns .next.
   // Production and normal local development keep the standard directory.
   distDir: process.env.CDS_NEXT_DIST_DIR || ".next",
-  serverExternalPackages: ["@napi-rs/canvas", "ffmpeg-static"],
+  serverExternalPackages: ["@napi-rs/canvas", "ffmpeg-static", "whatsapp-web.js", "puppeteer"],
   turbopack: {
     root: path.resolve(__dirname),
   },

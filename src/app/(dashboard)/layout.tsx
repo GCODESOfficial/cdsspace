@@ -1,7 +1,8 @@
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { DashboardShell } from "@/components/layout/DashboardShell";
-import { getClientAccountState, safeClientPath } from "@/lib/client-account";
+import { loadClientAccountState, safeClientPath } from "@/lib/client-account";
+import { PortalUnavailable } from "@/components/dashboard/PortalUnavailable";
 import { ClientAccountProvider } from "@/components/dashboard/ClientAccountProvider";
 import { clientDashboardPath, isLegacyDashboardPath, parseScopedClientDashboardPath } from "@/lib/client-routes";
 import { DashboardAutoSave } from "@/components/autosave/DashboardAutoSave";
@@ -16,10 +17,14 @@ export default async function DashboardLayout({
 }: {
     children: React.ReactNode;
 }) {
-    const account = await getClientAccountState();
+    const loaded = await loadClientAccountState();
     const requestHeaders = await headers();
     const requestedPath = safeClientPath(requestHeaders.get("x-cds-client-path"), "/dashboard");
 
+    // A database that cannot be reached is not a signed-out client: sending
+    // them to the login page would throw away a session that is still valid.
+    if (loaded.status === "unavailable") return <PortalUnavailable />;
+    const account = loaded.status === "ok" ? loaded.state : null;
     if (!account) redirect(`/login?next=${encodeURIComponent(requestedPath)}`);
     if (!account.agreement) redirect(`/agreement?next=${encodeURIComponent(requestedPath)}`);
     if (!account.profile.billing_currency) redirect(`/onboarding?next=${encodeURIComponent(requestedPath)}`);

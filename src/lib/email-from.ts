@@ -27,6 +27,7 @@ declare global {
   // Reuse a warm HTTPS/SMTP transport for one-off transactional messages.
   // Batch callers still create and own their explicit transport.
   var cdsImmediateEmailTransport: ReturnType<typeof createEmailTransport> | undefined;
+  var cdsImmediateEmailTransportMode: "gmail_api" | "resend" | "smtp" | undefined;
 }
 
 export const EMAIL_FROM = process.env.EMAIL_FROM || "support@cdsspace.pro";
@@ -127,11 +128,96 @@ export const EMAIL_MODE: "gmail_api" | "resend" | "smtp" = gmailApiCredsFromEnv(
     ? "resend"
     : "smtp";
 
+type EmailMode = typeof EMAIL_MODE;
+
+function configuredEmailModes(): EmailMode[] {
+  const modes: EmailMode[] = [];
+  if (gmailApiCredsFromEnv()) modes.push("gmail_api");
+  if (process.env.RESEND_API_KEY) modes.push("resend");
+  if (process.env.EMAIL_USER && process.env.EMAIL_PASS) modes.push("smtp");
+  return modes;
+}
+
+function createTransportForMode(mode: EmailMode) {
+  if (mode === "gmail_api") {
+    const credentials = gmailApiCredsFromEnv();
+    if (!credentials) throw new Error("Gmail API email is not configured.");
+    return createGmailApiTransport(credentials);
+  }
+  if (mode === "resend") {
+    if (!process.env.RESEND_API_KEY) throw new Error("Resend email is not configured.");
+    return createResendHttpTransport(process.env.RESEND_API_KEY);
+  }
+
+  const port = Number(process.env.EMAIL_PORT || 587);
+  return nodemailer.createTransport({
+    host: process.env.EMAIL_HOST || "smtp.gmail.com",
+    port,
+    secure: process.env.EMAIL_SECURE ? process.env.EMAIL_SECURE === "true" : port === 465,
+    auth: { user: process.env.EMAIL_USER, pass: process.env.EMAIL_PASS },
+    pool: true,
+    maxConnections: 3,
+    connectionTimeout: 10_000,
+    greetingTimeout: 10_000,
+    socketTimeout: 20_000,
+  });
+}
+
+function emailErrorMessage(error: unknown) {
+  return error instanceof Error ? error.message.slice(0, 300) : "unknown email delivery error";
+}
+
 /**
  * Send one email through nodemailer. The transport chosen by
  * `createEmailTransport()` is HTTPS (Resend) when RESEND_API_KEY is set, or
  * Gmail SMTP otherwise. Either way the From address is EMAIL_FROM.
  */
+/**
+ * A send must fail rather than hang.
+ *
+ * A host that blocks outbound SMTP does not refuse the connection, it simply
+ * never answers, so a send could hold a request open until the platform killed
+ * it. One stalled send then ties up a worker; many of them take the site down.
+ */
+const EMAIL_SEND_TIMEOUT_MS = Number(process.env.EMAIL_SEND_TIMEOUT_MS || 12_000);
+
+/**
+ * How many sends may be in flight at once. Notifications can arrive in bursts
+ * (an announcement, a busy thread), and without a ceiling each one opens its
+ * own connection, so a slow provider turns a burst into hundreds of waiting
+ * sockets on one server.
+ */
+const EMAIL_MAX_IN_FLIGHT = Number(process.env.EMAIL_MAX_IN_FLIGHT || 4);
+let emailInFlight = 0;
+const emailQueue: Array<() => void> = [];
+
+async function withSendSlot<T>(run: () => Promise<T>): Promise<T> {
+  if (emailInFlight >= EMAIL_MAX_IN_FLIGHT) {
+    await new Promise<void>((resolve) => emailQueue.push(resolve));
+  }
+  emailInFlight += 1;
+  try {
+    return await run();
+  } finally {
+    emailInFlight -= 1;
+    emailQueue.shift()?.();
+  }
+}
+
+function withSendTimeout<T>(pending: Promise<T>): Promise<T> {
+  return Promise.race([
+    pending,
+    new Promise<T>((_resolve, reject) => {
+      const timer = setTimeout(
+        () => reject(new Error(`Email send timed out after ${EMAIL_SEND_TIMEOUT_MS}ms`)),
+        EMAIL_SEND_TIMEOUT_MS,
+      );
+      // Never keep the process alive just for this timer.
+      if (typeof timer.unref === "function") timer.unref();
+    }),
+  ]);
+}
+
 export async function sendEmail(input: SendEmailInput): Promise<void> {
   const threadCategory = input.threadCategory || input.digestCategory;
   // Immediate delivery is the default. The durable queue remains available as
@@ -173,29 +259,75 @@ export async function sendEmail(input: SendEmailInput): Promise<void> {
   }
 
   const from = emailFrom(input.fromName || "CDS Space");
-  const transporter = input.transporter
-    ?? globalThis.cdsImmediateEmailTransport
-    ?? createEmailTransport();
-  if (!input.transporter) globalThis.cdsImmediateEmailTransport = transporter;
   // Attach the branded logo inline only when the html references its cid (i.e.
   // it went through brandedEmailHtml), so plain emails stay lightweight.
   const attachments = [
     ...(input.html?.includes(`cid:${EMAIL_LOGO_CID}`) ? [emailLogoAttachment()] : []),
     ...(input.attachments || []),
   ];
-  await transporter.sendMail({
-      from,
-      to: input.to,
-      subject: input.subject,
-      html: input.html,
-      text: input.text,
-      replyTo: input.replyTo,
-      attachments: attachments.length ? attachments : undefined,
-      messageId: input.messageId,
-      references: input.references,
-      inReplyTo: input.inReplyTo,
-      date: input.date,
-  });
+  const mail = {
+    from,
+    to: input.to,
+    subject: input.subject,
+    html: input.html,
+    text: input.text,
+    replyTo: input.replyTo,
+    attachments: attachments.length ? attachments : undefined,
+    messageId: input.messageId,
+    references: input.references,
+    inReplyTo: input.inReplyTo,
+    date: input.date,
+  };
+
+  // Batch callers explicitly own their transport and its lifecycle. Preserve
+  // that behaviour rather than retrying through an unrelated provider.
+  if (input.transporter) {
+    await withSendSlot(() => withSendTimeout(input.transporter!.sendMail(mail)));
+    return;
+  }
+
+  const configuredModes = configuredEmailModes();
+  if (!configuredModes.length) {
+    throw new Error("Email is not configured.");
+  }
+
+  // A Gmail refresh token can expire or lose its send scope, and a provider
+  // can have a temporary outage. Transactional mail must not become a
+  // single-provider failure: try every independently configured channel in a
+  // deterministic order, while keeping the last successful transport warm.
+  const cachedMode = globalThis.cdsImmediateEmailTransportMode;
+  const modes = cachedMode && configuredModes.includes(cachedMode)
+    ? [cachedMode, ...configuredModes.filter((mode) => mode !== cachedMode)]
+    : configuredModes;
+  const failures: string[] = [];
+
+  for (const mode of modes) {
+    const isCached = mode === globalThis.cdsImmediateEmailTransportMode
+      && !!globalThis.cdsImmediateEmailTransport;
+    const transporter = isCached
+      ? globalThis.cdsImmediateEmailTransport!
+      : createTransportForMode(mode);
+    try {
+      await withSendSlot(() => withSendTimeout(transporter.sendMail(mail)));
+      globalThis.cdsImmediateEmailTransport = transporter;
+      globalThis.cdsImmediateEmailTransportMode = mode;
+      return;
+    } catch (error) {
+      failures.push(`${mode}: ${emailErrorMessage(error)}`);
+      console.error(`[email] ${mode} delivery failed; trying the next configured transport.`, error);
+      if (isCached) {
+        globalThis.cdsImmediateEmailTransport = undefined;
+        globalThis.cdsImmediateEmailTransportMode = undefined;
+      }
+      try {
+        transporter.close();
+      } catch {
+        // Custom HTTPS transports do not always expose a meaningful close.
+      }
+    }
+  }
+
+  throw new Error(`Email delivery failed through every configured transport (${failures.join("; ")}).`);
 }
 
 /**
@@ -207,19 +339,41 @@ export async function sendEmail(input: SendEmailInput): Promise<void> {
 export async function verifyEmailReady(
   transporter?: ReturnType<typeof createEmailTransport>,
 ): Promise<string | null> {
+  if (transporter) {
+    const gmail = gmailApiCredsFromEnv();
+    if (EMAIL_MODE === "gmail_api" && gmail) return verifyGmailApi(gmail);
+    if (EMAIL_MODE === "resend") return null;
+    try {
+      await transporter.verify();
+      return null;
+    } catch (e) {
+      return `Email server connection failed: ${e instanceof Error ? e.message : "unknown error"}`;
+    }
+  }
+
+  const failures: string[] = [];
   const gmail = gmailApiCredsFromEnv();
-  if (gmail) return verifyGmailApi(gmail);
+  if (gmail) {
+    const error = await verifyGmailApi(gmail);
+    if (!error) return null;
+    failures.push(error);
+  }
+  // Resend's send-only API keys cannot be verified with the account/domain
+  // endpoints. Presence is enough here; sendEmail performs real failover if
+  // the provider rejects the subsequent message.
   if (process.env.RESEND_API_KEY) return null;
   if (!process.env.EMAIL_USER || !process.env.EMAIL_PASS) {
+    if (failures.length) return failures.join(" ");
     return "Email is not configured (set GMAIL_REFRESH_TOKEN, RESEND_API_KEY, or EMAIL_USER/EMAIL_PASS).";
   }
-  const t = transporter ?? createEmailTransport();
+  const t = createTransportForMode("smtp");
   try {
     await t.verify();
     return null;
   } catch (e) {
-    return `Email server connection failed: ${e instanceof Error ? e.message : "unknown error"}`;
+    failures.push(`Email server connection failed: ${e instanceof Error ? e.message : "unknown error"}`);
+    return failures.join(" ");
   } finally {
-    if (!transporter) t.close();
+    t.close();
   }
 }

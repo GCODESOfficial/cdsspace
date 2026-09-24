@@ -5,7 +5,7 @@ import { useToast } from "@/hooks/use-toast";
 import {
   Trash2, Loader2, Plus, Pencil, Save, Building2, Search, Mail, Phone,
   Filter, Cake, MessageCircle, UserRound, MapPin, BellRing, CheckCircle2,
-  BadgeCheck, CircleAlert, Copy, Link2, Send, UserPlus, X,
+  BadgeCheck, CircleAlert, Copy, HardDrive, Link2, Send, UserPlus, X,
 } from "lucide-react";
 import { BirthdayModal, type BirthdayClient } from "@/components/admin/BirthdayCelebrate";
 import {
@@ -60,6 +60,16 @@ interface DuplicatePayload {
   profiles: PlatformProfile[];
 }
 
+interface StorageRequest {
+  id: string;
+  client_user_id: string;
+  requested_at: string;
+  full_name: string | null;
+  company_name: string | null;
+  email: string;
+  storage_limit_bytes: string;
+}
+
 const STATUS_FILTERS = [
   { key: "all", label: "All" },
   { key: "active", label: "Active" },
@@ -107,6 +117,8 @@ export default function ClientsListPage() {
   const [mergeClient, setMergeClient] = useState<Client | null>(null);
   const [mergeProfileId, setMergeProfileId] = useState("");
   const [inviteLink, setInviteLink] = useState<string | null>(null);
+  const [storageRequests, setStorageRequests] = useState<StorageRequest[]>([]);
+  const [storageRequestBusy, setStorageRequestBusy] = useState<string | null>(null);
   const { toast } = useToast();
 
   // Form fields
@@ -130,15 +142,40 @@ export default function ClientsListPage() {
 
   async function fetchClients() {
     setIsFetching(true);
-    const response = await fetch("/api/admin/clients/directory", { cache: "no-store" });
-    const data = await response.json().catch(() => ({}));
+    const [response, storageResponse] = await Promise.all([
+      fetch("/api/admin/clients/directory", { cache: "no-store" }),
+      fetch("/api/admin/clients/storage-requests", { cache: "no-store" }),
+    ]);
+    const [data, storageData] = await Promise.all([
+      response.json().catch(() => ({})),
+      storageResponse.json().catch(() => ({})),
+    ]);
     if (!response.ok) {
       toast({ title: "Could not load clients", description: data.error || "Please try again.", variant: "destructive" });
     } else {
       setClients(data.clients || []);
       setPlatformProfiles(data.platformProfiles || []);
     }
+    if (storageResponse.ok) setStorageRequests(storageData.requests || []);
     setIsFetching(false);
+  }
+
+  async function reviewStorageRequest(requestId: string, decision: "approve" | "decline") {
+    if (decision === "decline" && !(await appConfirm({ title: "Decline storage request?", message: "The client will be notified that the request was reviewed.", confirmLabel: "Decline request", destructive: true }))) return;
+    setStorageRequestBusy(requestId);
+    const response = await fetch("/api/admin/clients/storage-requests", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ requestId, decision, grantBytes: 1024 ** 3 }),
+    });
+    const payload = await response.json().catch(() => ({}));
+    setStorageRequestBusy(null);
+    if (!response.ok) {
+      toast({ title: "Request not updated", description: payload.error || "Please try again.", variant: "destructive" });
+      return;
+    }
+    setStorageRequests((current) => current.filter((item) => item.id !== requestId));
+    toast({ title: decision === "approve" ? "Storage increased" : "Request declined", description: decision === "approve" ? "The client can continue uploading and creating work." : "The client was notified." });
   }
 
   function resetForm() {
@@ -265,7 +302,13 @@ export default function ClientsListPage() {
     const result = await response.json().catch(() => ({}));
     setIsLoading(false);
     if (!response.ok) {
-      toast({ title: "Invite not sent", description: result.error || "Please try again.", variant: "destructive" });
+      setInviteLink(result.invite_url || null);
+      if (result.invite_url) await navigator.clipboard.writeText(result.invite_url).catch(() => undefined);
+      toast({
+        title: "Invite not sent",
+        description: result.error || "Please try again.",
+        variant: "destructive",
+      });
       return;
     }
     setInviteLink(result.invite_url || null);
@@ -390,6 +433,23 @@ export default function ClientsListPage() {
           <Plus className="w-4 h-4" /> Add Client
         </button>
       </div>
+
+      {storageRequests.length > 0 && (
+        <section id="storage-requests" className="mb-6 rounded-2xl border border-blue-100 bg-white p-4 shadow-sm sm:p-5">
+          <div className="flex items-start gap-3">
+            <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-blue-50 text-[#0A4FE8]"><HardDrive className="h-5 w-5" /></span>
+            <div><h2 className="text-sm font-semibold text-[#0D1B39]">Storage requests</h2><p className="mt-1 text-xs text-slate-500">Review clients who need more workspace space.</p></div>
+          </div>
+          <div className="mt-4 grid gap-3 lg:grid-cols-2">
+            {storageRequests.map((request) => (
+              <article key={request.id} className="flex flex-col gap-3 rounded-xl border border-slate-200 p-4 sm:flex-row sm:items-center">
+                <div className="min-w-0 flex-1"><p className="truncate text-sm font-semibold text-[#0D1B39]">{request.full_name || request.company_name || request.email}</p><p className="mt-1 truncate text-xs text-slate-400">{request.email}</p></div>
+                <div className="flex gap-2"><button type="button" disabled={storageRequestBusy === request.id} onClick={() => void reviewStorageRequest(request.id, "decline")} className="h-9 rounded-lg border border-slate-200 px-3 text-xs font-semibold text-slate-600 disabled:opacity-50">Decline</button><button type="button" disabled={storageRequestBusy === request.id} onClick={() => void reviewStorageRequest(request.id, "approve")} className="inline-flex h-9 items-center gap-2 rounded-lg bg-[#0A4FE8] px-3 text-xs font-semibold text-white disabled:opacity-50">{storageRequestBusy === request.id && <Loader2 className="h-3.5 w-3.5 animate-spin" />}Approve more space</button></div>
+              </article>
+            ))}
+          </div>
+        </section>
+      )}
 
       {/* Edit / Add client modal */}
       {showForm && (

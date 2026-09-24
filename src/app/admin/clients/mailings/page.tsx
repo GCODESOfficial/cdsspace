@@ -30,6 +30,7 @@ type ClientOption = {
   status: string;
   source: "manual" | "platform";
   has_platform_account: boolean;
+  platform_user_id?: string | null;
 };
 
 type CampaignHistory = {
@@ -138,6 +139,7 @@ export default function ClientMailingsPage() {
   const [addingClient, setAddingClient] = useState(false);
   const loadedRef = useRef(false);
   const fileRef = useRef<HTMLInputElement>(null);
+  const chatContextApplied = useRef(false);
 
   const applyCampaignToComposer = useCallback((draft: DraftPayload) => {
     setDraftId(draft.id);
@@ -204,6 +206,24 @@ export default function ClientMailingsPage() {
   }, [applyCampaignToComposer]);
 
   useEffect(() => { void load(); }, [load]);
+
+  useEffect(() => {
+    if (!clients.length || chatContextApplied.current) return;
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("action") !== "compose") return;
+    chatContextApplied.current = true;
+    const platformId = params.get("client") || "";
+    const email = (params.get("email") || "").trim().toLowerCase();
+    const client = clients.find((candidate) =>
+      (platformId && candidate.platform_user_id === platformId)
+      || (email && candidate.email.trim().toLowerCase() === email),
+    );
+    if (!client) return;
+    setAllClients(false);
+    setSelectedClientIds((current) => Array.from(new Set([...current, client.id])));
+    setSearch(client.name);
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }, [clients]);
 
   const customTokens = useMemo(() => emailTokens(customEmailText), [customEmailText]);
   const validCustomEmails = useMemo(() => customTokens.filter(isEmail), [customTokens]);

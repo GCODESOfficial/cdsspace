@@ -3,7 +3,7 @@ import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase";
 import { getToolActor } from "@/lib/team-tools-auth";
 import { canActorReadDoc, hashDocPassword } from "@/lib/protect-docs";
-import { assertCleanBuffer, UploadSecurityError } from "@/lib/upload-security";
+import { assertSafeUpload, UploadSecurityError } from "@/lib/upload-security";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -34,6 +34,7 @@ export async function POST(req: Request) {
 
   let fields: Record<string, any> = {};
   let fileBuffer: ArrayBuffer | null = null;
+  let uploadedFile: File | null = null;
   let fileName: string | null = null;
   let fileMime: string | null = null;
 
@@ -41,6 +42,7 @@ export async function POST(req: Request) {
     const form = await req.formData();
     for (const [k, v] of form.entries()) {
       if (v instanceof File) {
+        uploadedFile = v;
         fileBuffer = await v.arrayBuffer();
         fileName = v.name;
         fileMime = v.type || "application/octet-stream";
@@ -58,21 +60,27 @@ export async function POST(req: Request) {
   let file_url: string | null = null;
   let file_size_bytes: number | null = null;
   if (fileBuffer && fileName) {
+    if (!uploadedFile || uploadedFile.size > 25 * 1024 * 1024) {
+      return NextResponse.json({ ok: false, error: "Files must be 25MB or smaller." }, { status: 413 });
+    }
     const bucket = "team-documents";
-    const path = `${Date.now()}-${(fileName || "file").replace(/[^a-zA-Z0-9._-]+/g, "_")}`;
+    let safe: Awaited<ReturnType<typeof assertSafeUpload>>;
     try {
-      assertCleanBuffer(Buffer.from(fileBuffer));
+      safe = await assertSafeUpload(uploadedFile, { allow: ["image", "pdf", "office", "zip", "design"], maxBytes: 25 * 1024 * 1024 });
     } catch (e) {
       if (e instanceof UploadSecurityError) return NextResponse.json({ ok: false, error: e.message }, { status: e.status });
       throw e;
     }
-    const { error: upErr } = await (db as any).storage.from(bucket).upload(path, new Uint8Array(fileBuffer), {
-      contentType: fileMime || "application/octet-stream",
+    const baseName = (fileName || "file").replace(/\.[^.]+$/, "").replace(/[^a-zA-Z0-9._-]+/g, "_").slice(0, 140) || "file";
+    const path = `${Date.now()}-${baseName}.${safe.ext}`;
+    const { error: upErr } = await (db as any).storage.from(bucket).upload(path, safe.buffer, {
+      contentType: safe.contentType,
       upsert: false,
     });
     if (upErr) return NextResponse.json({ ok: false, error: upErr.message }, { status: 500 });
     file_url = path;
-    file_size_bytes = fileBuffer.byteLength;
+    file_size_bytes = safe.buffer.byteLength;
+    fileMime = safe.contentType;
   }
 
   const password_hash = password ? await hashDocPassword(String(password)) : null;

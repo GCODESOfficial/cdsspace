@@ -340,8 +340,14 @@ function clampPosition(x: number, y: number) {
 
 export function DashboardGuide() {
   const pathname = usePathname();
+  const isChatPage =
+    pathname === "/team/chat" ||
+    pathname === "/admin/chat" ||
+    pathname === "/admin/messages" ||
+    pathname === "/dashboard/messages" ||
+    pathname.endsWith("/dashboard/messages");
   const context = useMemo(() => getGuideContext(pathname), [pathname]);
-  if (!context) return null;
+  if (!context || isChatPage) return null;
   return <DashboardGuideContent context={context} />;
 }
 

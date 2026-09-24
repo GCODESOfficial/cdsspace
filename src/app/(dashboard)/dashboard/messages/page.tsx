@@ -27,6 +27,7 @@ import {
 import { useClientAccount } from "@/components/dashboard/ClientAccountProvider";
 import { Linkified, LinkPreview, firstUrl } from "@/components/chat/message-links";
 import { ChatSidebarPreview } from "@/components/chat/chat-sidebar-preview";
+import { PlatformMediaViewer } from "@/components/media/PlatformMediaViewer";
 import { validateChatUpload } from "@/lib/chat-upload-limits";
 import { appAlert } from "@/lib/app-notify";
 import { initials } from "@/lib/utils";
@@ -297,9 +298,13 @@ export default function ClientMessagesPage() {
   useEffect(() => {
     void loadThreads();
     const interval = window.setInterval(() => {
-      if (!document.hidden) void loadThreads();
+      void loadThreads();
     }, 8000);
-    return () => window.clearInterval(interval);
+    window.addEventListener("cds:notification-pulse", loadThreads);
+    return () => {
+      window.clearInterval(interval);
+      window.removeEventListener("cds:notification-pulse", loadThreads);
+    };
   }, [loadThreads]);
 
   useEffect(() => {
@@ -312,9 +317,14 @@ export default function ClientMessagesPage() {
     messagesSnapshot.current = "";
     void loadMessages();
     const interval = window.setInterval(() => {
-      if (!document.hidden) void loadMessages(true);
+      void loadMessages(true);
     }, 5000);
-    return () => window.clearInterval(interval);
+    const refreshMessages = () => void loadMessages(true);
+    window.addEventListener("cds:notification-pulse", refreshMessages);
+    return () => {
+      window.clearInterval(interval);
+      window.removeEventListener("cds:notification-pulse", refreshMessages);
+    };
   }, [loadMessages, selectedId, selectedKind]);
 
   const scrollToLatest = useCallback((behavior: ScrollBehavior = "smooth") => {
@@ -758,10 +768,10 @@ export default function ClientMessagesPage() {
                             {!isStickerMessage && previewUrl && <LinkPreview url={previewUrl} variant={message.isMine ? "dark" : "light"} />}
                             {message.attachmentUrl && !isStickerMessage && (
                               isImageAttachment(message.attachmentUrl) ? (
-                                <a href={message.attachmentUrl} target="_blank" rel="noopener noreferrer" className="mt-2 block overflow-hidden rounded-xl border border-white/20 bg-white/10">
+                                <PlatformMediaViewer url={message.attachmentUrl} title={displayFileName(message)} triggerClassName="mt-2 block w-full overflow-hidden rounded-xl border border-white/20 bg-white/10">
                                   {/* eslint-disable-next-line @next/next/no-img-element */}
                                   <img src={message.attachmentUrl} alt={displayFileName(message)} className="max-h-80 w-full object-contain" />
-                                </a>
+                                </PlatformMediaViewer>
                               ) : (
                                 <a href={message.attachmentUrl} target="_blank" rel="noopener noreferrer" className={`mt-2 flex items-center gap-2 rounded-xl border px-3 py-2 ${message.isMine ? "border-white/25 bg-white/10" : "border-slate-200 bg-slate-50"}`}>
                                   <FileText className="h-4 w-4 shrink-0" />
@@ -842,18 +852,22 @@ export default function ClientMessagesPage() {
                       <ChatStickerPicker actor="client" onSelect={sendSticker} />
                     </div>
                   )}
-                <div className="flex items-center gap-2">
+                <div className="space-y-2">
                   <input ref={fileRef} type="file" className="hidden" accept="image/*,video/*,.pdf,.doc,.docx,.ppt,.pptx,.xls,.xlsx,.txt,.csv" onChange={(event) => { const file = event.target.files?.[0]; if (file) void uploadFile(file); }} />
-                  <button onClick={() => fileRef.current?.click()} disabled={uploading || sending} className="grid h-11 w-11 shrink-0 place-items-center rounded-full border border-slate-200 bg-white text-slate-500 transition hover:border-blue-200 hover:bg-blue-50 hover:text-[#0A4FE8] disabled:opacity-40" title="Send a photo or document">
-                    {uploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Paperclip className="h-4 w-4" />}
-                  </button>
-                  <button type="button" onClick={() => setStickersOpen((current) => !current)} disabled={sending} className={`grid h-11 w-11 shrink-0 place-items-center rounded-full border transition disabled:opacity-40 ${stickersOpen ? "border-blue-200 bg-blue-50 text-[#0A4FE8]" : "border-slate-200 bg-white text-slate-500 hover:border-blue-200 hover:bg-blue-50 hover:text-[#0A4FE8]"}`} title="Stickers" aria-label="Open stickers">
-                    <Sticker className="h-4 w-4" />
-                  </button>
-                  <input dir="auto" value={input} onChange={(event) => setInput(event.target.value)} onPaste={handlePhotoPaste} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); submitMessage(); } }} placeholder={pendingPhoto ? "Add a caption..." : "Type a message or paste a photo..."} className="h-11 min-w-0 flex-1 rounded-full border border-slate-200 bg-slate-50 px-4 text-start text-[13px] text-[#0D1B39] outline-none transition placeholder:text-slate-400 focus:border-blue-300 focus:bg-white focus:ring-2 focus:ring-blue-100" />
-                  <button onClick={submitMessage} disabled={(!input.trim() && !pendingPhoto) || sending || uploading} className="grid h-11 w-11 shrink-0 place-items-center rounded-full bg-[#0A4FE8] text-white shadow-sm transition hover:bg-[#083FC0] disabled:opacity-40" aria-label={uploading ? "Sending photo" : "Send message"}>
-                    {sending || uploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
-                  </button>
+                  <div className="flex min-h-9 items-center gap-1 overflow-x-auto px-1">
+                    <button onClick={() => fileRef.current?.click()} disabled={uploading || sending} className="grid h-9 w-9 shrink-0 place-items-center rounded-xl text-slate-500 transition hover:bg-blue-50 hover:text-[#0A4FE8] disabled:opacity-40" title="Send a photo or document" aria-label="Send a photo or document">
+                      {uploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Paperclip className="h-4 w-4" />}
+                    </button>
+                    <button type="button" onClick={() => setStickersOpen((current) => !current)} disabled={sending} className={`grid h-9 w-9 shrink-0 place-items-center rounded-xl transition disabled:opacity-40 ${stickersOpen ? "bg-blue-50 text-[#0A4FE8]" : "text-slate-500 hover:bg-blue-50 hover:text-[#0A4FE8]"}`} title="Stickers" aria-label="Open stickers">
+                      <Sticker className="h-4 w-4" />
+                    </button>
+                  </div>
+                  <div className="flex w-full items-center gap-2">
+                    <input dir="auto" value={input} onChange={(event) => setInput(event.target.value)} onPaste={handlePhotoPaste} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); submitMessage(); } }} placeholder={pendingPhoto ? "Add a caption..." : "Type a message or paste a photo..."} className="h-11 min-w-0 flex-1 rounded-2xl border border-slate-200 bg-slate-50 px-4 text-start text-[13px] text-[#0D1B39] outline-none transition placeholder:text-slate-400 focus:border-blue-300 focus:bg-white focus:ring-2 focus:ring-blue-100" />
+                    <button onClick={submitMessage} disabled={(!input.trim() && !pendingPhoto) || sending || uploading} className="grid h-11 w-11 shrink-0 place-items-center rounded-2xl bg-[#0A4FE8] text-white shadow-sm transition hover:bg-[#083FC0] disabled:opacity-40" aria-label={uploading ? "Sending photo" : "Send message"}>
+                      {sending || uploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+                    </button>
+                  </div>
                 </div>
                 </div>
               )}

@@ -1,0 +1,21 @@
+name: Invoice auto cancel
+
+# glashdb has no built-in scheduler, so this GitHub Actions workflow is the
+# external cron: once a day it cancels invoices that passed their 28 day
+# validity unpaid. Invoices raised before the rule existed carry no expiry
+# date and are never touched.
+
+on:
+  schedule:
+    - cron: "15 1 * * *"
+  workflow_dispatch: {}
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Cancel expired invoices
+        run: |
+          curl -fsS -X GET "https://cdsspace.pro/api/cron/invoice-auto-cancel" \
+            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
+            -w "\nHTTP %{http_code}\n"

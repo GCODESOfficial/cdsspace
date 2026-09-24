@@ -15,6 +15,7 @@ import {
   X,
 } from "lucide-react";
 import type { PublicDeliveryFile } from "@/lib/public-delivery";
+import { PlatformMediaViewer } from "@/components/media/PlatformMediaViewer";
 
 type DeliveryView = "folder" | "flat";
 
@@ -269,11 +270,18 @@ function LazyPreviewImage({ src, compact }: { src: string; compact: boolean }) {
 }
 
 function AssetCard({ token, file }: { token: string; file: PublicDeliveryFile & { path: string } }) {
+  const previewUrl = `/api/delivery/${token}/files/${file.id}`;
   return (
     <article className="group overflow-hidden rounded-2xl border border-[#DFE6F1] bg-white transition hover:border-blue-200 hover:shadow-[0_12px_30px_rgba(15,40,90,0.08)]">
-      <a href={`/api/delivery/${token}/files/${file.id}`} target="_blank" rel="noopener noreferrer" className="block aspect-[4/3] overflow-hidden border-b border-[#E8EDF5]" aria-label={`Preview ${file.file_name}`}>
-        <AssetPreview token={token} file={file} />
-      </a>
+      {file.file_kind === "image" ? (
+        <PlatformMediaViewer url={previewUrl} title={file.file_name} detail={formatBytes(file.file_size)} triggerClassName="block aspect-[4/3] w-full overflow-hidden border-b border-[#E8EDF5]">
+          <AssetPreview token={token} file={file} />
+        </PlatformMediaViewer>
+      ) : (
+        <a href={previewUrl} target="_blank" rel="noopener noreferrer" className="block aspect-[4/3] overflow-hidden border-b border-[#E8EDF5]" aria-label={`Preview ${file.file_name}`}>
+          <AssetPreview token={token} file={file} />
+        </a>
+      )}
       <div className="flex items-center gap-3 p-3">
         <span className="min-w-0 flex-1">
           <span className="block truncate text-xs font-bold text-[#07133B]" title={file.file_name}>{file.file_name}</span>
@@ -288,11 +296,18 @@ function AssetCard({ token, file }: { token: string; file: PublicDeliveryFile & 
 }
 
 function AssetRow({ token, file }: { token: string; file: PublicDeliveryFile & { path: string } }) {
+  const previewUrl = `/api/delivery/${token}/files/${file.id}`;
   return (
     <div className="group flex items-center gap-3 border-b border-[#EDF1F6] px-3 py-2.5 last:border-0 hover:bg-blue-50/40">
-      <a href={`/api/delivery/${token}/files/${file.id}`} target="_blank" rel="noopener noreferrer" className="h-11 w-14 shrink-0 overflow-hidden rounded-lg border border-[#E4EAF3]" aria-label={`Preview ${file.file_name}`}>
-        <AssetPreview token={token} file={file} compact />
-      </a>
+      {file.file_kind === "image" ? (
+        <PlatformMediaViewer url={previewUrl} title={file.file_name} detail={formatBytes(file.file_size)} triggerClassName="h-11 w-14 shrink-0 overflow-hidden rounded-lg border border-[#E4EAF3]">
+          <AssetPreview token={token} file={file} compact />
+        </PlatformMediaViewer>
+      ) : (
+        <a href={previewUrl} target="_blank" rel="noopener noreferrer" className="h-11 w-14 shrink-0 overflow-hidden rounded-lg border border-[#E4EAF3]" aria-label={`Preview ${file.file_name}`}>
+          <AssetPreview token={token} file={file} compact />
+        </a>
+      )}
       <span className="min-w-0 flex-1"><span className="block truncate text-xs font-bold text-[#07133B]">{file.file_name}</span><span className="mt-1 block text-[10px] text-[#8A95AA]">{formatBytes(file.file_size)}</span></span>
       <a href={`/api/delivery/${token}/files/${file.id}?download=1`} aria-label={`Download ${file.file_name}`} className="inline-flex h-9 items-center gap-2 rounded-xl border border-[#DFE6F1] bg-white px-3 text-[10px] font-bold text-[#0A4FE8] transition hover:border-blue-200 hover:bg-blue-50">
         <Download className="h-3.5 w-3.5" /><span className="hidden sm:inline">Download</span>

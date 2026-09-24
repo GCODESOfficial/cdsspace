@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getCreateActorFromRequest } from "@/lib/create-platform/session";
 import { deleteCreateCreation, duplicateCreateCreation, listCreateCreations } from "@/lib/create-platform/server";
+import { CLIENT_STORAGE_FULL_CODE, isClientStorageFullError } from "@/lib/client-storage";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -44,6 +45,7 @@ export async function POST(req: NextRequest) {
     }
     return NextResponse.json({ error: "Unknown action." }, { status: 400 });
   } catch (error) {
-    return NextResponse.json({ error: error instanceof Error ? error.message : "Could not update creation." }, { status: 400 });
+    const storageFull = isClientStorageFullError(error);
+    return NextResponse.json({ error: error instanceof Error ? error.message : "Could not update creation.", ...(storageFull ? { code: CLIENT_STORAGE_FULL_CODE } : {}) }, { status: storageFull ? 409 : 400 });
   }
 }

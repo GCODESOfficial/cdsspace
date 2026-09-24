@@ -31,9 +31,18 @@ import {
   ChevronUp,
   ChevronDown,
   Sticker,
+  PackageCheck,
+  FolderPlus,
+  FileText,
+  Mail,
+  MessageCircleQuestion,
+  Cake,
+  Copy,
+  Check,
 } from "lucide-react";
 import { Linkified, LinkPreview, firstUrl } from "@/components/chat/message-links";
 import { ChatSidebarPreview } from "@/components/chat/chat-sidebar-preview";
+import { PlatformMediaViewer } from "@/components/media/PlatformMediaViewer";
 import {
   ContextMenu,
   ContextMenuContent,
@@ -69,6 +78,9 @@ interface ChatRoom {
     email: string;
     full_name: string | null;
     avatar_url: string | null;
+    brand_name?: string | null;
+    birthday?: string | null;
+    manual_client_id?: string | null;
   } | null;
   whatsapp?: {
     phone: string;
@@ -192,6 +204,28 @@ interface PendingClientPhoto {
   fileName: string;
 }
 
+interface ClientResponseAdvice {
+  suggestedReply: string;
+  rationale: string;
+  nextSteps: string[];
+  cautions: string[];
+}
+
+function clientBirthdaySummary(value: string | null | undefined) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(value || ""));
+  if (!match) return null;
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  if (month < 1 || month > 12 || day < 1 || day > 31) return null;
+  const today = new Date();
+  const start = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+  let next = new Date(today.getFullYear(), month - 1, day);
+  if (next < start) next = new Date(today.getFullYear() + 1, month - 1, day);
+  const days = Math.round((next.getTime() - start.getTime()) / 86_400_000);
+  const date = next.toLocaleDateString(undefined, { day: "numeric", month: "long" });
+  return { date, timing: days === 0 ? "Today" : days === 1 ? "Tomorrow" : `In ${days} days` };
+}
+
 export function AdminChatPanel() {
   const [rooms, setRooms] = useState<ChatRoom[]>([]);
   const [selectedRoom, setSelectedRoom] = useState<string | null>(null);
@@ -223,6 +257,12 @@ export function AdminChatPanel() {
   const [welcomeSaving, setWelcomeSaving] = useState(false);
   const [welcomeBackfillBusy, setWelcomeBackfillBusy] = useState(false);
   const [welcomeUpdatedAt, setWelcomeUpdatedAt] = useState<string | null>(null);
+  const [responseAdviceOpen, setResponseAdviceOpen] = useState(false);
+  const [responseAdvice, setResponseAdvice] = useState<ClientResponseAdvice | null>(null);
+  const [responseAdviceSources, setResponseAdviceSources] = useState<string[]>([]);
+  const [responseAdviceInstruction, setResponseAdviceInstruction] = useState("");
+  const [responseAdviceBusy, setResponseAdviceBusy] = useState(false);
+  const [responseAdviceCopied, setResponseAdviceCopied] = useState(false);
   const [replyingTo, setReplyingTo] = useState<ChatMessage | null>(null);
   const [pinnedIndex, setPinnedIndex] = useState(0);
   const [isAtLatest, setIsAtLatest] = useState(true);
@@ -289,8 +329,12 @@ export function AdminChatPanel() {
   // Initial rooms fetch + polling
   useEffect(() => {
     fetchRooms();
-    const interval = setInterval(() => { if (!document.hidden) fetchRooms(); }, 8000);
-    return () => clearInterval(interval);
+    const interval = setInterval(fetchRooms, 4_000);
+    window.addEventListener("cds:notification-pulse", fetchRooms);
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener("cds:notification-pulse", fetchRooms);
+    };
   }, [fetchRooms]);
 
   // Email escalations deep-link to the exact waiting conversation.
@@ -307,6 +351,11 @@ export function AdminChatPanel() {
   // Fetch messages when room changes + polling
   useEffect(() => {
     setPendingPhoto(null);
+    setResponseAdviceOpen(false);
+    setResponseAdvice(null);
+    setResponseAdviceSources([]);
+    setResponseAdviceInstruction("");
+    setResponseAdviceCopied(false);
     if (selectedRoom) {
       initialScrollPending.current = true;
       renderedLastMessageId.current = null;
@@ -317,8 +366,12 @@ export function AdminChatPanel() {
       setIsLoadingMessages(true);
       fetchMessages();
     }
-    const interval = setInterval(() => { if (!document.hidden) fetchMessages(); }, 8000);
-    return () => clearInterval(interval);
+    const interval = setInterval(fetchMessages, 4_000);
+    window.addEventListener("cds:notification-pulse", fetchMessages);
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener("cds:notification-pulse", fetchMessages);
+    };
   }, [selectedRoom, fetchMessages]);
 
   const scrollToLatest = useCallback((behavior: ScrollBehavior = "smooth") => {
@@ -378,6 +431,46 @@ export function AdminChatPanel() {
     setPinnedIndex(0);
     setMobileShowThread(true);
     setTimeout(() => inputRef.current?.focus(), 200);
+  };
+
+  const requestResponseAdvice = async () => {
+    if (!selectedRoom || responseAdviceBusy) return;
+    setResponseAdviceBusy(true);
+    setResponseAdviceCopied(false);
+    try {
+      const response = await fetch("/api/admin/chat/response-advice", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ roomId: selectedRoom, instruction: responseAdviceInstruction }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || !payload.ok) throw new Error(payload.error || "Could not prepare response advice.");
+      setResponseAdvice(payload.advice);
+      setResponseAdviceSources(Array.isArray(payload.sources) ? payload.sources : []);
+    } catch (error) {
+      await appAlert(error instanceof Error ? error.message : "Could not prepare response advice.");
+    } finally {
+      setResponseAdviceBusy(false);
+    }
+  };
+
+  const openResponseAdvice = () => {
+    setResponseAdviceOpen(true);
+    if (!responseAdvice) void requestResponseAdvice();
+  };
+
+  const useSuggestedResponse = () => {
+    if (!responseAdvice?.suggestedReply) return;
+    setInput(responseAdvice.suggestedReply);
+    setResponseAdviceOpen(false);
+    window.setTimeout(() => inputRef.current?.focus(), 50);
+  };
+
+  const copySuggestedResponse = async () => {
+    if (!responseAdvice?.suggestedReply) return;
+    await navigator.clipboard.writeText(responseAdvice.suggestedReply);
+    setResponseAdviceCopied(true);
+    window.setTimeout(() => setResponseAdviceCopied(false), 1600);
   };
 
   const openClientPicker = async () => {
@@ -841,6 +934,10 @@ export function AdminChatPanel() {
   });
 
   const selectedRoomData = rooms.find((r) => r.roomId === selectedRoom);
+  const selectedClient = selectedRoomData?.client || null;
+  const selectedClientBirthday = clientBirthdaySummary(selectedClient?.birthday);
+  const selectedClientName = selectedRoomData ? getClientName(selectedRoomData) : "Client";
+  const selectedClientBrand = selectedClient?.brand_name || selectedClientName;
   const totalUnreadCount = rooms.reduce((total, room) => total + Math.max(0, room.unreadCount || 0), 0);
 
   return (
@@ -990,21 +1087,25 @@ export function AdminChatPanel() {
                   {selectedRoomData && <SourceBadge source={getRoomSource(selectedRoomData)} />}
                   {selectedRoomData?.deal && <DealBadge deal={selectedRoomData.deal} />}
                 </p>
-                <p className="text-gray-400 text-xs">
-                  {selectedRoomData?.whatsapp
-                    ? `WhatsApp · +${selectedRoomData.whatsapp.phone}`
-                    : selectedRoomData?.meta
-                      ? `${selectedRoomData.meta.platform === "facebook" ? "Messenger" : "Instagram"}${selectedRoomData.meta.username ? ` · @${selectedRoomData.meta.username}` : ""}`
-                      : "Client"}
+                <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-gray-400">
+                  <span>
+                    {selectedRoomData?.whatsapp
+                      ? `WhatsApp · +${selectedRoomData.whatsapp.phone}`
+                      : selectedRoomData?.meta
+                        ? `${selectedRoomData.meta.platform === "facebook" ? "Messenger" : "Instagram"}${selectedRoomData.meta.username ? ` · @${selectedRoomData.meta.username}` : ""}`
+                        : "Client"}
+                  </span>
+                  {selectedClientBirthday && (
+                    <span title={`${selectedClientBirthday.timing}: ${selectedClientBirthday.date}`} className="inline-flex items-center gap-1 rounded-full bg-fuchsia-400/10 px-2 py-0.5 text-[10px] font-medium text-fuchsia-200">
+                      <Cake className="h-3 w-3" /> Birthday {selectedClientBirthday.date} · {selectedClientBirthday.timing.toLowerCase()}
+                    </span>
+                  )}
                   {selectedRoomData?.deal?.proposal_id ? (
-                    <>
-                      {" · "}
-                      <Link href={`/admin/deals/proposals?proposal=${selectedRoomData.deal.proposal_id}`} className="text-[#5BA8FF] hover:underline">
-                        Open proposal
-                      </Link>
-                    </>
+                    <Link href={`/admin/deals/proposals?proposal=${selectedRoomData.deal.proposal_id}`} className="text-[#5BA8FF] hover:underline">
+                      Open proposal
+                    </Link>
                   ) : null}
-                </p>
+                </div>
               </div>
               {selectedRoom.startsWith("client_") && (
                 <div className="ms-auto flex items-center gap-1">
@@ -1027,6 +1128,92 @@ export function AdminChatPanel() {
                 </div>
               )}
             </div>
+
+            {selectedClient && (
+              <div className="flex shrink-0 items-center gap-2 overflow-x-auto border-b border-[#2a3578] bg-[#121A36] px-4 py-2.5 sm:px-5">
+                <Link
+                  href={{ pathname: "/admin/clients/deliveries", query: { action: "delivery", client: selectedClient.id, email: selectedClient.email } }}
+                  className="inline-flex h-9 shrink-0 items-center gap-2 rounded-xl border border-[#344185] bg-[#1A2255] px-3 text-[11px] font-semibold text-white/80 transition hover:border-[#5BA8FF] hover:text-white"
+                >
+                  <PackageCheck className="h-3.5 w-3.5 text-[#7DBBFF]" /> Send a delivery
+                </Link>
+                <Link
+                  href={{ pathname: "/admin/clients/deliveries", query: { action: "drive", client: selectedClient.id, email: selectedClient.email } }}
+                  className="inline-flex h-9 shrink-0 items-center gap-2 rounded-xl border border-[#344185] bg-[#1A2255] px-3 text-[11px] font-semibold text-white/80 transition hover:border-[#5BA8FF] hover:text-white"
+                >
+                  <FolderPlus className="h-3.5 w-3.5 text-[#7DBBFF]" /> New project folder
+                </Link>
+                <Link
+                  href={{ pathname: "/admin/deals/proposals", query: { action: "create", client: selectedClient.id, email: selectedClient.email, brand: selectedClientBrand } }}
+                  className="inline-flex h-9 shrink-0 items-center gap-2 rounded-xl border border-[#344185] bg-[#1A2255] px-3 text-[11px] font-semibold text-white/80 transition hover:border-[#5BA8FF] hover:text-white"
+                >
+                  <FileText className="h-3.5 w-3.5 text-[#7DBBFF]" /> Send a proposal
+                </Link>
+                <Link
+                  href={{ pathname: "/admin/clients/mailings", query: { action: "compose", client: selectedClient.id, email: selectedClient.email } }}
+                  className="inline-flex h-9 shrink-0 items-center gap-2 rounded-xl border border-[#344185] bg-[#1A2255] px-3 text-[11px] font-semibold text-white/80 transition hover:border-[#5BA8FF] hover:text-white"
+                >
+                  <Mail className="h-3.5 w-3.5 text-[#7DBBFF]" /> Send an email
+                </Link>
+                <button
+                  type="button"
+                  onClick={openResponseAdvice}
+                  className="inline-flex h-9 shrink-0 items-center gap-2 rounded-xl bg-[#0A4FE8] px-3 text-[11px] font-semibold text-white transition hover:bg-[#0B45C7]"
+                >
+                  <MessageCircleQuestion className="h-3.5 w-3.5" /> Response adviser
+                </button>
+              </div>
+            )}
+
+            {responseAdviceOpen && selectedClient && (
+              <aside className="absolute inset-x-3 top-[138px] z-40 max-h-[calc(100%-160px)] overflow-y-auto rounded-2xl border border-[#344185] bg-[#151E45] p-4 text-white shadow-2xl md:left-auto md:right-4 md:w-[410px]">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="text-sm font-semibold">Response adviser</p>
+                    <p className="mt-1 text-[11px] leading-4 text-slate-400">Uses this conversation with approved sales scripts, published packages, and current platform pricing. Nothing is sent automatically.</p>
+                  </div>
+                  <button type="button" onClick={() => setResponseAdviceOpen(false)} className="grid h-8 w-8 shrink-0 place-items-center rounded-lg text-slate-400 hover:bg-white/10 hover:text-white" aria-label="Close response adviser"><X className="h-4 w-4" /></button>
+                </div>
+
+                <label className="mt-4 block text-[11px] font-medium text-slate-300">
+                  What should the response achieve? <span className="font-normal text-slate-500">Optional</span>
+                  <textarea
+                    value={responseAdviceInstruction}
+                    onChange={(event) => setResponseAdviceInstruction(event.target.value)}
+                    rows={2}
+                    maxLength={600}
+                    placeholder="For example: qualify their budget, explain the best package, or calm a concern."
+                    className="mt-1.5 w-full resize-none rounded-xl border border-[#344185] bg-[#0F1735] px-3 py-2.5 text-xs leading-5 text-white outline-none placeholder:text-slate-500 focus:border-[#5BA8FF]"
+                  />
+                </label>
+                <button type="button" onClick={() => void requestResponseAdvice()} disabled={responseAdviceBusy} className="mt-2 inline-flex h-9 items-center gap-2 rounded-xl bg-[#0A4FE8] px-3 text-[11px] font-semibold text-white disabled:opacity-50">
+                  {responseAdviceBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <MessageCircleQuestion className="h-3.5 w-3.5" />}
+                  {responseAdvice ? "Refresh advice" : "Prepare advice"}
+                </button>
+
+                {responseAdviceBusy && !responseAdvice ? (
+                  <div className="mt-5 flex items-center gap-2 rounded-xl bg-white/5 px-3 py-4 text-xs text-slate-300"><Loader2 className="h-4 w-4 animate-spin text-[#7DBBFF]" /> Reviewing the conversation and current offers...</div>
+                ) : responseAdvice ? (
+                  <div className="mt-4 space-y-3">
+                    <section className="rounded-xl border border-[#344185] bg-[#0F1735] p-3">
+                      <div className="flex items-center justify-between gap-2">
+                        <p className="text-[11px] font-semibold text-[#8CC4FF]">Suggested reply</p>
+                        <button type="button" onClick={() => void copySuggestedResponse()} className="inline-flex items-center gap-1 text-[10px] text-slate-400 hover:text-white">{responseAdviceCopied ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}{responseAdviceCopied ? "Copied" : "Copy"}</button>
+                      </div>
+                      <p className="mt-2 whitespace-pre-wrap text-xs leading-5 text-white/90">{responseAdvice.suggestedReply}</p>
+                      <button type="button" onClick={useSuggestedResponse} className="mt-3 inline-flex h-9 items-center gap-2 rounded-lg bg-[#0A4FE8] px-3 text-[11px] font-semibold text-white"><PenLine className="h-3.5 w-3.5" /> Add to message box</button>
+                    </section>
+                    <section className="rounded-xl bg-white/5 p-3">
+                      <p className="text-[11px] font-semibold text-white">Why this response</p>
+                      <p className="mt-1.5 text-[11px] leading-4.5 text-slate-300">{responseAdvice.rationale}</p>
+                    </section>
+                    {responseAdvice.nextSteps.length > 0 && <section className="rounded-xl bg-white/5 p-3"><p className="text-[11px] font-semibold text-white">Recommended next steps</p><ul className="mt-1.5 space-y-1 text-[11px] leading-4 text-slate-300">{responseAdvice.nextSteps.map((step) => <li key={step}>• {step}</li>)}</ul></section>}
+                    {responseAdvice.cautions.length > 0 && <section className="rounded-xl border border-amber-300/20 bg-amber-300/5 p-3"><p className="text-[11px] font-semibold text-amber-200">Check before sending</p><ul className="mt-1.5 space-y-1 text-[11px] leading-4 text-amber-100/75">{responseAdvice.cautions.map((item) => <li key={item}>• {item}</li>)}</ul></section>}
+                    {responseAdviceSources.length > 0 && <details className="rounded-xl bg-white/5 p-3 text-[10px] text-slate-400"><summary className="cursor-pointer font-semibold text-slate-300">Platform sources used</summary><ul className="mt-2 space-y-1">{responseAdviceSources.map((source) => <li key={source}>{source}</li>)}</ul></details>}
+                  </div>
+                ) : null}
+              </aside>
+            )}
 
             {activePinnedMessage && (
               <div className="flex shrink-0 items-center gap-2 border-b border-[#2a3578] bg-[#121c4b] px-4 py-2.5 text-start">
@@ -1165,10 +1352,10 @@ export function AdminChatPanel() {
                             )}
                             {msg.file_url && !isStickerMessage && (
                               isChatImageUrl(msg.file_url) ? (
-                                <a href={msg.file_url} target="_blank" rel="noopener noreferrer" className="mt-2 block overflow-hidden rounded-xl border border-white/20 bg-white/10">
+                                <PlatformMediaViewer url={msg.file_url} title="Message visual" triggerClassName="mt-2 block w-full overflow-hidden rounded-xl border border-white/20 bg-white/10">
                                   {/* eslint-disable-next-line @next/next/no-img-element */}
                                   <img src={msg.file_url} alt="Message visual" className="max-h-80 w-full object-contain" />
-                                </a>
+                                </PlatformMediaViewer>
                               ) : (
                                 <a
                                   href={msg.file_url}
@@ -1265,7 +1452,7 @@ export function AdminChatPanel() {
                   <ChatStickerPicker dark onSelect={sendSticker} />
                 </div>
               )}
-              <div className="flex items-center gap-2">
+              <div className="space-y-2">
                 <input
                   ref={fileInputRef}
                   type="file"
@@ -1277,39 +1464,42 @@ export function AdminChatPanel() {
                   }}
                 />
                 {selectedRoom.startsWith("client_") && (
-                  <>
+                  <div className="flex min-h-9 items-center gap-1 overflow-x-auto px-1">
                     <button
                       onClick={() => fileInputRef.current?.click()}
                       disabled={uploading || isSending}
-                      className="grid h-10 w-10 shrink-0 place-items-center rounded-full border border-white/10 text-slate-400 transition hover:border-blue-400/50 hover:bg-white/5 hover:text-blue-300 disabled:opacity-40"
+                      className="grid h-9 w-9 shrink-0 place-items-center rounded-xl text-slate-400 transition hover:bg-white/5 hover:text-blue-300 disabled:opacity-40"
                       title="Send a photo or document"
+                      aria-label="Send a photo or document"
                     >
                       {uploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Paperclip className="h-4 w-4" />}
                     </button>
-                    <button type="button" onClick={() => setStickersOpen((current) => !current)} disabled={isSending} className={`grid h-10 w-10 shrink-0 place-items-center rounded-full border transition disabled:opacity-40 ${stickersOpen ? "border-blue-400/50 bg-white/10 text-blue-300" : "border-white/10 text-slate-400 hover:border-blue-400/50 hover:bg-white/5 hover:text-blue-300"}`} title="Stickers" aria-label="Open stickers">
+                    <button type="button" onClick={() => setStickersOpen((current) => !current)} disabled={isSending} className={`grid h-9 w-9 shrink-0 place-items-center rounded-xl transition disabled:opacity-40 ${stickersOpen ? "bg-white/10 text-blue-300" : "text-slate-400 hover:bg-white/5 hover:text-blue-300"}`} title="Stickers" aria-label="Open stickers">
                       <Sticker className="h-4 w-4" />
                     </button>
-                  </>
+                  </div>
                 )}
-                <input
-                  dir="auto"
-                  ref={inputRef}
-                  type="text"
-                  value={input}
-                  onChange={(e) => setInput(e.target.value)}
-                  onPaste={handlePhotoPaste}
-                  onKeyDown={handleKeyDown}
-                  placeholder={pendingPhoto ? "Add a caption..." : "Type a message or paste a photo..."}
-                  className="min-w-0 flex-1 rounded-full border border-white/10 bg-white/[0.06] px-4 py-2.5 text-start text-sm text-white placeholder:text-slate-500 focus:border-blue-400/60 focus:outline-none focus:ring-1 focus:ring-blue-400/30"
-                />
-                <button
-                  onClick={handleSend}
-                  disabled={(!input.trim() && !pendingPhoto) || isSending || uploading}
-                  className="w-10 h-10 rounded-full bg-[#0A4FE8] text-white flex items-center justify-center hover:bg-[#083FC0] disabled:opacity-40 disabled:cursor-not-allowed transition-colors shrink-0 shadow-sm"
-                  aria-label="Send message"
-                >
-                  {isSending || uploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="w-4 h-4" />}
-                </button>
+                <div className="flex w-full items-center gap-2">
+                  <input
+                    dir="auto"
+                    ref={inputRef}
+                    type="text"
+                    value={input}
+                    onChange={(e) => setInput(e.target.value)}
+                    onPaste={handlePhotoPaste}
+                    onKeyDown={handleKeyDown}
+                    placeholder={pendingPhoto ? "Add a caption..." : "Type a message or paste a photo..."}
+                    className="h-11 min-w-0 flex-1 rounded-2xl border border-white/10 bg-white/[0.06] px-4 text-start text-sm text-white placeholder:text-slate-500 focus:border-blue-400/60 focus:outline-none focus:ring-1 focus:ring-blue-400/30"
+                  />
+                  <button
+                    onClick={handleSend}
+                    disabled={(!input.trim() && !pendingPhoto) || isSending || uploading}
+                    className="grid h-11 w-11 shrink-0 place-items-center rounded-2xl bg-[#0A4FE8] text-white shadow-sm transition-colors hover:bg-[#083FC0] disabled:cursor-not-allowed disabled:opacity-40"
+                    aria-label="Send message"
+                  >
+                    {isSending || uploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="w-4 h-4" />}
+                  </button>
+                </div>
               </div>
             </div>
           </>

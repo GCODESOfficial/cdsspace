@@ -1,0 +1,18 @@
+services:
+  clamav:
+    image: clamav/clamav:stable
+    container_name: cds-upload-clamav
+    restart: unless-stopped
+    expose:
+      - "3310"
+    volumes:
+      - clamav-signatures:/var/lib/clamav
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/clamdcheck.sh"]
+      interval: 30s
+      timeout: 10s
+      retries: 10
+      start_period: 120s
+
+volumes:
+  clamav-signatures:

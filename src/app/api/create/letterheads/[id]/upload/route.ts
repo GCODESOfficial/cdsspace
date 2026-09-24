@@ -3,9 +3,10 @@ import { NextRequest, NextResponse } from "next/server";
 import sharp from "sharp";
 import { renderPageAsImage } from "unpdf";
 import { getCreateActorFromRequest } from "@/lib/create-platform/session";
-import { createPrivateAssetPrefix, getLetterhead, LETTERHEAD_BUCKET, LETTERHEAD_MAX_BYTES, updateLetterheadAsset } from "@/lib/create-platform/letterheads";
+import { createPrivateAssetPrefix, getLetterhead, getLetterheadAssetReplacement, LETTERHEAD_BUCKET, LETTERHEAD_MAX_BYTES, updateLetterheadAsset } from "@/lib/create-platform/letterheads";
 import { getGlashDbAdmin } from "@/lib/glashdb";
 import { assertSafeUpload, UploadSecurityError } from "@/lib/upload-security";
+import { CLIENT_STORAGE_FULL_CODE, isClientStorageFullError, releaseClientStorageReservation, reserveClientStorage } from "@/lib/client-storage";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -49,20 +50,35 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   if (kind !== "firstPage" && kind !== "secondPage" && kind !== "signature") return NextResponse.json({ error: "Invalid asset type." }, { status: 400 });
 
   let storagePath = "";
+  let reservationId: string | null = null;
+  let previousAsset: Awaited<ReturnType<typeof getLetterheadAssetReplacement>> | null = null;
   try {
     const png = await pngFromUpload(file);
+    if (actor.kind === "client") {
+      previousAsset = await getLetterheadAssetReplacement(actor, id, kind as AssetKind);
+      const replacingBytes = previousAsset.referenceCount <= 1 ? previousAsset.bytes : 0;
+      reservationId = await reserveClientStorage(actor.id, png.byteLength, replacingBytes);
+    } else {
+      previousAsset = await getLetterheadAssetReplacement(actor, id, kind as AssetKind);
+    }
     storagePath = `${createPrivateAssetPrefix(actor)}/${id}/${kind}-${crypto.randomUUID()}.png`;
     const db = getGlashDbAdmin() as any;
     const { error: uploadError } = await db.storage.from(LETTERHEAD_BUCKET).upload(storagePath, png, { contentType: "image/png", upsert: false });
     if (uploadError) throw new Error(uploadError.message);
-    const letterhead = await updateLetterheadAsset(actor, id, kind as AssetKind, storagePath, file.name);
+    const letterhead = await updateLetterheadAsset(actor, id, kind as AssetKind, storagePath, file.name, png.byteLength);
+    if (previousAsset.path && previousAsset.referenceCount <= 1) {
+      await db.storage.from(LETTERHEAD_BUCKET).remove([previousAsset.path]).catch(() => undefined);
+    }
     return NextResponse.json({ ok: true, letterhead });
   } catch (error) {
     if (storagePath) {
       const db = getGlashDbAdmin() as any;
       await db.storage.from(LETTERHEAD_BUCKET).remove([storagePath]);
     }
-    const status = error instanceof UploadSecurityError ? error.status : 500;
-    return NextResponse.json({ error: error instanceof Error ? error.message : "The asset could not be uploaded." }, { status });
+    const storageFull = isClientStorageFullError(error);
+    const status = storageFull ? 409 : error instanceof UploadSecurityError ? error.status : 500;
+    return NextResponse.json({ error: error instanceof Error ? error.message : "The asset could not be uploaded.", ...(storageFull ? { code: CLIENT_STORAGE_FULL_CODE } : {}) }, { status });
+  } finally {
+    await releaseClientStorageReservation(reservationId).catch(() => undefined);
   }
 }

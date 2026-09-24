@@ -49,11 +49,14 @@ import {
   Clock3,
   Copy,
   Upload,
+  ClipboardCheck,
+  Eye,
+  Inbox,
+  WifiOff,
 } from "lucide-react";
 import { cn, initials } from "@/lib/utils";
 import { validateChatUpload } from "@/lib/chat-upload-limits";
 import { buildCMeetAutoJoinPath, buildCMeetPath } from "@/lib/cmeet-links";
-import { isSocialEngagementPost } from "@/lib/chat-social-engagement";
 import {
   Linkified,
   LinkPreview,
@@ -62,6 +65,7 @@ import {
 import { ChatSidebarPreview } from "@/components/chat/chat-sidebar-preview";
 import { UniversalShareButton } from "@/components/share/UniversalShareButton";
 import { ViewportPortal } from "@/components/ui/ViewportPortal";
+import { PlatformMediaViewer } from "@/components/media/PlatformMediaViewer";
 import {
   MeetingModeModal,
   type MeetingRequest,
@@ -124,6 +128,10 @@ interface Message {
   message_type?: string;
   metadata?: {
     custom_sticker?: CustomSticker;
+    task_post?: {
+      label?: string;
+      audience?: "thread";
+    };
     [key: string]: unknown;
   };
   delivery_status?: string;
@@ -193,6 +201,28 @@ interface PendingChatImage {
   size: number;
 }
 
+interface MessageDeliveryMember {
+  id: string;
+  name: string;
+  avatarUrl: string | null;
+  online: boolean;
+  deliveredAt: string | null;
+  readAt: string | null;
+  state: "seen" | "delivered" | "not_seen" | "offline";
+  compliant: boolean;
+}
+
+interface MessageDeliveryStatus {
+  total: number;
+  seen: number;
+  delivered: number;
+  notSeen: number;
+  offline: number;
+  taskPost: boolean;
+  compliant: number;
+  members: MessageDeliveryMember[];
+}
+
 interface CustomSticker {
   id: string;
   title: string;
@@ -222,9 +252,11 @@ interface ChatProjectOption {
 type ComposerPanel = "emoji" | "stickers" | "background" | null;
 type ChatBackgroundKey = "mist" | "linen" | "ocean" | "midnight";
 type NewChatKind = "self" | "direct" | "group" | "department" | "project";
+type ThreadFilter = "team" | "groups";
 
 const CHAT_BG_KEY = "cds_team_chat_bg";
-const SOCIAL_COMPLETION_REACTION = "__social_complete__";
+const TASK_COMPLETION_REACTION = "__task_compliant__";
+const LEGACY_SOCIAL_COMPLETION_REACTION = "__social_complete__";
 const REACTION_EMOJIS = ["❤️", "👍", "😂", "😮", "👏", "🔥", "🙏", "🎉"];
 const EMOJI_GROUPS = [
   {
@@ -475,6 +507,7 @@ export function TeamChatPanel({
   const router = useRouter();
   const [threads, setThreads] = useState<Thread[]>([]);
   const [threadsLoading, setThreadsLoading] = useState(true);
+  const [threadFilter, setThreadFilter] = useState<ThreadFilter>("team");
   const [selectedThread, setSelectedThread] = useState<string | null>(
     initialThreadId ?? null,
   );
@@ -503,6 +536,11 @@ export function TeamChatPanel({
   const [stickerEmoji, setStickerEmoji] = useState("🙂");
   const [stickerTitle, setStickerTitle] = useState("");
   const [composerPanel, setComposerPanel] = useState<ComposerPanel>(null);
+  const [taskPostMode, setTaskPostMode] = useState(false);
+  const [deliveryMessage, setDeliveryMessage] = useState<Message | null>(null);
+  const [deliveryStatus, setDeliveryStatus] =
+    useState<MessageDeliveryStatus | null>(null);
+  const [deliveryLoading, setDeliveryLoading] = useState(false);
   const [toolkitOpen, setToolkitOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<ChatSearchResult[]>([]);
@@ -590,6 +628,17 @@ export function TeamChatPanel({
 
   const currentThread =
     threads.find((thread) => thread.id === selectedThread) || null;
+  const filteredThreads = useMemo(
+    () => threads.filter((thread) =>
+      threadFilter === "team" ? thread.kind === "direct" : thread.kind !== "direct",
+    ),
+    [threadFilter, threads],
+  );
+  const directThreadCount = useMemo(
+    () => threads.filter((thread) => thread.kind === "direct").length,
+    [threads],
+  );
+  const groupThreadCount = threads.length - directThreadCount;
   // Files/media are allowed in group spaces (department & project group chats)
   // and admin DMs, but blocked in 1-on-1 member chats. The server enforces the
   // same rule; this just hides the affordance.
@@ -600,6 +649,12 @@ export function TeamChatPanel({
   // Announcement channels are read-only for everyone except management.
   const composerLocked =
     !!currentThread?.is_announcement_only && !viewer?.isManagement;
+
+  useEffect(() => {
+    if (!initialThreadId) return;
+    const initialThread = threads.find((thread) => thread.id === initialThreadId);
+    if (initialThread) setThreadFilter(initialThread.kind === "direct" ? "team" : "groups");
+  }, [initialThreadId, threads]);
 
   useEffect(() => {
     syncBusyRef.current = sending || uploading;
@@ -788,6 +843,8 @@ export function TeamChatPanel({
   // Incremental sync: pull only what changed since the cursor and merge it in,
   // preserving scroll position. This is the polling replacement that makes the
   // chat feel live without re-rendering the whole thread.
+  // Marking a thread read is a write, so it only runs when something arrived.
+  const hadIncomingRef = useRef(false);
   const syncDelta = useCallback(async () => {
     const threadId = selectedThreadRef.current;
     if (!threadId || !cursorRef.current) return;
@@ -806,6 +863,7 @@ export function TeamChatPanel({
       setReadWatermark(json.read_watermark || null);
       const incoming: Message[] = json.messages || [];
       if (incoming.length === 0) return;
+      hadIncomingRef.current = true;
 
       const wasAtBottom = atBottomRef.current;
       setMessages((prev) => {
@@ -919,23 +977,38 @@ export function TeamChatPanel({
     loadInitial(selectedThread);
     markThreadRead(selectedThread);
 
-    // Fast incremental sync loop. Only new/changed rows come down each tick, so
-    // this is cheap enough to run frequently - ~1.8s feels near-live.
+    // Messages arrive through the notification stream, so this timer exists
+    // for presence: who is typing, and how far the other side has read. It
+    // stops entirely while the tab is hidden, where presence means nothing.
     const interval = setInterval(() => {
-      if (document.hidden) return; // pause when the tab is backgrounded
-      syncDelta();
-      if (atBottomRef.current) markThreadRead(selectedThread);
-    }, 1800);
+      if (document.hidden) return;
+      void syncDelta().then(() => {
+        if (atBottomRef.current && hadIncomingRef.current) {
+          hadIncomingRef.current = false;
+          markThreadRead(selectedThread);
+        }
+      });
+    }, 4_000);
 
     // Catch up instantly when the tab regains focus.
     const onVisible = () => {
       if (!document.hidden) syncDelta();
     };
     document.addEventListener("visibilitychange", onVisible);
+    const onLiveEvent = () => {
+      void syncDelta().then(() => {
+        if (atBottomRef.current && hadIncomingRef.current) {
+          hadIncomingRef.current = false;
+          markThreadRead(selectedThread);
+        }
+      });
+    };
+    window.addEventListener("cds:notification-pulse", onLiveEvent);
 
     return () => {
       clearInterval(interval);
       document.removeEventListener("visibilitychange", onVisible);
+      window.removeEventListener("cds:notification-pulse", onLiveEvent);
     };
   }, [selectedThread, loadInitial, syncDelta, markThreadRead]);
 
@@ -1099,6 +1172,20 @@ export function TeamChatPanel({
     setEditingMessageId(null);
     setReplyingTo(null);
     setComposerPanel(null);
+    setTaskPostMode(false);
+  }
+
+  function changeThreadFilter(nextFilter: ThreadFilter) {
+    setThreadFilter(nextFilter);
+    if (!currentThread) return;
+    const remainsVisible = nextFilter === "team"
+      ? currentThread.kind === "direct"
+      : currentThread.kind !== "direct";
+    if (remainsVisible) return;
+    setSelectedThread(null);
+    setMessages([]);
+    setMobileShowThread(false);
+    resetComposerState();
   }
 
   function scrollToMessage(messageId: string) {
@@ -1281,6 +1368,7 @@ export function TeamChatPanel({
       setMessages((prev) => prev.filter((message) => message.id !== tempId));
       if (!stickerKey && (!attachmentUrl || messageType === "image"))
         setInput(normalizedBody);
+      if (metadata?.task_post) setTaskPostMode(true);
     } finally {
       setSending(false);
     }
@@ -1477,6 +1565,9 @@ export function TeamChatPanel({
   }
 
   async function submitComposer() {
+    const taskMetadata = taskPostMode
+      ? { task_post: { label: "Done / compliant", audience: "thread" } }
+      : undefined;
     if (pendingImage) {
       const photo = pendingImage;
       await sendMessage({
@@ -1486,10 +1577,38 @@ export function TeamChatPanel({
         fileName: photo.name,
         fileSizeBytes: photo.size,
         mimeType: photo.mimeType,
+        metadata: taskMetadata,
       });
       return;
     }
-    await sendMessage();
+    await sendMessage({
+      messageType: taskPostMode ? "task" : undefined,
+      metadata: taskMetadata,
+    });
+  }
+
+  async function openDeliveryStatus(message: Message) {
+    setActionMessage(null);
+    setDeliveryMessage(message);
+    setDeliveryStatus(null);
+    setDeliveryLoading(true);
+    try {
+      const response = await fetch(
+        `/api/team/chat/messages/${message.id}/status`,
+        { credentials: "include" },
+      );
+      const json = await response.json();
+      if (!response.ok || !json.ok) {
+        throw new Error(json.error || "Could not load delivery status");
+      }
+      setDeliveryStatus(json.status);
+    } catch (error) {
+      console.error(error);
+      await appAlert("Could not load the delivery status for this post.");
+      setDeliveryMessage(null);
+    } finally {
+      setDeliveryLoading(false);
+    }
   }
 
   async function toggleReaction(messageId: string, emoji: string) {
@@ -1623,6 +1742,19 @@ export function TeamChatPanel({
     return message.sender_id === viewer?.id && !message.sender_is_admin;
   }
 
+  /**
+   * Who may see the breakdown of a task post: who has marked it done and who
+   * has not. That is the poster and the super admin only. Everyone else sees
+   * the post and their own state, not a register of their colleagues.
+   */
+  function canInspectDelivery(message: Message) {
+    if (message.id.startsWith("temp_") || message.deleted_at) return false;
+    if (viewer?.isSuperAdmin) return true;
+    return message.sender_is_admin
+      ? viewer?.kind === "admin"
+      : Boolean(message.sender_id && message.sender_id === viewer?.id);
+  }
+
   function handleTouchStart(
     message: Message,
     event: React.TouchEvent<HTMLDivElement>,
@@ -1714,41 +1846,69 @@ export function TeamChatPanel({
         }}
       >
         <div
-          className="px-4 sm:px-5 py-4 border-b flex items-center justify-between"
+          className="border-b px-4 py-3.5 sm:px-5"
           style={{
             borderColor: currentTheme.dark
               ? "rgba(71,85,105,0.48)"
               : "rgba(226,232,240,0.72)",
           }}
         >
-          <div>
-            <h2
-              className={cn(
-                "text-[15px] font-semibold",
-                currentTheme.dark ? "text-white" : "text-[#0D1B39]",
-              )}
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <h2
+                className={cn(
+                  "text-[15px] font-semibold",
+                  currentTheme.dark ? "text-white" : "text-[#0D1B39]",
+                )}
+              >
+                Team chat
+              </h2>
+              <p
+                className={cn(
+                  "text-[11.5px]",
+                  currentTheme.dark ? "text-slate-400" : "text-gray-400",
+                )}
+              >
+                {threadFilter === "team" ? "Direct team conversations" : "Departments, projects and groups"}
+              </p>
+            </div>
+            <button
+              onClick={() => setShowingNewChat(true)}
+              className="rounded-xl p-2 text-white shadow-sm transition-colors"
+              style={{ background: currentTheme.accent }}
+              title="Start new chat"
+              aria-label="Start new chat"
             >
-              Team chat
-            </h2>
-            <p
-              className={cn(
-                "text-[11.5px]",
-                currentTheme.dark ? "text-slate-400" : "text-gray-400",
-              )}
-            >
-              {viewer?.isSuperAdmin
-                ? "All threads + broadcasts"
-                : "Your channels, DMs, and broadcasts"}
-            </p>
+              <Plus className="h-4 w-4" />
+            </button>
           </div>
-          <button
-            onClick={() => setShowingNewChat(true)}
-            className="p-2 rounded-xl text-white transition-colors shadow-sm"
-            style={{ background: currentTheme.accent }}
-            title="Start new chat"
-          >
-            <Plus className="w-4 h-4" />
-          </button>
+          <div role="tablist" aria-label="Filter team chats" className={cn("mt-3 grid grid-cols-2 gap-1 rounded-xl p-1", currentTheme.dark ? "bg-slate-900/80" : "bg-slate-100/90")}>
+            {([
+              ["team", "Team", directThreadCount],
+              ["groups", "Groups", groupThreadCount],
+            ] as const).map(([value, label, count]) => (
+              <button
+                key={value}
+                type="button"
+                role="tab"
+                aria-selected={threadFilter === value}
+                onClick={() => changeThreadFilter(value)}
+                className={cn(
+                  "flex h-8 items-center justify-center gap-1.5 rounded-lg px-2 text-[11px] font-semibold transition",
+                  threadFilter === value
+                    ? currentTheme.dark
+                      ? "bg-slate-700 text-white shadow-sm"
+                      : "bg-white text-[#0A4FE8] shadow-sm"
+                    : currentTheme.dark
+                      ? "text-slate-400 hover:text-white"
+                      : "text-slate-500 hover:text-[#0D1B39]",
+                )}
+              >
+                {label}
+                <span className={cn("min-w-4 rounded-full px-1 text-[9px]", threadFilter === value ? "bg-[#0A4FE8]/10" : currentTheme.dark ? "bg-white/5" : "bg-white/70")}>{count}</span>
+              </button>
+            ))}
+          </div>
         </div>
 
         <div className="flex-1 overflow-y-auto">
@@ -1756,18 +1916,18 @@ export function TeamChatPanel({
             <div className="py-12 flex justify-center">
               <Loader2 className="w-4 h-4 animate-spin text-[#0A4FE8]" />
             </div>
-          ) : threads.length === 0 ? (
+          ) : filteredThreads.length === 0 ? (
             <p
               className={cn(
                 "px-5 py-10 text-center text-[12px]",
                 currentTheme.dark ? "text-slate-400" : "text-gray-400",
               )}
             >
-              No threads yet.
+              {threadFilter === "team" ? "No direct team chats yet." : "No group chats yet."}
             </p>
           ) : (
-            <ul className="py-2">
-              {threads.map((thread) => (
+            <ul className="py-1">
+              {filteredThreads.map((thread) => (
                 <li key={thread.id}>
                   <button
                     onClick={() => {
@@ -1776,7 +1936,7 @@ export function TeamChatPanel({
                       resetComposerState();
                     }}
                     className={cn(
-                      "w-full text-left px-4 sm:px-5 py-3.5 flex items-start gap-3 transition relative group",
+                      "group relative flex w-full items-start gap-2.5 px-4 py-2.5 text-left transition sm:px-5",
                       selectedThread === thread.id
                         ? currentTheme.dark
                           ? "bg-slate-900/70"
@@ -1788,7 +1948,7 @@ export function TeamChatPanel({
                   >
                     <div
                       className={cn(
-                        "w-9 h-9 rounded-xl flex items-center justify-center shrink-0 shadow-xs",
+                        "flex h-8 w-8 shrink-0 items-center justify-center rounded-lg shadow-xs",
                         thread.kind === "admin_broadcast"
                           ? "bg-amber-100 text-amber-700"
                           : "bg-[#0A4FE8]/10 text-[#0A4FE8]",
@@ -2046,7 +2206,7 @@ export function TeamChatPanel({
               <div
                 ref={scrollRef}
                 onScroll={handleScroll}
-                className="flex-1 overflow-y-auto px-3 sm:px-5 py-5 sm:py-6 relative"
+                className="relative flex-1 overflow-y-auto px-3 py-4 sm:px-5 sm:py-5"
                 style={{ background: currentTheme.canvas }}
               >
                 {loadingOlder && (
@@ -2073,9 +2233,9 @@ export function TeamChatPanel({
                     </p>
                   </div>
                 ) : (
-                  <div className="space-y-6">
+                  <div className="space-y-4">
                     {groupedMessages.map((group) => (
-                      <div key={group.label} className="space-y-4">
+                      <div key={group.label} className="space-y-2.5">
                         <div className="flex items-center gap-3">
                           <div
                             className={cn(
@@ -2106,7 +2266,7 @@ export function TeamChatPanel({
                           />
                         </div>
 
-                        <ul className="space-y-2.5">
+                        <ul className="space-y-1">
                           {group.items.map((message) => {
                             const mine = viewer?.id
                               ? message.sender_id === viewer.id && !message.sender_is_admin
@@ -2130,12 +2290,12 @@ export function TeamChatPanel({
                               ) ||
                               null;
                             const isStickerMessage = Boolean(sticker || customSticker);
-                            const socialEngagement = isSocialEngagementPost(
-                              message.body,
+                            const taskPost = Boolean(
+                              message.metadata?.task_post,
                             );
                             const completionIds =
                               message.reactions?.[
-                                SOCIAL_COMPLETION_REACTION
+                                TASK_COMPLETION_REACTION
                               ] || [];
                             const completedByMe = viewer?.reactionKey
                               ? completionIds.includes(viewer.reactionKey)
@@ -2154,7 +2314,8 @@ export function TeamChatPanel({
                               message.reactions || {},
                             ).filter(
                               ([emoji, ids]) =>
-                                emoji !== SOCIAL_COMPLETION_REACTION &&
+                                emoji !== TASK_COMPLETION_REACTION &&
+                                emoji !== LEGACY_SOCIAL_COMPLETION_REACTION &&
                                 ids.length > 0,
                             );
                             const swipeOffset =
@@ -2182,7 +2343,7 @@ export function TeamChatPanel({
                                   messageRefs.current[message.id] = node;
                                 }}
                                 className={cn(
-                                  "flex gap-2.5 transition-shadow",
+                                  "flex gap-2 transition-shadow",
                                   mine ? "flex-row-reverse" : "flex-row",
                                 )}
                               >
@@ -2258,7 +2419,7 @@ export function TeamChatPanel({
                                         >
                                           <div
                                             className={cn(
-                                              "rounded-2xl px-3.5 py-2.5 text-[13px] leading-[1.55] border",
+                                              "rounded-2xl border px-3.5 py-2 text-[13px] leading-[1.5]",
                                               isStickerMessage
                                                 ? "border-transparent bg-transparent shadow-none"
                                                 : mine
@@ -2464,11 +2625,10 @@ export function TeamChatPanel({
                                             ) : inlineImage &&
                                               message.attachment_url ? (
                                               <div className="-m-1">
-                                                <a
-                                                  href={message.attachment_url}
-                                                  target="_blank"
-                                                  rel="noreferrer"
-                                                  className="block"
+                                                <PlatformMediaViewer
+                                                  url={message.attachment_url}
+                                                  title={message.file_name || inlineImageMarker?.[1] || "Shared photo"}
+                                                  triggerClassName="block max-w-full"
                                                 >
                                                   <img
                                                     src={message.attachment_url}
@@ -2479,7 +2639,7 @@ export function TeamChatPanel({
                                                     }
                                                     className="max-h-72 max-w-full rounded-[18px] object-contain bg-black/5"
                                                   />
-                                                </a>
+                                                </PlatformMediaViewer>
                                                 {message.body &&
                                                   !inlineImageMarker && (
                                                     <div
@@ -2682,7 +2842,7 @@ export function TeamChatPanel({
                                               </>
                                             )}
 
-                                            {socialEngagement &&
+                                            {taskPost &&
                                               !message.deleted_at && (
                                                 <div
                                                   className={cn(
@@ -2701,7 +2861,7 @@ export function TeamChatPanel({
                                                         onClick={() =>
                                                           toggleReaction(
                                                             message.id,
-                                                            SOCIAL_COMPLETION_REACTION,
+                                                            TASK_COMPLETION_REACTION,
                                                           )
                                                         }
                                                         disabled={
@@ -2741,8 +2901,8 @@ export function TeamChatPanel({
                                                           )}
                                                         </span>
                                                         {completedByMe
-                                                          ? "Completed"
-                                                          : "Mark complete"}
+                                                          ? "Done / compliant"
+                                                          : "Mark done / compliant"}
                                                       </button>
                                                     ) : (
                                                       <span
@@ -2755,12 +2915,23 @@ export function TeamChatPanel({
                                                               : "text-slate-700",
                                                         )}
                                                       >
-                                                        Team completion
+                                                        Task compliance
                                                       </span>
                                                     )}
-                                                    <span
+                                                    {/* The tally is part of the
+                                                        breakdown, so it is
+                                                        shown only to the
+                                                        poster and the super
+                                                        admin. */}
+                                                    {canInspectDelivery(message) && (
+                                                    <button
+                                                      type="button"
+                                                      onClick={() => {
+                                                        void openDeliveryStatus(message);
+                                                      }}
                                                       className={cn(
-                                                        "shrink-0 text-[10px]",
+                                                        "shrink-0 text-[10px] disabled:cursor-default",
+                                                        canInspectDelivery(message) && "underline underline-offset-2",
                                                         mine
                                                           ? "text-white/75"
                                                           : currentTheme.dark
@@ -2773,9 +2944,10 @@ export function TeamChatPanel({
                                                         ? ` of ${completionTotal}`
                                                         : ""}{" "}
                                                       done
-                                                    </span>
+                                                    </button>
+                                                    )}
                                                   </div>
-                                                  {completionTotal > 0 && (
+                                                  {canInspectDelivery(message) && completionTotal > 0 && (
                                                     <div
                                                       className={cn(
                                                         "mt-2 h-1 overflow-hidden rounded-full",
@@ -2804,7 +2976,7 @@ export function TeamChatPanel({
 
                                             <div
                                               className={cn(
-                                                "mt-2.5 flex items-center gap-2 text-[10px]",
+                                                "mt-1.5 flex items-center gap-2 text-[10px]",
                                                 mine
                                                   ? "justify-end text-white/70"
                                                   : currentTheme.dark
@@ -2853,7 +3025,8 @@ export function TeamChatPanel({
 
                                         <div
                                           className={cn(
-                                            "mt-1.5 flex items-center gap-1.5 px-1",
+                                            "relative mt-1 flex items-center gap-1.5 px-1",
+                                            reactionEntries.length === 0 && "h-0 mt-0",
                                             mine
                                               ? "justify-end"
                                               : "justify-start",
@@ -2900,10 +3073,10 @@ export function TeamChatPanel({
 
                                           <div
                                             className={cn(
-                                              "flex items-center gap-1 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition",
+                                              "absolute -top-9 hidden items-center gap-1 opacity-0 transition md:flex md:group-hover:opacity-100 md:focus-within:opacity-100",
                                               mine
-                                                ? "justify-end"
-                                                : "justify-start",
+                                                ? "right-0 justify-end"
+                                                : "left-0 justify-start",
                                             )}
                                           >
                                             <button
@@ -3620,30 +3793,8 @@ export function TeamChatPanel({
                   accept="image/*,video/*,.pdf,.doc,.docx,.ppt,.pptx,.xls,.xlsx,.txt,.csv"
                 />
 
-                {/* The picker stays focused on managed group spaces. Direct
-                    chats can still receive a photo pasted into the composer. */}
-                {attachmentsAllowed && (
-                  <button
-                    onClick={() => fileInputRef.current?.click()}
-                    disabled={uploading}
-                    className={cn(
-                      "p-2.5 rounded-full transition border",
-                      currentTheme.dark
-                        ? "text-slate-300 hover:text-white bg-slate-900/60 border-slate-700 hover:bg-slate-800"
-                        : "text-gray-400 hover:text-[#0A4FE8] bg-white/88 border-slate-200 hover:border-blue-100",
-                    )}
-                    title="Upload image (≤5MB) or PDF (≤20MB)"
-                  >
-                    {uploading ? (
-                      <Loader2 className="w-5 h-5 animate-spin" />
-                    ) : (
-                      <Paperclip className="w-5 h-5" />
-                    )}
-                  </button>
-                )}
-
                 <div
-                  className="flex-1 rounded-2xl border shadow-sm"
+                  className="min-w-0 flex-1 rounded-2xl border shadow-sm"
                   style={{
                     background: currentTheme.dark
                       ? "rgba(2,6,23,0.72)"
@@ -3704,8 +3855,54 @@ export function TeamChatPanel({
                       </button>
                     </div>
                   )}
-                  <div className="flex items-end gap-1 px-1.5 py-1.5">
-                    <div className="flex items-center gap-1 pb-1 pl-1">
+                  {taskPostMode && (
+                    <div
+                      className={cn(
+                        "mx-2 mt-2 flex items-center justify-between gap-3 rounded-xl border px-3 py-2",
+                        currentTheme.dark
+                          ? "border-blue-400/30 bg-blue-500/10 text-blue-100"
+                          : "border-blue-200 bg-blue-50 text-blue-950",
+                      )}
+                    >
+                      <span className="flex min-w-0 items-center gap-2 text-[11px] font-semibold">
+                        <ClipboardCheck className="h-4 w-4 shrink-0" />
+                        Task post: everyone in this chat must mark Done / compliant.
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => setTaskPostMode(false)}
+                        className="grid h-7 w-7 shrink-0 place-items-center rounded-lg hover:bg-black/5"
+                        aria-label="Cancel task post"
+                      >
+                        <X className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
+                  )}
+                  <div className="flex flex-col gap-1 px-1.5 py-1.5">
+                    <div className="flex min-h-9 items-center gap-1 overflow-x-auto px-1">
+                      {/* Managed group spaces accept files. Direct chats keep
+                          photo paste support without exposing document upload. */}
+                      {attachmentsAllowed && (
+                        <button
+                          type="button"
+                          onClick={() => fileInputRef.current?.click()}
+                          disabled={uploading}
+                          className={cn(
+                            "grid h-9 w-9 shrink-0 place-items-center rounded-xl transition",
+                            currentTheme.dark
+                              ? "text-slate-300 hover:bg-slate-800 hover:text-white"
+                              : "text-slate-500 hover:bg-slate-100 hover:text-[#0A4FE8]",
+                          )}
+                          title="Upload image or document"
+                          aria-label="Upload image or document"
+                        >
+                          {uploading ? (
+                            <Loader2 className="h-4.5 w-4.5 animate-spin" />
+                          ) : (
+                            <Paperclip className="h-4.5 w-4.5" />
+                          )}
+                        </button>
+                      )}
                       <button
                         onClick={() =>
                           setComposerPanel(
@@ -3742,9 +3939,30 @@ export function TeamChatPanel({
                       >
                         <Shapes className="w-4.5 h-4.5" />
                       </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setTaskPostMode((active) => !active);
+                          setComposerPanel(null);
+                          focusComposer();
+                        }}
+                        className={cn(
+                          "grid h-9 w-9 place-items-center rounded-xl transition",
+                          taskPostMode
+                            ? "bg-[#0A4FE8] text-white"
+                            : currentTheme.dark
+                              ? "text-slate-300 hover:bg-slate-800"
+                              : "text-slate-500 hover:bg-slate-100",
+                        )}
+                        title="Create a task post"
+                        aria-pressed={taskPostMode}
+                        aria-label="Create a task post"
+                      >
+                        <ClipboardCheck className="h-4.5 w-4.5" />
+                      </button>
                     </div>
 
-                    <div className="flex-1 relative flex items-end">
+                    <div className="relative flex w-full items-end">
                       {mentionActive && (
                         <div
                           className={cn(
@@ -3908,7 +4126,7 @@ export function TeamChatPanel({
                         }
                         readOnly={composerLocked}
                         className={cn(
-                          "w-full bg-transparent px-2 py-2.5 text-[13px] focus:outline-none resize-none overflow-y-auto",
+                          "min-h-11 w-full resize-none overflow-y-auto rounded-xl bg-transparent px-3 py-2.5 text-[13px] focus:outline-none",
                           currentTheme.dark
                             ? "text-white placeholder:text-slate-500"
                             : "text-[#0D1B39] placeholder:text-slate-400",
@@ -3994,6 +4212,10 @@ export function TeamChatPanel({
                 : "bookmark",
             )
           }
+          onCopy={() => {
+            void copyMessage(actionMessage);
+            setActionMessage(null);
+          }}
           onTranslate={
             actionMessage.body
               ? () => runMessageAction(actionMessage, "translate")
@@ -4008,6 +4230,24 @@ export function TeamChatPanel({
               : undefined
           }
           onReact={(emoji) => toggleReaction(actionMessage.id, emoji)}
+          onDeliveryStatus={
+            canInspectDelivery(actionMessage)
+              ? () => openDeliveryStatus(actionMessage)
+              : undefined
+          }
+        />
+      )}
+
+      {deliveryMessage && (
+        <MessageDeliveryDialog
+          message={deliveryMessage}
+          status={deliveryStatus}
+          loading={deliveryLoading}
+          theme={currentTheme}
+          onClose={() => {
+            setDeliveryMessage(null);
+            setDeliveryStatus(null);
+          }}
         />
       )}
 
@@ -4735,19 +4975,12 @@ function CollabToolPanel({
           {data.files.length === 0 ? (
             <p className={emptyLine}>No shared files yet.</p>
           ) : (
-            data.files.map((f) => (
-              <a
-                key={f.id}
-                href={f.file_url || "#"}
-                target="_blank"
-                rel="noreferrer"
-                className={cn(
-                  "flex items-center gap-2 rounded-xl px-3 py-2 transition",
-                  theme.dark
-                    ? "bg-slate-950/40 hover:bg-slate-900"
-                    : "bg-slate-50 hover:bg-blue-50",
-                )}
-              >
+            data.files.map((f) => {
+              const className = cn(
+                "flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left transition",
+                theme.dark ? "bg-slate-950/40 hover:bg-slate-900" : "bg-slate-50 hover:bg-blue-50",
+              );
+              const content = <>
                 <FileStack className="h-4 w-4 text-[#0A4FE8]" />
                 <span
                   className={cn(
@@ -4758,8 +4991,14 @@ function CollabToolPanel({
                   {f.file_name || f.file_url}
                 </span>
                 {f.folder && <span className={label}>{f.folder}</span>}
-              </a>
-            ))
+              </>;
+              const image = /\.(png|jpe?g|webp|gif)(?:$|[?#])/i.test(f.file_url || "") || /\.(png|jpe?g|webp|gif)$/i.test(f.file_name || "");
+              return image && f.file_url ? (
+                <PlatformMediaViewer key={f.id} url={f.file_url} title={f.file_name || "Shared image"} triggerClassName={className}>{content}</PlatformMediaViewer>
+              ) : (
+                <a key={f.id} href={f.file_url || "#"} target="_blank" rel="noreferrer" className={className}>{content}</a>
+              );
+            })
           )}
         </div>
       </CollabToolShell>
@@ -5248,6 +5487,119 @@ function CollabToolPanel({
   return null;
 }
 
+function MessageDeliveryDialog({
+  message,
+  status,
+  loading,
+  theme,
+  onClose,
+}: {
+  message: Message;
+  status: MessageDeliveryStatus | null;
+  loading: boolean;
+  theme: (typeof CHAT_BACKGROUNDS)[ChatBackgroundKey];
+  onClose: () => void;
+}) {
+  const summary = status
+    ? [
+        { label: "Seen", value: status.seen, icon: Eye, tone: "text-emerald-600" },
+        { label: "Delivered", value: status.delivered, icon: CheckCheck, tone: "text-[#0A4FE8]" },
+        { label: "Not seen", value: status.notSeen, icon: Inbox, tone: "text-amber-600" },
+        { label: "Offline", value: status.offline, icon: WifiOff, tone: "text-slate-500" },
+      ]
+    : [];
+
+  return (
+    <ViewportPortal>
+      <div
+        className="fixed inset-0 z-[170] flex items-end justify-center bg-black/40 p-0 backdrop-blur-sm md:items-center md:p-4"
+        onClick={onClose}
+      >
+        <div
+          className={cn(
+            "max-h-[90dvh] w-full overflow-hidden rounded-t-[28px] border shadow-2xl md:max-w-lg md:rounded-[28px]",
+            theme.dark
+              ? "border-slate-700 bg-slate-950 text-white"
+              : "border-slate-200 bg-white text-[#0D1B39]",
+          )}
+          onClick={(event) => event.stopPropagation()}
+        >
+          <div className="flex items-start justify-between gap-4 border-b border-slate-200/60 px-5 py-4">
+            <div className="min-w-0">
+              <h2 className="text-base font-semibold">Delivery and seen status</h2>
+              <p className={cn("mt-1 line-clamp-2 text-xs", theme.dark ? "text-slate-400" : "text-slate-500")}>
+                {describeMessage(message)}
+              </p>
+            </div>
+            <button type="button" onClick={onClose} className="grid h-9 w-9 shrink-0 place-items-center rounded-xl hover:bg-slate-100/10" aria-label="Close delivery status">
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+
+          {loading ? (
+            <div className="grid min-h-56 place-items-center">
+              <Loader2 className="h-6 w-6 animate-spin text-[#0A4FE8]" />
+            </div>
+          ) : status ? (
+            <>
+              {status.taskPost && (
+                <div className={cn("mx-4 mt-4 flex items-center justify-between gap-3 rounded-2xl border px-4 py-3", theme.dark ? "border-blue-400/25 bg-blue-500/10" : "border-blue-200 bg-blue-50")}>
+                  <span className="flex items-center gap-2 text-sm font-semibold">
+                    <ClipboardCheck className="h-4 w-4 text-[#0A4FE8]" /> Task compliance
+                  </span>
+                  <span className="text-xs font-semibold">{status.compliant} of {status.total} done</span>
+                </div>
+              )}
+              <div className="grid grid-cols-2 gap-2 p-4 sm:grid-cols-4">
+                {summary.map(({ label, value, icon: Icon, tone }) => (
+                  <div key={label} className={cn("rounded-2xl border p-3", theme.dark ? "border-slate-800 bg-slate-900" : "border-slate-200 bg-slate-50")}>
+                    <Icon className={cn("h-4 w-4", tone)} />
+                    <p className="mt-2 text-lg font-semibold">{value}</p>
+                    <p className={cn("text-[11px]", theme.dark ? "text-slate-400" : "text-slate-500")}>{label}</p>
+                  </div>
+                ))}
+              </div>
+              <div className="max-h-[48dvh] overflow-y-auto border-t border-slate-200/60 px-4 py-2">
+                {status.members.map((member) => (
+                  <div key={member.id} className="flex items-center gap-3 border-b border-slate-200/40 py-3 last:border-0">
+                    {member.avatarUrl ? (
+                      <img src={member.avatarUrl} alt="" className="h-9 w-9 rounded-full object-cover" />
+                    ) : (
+                      <span className="grid h-9 w-9 rounded-full bg-[#0A4FE8] text-xs font-semibold text-white place-items-center">{initials(member.name)}</span>
+                    )}
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm font-medium">{member.name}</p>
+                      <p className={cn("text-[11px]", theme.dark ? "text-slate-400" : "text-slate-500")}>
+                        {member.state === "seen"
+                          ? `Seen ${member.readAt ? formatClock(member.readAt) : ""}`
+                          : member.state === "delivered"
+                            ? "Delivered, not opened"
+                            : member.state === "offline"
+                              ? "Offline, not seen"
+                              : "Online, not seen"}
+                      </p>
+                    </div>
+                    <div className="flex shrink-0 flex-col items-end gap-1">
+                      {status.taskPost && (
+                        <span className={cn("rounded-full px-2 py-1 text-[10px] font-semibold", member.compliant ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-700")}>
+                          {member.compliant ? "Done / compliant" : "Pending"}
+                        </span>
+                      )}
+                      <span className={cn("rounded-full px-2 py-1 text-[10px] font-semibold", member.state === "seen" ? "bg-emerald-50 text-emerald-700" : member.state === "delivered" ? "bg-blue-50 text-blue-700" : member.state === "offline" ? "bg-slate-100 text-slate-600" : "bg-amber-50 text-amber-700")}>
+                        {member.state === "not_seen" ? "Not seen" : member.state}
+                      </span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </>
+          ) : null}
+        </div>
+      </div>
+    </ViewportPortal>
+  );
+}
+
 function MessageActionSheet({
   message,
   canEdit,
@@ -5261,9 +5613,11 @@ function MessageActionSheet({
   onPin,
   onStar,
   onBookmark,
+  onCopy,
   onTranslate,
   onJumpToReply,
   onReact,
+  onDeliveryStatus,
 }: {
   message: Message;
   canEdit: boolean;
@@ -5277,9 +5631,11 @@ function MessageActionSheet({
   onPin: () => void;
   onStar: () => void;
   onBookmark: () => void;
+  onCopy: () => void;
   onTranslate?: () => void;
   onJumpToReply?: () => void;
   onReact: (emoji: string) => void;
+  onDeliveryStatus?: () => void;
 }) {
   return (
     <ViewportPortal>
@@ -5350,6 +5706,20 @@ function MessageActionSheet({
         </div>
 
         <div className="space-y-2">
+          {onDeliveryStatus && (
+            <button
+              type="button"
+              onClick={onDeliveryStatus}
+              className={cn(
+                "flex w-full items-center gap-3 rounded-2xl px-4 py-3",
+                theme.dark
+                  ? "bg-slate-900 text-white"
+                  : "bg-slate-50 text-[#0D1B39]",
+              )}
+            >
+              <Eye className="h-4 w-4" /> Delivery and seen status
+            </button>
+          )}
           <UniversalShareButton
             title={`Message from ${message.sender_name}`}
             text={describeMessage(message)}
@@ -5363,6 +5733,17 @@ function MessageActionSheet({
                 : "!bg-slate-50 !text-[#0D1B39] hover:!bg-slate-100",
             )}
           />
+          <button
+            onClick={onCopy}
+            className={cn(
+              "w-full rounded-2xl px-4 py-3 flex items-center gap-3 text-sm font-medium",
+              theme.dark
+                ? "bg-slate-900 text-white"
+                : "bg-slate-50 text-[#0D1B39]",
+            )}
+          >
+            <Copy className="h-4 w-4" /> Copy message
+          </button>
           {onJumpToReply && (
             <button
               onClick={onJumpToReply}

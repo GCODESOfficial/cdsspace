@@ -157,7 +157,7 @@ export function openSignalTransport({
       outgoing.push({ payload, to });
       // Start a leave write before CMeetClient closes the transport in the
       // same tick. Other signals get a tiny batching window for one DB write.
-      if (["leave", "host-end", "host-kick", "host-mute-all"].includes(payload.type)) void drain();
+      if (["leave", "host-end", "host-kick", "host-mute", "host-mute-all", "host-set-mode"].includes(payload.type)) void drain();
       else scheduleDrain();
     },
     flush: drain,

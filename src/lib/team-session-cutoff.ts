@@ -2,6 +2,7 @@ import "server-only";
 
 import { glashQuery } from "@/lib/glashdb/postgres";
 import { dailyTeamCutoffIsDue, mostRecentTeamSessionCutoffIso } from "@/lib/team-session-policy";
+import { forgetCachedTeamSession } from "@/lib/team-auth";
 
 export async function enforceDailyTeamSessionCutoff(now = new Date()) {
   const cutoffAt = mostRecentTeamSessionCutoffIso(now);
@@ -16,6 +17,7 @@ export async function enforceDailyTeamSessionCutoff(now = new Date()) {
   );
 
   if (revoked.length) {
+    for (const session of revoked) forgetCachedTeamSession(session.session_token);
     await glashQuery(
       `update public.team_members
           set session_token = null, session_expires_at = null

@@ -1,0 +1,21 @@
+name: Notification dispatch
+
+# glashdb has no built-in scheduler, so this GitHub Actions workflow is the
+# external cron. Client notices are raised from dozens of routes; the busiest
+# deliver push and email inline, and this sweep catches the rest within a few
+# minutes so nothing stays trapped in the in-app bell.
+
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch: {}
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Dispatch pending notifications
+        run: |
+          curl -fsS -X GET "https://cdsspace.pro/api/cron/notification-dispatch" \
+            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
+            -w "\nHTTP %{http_code}\n"
