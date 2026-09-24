@@ -5,6 +5,7 @@ import { cookies } from "next/headers";
 import type { NextResponse } from "next/server";
 import type { User } from "@supabase/supabase-js";
 import { getGlashDbServiceRoleConfig } from "@/lib/glashdb/env";
+import { readClientMobileSession } from "@/lib/client-mobile-session";
 import {
   createFirstPartyDashboardSession,
   dashboardSessionCookieOptions,
@@ -90,7 +91,11 @@ export function clientDashboardSessionUser(claims: ClientDashboardSessionClaims)
 
 export async function readClientDashboardSession() {
   const store = await cookies();
-  return verifyClientDashboardSession(store.get(CLIENT_DASHBOARD_SESSION_COOKIE)?.value);
+  const cookieSession = verifyClientDashboardSession(store.get(CLIENT_DASHBOARD_SESSION_COOKIE)?.value);
+  if (cookieSession) return cookieSession;
+  // The mobile app has no cookie; it sends its revocable session token as a
+  // Bearer header instead. Both resolve to the same stable client user ID.
+  return readClientMobileSession();
 }
 
 export async function readClientDashboardSessionUser(
