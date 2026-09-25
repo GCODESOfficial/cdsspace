@@ -161,6 +161,10 @@ test("every API upload route reaches the central security gate", async () => {
     "assertSafeUpload", "assertSafeImage", "assertSecureBuffer", "uploadDriveFile",
     "uploadClientDeliveryFiles", "completeClientDeliveryChunkUpload", "uploadContentHubFile",
     "uploadSopMedia", "videoToGifSticker", "uploadDeliveryCover",
+    // scanTutorialVideo is the tutorial wrapper around assertSafeUpload: a
+    // chunked upload assembles its parts, then puts the whole video through it
+    // before anything is stored.
+    "scanTutorialVideo",
   ];
   const unguarded = [];
   for (const file of await routeFiles(path.join(root, "src/app/api"))) {

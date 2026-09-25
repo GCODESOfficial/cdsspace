@@ -1,17 +1,18 @@
 import { after, NextRequest, NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/admin-api-auth";
-import { listAdminTutorials, saveTutorial, TUTORIAL_VIDEO_MAX_BYTES } from "@/lib/tutorials";
+import { listAdminTutorials, saveTutorial, scanTutorialVideo, TUTORIAL_VIDEO_MAX_BYTES } from "@/lib/tutorials";
 import { UploadSecurityError } from "@/lib/upload-security";
 import { logActivity } from "@/lib/activity-log";
 import { processTutorialLocalisation } from "@/lib/tutorial-processing";
 import { compressStoredTutorialVideo, describeSaving } from "@/lib/tutorial-compression";
 import {
-  appendUploadChunk,
   beginUploadSession,
   discardUploadSession,
   getUploadSession,
   readCompletedUpload,
+  storeUploadPart,
   UPLOAD_CHUNK_BYTES,
+  UPLOAD_PARALLEL_PARTS,
 } from "@/lib/tutorial-upload-session";
 
 export const runtime = "nodejs";
@@ -50,16 +51,25 @@ export async function POST(request: NextRequest) {
         return failure(new Error(`That video is larger than the ${Math.round(TUTORIAL_VIDEO_MAX_BYTES / (1024 * 1024))}MB limit.`));
       }
       const created = await beginUploadSession({ fileName, fileSize, contentType: String(body.contentType || "video/mp4"), owner });
-      return NextResponse.json({ ok: true, uploadId: created.id, chunkSize: UPLOAD_CHUNK_BYTES, receivedBytes: 0 });
+      return NextResponse.json({
+        ok: true,
+        uploadId: created.id,
+        chunkSize: UPLOAD_CHUNK_BYTES,
+        totalParts: created.totalParts,
+        parallel: UPLOAD_PARALLEL_PARTS,
+        receivedIndexes: [],
+        receivedBytes: 0,
+      });
     }
 
     if (action === "chunk") {
-      const uploadId = url.searchParams.get("uploadId") || "";
-      const offset = Number(url.searchParams.get("offset") || -1);
-      const chunk = Buffer.from(await request.arrayBuffer());
-      if (!chunk.byteLength) return failure(new Error("That part was empty."));
-      const updated = await appendUploadChunk(uploadId, owner, offset, chunk);
-      return NextResponse.json({ ok: true, receivedBytes: updated.receivedBytes, duplicate: updated.duplicate });
+      const form = await request.formData();
+      const uploadId = String(form.get("uploadId") || url.searchParams.get("uploadId") || "");
+      const index = Number(form.get("index") ?? url.searchParams.get("index") ?? -1);
+      const part = form.get("chunk");
+      if (!(part instanceof File) || !part.size) return failure(new Error("That part was empty."));
+      const stored = await storeUploadPart(uploadId, owner, index, Buffer.from(await part.arrayBuffer()));
+      return NextResponse.json({ ok: true, index, ...stored });
     }
 
     if (action === "status") {
@@ -69,9 +79,12 @@ export async function POST(request: NextRequest) {
         ok: true,
         found: true,
         receivedBytes: found.receivedBytes,
+        receivedIndexes: found.receivedIndexes,
         fileName: found.fileName,
         fileSize: found.fileSize,
-        chunkSize: UPLOAD_CHUNK_BYTES,
+        chunkSize: found.chunkSize,
+        totalParts: found.totalParts,
+        parallel: UPLOAD_PARALLEL_PARTS,
       });
     }
 
@@ -85,7 +98,12 @@ export async function POST(request: NextRequest) {
       const body = (await request.json().catch(() => ({}))) as Record<string, unknown>;
       const { session: upload, buffer } = await readCompletedUpload(String(body.uploadId || ""), owner);
       const video = new File([new Uint8Array(buffer)], upload.fileName, { type: upload.contentType });
+      // The parts were written to a private temporary directory unchecked, so
+      // the assembled video goes through the malware and file-type gate here,
+      // before anything is stored or published.
+      const scannedVideo = await scanTutorialVideo(video);
       const id = await saveTutorial({
+        scannedVideo,
         toolSlug: body.toolSlug,
         tags: body.tags,
         title: body.title,

@@ -66,7 +66,13 @@ async function call(action: string, body?: unknown) {
 
 export async function beginUpload(file: File) {
   const payload = await call("begin", { fileName: file.name, fileSize: file.size, contentType: file.type || "video/mp4" });
-  return { uploadId: String(payload.uploadId), chunkSize: Number(payload.chunkSize) || 4 * 1024 * 1024 };
+  return {
+    uploadId: String(payload.uploadId),
+    chunkSize: Number(payload.chunkSize) || 4 * 1024 * 1024,
+    totalParts: Number(payload.totalParts) || 1,
+    parallel: Number(payload.parallel) || 4,
+    receivedIndexes: [] as number[],
+  };
 }
 
 export async function uploadStatus(uploadId: string) {
@@ -75,9 +81,12 @@ export async function uploadStatus(uploadId: string) {
   if (!response.ok || !payload.found) return null;
   return {
     receivedBytes: Number(payload.receivedBytes) || 0,
+    receivedIndexes: Array.isArray(payload.receivedIndexes) ? (payload.receivedIndexes as number[]) : [],
     fileName: String(payload.fileName || ""),
     fileSize: Number(payload.fileSize) || 0,
     chunkSize: Number(payload.chunkSize) || 4 * 1024 * 1024,
+    totalParts: Number(payload.totalParts) || 1,
+    parallel: Number(payload.parallel) || 4,
   };
 }
 
@@ -86,49 +95,73 @@ export async function discardUpload(uploadId: string) {
   clearPendingUpload();
 }
 
-/** One part, with progress, so a slow line still shows movement inside a part. */
-function sendChunk(uploadId: string, offset: number, chunk: Blob, signal: AbortSignal, onBytes: (loaded: number) => void) {
-  return new Promise<number>((resolve, reject) => {
+/**
+ * One part, sent as form data.
+ *
+ * The host refuses raw bodies over about 2MB but accepts multipart bodies many
+ * times larger, so parts travel in a form rather than as a bare binary body.
+ */
+function sendPart(input: {
+  uploadId: string;
+  index: number;
+  chunk: Blob;
+  signal: AbortSignal;
+  onBytes: (loaded: number) => void;
+}) {
+  return new Promise<void>((resolve, reject) => {
     const request = new XMLHttpRequest();
-    request.open("POST", `/api/admin/tutorials/upload?action=chunk&uploadId=${encodeURIComponent(uploadId)}&offset=${offset}`);
+    request.open("POST", "/api/admin/tutorials/upload?action=chunk");
     request.upload.addEventListener("progress", (event) => {
-      if (event.lengthComputable) onBytes(event.loaded);
+      if (event.lengthComputable) input.onBytes(event.loaded);
     });
     request.addEventListener("load", () => {
       let payload: Record<string, unknown> = {};
       try { payload = JSON.parse(request.responseText || "{}"); } catch { payload = {}; }
-      if (request.status >= 200 && request.status < 300) resolve(Number(payload.receivedBytes) || offset + chunk.size);
-      else if (request.status === 413) reject(new Error("The server refused this part as too large. Tell an administrator the upload limit needs raising."));
-      else reject(new Error(String(payload.error || `The upload stopped at ${Math.round(offset / (1024 * 1024))}MB.`)));
+      if (request.status >= 200 && request.status < 300) resolve();
+      else if (request.status === 413) reject(new Error("The server refused a part as too large. Tell an administrator the upload limit needs raising."));
+      else reject(new Error(String(payload.error || `Part ${input.index + 1} could not be sent.`)));
     });
-    request.addEventListener("error", () => reject(new Error("The connection dropped. You can carry on from here.")));
+    request.addEventListener("error", () => reject(new Error("The connection dropped. Your progress is saved, so you can carry on.")));
     request.addEventListener("abort", () => reject(new DOMException("Upload cancelled", "AbortError")));
-    signal.addEventListener("abort", () => request.abort(), { once: true });
-    request.send(chunk);
+    input.signal.addEventListener("abort", () => request.abort(), { once: true });
+
+    const form = new FormData();
+    form.set("uploadId", input.uploadId);
+    form.set("index", String(input.index));
+    form.set("chunk", input.chunk, `part-${input.index}`);
+    request.send(form);
   });
 }
 
 /**
- * Sends everything from `startAt` onward. Progress is reported across the
- * whole file, not the current part, so the bar means what it says.
+ * Sends every part that is not already on the server, several at a time.
+ *
+ * Parts are independent, so a few travel together: that keeps a long upload
+ * moving at the speed of the line rather than one round trip at a time, and a
+ * part that fails can be retried without touching the others.
  */
 export async function uploadFileInChunks(input: {
   file: File;
   uploadId: string;
   chunkSize: number;
-  startAt: number;
+  totalParts: number;
+  parallel?: number;
+  receivedIndexes?: number[];
   signal: AbortSignal;
   onProgress: (progress: UploadProgress) => void;
-  onChunkDone?: (receivedBytes: number) => void;
+  onPartDone?: (receivedBytes: number) => void;
 }) {
   const started = Date.now();
-  const alreadyHad = input.startAt;
-  let confirmed = input.startAt;
+  const done = new Set(input.receivedIndexes || []);
+  const partSize = (index: number) => Math.min(input.chunkSize, input.file.size - index * input.chunkSize);
+  const settled = () => [...done].reduce((total, index) => total + partSize(index), 0);
+  const inFlight = new Map<number, number>();
+  const alreadyHad = settled();
 
-  const report = (sent: number) => {
+  const report = () => {
+    const sent = Math.min(input.file.size, settled() + [...inFlight.values()].reduce((a, b) => a + b, 0));
     const elapsed = Math.max(0.25, (Date.now() - started) / 1000);
-    const movedThisSession = Math.max(0, sent - alreadyHad);
-    const bytesPerSecond = movedThisSession / elapsed;
+    const bytesPerSecond = Math.max(0, sent - alreadyHad) / elapsed;
     const remaining = input.file.size - sent;
     input.onProgress({
       sentBytes: sent,
@@ -139,18 +172,40 @@ export async function uploadFileInChunks(input: {
     });
   };
 
-  report(confirmed);
-  while (confirmed < input.file.size) {
-    if (input.signal.aborted) throw new DOMException("Upload cancelled", "AbortError");
-    const end = Math.min(confirmed + input.chunkSize, input.file.size);
-    const chunk = input.file.slice(confirmed, end);
-    const offset = confirmed;
-    const received = await sendChunk(input.uploadId, offset, chunk, input.signal, (loaded) => report(offset + loaded));
-    confirmed = received;
-    input.onChunkDone?.(confirmed);
-    report(confirmed);
-  }
-  return confirmed;
+  const queue: number[] = [];
+  for (let index = 0; index < input.totalParts; index += 1) if (!done.has(index)) queue.push(index);
+  report();
+
+  const lanes = Math.max(1, Math.min(input.parallel || 4, queue.length || 1));
+  const worker = async () => {
+    for (;;) {
+      if (input.signal.aborted) throw new DOMException("Upload cancelled", "AbortError");
+      const index = queue.shift();
+      if (index === undefined) return;
+      const start = index * input.chunkSize;
+      const chunk = input.file.slice(start, start + partSize(index));
+      inFlight.set(index, 0);
+      try {
+        // One retry: a single dropped part should not end the whole upload.
+        try {
+          await sendPart({ uploadId: input.uploadId, index, chunk, signal: input.signal, onBytes: (loaded) => { inFlight.set(index, loaded); report(); } });
+        } catch (error) {
+          if (input.signal.aborted || (error instanceof Error && /too large/.test(error.message))) throw error;
+          inFlight.set(index, 0);
+          await sendPart({ uploadId: input.uploadId, index, chunk, signal: input.signal, onBytes: (loaded) => { inFlight.set(index, loaded); report(); } });
+        }
+        done.add(index);
+        input.onPartDone?.(settled());
+      } finally {
+        inFlight.delete(index);
+      }
+      report();
+    }
+  };
+
+  await Promise.all(Array.from({ length: lanes }, () => worker()));
+  report();
+  return settled();
 }
 
 export async function finishUpload(uploadId: string, meta: Record<string, unknown>) {

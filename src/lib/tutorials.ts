@@ -207,6 +207,15 @@ export function normalizeLanguage(codeValue: unknown, nameValue: unknown) {
   return { code, name };
 }
 
+/**
+ * The malware and file-type gate for a tutorial video. Exported so a chunked
+ * upload can scan the assembled file once, in its own route, rather than
+ * storing parts that nothing has checked.
+ */
+export async function scanTutorialVideo(file: File) {
+  return safeTutorialVideo(file);
+}
+
 async function safeTutorialVideo(file: File) {
   const safe = await assertSafeUpload(file, { allow: ["design"], maxBytes: TUTORIAL_VIDEO_MAX_BYTES });
   if (!safe.contentType.startsWith("video/") || !["mp4", "mov", "m4v", "webm"].includes(safe.ext)) {
@@ -225,6 +234,7 @@ export async function saveTutorial(input: {
   languageCode: unknown;
   languageName: unknown;
   video: File;
+  scannedVideo?: Awaited<ReturnType<typeof safeTutorialVideo>>;
   createdBy: string;
 }) {
   const tags = normalizeTutorialTags(input.tags, input.toolSlug);
@@ -235,7 +245,9 @@ export async function saveTutorial(input: {
   const status = input.status === "draft" ? "draft" : "published";
   const sortOrder = Math.min(10000, Math.max(-10000, Number(input.sortOrder) || 0));
   const language = normalizeLanguage(input.languageCode, input.languageName);
-  const video = await safeTutorialVideo(input.video);
+  // A caller that has already put the file through the gate passes the result
+  // here, so a large video is never scanned twice.
+  const video = input.scannedVideo || await safeTutorialVideo(input.video);
   const tutorialId = crypto.randomUUID();
   const prefix = `tutorials/${tutorialId}/${language.code}`;
   const videoPath = `${prefix}/video-${crypto.randomUUID()}.${video.ext}`;

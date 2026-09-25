@@ -16,6 +16,11 @@ test("a video is sent in parts small enough to get through", async () => {
   const chunk = Number(session.match(/UPLOAD_CHUNK_BYTES = (\d+) \* 1024 \* 1024/)[1]);
   assert.ok(chunk > 0 && chunk <= 8, `parts must stay well under the proxy limit, got ${chunk}MB`);
   assert.match(client, /uploadFileInChunks/);
+  // Parts travel as form data: the host refuses raw bodies over about 2MB.
+  assert.match(client, /form\.set\("chunk"/);
+  assert.doesNotMatch(client, /request\.send\(chunk\)/);
+  // Several parts at once, so a long upload runs at the speed of the line.
+  assert.match(client, /lanes/);
   // Progress is measured across the file, not the current part.
   assert.match(client, /sentBytes/);
   assert.match(client, /secondsRemaining/);
@@ -32,8 +37,9 @@ test("an upload that stops can be carried on or discarded", async () => {
   assert.match(manager, /Unfinished upload/);
   assert.match(manager, /Continue upload/);
   assert.match(manager, /Discard/);
-  // A part that already landed must never be written twice.
-  assert.match(session, /duplicate: true/);
+  // Parts are stored by index, so they can arrive in any order and be retried.
+  assert.match(session, /partName\(index\)/);
+  assert.match(session, /is missing \$\{session\.totalParts - parts\.length\}/);
   // One admin's parts are not reachable by another.
   assert.match(session, /session\.owner !== owner/);
 });

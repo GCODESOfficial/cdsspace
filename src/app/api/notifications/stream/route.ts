@@ -1,6 +1,7 @@
 import { verifyAdmin, verifyUser } from "@/lib/admin-auth";
 import { getTeamSession } from "@/lib/team-auth";
 import { glashMaybeOne } from "@/lib/glashdb/postgres";
+import { sweepEmailQueueIfDue } from "@/lib/notification-email-queue";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -84,6 +85,10 @@ export async function GET(request: Request) {
     if (session) watcher = { actor: "admin", id: String(session.id) };
   }
   if (!watcher) return new Response("Unauthorized", { status: 401 });
+
+  // Someone is using the platform, so this is a good moment to make sure
+  // queued notification email is actually going out.
+  void sweepEmailQueueIfDue();
 
   const encoder = new TextEncoder();
   const stream = new ReadableStream({

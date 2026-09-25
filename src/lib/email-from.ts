@@ -327,7 +327,31 @@ export async function sendEmail(input: SendEmailInput): Promise<void> {
     }
   }
 
-  throw new Error(`Email delivery failed through every configured transport (${failures.join("; ")}).`);
+  // Nothing got through. Keep the message rather than losing it: the queue
+  // worker retries it, and the failure is then visible in the backlog instead
+  // of disappearing into a log line nobody reads.
+  const reason = `Email delivery failed through every configured transport (${failures.join("; ")}).`;
+  await glashQuery(
+    `insert into public.notification_email_queue
+       (recipient_email, category, subject, title, body, link, html, text_body, from_name, last_error)
+     values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+    [
+      String(input.to),
+      threadCategory || "system",
+      input.subject,
+      input.subject,
+      null,
+      null,
+      input.html || null,
+      input.text || null,
+      input.fromName || "CDS Space",
+      reason.slice(0, 1000),
+    ],
+  ).catch((queueError) => {
+    console.error("[email] could not keep the failed message for retry", queueError);
+    return [];
+  });
+  throw new Error(reason);
 }
 
 /**

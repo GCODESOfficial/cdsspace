@@ -1,23 +1,24 @@
 import "server-only";
 
 import crypto from "node:crypto";
-import { appendFile, mkdir, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
 /**
- * Resumable tutorial uploads.
+ * Resumable tutorial uploads, sent as numbered parts.
  *
- * A whole video in one request never arrived: the proxy in front of the app
- * refuses bodies over about 48MB, so a 100MB recording was rejected before a
- * single percent could be reported. The browser now sends small parts, which
- * pass comfortably, and this keeps the parts on disk until the video is whole.
+ * Two limits shape this. The host refuses raw bodies over about 2MB, and
+ * refuses any body over roughly 47MB, so a whole video in one request never
+ * arrived and raw parts were rejected as well. Parts are therefore sent as
+ * form data, a few megabytes each, and several can be in flight at once.
  *
- * The session survives a closed tab or a dropped connection, so an admin can
- * come back, pick the same file, and carry on from where it stopped rather
- * than starting the upload again.
+ * Each part is stored under its own index rather than appended, which is what
+ * lets them arrive in any order, be retried individually, and be resumed after
+ * a dropped connection or a closed tab.
  */
 export const UPLOAD_CHUNK_BYTES = 4 * 1024 * 1024;
+export const UPLOAD_PARALLEL_PARTS = 4;
 export const UPLOAD_SESSION_TTL_MS = 48 * 60 * 60 * 1000;
 
 const ROOT = path.join(os.tmpdir(), "cds-tutorial-uploads");
@@ -30,12 +31,17 @@ export type UploadSession = {
   contentType: string;
   owner: string;
   createdAt: number;
-  receivedBytes: number;
+  chunkSize: number;
+  totalParts: number;
 };
 
 function sessionDir(id: string) {
   if (!ID.test(id)) throw new Error("Invalid upload reference.");
   return path.join(ROOT, id);
+}
+
+function partName(index: number) {
+  return `part-${String(index).padStart(6, "0")}`;
 }
 
 async function readMeta(id: string): Promise<UploadSession | null> {
@@ -46,11 +52,7 @@ async function readMeta(id: string): Promise<UploadSession | null> {
   }
 }
 
-async function writeMeta(session: UploadSession) {
-  await writeFile(path.join(sessionDir(session.id), "meta.json"), JSON.stringify(session), "utf8");
-}
-
-/** Removes sessions nobody came back for, so an abandoned upload cannot fill the disk. */
+/** Removes sessions nobody came back for, so abandoned uploads cannot fill the disk. */
 export async function pruneUploadSessions() {
   try {
     const entries = await readdir(ROOT, { withFileTypes: true });
@@ -76,50 +78,81 @@ export async function beginUploadSession(input: { fileName: string; fileSize: nu
     contentType: input.contentType || "video/mp4",
     owner: input.owner,
     createdAt: Date.now(),
-    receivedBytes: 0,
+    chunkSize: UPLOAD_CHUNK_BYTES,
+    totalParts: Math.max(1, Math.ceil(input.fileSize / UPLOAD_CHUNK_BYTES)),
   };
-  await writeMeta(session);
+  await writeFile(path.join(sessionDir(id), "meta.json"), JSON.stringify(session), "utf8");
   return session;
 }
 
-/** What the browser needs to know to carry on: how much is already here. */
+async function receivedParts(id: string) {
+  try {
+    const entries = await readdir(sessionDir(id));
+    const parts: Array<{ index: number; size: number }> = [];
+    for (const entry of entries) {
+      if (!entry.startsWith("part-")) continue;
+      const index = Number(entry.slice(5));
+      if (!Number.isInteger(index)) continue;
+      parts.push({ index, size: (await stat(path.join(sessionDir(id), entry))).size });
+    }
+    return parts.sort((a, b) => a.index - b.index);
+  } catch {
+    return [];
+  }
+}
+
+/** What the browser needs to carry on: which parts are already here. */
 export async function getUploadSession(id: string, owner: string) {
   const session = await readMeta(id);
   if (!session || session.owner !== owner) return null;
-  try {
-    session.receivedBytes = (await stat(path.join(sessionDir(id), "part"))).size;
-  } catch {
-    session.receivedBytes = 0;
-  }
-  return session;
+  const parts = await receivedParts(id);
+  return {
+    ...session,
+    receivedIndexes: parts.map((part) => part.index),
+    receivedBytes: parts.reduce((total, part) => total + part.size, 0),
+  };
 }
 
 /**
- * Appends one part. The offset the browser claims must match what is already
- * stored, so a retry of a part that already landed cannot corrupt the file.
+ * Stores one part. Written to a temporary name first, so a part interrupted
+ * half way cannot be mistaken for a complete one when the upload resumes.
  */
-export async function appendUploadChunk(id: string, owner: string, offset: number, chunk: Buffer) {
-  const session = await getUploadSession(id, owner);
-  if (!session) throw new Error("This upload is no longer available. Start it again.");
-  if (offset !== session.receivedBytes) {
-    return { ...session, duplicate: true };
-  }
-  if (session.receivedBytes + chunk.byteLength > session.fileSize) {
-    throw new Error("This part does not belong to the upload.");
-  }
-  await appendFile(path.join(sessionDir(id), "part"), chunk);
-  session.receivedBytes += chunk.byteLength;
-  await writeMeta(session);
-  return { ...session, duplicate: false };
+export async function storeUploadPart(id: string, owner: string, index: number, chunk: Buffer) {
+  const session = await readMeta(id);
+  if (!session || session.owner !== owner) throw new Error("This upload is no longer available. Start it again.");
+  if (!Number.isInteger(index) || index < 0 || index >= session.totalParts) throw new Error("That part does not belong to this upload.");
+
+  const expected = index === session.totalParts - 1
+    ? session.fileSize - session.chunkSize * index
+    : session.chunkSize;
+  if (chunk.byteLength !== expected) throw new Error("That part is not the size this upload expects.");
+
+  const target = path.join(sessionDir(id), partName(index));
+  const staging = `${target}.incoming-${crypto.randomUUID().slice(0, 8)}`;
+  await writeFile(staging, chunk);
+  await rename(staging, target);
+
+  const parts = await receivedParts(id);
+  return {
+    receivedBytes: parts.reduce((total, part) => total + part.size, 0),
+    receivedParts: parts.length,
+    totalParts: session.totalParts,
+  };
 }
 
 export async function readCompletedUpload(id: string, owner: string) {
-  const session = await getUploadSession(id, owner);
-  if (!session) throw new Error("This upload is no longer available. Start it again.");
-  if (session.receivedBytes !== session.fileSize) {
-    throw new Error("The upload is not complete yet.");
+  const session = await readMeta(id);
+  if (!session || session.owner !== owner) throw new Error("This upload is no longer available. Start it again.");
+  const parts = await receivedParts(id);
+  if (parts.length !== session.totalParts) {
+    throw new Error(`The upload is missing ${session.totalParts - parts.length} of its ${session.totalParts} parts.`);
   }
-  const buffer = await readFile(path.join(sessionDir(id), "part"));
+  const chunks: Buffer[] = [];
+  for (let index = 0; index < session.totalParts; index += 1) {
+    chunks.push(await readFile(path.join(sessionDir(id), partName(index))));
+  }
+  const buffer = Buffer.concat(chunks);
+  if (buffer.byteLength !== session.fileSize) throw new Error("The assembled video does not match the file that was chosen.");
   return { session, buffer };
 }
 

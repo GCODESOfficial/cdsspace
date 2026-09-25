@@ -127,6 +127,9 @@ export function AdminTutorialManager() {
     try {
       let uploadId = resume?.uploadId || "";
       let chunkSize = 4 * 1024 * 1024;
+      let totalParts = 1;
+      let parallel = 4;
+      let receivedIndexes: number[] = [];
       let startAt = 0;
       if (resume) {
         const status = await uploadStatus(resume.uploadId);
@@ -135,11 +138,16 @@ export function AdminTutorialManager() {
           throw new Error("That is a different file. Choose the same video to carry on, or discard the unfinished upload.");
         }
         chunkSize = status.chunkSize;
+        totalParts = status.totalParts;
+        parallel = status.parallel;
+        receivedIndexes = status.receivedIndexes;
         startAt = status.receivedBytes;
       } else {
         const begun = await beginUpload(file);
         uploadId = begun.uploadId;
         chunkSize = begun.chunkSize;
+        totalParts = begun.totalParts;
+        parallel = begun.parallel;
       }
 
       const record: PendingUpload = { uploadId, fileName: file.name, fileSize: file.size, receivedBytes: startAt, savedAt: Date.now(), meta };
@@ -147,9 +155,9 @@ export function AdminTutorialManager() {
       setPending(record);
 
       await uploadFileInChunks({
-        file, uploadId, chunkSize, startAt, signal: controller.signal,
+        file, uploadId, chunkSize, totalParts, parallel, receivedIndexes, signal: controller.signal,
         onProgress: (value) => { setTransfer(value); setProgress(value.percent); },
-        onChunkDone: (receivedBytes) => writePendingUpload({ ...record, receivedBytes }),
+        onPartDone: (receivedBytes: number) => writePendingUpload({ ...record, receivedBytes }),
       });
 
       setTransfer(null);
