@@ -4,8 +4,10 @@ import { useCallback, useEffect, useState } from "react";
 import {
     Loader2, LogIn, LogOut, Coffee, Play, MapPin, CalendarPlus,
     Clock, CheckCircle2, History, Building2,
+    MessageCircleQuestion, Send,
 } from "lucide-react";
 import { toast } from "sonner";
+import { Linkified } from "@/components/chat/message-links";
 import {
     ANNUAL_LEAVE_MAX_WORKING_DAYS,
     annualLeaveLatestEndDate,
@@ -60,6 +62,7 @@ export default function TimebookPage() {
     const [busy, setBusy] = useState("");
     const [bypass, setBypass] = useState<{ show: boolean; distance?: number; code: string }>({ show: false, code: "" });
     const [leave, setLeave] = useState({ leave_type: "annual", start_date: "", end_date: "", reason: "" });
+    const [clarificationDrafts, setClarificationDrafts] = useState<Record<string, string>>({});
 
     const load = useCallback(async () => {
         try {
@@ -133,6 +136,32 @@ export default function TimebookPage() {
         } catch (e) { toast.error(e instanceof Error ? e.message : "Failed"); }
         finally { setBusy(""); }
     }, [geo, load]);
+
+    const replyToClarification = useCallback(async (leaveId: string) => {
+        const message = String(clarificationDrafts[leaveId] || "").trim();
+        if (!message) {
+            toast.error("Enter your response before sending.");
+            return;
+        }
+        const busyKey = `reply_leave_${leaveId}`;
+        setBusy(busyKey);
+        try {
+            const response = await fetch("/api/team/timebook", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ action: "reply_leave_clarification", leave_id: leaveId, message }),
+            });
+            const payload = await response.json().catch(() => ({}));
+            if (!response.ok || !payload.ok) throw new Error(payload.error || "Could not send your response.");
+            setClarificationDrafts((current) => ({ ...current, [leaveId]: "" }));
+            toast.success("Response sent to HR");
+            await load();
+        } catch (error) {
+            toast.error(error instanceof Error ? error.message : "Could not send your response.");
+        } finally {
+            setBusy("");
+        }
+    }, [clarificationDrafts, load]);
 
     if (loading) return <div className="flex justify-center py-24 text-brand-body/40"><Loader2 className="h-6 w-6 animate-spin" /></div>;
     if (!data) return <div className="py-24 text-center text-brand-body/60">Could not load attendance.</div>;
@@ -326,11 +355,46 @@ export default function TimebookPage() {
                                 {busy === "request_leave" ? "Requesting…" : "Request leave"}
                             </button>
                             {(data.leave_requests || []).length > 0 && (
-                                <ul className="mt-2 space-y-1.5 border-t border-brand-stroke/20 pt-2">
+                                <ul className="mt-3 space-y-2.5 border-t border-brand-stroke/20 pt-3">
                                     {(data.leave_requests || []).map((l: any) => (
-                                        <li key={l.id} className="flex items-center justify-between text-[12px]">
-                                            <span className="capitalize text-brand-body">{String(l.leave_type).replace(/_/g, " ")} · {fmtDate(l.start_date)} → {fmtDate(l.end_date)}</span>
-                                            <span className={`rounded-full px-2 py-0.5 font-semibold capitalize ${l.status === "approved" ? "bg-green-100 text-green-700" : l.status === "rejected" ? "bg-red-100 text-red-700" : "bg-amber-100 text-amber-700"}`}>{l.status || "pending"}</span>
+                                        <li key={l.id} className="rounded-xl border border-brand-stroke/30 bg-white p-3 text-[12px]">
+                                            <div className="flex items-start justify-between gap-3">
+                                                <span className="capitalize text-brand-body">{String(l.leave_type).replace(/_/g, " ")} · {fmtDate(l.start_date)} → {fmtDate(l.end_date)}</span>
+                                                <span className={`shrink-0 rounded-full px-2 py-0.5 font-semibold capitalize ${l.status === "approved" ? "bg-green-100 text-green-700" : l.status === "rejected" ? "bg-red-100 text-red-700" : "bg-amber-100 text-amber-700"}`}>{l.status || "pending"}</span>
+                                            </div>
+                                            {l.reason && <Linkified text={String(l.reason)} className="mt-2 block whitespace-pre-wrap text-brand-body/75" />}
+                                            {(l.clarifications || []).length > 0 && (
+                                                <div className="mt-3 space-y-2 rounded-xl border border-blue-100 bg-blue-50/50 p-3">
+                                                    <div className="flex items-center gap-1.5 font-semibold text-brand-navy">
+                                                        <MessageCircleQuestion className="h-3.5 w-3.5 text-[#0A4FE8]" /> Clarification with HR
+                                                    </div>
+                                                    {(l.clarifications || []).map((message: any) => (
+                                                        <div key={message.id} className={`rounded-lg px-3 py-2 ${message.sender_type === "admin" ? "bg-white text-brand-body" : "ml-4 bg-[#0A4FE8] text-white"}`}>
+                                                            <p className={`mb-1 text-[10px] font-semibold ${message.sender_type === "admin" ? "text-[#0A4FE8]" : "text-white/75"}`}>
+                                                                {message.sender_type === "admin" ? (message.sender_label || "CDS Space HR") : "You"}
+                                                            </p>
+                                                            <Linkified text={String(message.message)} className="whitespace-pre-wrap break-words" />
+                                                        </div>
+                                                    ))}
+                                                    {l.status === "pending" && (
+                                                        <div className="pt-1">
+                                                            <label htmlFor={`leave-clarification-${l.id}`} className="mb-1.5 block text-[11px] font-semibold text-brand-navy">Your response</label>
+                                                            <textarea
+                                                                id={`leave-clarification-${l.id}`}
+                                                                rows={2}
+                                                                maxLength={2000}
+                                                                value={clarificationDrafts[l.id] || ""}
+                                                                onChange={(event) => setClarificationDrafts((current) => ({ ...current, [l.id]: event.target.value }))}
+                                                                placeholder="Reply with the details HR requested."
+                                                                className="w-full resize-y rounded-lg border border-blue-100 bg-white px-3 py-2 text-[12px] text-brand-navy outline-none focus:border-[#0A4FE8]"
+                                                            />
+                                                            <button type="button" disabled={busy === `reply_leave_${l.id}` || !String(clarificationDrafts[l.id] || "").trim()} onClick={() => replyToClarification(l.id)} className="mt-2 inline-flex w-full items-center justify-center gap-1.5 rounded-lg bg-[#0A4FE8] px-3 py-2 text-[12px] font-semibold text-white disabled:opacity-50">
+                                                                {busy === `reply_leave_${l.id}` ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />} Send response
+                                                            </button>
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            )}
                                         </li>
                                     ))}
                                 </ul>

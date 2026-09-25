@@ -3,12 +3,14 @@
 /* eslint-disable @next/next/no-img-element */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ArrowLeft, Archive, Check, ClipboardPaste, Copy, Download, FileText, Loader2, LockKeyhole, Plus, Upload } from "lucide-react";
+import { ArrowLeft, Archive, Check, ClipboardPaste, Copy, Download, FileText, Loader2, LockKeyhole, PenLine, Plus, Send, Trash2, Upload } from "lucide-react";
 import { RichDocEditor } from "@/components/cdocs/rich-doc-editor";
 import { appConfirm } from "@/lib/app-notify";
 import { offerClientStorageRequest } from "@/lib/client-storage-ui";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import type { LetterheadExportSize } from "@/lib/letterhead-pdf";
+import { LiveSignaturePad } from "@/components/csign/LiveSignaturePad";
+import { ContextualTutorialPrompt } from "@/components/tutorials/ContextualTutorialPrompt";
 
 type Letterhead = {
   id: string;
@@ -27,6 +29,8 @@ type Letterhead = {
   signatureWidth: number;
   signaturePage: "first" | "last";
   status: "draft" | "ready" | "archived";
+  deliveredByCds: boolean;
+  deliveredAt: string | null;
   lastExportedAt: string | null;
   updatedAt: string;
 };
@@ -34,6 +38,7 @@ type Letterhead = {
 type AssetKind = "firstPage" | "secondPage" | "signature";
 type SaveState = "idle" | "saving" | "saved" | "error";
 type WorkspaceKind = "client" | "team" | "admin";
+type DeliveryClient = { id: string; platform_user_id: string | null; has_platform_account: boolean; name: string; brand_name: string | null; email: string | null };
 
 function apiPath(path: string, workspaceKind: WorkspaceKind, scope: "create" | "executive_board" = "create") {
   const joined = `${path}${path.includes("?") ? "&" : "?"}workspace=${workspaceKind}`;
@@ -72,6 +77,94 @@ function canvasObjectUrl(canvas: HTMLCanvasElement) {
   });
 }
 
+/**
+ * Render the opening of a saved document, not just its blank stationery.
+ * Work begins only when the card approaches the viewport so a large library
+ * does not build dozens of PDFs at once.
+ */
+function SavedLetterheadPreview({ item }: { item: Letterhead }) {
+  const frame = useRef<HTMLDivElement | null>(null);
+  const [visible, setVisible] = useState(false);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [rendering, setRendering] = useState(false);
+
+  useEffect(() => {
+    const node = frame.current;
+    if (!node) return;
+    if (typeof IntersectionObserver === "undefined") {
+      setVisible(true);
+      return;
+    }
+    const observer = new IntersectionObserver((entries) => {
+      if (!entries.some((entry) => entry.isIntersecting)) return;
+      setVisible(true);
+      observer.disconnect();
+    }, { rootMargin: "240px" });
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, []);
+
+  useEffect(() => {
+    if (!visible || (!item.firstPageUrl && !item.bodyHtml.trim())) return;
+    let cancelled = false;
+    let generatedUrl: string | null = null;
+    let loadingTask: ReturnType<(typeof import("pdfjs-dist/legacy/build/pdf.mjs"))["getDocument"]> | null = null;
+
+    void (async () => {
+      setRendering(true);
+      try {
+        const { buildLetterheadPdf, pdfjs } = await loadPreviewRuntime();
+        const pdfDocument = await buildLetterheadPdf({ ...item, signatureUrl: null }, { includeSignature: false });
+        loadingTask = pdfjs.getDocument({ data: new Uint8Array(pdfDocument.output("arraybuffer")) });
+        const pdf = await loadingTask.promise;
+        const page = await pdf.getPage(1);
+        const viewport = page.getViewport({ scale: 0.8 });
+        const canvas = document.createElement("canvas");
+        canvas.width = Math.ceil(viewport.width);
+        canvas.height = Math.ceil(viewport.height);
+        const context = canvas.getContext("2d", { alpha: false });
+        if (!context) throw new Error("This browser cannot render saved document previews.");
+        context.fillStyle = "#ffffff";
+        context.fillRect(0, 0, canvas.width, canvas.height);
+        await page.render({ canvas, canvasContext: context, viewport }).promise;
+        generatedUrl = await canvasObjectUrl(canvas);
+        page.cleanup();
+        canvas.width = 1;
+        canvas.height = 1;
+        if (cancelled) {
+          URL.revokeObjectURL(generatedUrl);
+          generatedUrl = null;
+          return;
+        }
+        setPreviewUrl(generatedUrl);
+      } catch {
+        // The stationery image below remains a useful fallback.
+      } finally {
+        if (!cancelled) setRendering(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+      if (generatedUrl) URL.revokeObjectURL(generatedUrl);
+      void loadingTask?.destroy().catch(() => undefined);
+    };
+  }, [item.bodyHtml, item.firstPageUrl, item.hasSecondPage, item.id, item.paperSize, item.secondPageUrl, item.updatedAt, visible]);
+
+  return (
+    <div ref={frame} className="absolute inset-0 bg-white">
+      {previewUrl ? (
+        <img src={previewUrl} alt={item.title + " document preview"} className="absolute inset-x-0 top-0 h-auto w-full bg-white" />
+      ) : item.firstPageUrl ? (
+        <img src={item.firstPageUrl} alt={item.title + " stationery preview"} loading="lazy" decoding="async" className="absolute inset-x-0 top-0 h-auto w-full bg-white" />
+      ) : (
+        <div className="grid h-full place-items-center text-center"><span><FileText className="mx-auto h-7 w-7 text-blue-300" /><span className="mt-1.5 block text-[10px] font-semibold text-gray-400">Add letterhead artwork</span></span></div>
+      )}
+      {rendering && <span className="absolute bottom-2 right-2 grid h-6 w-6 place-items-center rounded-full bg-white/95 text-[#0A4FE8] shadow" aria-label="Preparing document preview"><Loader2 className="h-3.5 w-3.5 animate-spin" /></span>}
+    </div>
+  );
+}
+
 export function LetterheadStudio({
   onBack,
   workspaceKind,
@@ -83,17 +176,20 @@ export function LetterheadStudio({
    * nothing to choose.
    */
   lockedLetterhead = false,
+  initialLetterheadId = null,
 }: {
   onBack: () => void;
   workspaceKind: WorkspaceKind;
   scope?: "create" | "executive_board";
   lockedLetterhead?: boolean;
+  initialLetterheadId?: string | null;
 }) {
   const [items, setItems] = useState<Letterhead[]>([]);
   const [active, setActive] = useState<Letterhead | null>(null);
   const [loading, setLoading] = useState(true);
   const [creating, setCreating] = useState(false);
   const [duplicatingId, setDuplicatingId] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
   const [saveState, setSaveState] = useState<SaveState>("idle");
   const [error, setError] = useState<string | null>(null);
   const [uploading, setUploading] = useState<AssetKind | null>(null);
@@ -104,11 +200,20 @@ export function LetterheadStudio({
   const [preparingExport, setPreparingExport] = useState(false);
   const [exportingSize, setExportingSize] = useState<LetterheadExportSize | null>(null);
   const [exportDialogOpen, setExportDialogOpen] = useState(false);
+  const [signatureDialogOpen, setSignatureDialogOpen] = useState(false);
+  const [deliveryDialogOpen, setDeliveryDialogOpen] = useState(false);
+  const [deliveryClients, setDeliveryClients] = useState<DeliveryClient[]>([]);
+  const [deliverySearch, setDeliverySearch] = useState("");
+  const [deliveryClientId, setDeliveryClientId] = useState("");
+  const [deliveryBusy, setDeliveryBusy] = useState(false);
+  const [deliveryLoading, setDeliveryLoading] = useState(false);
+  const [deliveryNotice, setDeliveryNotice] = useState<string | null>(null);
   const [originalPdfBytes, setOriginalPdfBytes] = useState<ArrayBuffer | null>(null);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const loadedId = useRef<string | null>(null);
   const signaturePreviewRef = useRef<HTMLDivElement | null>(null);
   const previewUrls = useRef<string[]>([]);
+  const deepLinkOpened = useRef(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -125,6 +230,14 @@ export function LetterheadStudio({
     // library is being read, rather than after somebody opens a document.
     void loadPreviewRuntime();
   }, [load]);
+
+  useEffect(() => {
+    if (!initialLetterheadId || deepLinkOpened.current || active) return;
+    const requested = items.find((item) => item.id === initialLetterheadId);
+    if (!requested) return;
+    deepLinkOpened.current = true;
+    open(requested);
+  }, [active, initialLetterheadId, items]);
 
   useEffect(() => () => {
     previewUrls.current.forEach((url) => URL.revokeObjectURL(url));
@@ -216,6 +329,29 @@ export function LetterheadStudio({
     setItems((current) => current.map((item) => item.id === active.id ? payload.letterhead : item));
   }
 
+  async function openDelivery() {
+    if (!active) return;
+    if (saveTimer.current) clearTimeout(saveTimer.current);
+    if (!(await persist(active))) return;
+    setDeliveryDialogOpen(true); setDeliveryLoading(true); setDeliveryNotice(null); setDeliveryClientId(""); setDeliverySearch("");
+    const response = await fetch("/api/admin/clients/directory", { cache: "no-store" });
+    const payload = await response.json().catch(() => ({}));
+    setDeliveryLoading(false);
+    if (!response.ok) { setDeliveryNotice(payload.error || "Client accounts could not be loaded."); return; }
+    setDeliveryClients((payload.clients || []).filter((client: DeliveryClient) => client.has_platform_account && client.platform_user_id));
+  }
+
+  async function deliver() {
+    if (!active || !deliveryClientId) return;
+    setDeliveryBusy(true); setDeliveryNotice(null);
+    const response = await fetch("/api/admin/create/letterheads/deliver", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ letterheadId: active.id, clientId: deliveryClientId }) });
+    const payload = await response.json().catch(() => ({}));
+    setDeliveryBusy(false);
+    if (!response.ok) { setDeliveryNotice(payload.error || "The letterhead could not be delivered."); return; }
+    setDeliveryNotice(`Delivered securely to ${payload.delivery?.clientName || "the client"}. They have also received a dashboard notification and email.`);
+    setDeliveryClientId("");
+  }
+
   async function duplicateLetterhead(source: Letterhead, { saveFirst = false }: { saveFirst?: boolean } = {}) {
     if (duplicatingId) return;
     if (saveFirst) {
@@ -243,6 +379,27 @@ export function LetterheadStudio({
     if (!response.ok) { const payload = await response.json().catch(() => ({})); setError(payload.error || "The document could not be archived."); return; }
     setItems((current) => current.filter((item) => item.id !== active.id));
     setActive(null);
+  }
+
+  async function deleteLetterhead(source: Letterhead) {
+    if (deletingId) return;
+    if (!(await appConfirm(`Delete “${source.title}”? It will be removed from your saved documents.`))) return;
+    setDeletingId(source.id);
+    setError(null);
+    try {
+      const response = await fetch(apiPath(`/api/create/letterheads/${source.id}`, workspaceKind, scope), { method: "DELETE" });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        setError(payload.error || "The document could not be deleted.");
+        return;
+      }
+      setItems((current) => current.filter((item) => item.id !== source.id));
+      if (active?.id === source.id) setActive(null);
+    } catch {
+      setError("The document could not be deleted. Check your connection and try again.");
+    } finally {
+      setDeletingId(null);
+    }
   }
 
   async function refine(mode: string) {
@@ -366,7 +523,10 @@ export function LetterheadStudio({
         await loadingTask?.destroy().catch(() => undefined);
         if (!cancelled) setPreviewBusy(false);
       }
-    }, previewUrls.current.length ? 260 : 0);
+    // Let the writer finish a short typing burst before rebuilding every PDF
+    // page. This gives the layout engine enough settling time and prevents an
+    // older render from flashing over newer content on slower/mobile devices.
+    }, previewUrls.current.length ? 850 : 120);
 
     return () => {
       cancelled = true;
@@ -389,28 +549,32 @@ export function LetterheadStudio({
         {items.length ? <section>
           <div className="mb-3">
             <h2 className="text-[15px] font-bold text-[#07133B]">Saved letterheads</h2>
-            <p className="mt-0.5 text-[12px] text-gray-500">Open a previous document or duplicate it as the starting point for a new letter.</p>
+            <p className="mt-0.5 text-[12px] text-gray-500">Open, duplicate, or delete a saved document.</p>
           </div>
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">{items.map((item) => (
             <article key={item.id} className="overflow-hidden rounded-2xl border border-gray-100 bg-white shadow-sm transition hover:-translate-y-0.5 hover:border-blue-200 hover:shadow-md">
               <button type="button" onClick={() => open(item)} className="block w-full text-left">
                 <div className="relative aspect-[16/6] overflow-hidden border-b border-gray-100 bg-[#F3F6FB]">
                   {item.firstPageUrl ? (
-                    <img src={item.firstPageUrl} alt={`${item.title} letterhead preview`} loading="lazy" decoding="async" className="absolute inset-x-0 top-0 h-auto w-full bg-white" />
+                    <SavedLetterheadPreview item={item} />
                   ) : (
                     <div className="grid h-full place-items-center text-center"><span><FileText className="mx-auto h-7 w-7 text-blue-300" /><span className="mt-1.5 block text-[10px] font-semibold text-gray-400">Add letterhead artwork</span></span></div>
                   )}
                   <span className={`absolute right-3 top-3 rounded-full px-2 py-1 text-[10px] font-semibold capitalize shadow-sm ${item.status === "ready" ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-700"}`}>{item.status}</span>
+                  {item.deliveredByCds && <span className="absolute bottom-3 left-3 rounded-full bg-[#0A4FE8] px-2.5 py-1 text-[9.5px] font-semibold text-white shadow-sm">Delivered by CDS Space</span>}
                 </div>
                 <div className="px-4 pt-3">
                   <h3 className="truncate text-[14px] font-bold text-[#07133B]">{item.title}</h3>
                   <p className="mt-1 text-[11px] text-gray-400">{item.paperSize.toUpperCase()} · Updated {new Date(item.updatedAt).toLocaleDateString()}</p>
                 </div>
               </button>
-              <div className="mx-4 mt-4 flex gap-2 border-t border-gray-100 pb-4 pt-3">
+              <div className="mx-4 mt-4 grid grid-cols-3 gap-2 border-t border-gray-100 pb-4 pt-3">
                 <button type="button" onClick={() => open(item)} className="flex-1 rounded-lg bg-[#0A4FE8] px-3 py-2 text-[11px] font-bold text-white hover:bg-[#083EC0]">Open</button>
-                <button type="button" disabled={Boolean(duplicatingId)} onClick={() => void duplicateLetterhead(item)} className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-lg border border-blue-100 bg-blue-50 px-3 py-2 text-[11px] font-bold text-[#0A4FE8] hover:bg-blue-100 disabled:opacity-60">
+                <button type="button" disabled={Boolean(duplicatingId) || deletingId === item.id} onClick={() => void duplicateLetterhead(item)} className="inline-flex min-w-0 items-center justify-center gap-1 rounded-lg border border-blue-100 bg-blue-50 px-2 py-2 text-[11px] font-bold text-[#0A4FE8] hover:bg-blue-100 disabled:opacity-60">
                   {duplicatingId === item.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Copy className="h-3.5 w-3.5" />}Duplicate
+                </button>
+                <button type="button" disabled={Boolean(deletingId) || duplicatingId === item.id} onClick={() => void deleteLetterhead(item)} className="inline-flex min-w-0 items-center justify-center gap-1 rounded-lg border border-rose-200 bg-rose-50 px-2 py-2 text-[11px] font-bold text-rose-700 transition hover:border-rose-300 hover:bg-rose-100 disabled:opacity-60">
+                  {deletingId === item.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}Delete
                 </button>
               </div>
             </article>
@@ -430,10 +594,12 @@ export function LetterheadStudio({
           <span className={`text-[11px] ${saveState === "error" ? "text-rose-600" : "text-gray-400"}`}>{saveState === "saving" ? "Saving…" : saveState === "saved" ? "Saved" : saveState === "error" ? "Save failed" : "Autosave on"}</span>
           <button onClick={() => { if (saveTimer.current) clearTimeout(saveTimer.current); void persist(active); }} disabled={saveState === "saving"} className="inline-flex items-center gap-1.5 rounded-lg border border-blue-100 bg-blue-50 px-3 py-2 text-[12px] font-semibold text-[#0A4FE8] hover:bg-blue-100 disabled:opacity-60">{saveState === "saving" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />}Save letterhead</button>
           <button onClick={() => void duplicateLetterhead(active, { saveFirst: true })} disabled={Boolean(duplicatingId)} className="inline-flex items-center gap-1.5 rounded-lg border border-blue-200 bg-white px-3 py-2 text-[12px] font-semibold text-[#0A4FE8] hover:bg-blue-50 disabled:opacity-60">{duplicatingId === active.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Copy className="h-3.5 w-3.5" />}Duplicate</button>
+          {workspaceKind === "admin" && <button onClick={() => void openDelivery()} className="inline-flex items-center gap-1.5 rounded-lg border border-blue-200 bg-white px-3 py-2 text-[12px] font-semibold text-[#0A4FE8] hover:bg-blue-50"><Send className="h-3.5 w-3.5" />Deliver to client</button>}
           <button onClick={archive} className="inline-flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-3 py-2 text-[12px] font-semibold text-gray-600 hover:bg-gray-50"><Archive className="h-3.5 w-3.5" />Archive</button>
           <button onClick={openExportChoices} disabled={preparingExport || Boolean(exportingSize)} className="inline-flex items-center gap-1.5 rounded-lg bg-[#0A4FE8] px-4 py-2 text-[12px] font-bold text-white hover:bg-[#083EC0] disabled:cursor-wait disabled:opacity-65">{preparingExport ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />}{preparingExport ? "Preparing…" : "Export PDF"}</button>
         </div>
       </div>
+      {workspaceKind === "client" && <ContextualTutorialPrompt tool="official-letterhead" label="the Create letterhead tool" />}
       {!lockedLetterhead && <PrivacyNotice />}
       {error && <p className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-[12px] text-rose-700">{error}</p>}
 
@@ -498,8 +664,9 @@ export function LetterheadStudio({
           </div>
           <div className="rounded-2xl border border-gray-100 bg-white p-4 shadow-sm">
             <h2 className="text-[13px] font-bold text-[#07133B]">Signature</h2>
-            <p className="mt-1 text-[11px] text-gray-400">Upload or paste a signature, then drag it anywhere on the preview.</p>
+            <p className="mt-1 text-[11px] text-gray-400">Upload or paste a signature, or sign live with cSign, then drag it anywhere on the preview.</p>
             <div className="mt-3"><AssetUpload label="Signature image" name={active.signatureName} kind="signature" busy={uploading === "signature"} onFile={upload} paste /></div>
+            <button type="button" onClick={() => setSignatureDialogOpen(true)} className="mt-2 inline-flex h-10 w-full items-center justify-center gap-2 rounded-xl border border-blue-200 bg-blue-50 text-[12px] font-semibold text-[#0A4FE8] hover:bg-blue-100"><PenLine className="h-4 w-4" />Sign live with cSign</button>
             {active.signatureUrl && <div className="mt-3 grid grid-cols-2 gap-3"><label className="text-[11px] font-semibold text-gray-600">Place on<select value={active.signaturePage} onChange={(event) => patch({ signaturePage: event.target.value === "first" ? "first" : "last" })} className="mt-1 h-9 w-full rounded-lg border border-gray-200 bg-white px-2 text-[11px]"><option value="last">Last page</option><option value="first">First page</option></select></label><label className="text-[11px] font-semibold text-gray-600">Size<input type="range" min="8" max="50" value={active.signatureWidth} onChange={(event) => patch({ signatureWidth: Number(event.target.value) })} className="mt-3 w-full accent-[#0A4FE8]" /></label></div>}
           </div>
         </aside>
@@ -536,6 +703,27 @@ export function LetterheadStudio({
               disabled={Boolean(exportingSize)}
               onClick={() => void downloadExport("lite")}
             />
+          </div>
+        </DialogContent>
+      </Dialog>
+      <Dialog open={signatureDialogOpen} onOpenChange={(open) => { if (!uploading) setSignatureDialogOpen(open); }}>
+        <DialogContent className="sm:max-w-[680px]">
+          <DialogHeader><DialogTitle>Sign live with cSign</DialogTitle><DialogDescription>Draw a private signature for this letterhead. It is security-checked and stored with the same protected document assets.</DialogDescription></DialogHeader>
+          <div className="mt-3"><LiveSignaturePad busy={uploading === "signature"} onSave={async (file) => { await upload("signature", file); setSignatureDialogOpen(false); }} /></div>
+        </DialogContent>
+      </Dialog>
+      <Dialog open={deliveryDialogOpen} onOpenChange={(open) => { if (!deliveryBusy) setDeliveryDialogOpen(open); }}>
+        <DialogContent className="sm:max-w-[620px]">
+          <DialogHeader><DialogTitle>Deliver letterhead to a client</DialogTitle><DialogDescription>A protected client-owned copy will appear in Create Studio with the “Delivered by CDS Space” tag. Admin storage links are never shared.</DialogDescription></DialogHeader>
+          <div className="mt-3 space-y-3">
+            <label className="block text-[11.5px] font-semibold text-gray-600">Search client accounts<input value={deliverySearch} onChange={(event) => setDeliverySearch(event.target.value)} placeholder="Search by client, company, or email" className="mt-1.5 h-10 w-full rounded-xl border border-gray-200 px-3 text-[12px] outline-none focus:border-[#0A4FE8]" /></label>
+            <div className="max-h-64 space-y-2 overflow-y-auto rounded-xl border border-gray-100 bg-gray-50 p-2">
+              {deliveryLoading ? <div className="grid min-h-28 place-items-center"><Loader2 className="h-5 w-5 animate-spin text-[#0A4FE8]" /></div> : deliveryClients.filter((client) => `${client.name} ${client.brand_name || ""} ${client.email || ""}`.toLowerCase().includes(deliverySearch.toLowerCase())).map((client) => (
+                <button key={client.platform_user_id} type="button" onClick={() => setDeliveryClientId(client.platform_user_id || "")} className={`flex w-full items-center justify-between gap-3 rounded-xl border px-3 py-3 text-left ${deliveryClientId === client.platform_user_id ? "border-[#0A4FE8] bg-blue-50" : "border-transparent bg-white hover:border-blue-200"}`}><span className="min-w-0"><strong className="block truncate text-[12px] text-[#07133B]">{client.brand_name || client.name}</strong><span className="mt-0.5 block truncate text-[10.5px] text-gray-500">{client.email}</span></span>{deliveryClientId === client.platform_user_id && <Check className="h-4 w-4 shrink-0 text-[#0A4FE8]" />}</button>
+              ))}
+            </div>
+            {deliveryNotice && <p className={`rounded-xl px-3 py-2.5 text-[11.5px] ${deliveryNotice.startsWith("Delivered") ? "border border-emerald-200 bg-emerald-50 text-emerald-800" : "border border-rose-200 bg-rose-50 text-rose-700"}`}>{deliveryNotice}</p>}
+            <button type="button" disabled={!deliveryClientId || deliveryBusy} onClick={() => void deliver()} className="inline-flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-[#0A4FE8] text-[12px] font-semibold text-white hover:bg-[#083EC0] disabled:opacity-50">{deliveryBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}{deliveryBusy ? "Delivering secure copy…" : "Deliver letterhead"}</button>
           </div>
         </DialogContent>
       </Dialog>

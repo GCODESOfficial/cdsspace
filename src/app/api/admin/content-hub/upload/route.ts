@@ -19,7 +19,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json(
       {
         ok: false,
-        error: "Upload could not be read. Videos can be up to 100MB each; upload large videos one at a time.",
+        error: "Upload could not be read. Videos can be up to 150MB each; upload large videos one at a time.",
       },
       { status: 413 },
     );

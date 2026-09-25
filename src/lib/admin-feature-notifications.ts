@@ -18,6 +18,7 @@ export const ADMIN_FEATURE_PERMISSION_KEYS = {
   projects: ["projects", "projects.view", "projects.create", "projects.edit"],
   deliveries: ["deliveries", "deliveries.view", "deliveries.create", "deliveries.send"],
   mailings: ["clients", "clients.mailings.view", "clients.mailings.create", "clients.mailings.send"],
+  timebook: ["timebook", "timebook.view", "timebook.review_leave", "team_members"],
 } as const;
 
 interface AdminFeatureRecipient {

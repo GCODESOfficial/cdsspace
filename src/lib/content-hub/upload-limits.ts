@@ -1,7 +1,7 @@
 import { mediaKindFromMime, type MediaKind } from "@/lib/content-hub/shared";
 
-export const CONTENT_HUB_VIDEO_MAX_BYTES = 100 * 1024 * 1024;
-export const CONTENT_HUB_VIDEO_MAX_LABEL = "100MB";
+export const CONTENT_HUB_VIDEO_MAX_BYTES = 150 * 1024 * 1024;
+export const CONTENT_HUB_VIDEO_MAX_LABEL = "150MB";
 
 export function formatUploadBytes(value: number) {
   if (value <= 0) return "0 B";

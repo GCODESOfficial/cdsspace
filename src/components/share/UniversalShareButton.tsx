@@ -168,7 +168,7 @@ export function UniversalShareButton({
 
       <ViewportPortal>
       {open && (
-        <div className="fixed inset-0 z-[180] flex items-center justify-center overflow-y-auto overscroll-contain bg-[#07133B]/55 p-3 backdrop-blur-sm sm:p-4" onMouseDown={() => setOpen(false)}>
+        <div className="fixed inset-0 layer-popover flex items-center justify-center overflow-y-auto overscroll-contain bg-[#07133B]/55 p-3 backdrop-blur-sm sm:p-4" onMouseDown={() => setOpen(false)}>
           <section
             role="dialog"
             aria-modal="true"

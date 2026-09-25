@@ -286,11 +286,13 @@ export function CreateApp({
   const [category, setCategory] = useState<string | null>(null);
   const [view, setView] = useState<"home" | "creations">("home");
   const [activeTool, setActiveTool] = useState<Tool | null>(null);
+  const [requestedLetterheadId, setRequestedLetterheadId] = useState<string | null>(null);
   const [collapsed, setCollapsed] = useState(workspaceKind === "client");
   const [theme, setTheme] = useState<"light" | "dark">(initialTheme);
   const searchRef = useRef<HTMLInputElement | null>(null);
   const storagePromptedCreationIds = useRef(new Set<string>());
   const railStorageKey = `create_rail_collapsed_${workspaceKind}`;
+  const deepLinkApplied = useRef(false);
 
   useEffect(() => {
     try {
@@ -331,6 +333,18 @@ export function CreateApp({
   // Only when the server could not hand the data over already.
   const hasInitial = Boolean(initial);
   useEffect(() => { if (!hasInitial) void load(); }, [load, hasInitial]);
+
+  useEffect(() => {
+    if (!data || deepLinkApplied.current) return;
+    const params = new URLSearchParams(window.location.search);
+    const requestedTool = params.get("tool");
+    if (!requestedTool) return;
+    const tool = data.tools.find((item) => item.slug === requestedTool && item.status !== "disabled");
+    if (!tool) return;
+    deepLinkApplied.current = true;
+    setRequestedLetterheadId(params.get("letterhead"));
+    setActiveTool(tool);
+  }, [data]);
 
   const favorites = useMemo(() => new Set(data?.favoriteToolSlugs || []), [data]);
 
@@ -518,7 +532,7 @@ export function CreateApp({
 
           {activeTool ? (
             activeTool.slug === "official-letterhead"
-              ? <LetterheadStudio workspaceKind={workspaceKind} onBack={() => setActiveTool(null)} />
+              ? <LetterheadStudio workspaceKind={workspaceKind} initialLetterheadId={requestedLetterheadId} onBack={() => setActiveTool(null)} />
               : <ToolPage workspaceKind={workspaceKind} tool={activeTool} onBack={() => setActiveTool(null)} onSaved={load} />
           ) : view === "creations" ? (
             <CreationsView workspaceKind={workspaceKind} data={data} dark={dark} onBack={() => setView("home")} reload={load} />

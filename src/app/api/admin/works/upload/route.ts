@@ -11,6 +11,7 @@ export const dynamic = "force-dynamic";
 
 const ALLOWED_FOLDERS = new Set(["covers", "works"]);
 const MAX_BYTES = 50 * 1024 * 1024;
+const MAX_VIDEO_BYTES = 150 * 1024 * 1024;
 
 /**
  * Single-file upload for the portfolio "Works" feature.
@@ -47,16 +48,21 @@ export async function POST(req: NextRequest) {
   if (!(file instanceof File) || file.size === 0) {
     return NextResponse.json({ ok: false, error: "A file is required." }, { status: 400 });
   }
-  if (file.size > MAX_BYTES) return NextResponse.json({ ok: false, error: "Files must be 50MB or smaller." }, { status: 413 });
+  const declaredVideo = file.type.startsWith("video/");
+  const maxBytes = declaredVideo ? MAX_VIDEO_BYTES : MAX_BYTES;
+  if (file.size > maxBytes) return NextResponse.json({ ok: false, error: declaredVideo ? "Videos must be 150MB or smaller." : "Files must be 50MB or smaller." }, { status: 413 });
 
   let safe: Awaited<ReturnType<typeof assertSafeUpload>>;
   try {
     safe = await assertSafeUpload(file, {
       allow: ["image", "pdf", "design"],
-      maxBytes: MAX_BYTES,
+      maxBytes,
       imageMaxDimension: 16_000,
       imageMaxInputPixels: 160_000_000,
     });
+    if (!safe.contentType.startsWith("video/") && safe.buffer.byteLength > MAX_BYTES) {
+      throw new UploadSecurityError("Non-video portfolio files must be 50MB or smaller.", 413);
+    }
   } catch (error) {
     return NextResponse.json(
       { ok: false, error: error instanceof Error ? error.message : "Upload blocked." },

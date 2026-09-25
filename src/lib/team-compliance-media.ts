@@ -9,7 +9,7 @@ import {
 } from "@/lib/upload-security";
 
 export const TEAM_COMPLIANCE_BUCKET = "team-compliance";
-const MAX_VIDEO_BYTES = 75 * 1024 * 1024;
+const MAX_VIDEO_BYTES = 150 * 1024 * 1024;
 
 function safeName(name: string) {
   return (
@@ -66,7 +66,7 @@ export async function uploadSopMedia(input: {
   } else {
     if (input.file.size > MAX_VIDEO_BYTES)
       throw new UploadSecurityError(
-        "Video is larger than the 75MB limit.",
+        "Video is larger than the 150MB limit.",
         413,
       );
     buffer = Buffer.from(await input.file.arrayBuffer());

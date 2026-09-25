@@ -9,6 +9,7 @@ import { getTimebookOffice, saveTimebookOffice } from "@/lib/timebook-office";
 import { autoCheckoutOpenTimeEntries } from "@/lib/timebook-auto-checkout";
 import { sendEmail } from "@/lib/email-from";
 import { brandedEmailHtml } from "@/lib/email-template";
+import { notifyTeamMember } from "@/lib/notify-team";
 import {
   attendanceScores,
   formatWorkMode,
@@ -132,6 +133,27 @@ export async function GET(req: NextRequest) {
     glashQuery("select * from public.team_geofence_bypass_codes order by created_at desc limit 30"),
   ]);
 
+  const leaveIds = (leaveRequests ?? []).map((leave: any) => leave.id).filter(Boolean);
+  const clarificationMessages = leaveIds.length
+    ? await glashQuery<any>(
+      `select id, leave_request_id, sender_type, sender_member_id, sender_label, message, created_at
+         from public.team_leave_clarification_messages
+        where leave_request_id = any($1::uuid[])
+        order by created_at asc`,
+      [leaveIds],
+    )
+    : [];
+  const clarificationsByLeave = new Map<string, any[]>();
+  for (const message of clarificationMessages) {
+    const current = clarificationsByLeave.get(message.leave_request_id) ?? [];
+    current.push(message);
+    clarificationsByLeave.set(message.leave_request_id, current);
+  }
+  const hydratedLeaveRequests = (leaveRequests ?? []).map((leave: any) => ({
+    ...leave,
+    clarifications: clarificationsByLeave.get(leave.id) ?? [],
+  }));
+
   const profileByMember = new Map<string, any>((profiles ?? []).map((profile: any) => [profile.team_member_id, profile]));
   const leaveForDate = (leaveRequests ?? []).filter((leave: any) =>
     leave.status === "approved" && dateKey(leave.start_date) <= date && dateKey(leave.end_date) >= date,
@@ -196,7 +218,7 @@ export async function GET(req: NextRequest) {
     to,
     rows,
     entries: entries ?? [],
-    leave_requests: leaveRequests ?? [],
+    leave_requests: hydratedLeaveRequests,
     bypass_codes: hydratedBypassCodes,
     office,
     stats,
@@ -418,6 +440,58 @@ export async function POST(req: NextRequest) {
         team_members: { full_name: member.full_name, email: member.email, department: member.department },
       },
     });
+  }
+
+  if (action === "ask_leave_clarification") {
+    const leaveId = String(body.leave_id || "");
+    const message = String(body.message || "").trim();
+    if (!leaveId || !message) {
+      return NextResponse.json({ ok: false, error: "Choose a leave request and enter your question." }, { status: 400 });
+    }
+    if (message.length > 2000) {
+      return NextResponse.json({ ok: false, error: "Keep the question within 2,000 characters." }, { status: 400 });
+    }
+
+    const leave = await glashMaybeOne<any>(
+      `select l.*, m.full_name, m.email
+         from public.team_leave_requests l
+         join public.team_members m on m.id = l.team_member_id
+        where l.id = $1
+        limit 1`,
+      [leaveId],
+    );
+    if (!leave) return NextResponse.json({ ok: false, error: "Leave request not found." }, { status: 404 });
+    if (leave.status !== "pending") {
+      return NextResponse.json({ ok: false, error: "Clarification can only be requested while the leave request is pending." }, { status: 409 });
+    }
+
+    const clarification = await glashOne<any>(
+      `insert into public.team_leave_clarification_messages
+        (leave_request_id, sender_type, sender_label, message)
+       values ($1, 'admin', $2, $3)
+       returning id, leave_request_id, sender_type, sender_member_id, sender_label, message, created_at`,
+      [leaveId, session?.name ?? session?.email ?? "CDS Space HR", message],
+    );
+
+    await notifyTeamMember({
+      recipient_id: leave.team_member_id,
+      kind: "leave_clarification",
+      title: "HR asked about your leave request",
+      body: message,
+      link: "/team/timebook",
+      actor_is_admin: true,
+    });
+
+    await logActivity({
+      action: "timebook.leave_clarification_requested",
+      page: "timebook",
+      resource_type: "leave_request",
+      resource_id: leaveId,
+      resource_label: `${leave.leave_type} · ${leave.start_date} to ${leave.end_date}`,
+      metadata: { team_member_id: leave.team_member_id },
+    });
+
+    return NextResponse.json({ ok: true, clarification });
   }
 
   if (action === "review_leave") {

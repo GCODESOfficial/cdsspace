@@ -49,3 +49,45 @@ test("company stationery exposes separate first and continuation page controls",
   assert.match(assetRoute, /executive_board\.view/);
   assert.match(assetRoute, /Cache-Control.*private, no-store/);
 });
+
+test("completed company stationery collapses behind an accessible show control", async () => {
+  const studio = await read("src/components/admin/executive-board/CompanyLetterheadStudio.tsx");
+  assert.match(studio, /setStationeryOpen\(!\(payload\.hasFirstPage && payload\.hasSecondPage\)\)/);
+  assert.match(studio, /aria-controls="company-stationery-details"/);
+  assert.match(studio, /Show stationery/);
+  assert.match(studio, /Hide stationery/);
+  assert.match(studio, /!complete \|\| stationeryOpen/);
+});
+
+test("Executive Board letters always use the official company and sender identity", async () => {
+  const [library, updateRoute, refineRoute] = await Promise.all([
+    read("src/lib/create-platform/letterheads.ts"),
+    read("src/app/api/create/letterheads/[id]/route.ts"),
+    read("src/app/api/create/letterheads/[id]/refine/route.ts"),
+  ]);
+  assert.match(library, /companyShort: "CDS Space"/);
+  assert.match(library, /companyFull: "CDS Space Branding Agency LTD"/);
+  assert.match(library, /senderName: "Chris O\. John"/);
+  assert.match(library, /scope === "executive_board" \? applyExecutiveBoardIdentity/);
+  assert.match(library, /actor_email, scope, title, body_html/);
+  assert.match(updateRoute, /updateLetterhead\(auth\.actor, auth\.id, body, current\.scope\)/);
+  assert.match(refineRoute, /Never output placeholders/);
+  assert.match(refineRoute, /applyExecutiveBoardIdentity\(refinedHtml\)/);
+});
+
+test("saved letterhead cards provide a confirmed delete action", async () => {
+  const studio = await read("src/components/create/LetterheadStudio.tsx");
+  assert.match(studio, /async function deleteLetterhead\(source: Letterhead\)/);
+  assert.match(studio, /Delete “\$\{source\.title\}”\?/);
+  assert.match(studio, /method: "DELETE"/);
+  assert.match(studio, /<Trash2[^>]*\/>\}Delete\s*<\/button>/s);
+});
+
+test("saved letterhead cards preview the opening document content", async () => {
+  const studio = await read("src/components/create/LetterheadStudio.tsx");
+  assert.match(studio, /function SavedLetterheadPreview/);
+  assert.match(studio, /new IntersectionObserver/);
+  assert.match(studio, /buildLetterheadPdf\(\{ \.\.\.item, signatureUrl: null \}/);
+  assert.match(studio, /pdf\.getPage\(1\)/);
+  assert.match(studio, /<SavedLetterheadPreview item=\{item\} \/>/);
+});

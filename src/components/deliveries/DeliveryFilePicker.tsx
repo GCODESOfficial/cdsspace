@@ -59,7 +59,7 @@ export function DeliveryFilePicker({
       return;
     }
     if (next.reduce((total, file) => total + file.size, 0) > MAX_DELIVERY_BATCH_BYTES) {
-      setError("The combined selection must be 100MB or less. Use a compressed ZIP or Google Drive link for larger handovers.");
+      setError("The combined selection must be 200MB or less. Use a compressed ZIP or Google Drive link for larger handovers.");
       return;
     }
     onChange(next);
@@ -192,7 +192,7 @@ export function DeliveryFilePicker({
         )}
       </div>
       {error && <p className="mt-1.5 text-[11px] font-medium text-rose-600">{error}</p>}
-      <p className="mt-1 text-[10px] text-gray-400">Folder structure is preserved. Up to {MAX_DELIVERY_FILES} assets, 50MB each and 100MB combined per submission. Files upload in retryable chunks of up to 48MB.</p>
+      <p className="mt-1 text-[10px] text-gray-400">Folder structure is preserved. Up to {MAX_DELIVERY_FILES} assets; videos may be 150MB, other files 50MB, and each submission 200MB. Files upload in retryable chunks of up to 48MB.</p>
     </div>
   );
 }

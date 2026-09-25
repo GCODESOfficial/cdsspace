@@ -9,6 +9,8 @@ import {
   ArrowLeft,
   Check,
   CheckCircle2,
+  ChevronDown,
+  ChevronUp,
   FileStack,
   FileText,
   Files,
@@ -42,6 +44,7 @@ export function CompanyLetterheadStudio() {
   const [busy, setBusy] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [stationeryOpen, setStationeryOpen] = useState(false);
   const firstInput = useRef<HTMLInputElement | null>(null);
   const secondInput = useRef<HTMLInputElement | null>(null);
 
@@ -51,6 +54,7 @@ export function CompanyLetterheadStudio() {
       const payload = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(payload.error || "The company letterhead could not be loaded.");
       setCompany(payload);
+      setStationeryOpen(!(payload.hasFirstPage && payload.hasSecondPage));
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : "The company letterhead could not be loaded.");
     } finally {
@@ -121,7 +125,7 @@ export function CompanyLetterheadStudio() {
       </header>
 
       <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white">
-        <div className="flex flex-wrap items-start justify-between gap-4 border-b border-slate-100 px-4 py-4 sm:px-5">
+        <div className={`flex flex-wrap items-start justify-between gap-4 px-4 py-4 sm:px-5 ${!loading && (!complete || stationeryOpen) ? "border-b border-slate-100" : ""}`}>
           <div className="flex min-w-0 items-start gap-3">
             <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-[#EDF3FF] text-[#0A4FE8]">
               <FileStack className="h-5 w-5" />
@@ -140,47 +144,65 @@ export function CompanyLetterheadStudio() {
               </p>
             </div>
           </div>
-          {company?.updatedAt && (
-            <p className="text-right text-[11px] leading-5 text-slate-400">
-              Last updated {new Date(company.updatedAt).toLocaleDateString()}
-              {company.updatedBy ? <><br />by {company.updatedBy}</> : null}
-            </p>
-          )}
+          <div className="ml-auto flex flex-wrap items-center justify-end gap-3">
+            {company?.updatedAt && (
+              <p className="text-right text-[11px] leading-5 text-slate-400">
+                Last updated {new Date(company.updatedAt).toLocaleDateString()}
+                {company.updatedBy ? <><br />by {company.updatedBy}</> : null}
+              </p>
+            )}
+            {!loading && complete && (
+              <button
+                type="button"
+                onClick={() => setStationeryOpen((open) => !open)}
+                aria-expanded={stationeryOpen}
+                aria-controls="company-stationery-details"
+                className="inline-flex h-9 items-center gap-2 rounded-xl border border-[#CFE0FF] bg-[#F6F9FF] px-3 text-xs font-semibold text-[#0A4FE8] transition hover:border-[#0A4FE8] hover:bg-[#EDF3FF]"
+              >
+                {stationeryOpen ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+                {stationeryOpen ? "Hide stationery" : "Show stationery"}
+              </button>
+            )}
+          </div>
         </div>
 
-        <div className="grid gap-4 p-4 sm:p-5 lg:grid-cols-2">
-          <PageTemplateCard
-            icon={FileText}
-            eyebrow="Page 1"
-            title="First-page letterhead"
-            description="Used on the opening page of every new official letter."
-            name={company?.firstPageName || null}
-            available={Boolean(company?.hasFirstPage)}
-            previewUrl={company?.hasFirstPage ? `/api/admin/executive-board/letterhead/asset/first?v=${version}` : null}
-            busy={busy === "upload-first" || busy === "remove-first"}
-            onUpload={() => firstInput.current?.click()}
-            onRemove={() => void remove("first")}
-          />
-          <PageTemplateCard
-            icon={Files}
-            eyebrow="Page 2 and later"
-            title="Continuation letterhead"
-            description="Used automatically on every page after the opening page."
-            name={company?.secondPageName || null}
-            available={Boolean(company?.hasSecondPage)}
-            previewUrl={company?.hasSecondPage ? `/api/admin/executive-board/letterhead/asset/second?v=${version}` : null}
-            busy={busy === "upload-second" || busy === "remove-second"}
-            onUpload={() => secondInput.current?.click()}
-            onRemove={() => void remove("second")}
-          />
-          <input ref={firstInput} type="file" accept={ACCEPT} className="hidden" onChange={(event) => { const file = event.target.files?.[0]; event.currentTarget.value = ""; if (file) void upload("first", file); }} />
-          <input ref={secondInput} type="file" accept={ACCEPT} className="hidden" onChange={(event) => { const file = event.target.files?.[0]; event.currentTarget.value = ""; if (file) void upload("second", file); }} />
-        </div>
+        {!loading && (!complete || stationeryOpen) && (
+          <div id="company-stationery-details">
+            <div className="grid gap-4 p-4 sm:p-5 lg:grid-cols-2">
+              <PageTemplateCard
+                icon={FileText}
+                eyebrow="Page 1"
+                title="First-page letterhead"
+                description="Used on the opening page of every new official letter."
+                name={company?.firstPageName || null}
+                available={Boolean(company?.hasFirstPage)}
+                previewUrl={company?.hasFirstPage ? `/api/admin/executive-board/letterhead/asset/first?v=${version}` : null}
+                busy={busy === "upload-first" || busy === "remove-first"}
+                onUpload={() => firstInput.current?.click()}
+                onRemove={() => void remove("first")}
+              />
+              <PageTemplateCard
+                icon={Files}
+                eyebrow="Page 2 and later"
+                title="Continuation letterhead"
+                description="Used automatically on every page after the opening page."
+                name={company?.secondPageName || null}
+                available={Boolean(company?.hasSecondPage)}
+                previewUrl={company?.hasSecondPage ? `/api/admin/executive-board/letterhead/asset/second?v=${version}` : null}
+                busy={busy === "upload-second" || busy === "remove-second"}
+                onUpload={() => secondInput.current?.click()}
+                onRemove={() => void remove("second")}
+              />
+              <input ref={firstInput} type="file" accept={ACCEPT} className="hidden" onChange={(event) => { const file = event.target.files?.[0]; event.currentTarget.value = ""; if (file) void upload("first", file); }} />
+              <input ref={secondInput} type="file" accept={ACCEPT} className="hidden" onChange={(event) => { const file = event.target.files?.[0]; event.currentTarget.value = ""; if (file) void upload("second", file); }} />
+            </div>
 
-        <div className="flex flex-col gap-2 border-t border-slate-100 bg-slate-50/70 px-4 py-3 text-[11.5px] text-slate-500 sm:flex-row sm:items-center sm:justify-between sm:px-5">
-          <span className="inline-flex items-center gap-2"><ShieldCheck className="h-4 w-4 text-emerald-600" />Private, access-controlled, and malware-scanned before storage.</span>
-          <span>JPG, PNG, PDF or SVG · Maximum 5MB per page</span>
-        </div>
+            <div className="flex flex-col gap-2 border-t border-slate-100 bg-slate-50/70 px-4 py-3 text-[11.5px] text-slate-500 sm:flex-row sm:items-center sm:justify-between sm:px-5">
+              <span className="inline-flex items-center gap-2"><ShieldCheck className="h-4 w-4 text-emerald-600" />Private, access-controlled, and malware-scanned before storage.</span>
+              <span>JPG, PNG, PDF or SVG · Maximum 5MB per page</span>
+            </div>
+          </div>
+        )}
       </section>
 
       {(notice || error) && (

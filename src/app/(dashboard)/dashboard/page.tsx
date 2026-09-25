@@ -9,6 +9,7 @@ import type { ClientModuleKey } from "@/lib/client-modules";
 import { UniversalShareButton } from "@/components/share/UniversalShareButton";
 import { formatFinanceDate } from "@/lib/finance/types";
 import { BRANDING_WOTD_BLUE, getBrandingWordDateKey } from "@/lib/branding-word-of-day";
+import { ClientTutorialLibrary } from "@/components/tutorials/ClientTutorialLibrary";
 import {
     Plus, FileText, Image as ImageIcon, Package, Calendar, MessageSquare,
     ShoppingBag, Loader2, ArrowRight, Volume2, Download,
@@ -409,6 +410,14 @@ export default function DashboardPage() {
                     </Link>
                 </motion.div>}
             </div>
+
+            <section className="mb-8 rounded-2xl border border-white/70 bg-white/80 p-5 shadow-[0_10px_40px_rgba(15,40,90,0.05)] backdrop-blur-xl lg:p-6">
+                <div className="mb-4 flex items-center justify-between gap-4">
+                    <div><h2 className="text-[17px] font-semibold text-brand-navy">Tutorials</h2><p className="mt-1 text-[12px] text-brand-body/55">Short videos for getting the best from your CDS Space tools.</p></div>
+                    <Link href={dashboardPath("/dashboard/tutorials")} className="inline-flex shrink-0 items-center gap-1.5 text-[12px] font-semibold text-brand-blue hover:underline">View all <ArrowRight className="h-3.5 w-3.5" /></Link>
+                </div>
+                <ClientTutorialLibrary compact />
+            </section>
 
             {/* Three Column Data Widgets */}
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">

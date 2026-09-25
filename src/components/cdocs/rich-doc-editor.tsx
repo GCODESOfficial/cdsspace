@@ -25,9 +25,9 @@ const COLORS = [
 ];
 
 const FONT_SIZES = [
+  { label: "Tiny", value: "1" },   // ≈ 10px
   { label: "Small", value: "2" },  // ≈ 13px
   { label: "Normal", value: "3" }, // ≈ 16px
-  { label: "Medium", value: "4" }, // ≈ 18px
   { label: "Large", value: "5" },  // ≈ 24px
   { label: "Huge", value: "6" },   // ≈ 32px
 ];
@@ -201,7 +201,7 @@ export function RichDocEditor({ value, onChange, theme = "light", placeholder = 
       {/* Toolbar */}
       <div
         onMouseDown={(e) => { saveSelection(); e.preventDefault(); /* keep selection while clicking buttons */ }}
-        className={`sticky top-[56px] z-20 flex flex-wrap items-center gap-0.5 px-2 py-2 rounded-xl border mb-4 ${
+        className={`sticky top-[56px] z-20 flex flex-wrap items-center gap-0.5 overflow-visible px-2 py-2 rounded-xl border mb-4 ${
           isDark ? "bg-[#10225A] border-white/10" : "bg-white border-gray-100 shadow-sm"
         }`}
       >
@@ -225,7 +225,7 @@ export function RichDocEditor({ value, onChange, theme = "light", placeholder = 
         <Divider dark={isDark} />
 
         {/* Color */}
-        <div className="relative">
+        <div className="relative shrink-0">
           <TBtn icon={<Palette className="w-3.5 h-3.5" />} title="Text color" onClick={() => setColorOpen((v) => !v)} dark={isDark} />
           {colorOpen && (
             <div
@@ -246,18 +246,18 @@ export function RichDocEditor({ value, onChange, theme = "light", placeholder = 
         </div>
 
         {/* Font size */}
-        <div className="relative">
+        <div className="relative shrink-0">
           <TBtn icon={<span className="text-[10px] font-bold">AA</span>} title="Font size" onClick={() => setFontSizeOpen((v) => !v)} dark={isDark} />
           {fontSizeOpen && (
             <div
               onMouseDown={(e) => e.preventDefault()}
-              className="absolute z-30 top-full left-0 mt-1 bg-white rounded-xl shadow-xl ring-1 ring-gray-100 p-1 min-w-[110px]"
+              className="layer-popover absolute left-0 top-full mt-1 flex w-36 min-w-36 shrink-0 flex-col overflow-hidden rounded-xl bg-white p-1 shadow-xl ring-1 ring-gray-100"
             >
               {FONT_SIZES.map((s) => (
                 <button
                   key={s.value}
                   onClick={() => { exec("fontSize", s.value); setFontSizeOpen(false); }}
-                  className="w-full text-left px-3 py-1.5 text-[12.5px] hover:bg-gray-50 rounded-md"
+                  className="block w-full whitespace-nowrap rounded-md px-3 py-2 text-left text-[12.5px] leading-5 text-[#07133B] hover:bg-gray-50"
                 >
                   {s.label}
                 </button>

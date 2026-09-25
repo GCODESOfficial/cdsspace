@@ -1,7 +1,8 @@
 export const CLIENT_DELIVERABLES_BUCKET = "client-deliverables";
 export const MAX_DELIVERY_FILES = 200;
 export const MAX_DELIVERY_FILE_BYTES = 50 * 1024 * 1024;
-export const MAX_DELIVERY_BATCH_BYTES = 100 * 1024 * 1024;
+export const MAX_DELIVERY_VIDEO_BYTES = 150 * 1024 * 1024;
+export const MAX_DELIVERY_BATCH_BYTES = 200 * 1024 * 1024;
 export const MAX_DELIVERY_COVER_BYTES = 10 * 1024 * 1024;
 export const DELIVERY_COVER_ACCEPT = "image/jpeg,image/png,image/webp";
 /**
@@ -67,6 +68,11 @@ export function deliveryFileExtension(name: string) {
   return dot > 0 && dot < lower.length - 1 ? lower.slice(dot + 1) : "";
 }
 
+export const DELIVERY_VIDEO_EXTENSIONS = new Set(["mp4", "mov", "m4v", "webm", "mkv", "avi"]);
+export function deliveryFileMaximumBytes(name: string) {
+  return DELIVERY_VIDEO_EXTENSIONS.has(deliveryFileExtension(name)) ? MAX_DELIVERY_VIDEO_BYTES : MAX_DELIVERY_FILE_BYTES;
+}
+
 export type ExcludedDeliveryFile = { file: File; path: string; reason: string };
 
 /**
@@ -88,8 +94,8 @@ export function screenDeliveryFiles(incoming: File[]): { accepted: File[]; exclu
       excluded.push({ file, path, reason: "No file type" });
     } else if (!DELIVERY_ALLOWED_EXTENSIONS.has(ext)) {
       excluded.push({ file, path, reason: `.${ext} files cannot be delivered` });
-    } else if (file.size > MAX_DELIVERY_FILE_BYTES) {
-      excluded.push({ file, path, reason: "Larger than the 50MB per-file limit" });
+    } else if (file.size > deliveryFileMaximumBytes(file.name)) {
+      excluded.push({ file, path, reason: DELIVERY_VIDEO_EXTENSIONS.has(ext) ? "Larger than the 150MB video limit" : "Larger than the 50MB per-file limit" });
     } else {
       accepted.push(file);
     }

@@ -555,6 +555,15 @@ summary,
   --z-chrome-panel: 91;
   --z-overlay: 1000;
   --z-modal: 1010;
+  /* The accessibility controller outranks ordinary app modals, so the button
+     and its panel are never buried by the interface it is there to adjust. */
+  --z-a11y: 1400;
+  /* A dialog raised from inside another modal: a confirm, an alert, a picker
+     opened from a modal. It must outrank the accessibility panel too, since
+     that panel raises confirms of its own. */
+  --z-modal-top: 1600;
+  /* Menus, select dropdowns and popovers. Above every layer that can contain
+     one, which is what stops a dropdown opening behind its own dialog. */
   --z-popover: 2000;
   --z-toast: 3000;
 }
@@ -563,5 +572,12 @@ summary,
 .layer-chrome-panel { z-index: var(--z-chrome-panel); }
 .layer-overlay { z-index: var(--z-overlay); }
 .layer-modal { z-index: var(--z-modal); }
+.layer-a11y { z-index: var(--z-a11y); }
+.layer-modal-top { z-index: var(--z-modal-top); }
 .layer-popover { z-index: var(--z-popover); }
 .layer-toast { z-index: var(--z-toast); }
+
+/* Radix positions select/dropdown/popover content inside a generated wrapper.
+   The wrapper also needs the shared popover layer or its child can still sit
+   behind a modal despite having the correct class itself. */
+[data-radix-popper-content-wrapper] { z-index: var(--z-popover) !important; }

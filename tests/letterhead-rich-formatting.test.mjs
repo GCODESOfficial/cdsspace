@@ -33,3 +33,11 @@ test("exact preview and downloaded PDF use the same document builder", async () 
   assert.match(pdf, /export async function exportLetterheadToPdf/);
   assert.match(pdf, /preparedSource \|\| await prepareLetterheadPdf\(options\)/);
 });
+
+test("all letterhead pages reserve a footer-safe content area", async () => {
+  const pdf = await read("src/lib/letterhead-pdf.ts");
+  assert.match(pdf, /LETTERHEAD_CONTENT_BOTTOM_SAFE_AREA_RATIO = 0\.16/);
+  assert.match(pdf, /LETTERHEAD_CONTENT_BOTTOM_MIN_MM = 48/);
+  assert.match(pdf, /Math\.max\([\s\S]*LETTERHEAD_CONTENT_BOTTOM_MIN_MM[\s\S]*pageHeight \* LETTERHEAD_CONTENT_BOTTOM_SAFE_AREA_RATIO/);
+  assert.match(pdf, /y \+ height > pageHeight - bottom/);
+});

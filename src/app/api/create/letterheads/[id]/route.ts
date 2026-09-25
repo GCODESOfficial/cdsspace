@@ -32,7 +32,9 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
   if ("response" in auth) return auth.response;
   const body = await req.json().catch(() => ({})) as Record<string, unknown>;
   try {
-    return NextResponse.json({ ok: true, letterhead: await updateLetterhead(auth.actor, auth.id, body) });
+    const current = await getLetterhead(auth.actor, auth.id);
+    if (!current) return NextResponse.json({ error: "Letterhead not found." }, { status: 404 });
+    return NextResponse.json({ ok: true, letterhead: await updateLetterhead(auth.actor, auth.id, body, current.scope) });
   } catch (error) {
     return NextResponse.json({ error: error instanceof Error ? error.message : "The letterhead could not be saved." }, { status: 400 });
   }

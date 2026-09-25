@@ -25,6 +25,15 @@ export type LetterheadPdfOptions = {
 
 export type LetterheadExportSize = "original" | "compressed" | "lite";
 
+/**
+ * Keep document text above the branded footer artwork on every letterhead.
+ * Uploaded stationery is fitted to the full paper, so Legal paper needs a
+ * proportionally taller protected area than A4. The 48 mm floor protects A4
+ * continuation designs whose decorative footer extends beyond the final 15%.
+ */
+export const LETTERHEAD_CONTENT_BOTTOM_SAFE_AREA_RATIO = 0.16;
+export const LETTERHEAD_CONTENT_BOTTOM_MIN_MM = 48;
+
 type ImageAsset = { dataUrl: string; width: number; height: number };
 
 // Rebuilding an exact preview while somebody types should not download and
@@ -75,7 +84,10 @@ export async function buildLetterheadPdf(
   const pageHeight = doc.internal.pageSize.getHeight();
   const marginX = 20;
   const top = 38;
-  const bottom = 22;
+  const bottom = Math.max(
+    LETTERHEAD_CONTENT_BOTTOM_MIN_MM,
+    pageHeight * LETTERHEAD_CONTENT_BOTTOM_SAFE_AREA_RATIO,
+  );
   const maxWidth = pageWidth - (marginX * 2);
   const bodySize = 10.9;
   const bodyLineHeight = 6.5;

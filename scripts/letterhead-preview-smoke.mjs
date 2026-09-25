@@ -38,6 +38,17 @@ const bundled = await esbuild.build({
           }, { includeSignature: false });
           const task = pdfjs.getDocument({ data: new Uint8Array(doc.output("arraybuffer")) });
           const pdf = await task.promise;
+          let minimumTextBottomMm = Number.POSITIVE_INFINITY;
+          for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
+            const textPage = await pdf.getPage(pageNumber);
+            const text = await textPage.getTextContent();
+            for (const item of text.items) {
+              if (item && Array.isArray(item.transform) && String(item.str || "").trim()) {
+                minimumTextBottomMm = Math.min(minimumTextBottomMm, Number(item.transform[5]) * 25.4 / 72);
+              }
+            }
+            textPage.cleanup();
+          }
           const page = await pdf.getPage(1);
           const viewport = page.getViewport({ scale: 1 });
           const canvas = document.createElement("canvas");
@@ -45,7 +56,7 @@ const bundled = await esbuild.build({
           canvas.height = Math.ceil(viewport.height);
           const context = canvas.getContext("2d", { alpha: false });
           await page.render({ canvas, canvasContext: context, viewport }).promise;
-          const result = { pages: pdf.numPages, width: viewport.width, height: viewport.height, painted: canvas.width > 0 && canvas.height > 0 };
+          const result = { pages: pdf.numPages, width: viewport.width, height: viewport.height, painted: canvas.width > 0 && canvas.height > 0, minimumTextBottomMm };
           await task.destroy();
           return result;
         };
@@ -113,6 +124,8 @@ try {
   assert.ok(result.a4.painted && result.legal.painted, "A generated PDF page did not paint to the preview canvas");
   assert.ok(result.legal.height > result.a4.height, "Legal preview did not retain its taller paper geometry");
   assert.ok(result.legal.pages <= result.a4.pages, "Legal paper unexpectedly held less content than A4");
+  assert.ok(result.a4.minimumTextBottomMm >= 48, `A4 text entered the protected footer area (${result.a4.minimumTextBottomMm.toFixed(1)} mm)`);
+  assert.ok(result.legal.minimumTextBottomMm >= 56, `Legal text entered the protected footer area (${result.legal.minimumTextBottomMm.toFixed(1)} mm)`);
   assert.ok(result.compressedBytes <= Math.floor(result.originalBytes * 0.5), "Compressed PDF was not at least 50% smaller than the original");
   assert.ok(result.liteBytes <= Math.floor(result.originalBytes * 0.75), "Lite PDF was not at least 25% smaller than the original");
   console.log(`Letterhead preview smoke passed: A4=${result.a4.pages} pages, Legal=${result.legal.pages} pages, original=${result.originalBytes} bytes, compressed=${result.compressedBytes} bytes, lite=${result.liteBytes} bytes.`);

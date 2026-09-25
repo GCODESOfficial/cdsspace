@@ -12,7 +12,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import Link from "next/link";
 import {
   Building2, CalendarClock, Check, ChevronDown, ChevronRight, Copy, Download, ExternalLink,
-  FileText, Folder, FolderPlus, Landmark, Link2, Loader2, Lock, MapPin, Paperclip, Pencil,
+  FileText, Folder, FolderPlus, Landmark, Link2, Loader2, Lock, Paperclip, Pencil,
   Plus, Rocket, ScrollText, Search, ShieldCheck, Target as TargetIcon, Trash2, Unlock,
   Upload, Wallet, X,
 } from "lucide-react";
@@ -770,54 +770,66 @@ function ExpansionBudgets({ board, busy, run }: { board: Board; busy: string; ru
       </div>
 
       {visible.length === 0 ? <Empty text={board.expansionBudgets.length ? "No expansion plans match this stage." : "No expansion budgets yet. Add the first future plan."} /> : (
-        <div className="grid gap-4 xl:grid-cols-2">
-          {visible.map((budget) => {
-            const requirement = expansionRequirement(budget);
-            const fundingGap = expansionFundingGap(budget);
-            const funded = requirement > 0 ? Math.min(100, Math.round((Number(budget.committed_amount || 0) / requirement) * 100)) : 0;
-            return (
-              <Card key={budget.id} className="flex flex-col">
-                <div className="flex items-start justify-between gap-3">
-                  <div className="flex min-w-0 items-start gap-3">
-                    <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-blue-50 text-[#0A4FE8]"><Building2 className="h-5 w-5" /></span>
-                    <div className="min-w-0">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <h2 className="font-semibold text-[#07133B]">{budget.title}</h2>
-                        <Badge value={budget.status} />
-                        <Badge value={budget.priority} />
+        <div className="overflow-x-auto rounded-2xl border border-slate-200 bg-white">
+          <table className="w-full min-w-[1180px] text-sm">
+            <thead className="bg-slate-50 text-left text-[11px] font-semibold text-slate-500">
+              <tr>
+                <th className="px-4 py-3">Plan</th>
+                <th className="px-4 py-3">Timeline</th>
+                <th className="px-4 py-3 text-right">Requirement</th>
+                <th className="px-4 py-3 text-right">Committed</th>
+                <th className="px-4 py-3 text-right">Funding gap</th>
+                <th className="px-4 py-3">Readiness</th>
+                <th className="px-4 py-3">Stage</th>
+                <th className="px-4 py-3" />
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {visible.map((budget) => {
+                const requirement = expansionRequirement(budget);
+                const fundingGap = expansionFundingGap(budget);
+                const funded = requirement > 0 ? Math.min(100, Math.round((Number(budget.committed_amount || 0) / requirement) * 100)) : 0;
+                return (
+                  <tr key={budget.id} className="align-middle transition hover:bg-slate-50/70">
+                    <td className="px-4 py-3">
+                      <div className="flex min-w-0 items-start gap-3">
+                        <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-blue-50 text-[#0A4FE8]"><Building2 className="h-4 w-4" /></span>
+                        <div className="min-w-0">
+                          <p className="max-w-[310px] truncate font-semibold text-[#07133B]" title={budget.title}>{budget.title}</p>
+                          <p className="mt-0.5 max-w-[310px] truncate text-xs text-slate-400">
+                            {EXPANSION_TYPE_LABELS[budget.expansion_type]}{budget.location ? ` · ${budget.location}` : ""}{budget.owner ? ` · ${budget.owner}` : ""}
+                          </p>
+                        </div>
                       </div>
-                      <p className="mt-1 text-xs text-slate-500">{EXPANSION_TYPE_LABELS[budget.expansion_type]}{budget.location ? ` · ${budget.location}` : ""}</p>
-                    </div>
-                  </div>
-                  <div className="flex shrink-0 gap-1">
-                    <button type="button" onClick={() => void exportBoardToPdf(expansionBudgetPdf(budget, view))} className="rounded-lg p-1.5 text-slate-400 hover:bg-blue-50 hover:text-[#0A4FE8]" aria-label={`Download ${budget.title} with its implementation plan`} title="Download this plan and how it is meant to be carried out"><Download className="h-4 w-4" /></button>
-                    <button type="button" onClick={() => edit(budget)} className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-[#0A4FE8]" aria-label={`Edit ${budget.title}`}><Pencil className="h-4 w-4" /></button>
-                    <button type="button" onClick={() => void remove(budget)} className="rounded-lg p-1.5 text-slate-400 hover:bg-rose-50 hover:text-rose-600" aria-label={`Delete ${budget.title}`}><Trash2 className="h-4 w-4" /></button>
-                  </div>
-                </div>
-
-                {budget.rationale && <p className="mt-4 line-clamp-2 text-sm leading-6 text-slate-600">{budget.rationale}</p>}
-
-                <div className="mt-4 grid grid-cols-3 gap-2 rounded-xl bg-slate-50 p-3">
-                  <div><p className="text-[11px] text-slate-400">Requirement</p><Money amount={requirement} currency={budget.currency} className="mt-1 block text-sm font-semibold text-[#07133B]" /></div>
-                  <div><p className="text-[11px] text-slate-400">Committed</p><Money amount={budget.committed_amount} currency={budget.currency} className="mt-1 block text-sm font-semibold text-[#07133B]" /></div>
-                  <div><p className="text-[11px] text-slate-400">Funding gap</p><Money amount={fundingGap} currency={budget.currency} className="mt-1 block text-sm font-semibold text-[#07133B]" /></div>
-                </div>
-
-                <div className="mt-4">
-                  <div className="flex items-center justify-between text-[11px] text-slate-400"><span>Funding readiness</span><span>{funded}%</span></div>
-                  <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-slate-100"><div className="h-full rounded-full bg-[#0A4FE8]" style={{ width: `${funded}%` }} /></div>
-                </div>
-
-                <div className="mt-4 flex flex-wrap gap-x-5 gap-y-2 border-t border-slate-100 pt-4 text-xs text-slate-500">
-                  <span className="inline-flex items-center gap-1.5"><CalendarClock className="h-3.5 w-3.5 text-slate-400" /> {boardDate(budget.target_start)}{budget.target_end ? ` – ${boardDate(budget.target_end)}` : ""}</span>
-                  {budget.location && <span className="inline-flex items-center gap-1.5"><MapPin className="h-3.5 w-3.5 text-slate-400" /> {budget.location}</span>}
-                  {budget.owner && <span>Owner: {budget.owner}</span>}
-                  {budget.funding_source && <span>Funding: {budget.funding_source}</span>}
-                </div>
-              </Card>
-            );
-          })}
+                    </td>
+                    <td className="px-4 py-3 text-xs text-slate-500">
+                      <p>{boardDate(budget.target_start)}</p>
+                      <p className="mt-0.5 text-slate-400">to {budget.target_end ? boardDate(budget.target_end) : "open"}</p>
+                    </td>
+                    <td className="px-4 py-3 text-right font-medium text-slate-700"><Money amount={requirement} currency={budget.currency} /></td>
+                    <td className="px-4 py-3 text-right text-slate-600"><Money amount={budget.committed_amount} currency={budget.currency} /></td>
+                    <td className="px-4 py-3 text-right"><Money amount={fundingGap} currency={budget.currency} tone="font-semibold text-[#07133B]" /></td>
+                    <td className="px-4 py-3">
+                      <div className="w-32">
+                        <div className="flex items-center justify-between text-[11px] text-slate-400"><span>Funded</span><span>{funded}%</span></div>
+                        <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-slate-100"><div className="h-full rounded-full bg-[#0A4FE8]" style={{ width: `${funded}%` }} /></div>
+                      </div>
+                    </td>
+                    <td className="px-4 py-3">
+                      <div className="flex flex-col items-start gap-1.5"><Badge value={budget.status} /><Badge value={budget.priority} /></div>
+                    </td>
+                    <td className="px-4 py-3">
+                      <div className="flex justify-end gap-1">
+                        <button type="button" onClick={() => void exportBoardToPdf(expansionBudgetPdf(budget, view))} className="rounded-lg p-1.5 text-slate-400 hover:bg-blue-50 hover:text-[#0A4FE8]" aria-label={`Download ${budget.title} with its implementation plan`} title="Download this plan and how it is meant to be carried out"><Download className="h-4 w-4" /></button>
+                        <button type="button" onClick={() => edit(budget)} className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-[#0A4FE8]" aria-label={`Edit ${budget.title}`}><Pencil className="h-4 w-4" /></button>
+                        <button type="button" onClick={() => void remove(budget)} className="rounded-lg p-1.5 text-slate-400 hover:bg-rose-50 hover:text-rose-600" aria-label={`Delete ${budget.title}`}><Trash2 className="h-4 w-4" /></button>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
         </div>
       )}
 

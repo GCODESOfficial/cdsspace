@@ -7,6 +7,7 @@ import { assertSafeUpload } from "@/lib/upload-security";
 
 export const CDRIVE_BUCKET = "client-drives";
 export const CDRIVE_MAX_FILE_BYTES = 100 * 1024 * 1024;
+export const CDRIVE_MAX_VIDEO_BYTES = 150 * 1024 * 1024;
 
 export type CDriveAccess = "view" | "edit";
 
@@ -63,8 +64,10 @@ export async function uploadDriveFile(input: {
   actorId: string;
 }) {
   if (!supabaseAdmin) throw new Error("File storage is unavailable.");
-  if (!input.file.size || input.file.size > CDRIVE_MAX_FILE_BYTES) {
-    throw new Error("Files must be between 1 byte and 100 MB.");
+  const declaredVideo = input.file.type.startsWith("video/");
+  const maximumBytes = declaredVideo ? CDRIVE_MAX_VIDEO_BYTES : CDRIVE_MAX_FILE_BYTES;
+  if (!input.file.size || input.file.size > maximumBytes) {
+    throw new Error(declaredVideo ? "Videos must be between 1 byte and 150 MB." : "Files must be between 1 byte and 100 MB.");
   }
   if (input.folderId) {
     const folder = await glashMaybeOne(`select id from public.client_drive_folders where id = $1::uuid and drive_id = $2::uuid`, [input.folderId, input.driveId]);
@@ -73,7 +76,7 @@ export async function uploadDriveFile(input: {
 
   const safe = await assertSafeUpload(input.file, {
     allow: ["image", "pdf", "office", "zip", "design"],
-    maxBytes: CDRIVE_MAX_FILE_BYTES,
+    maxBytes: maximumBytes,
     imageMaxDimension: 16_000,
     imageMaxInputPixels: 160_000_000,
   });

@@ -21,6 +21,7 @@ export async function GET() {
   const [drives, directory] = await Promise.all([
     glashQuery(
       `select drive.id, drive.name, drive.description, drive.project_id, drive.created_by_kind,
+              drive.shared_with_admin,
               drive.status, drive.created_at, drive.updated_at,
               coalesce(jsonb_agg(jsonb_build_object(
                 'id', profile.id, 'name', coalesce(profile.full_name, profile.company_name, profile.email),
@@ -30,6 +31,7 @@ export async function GET() {
          from public.client_drives drive
          left join public.client_drive_members member on member.drive_id = drive.id
          left join public.profiles profile on profile.id = member.client_user_id
+        where drive.created_by_kind = 'admin' or drive.shared_with_admin = true
         group by drive.id order by drive.updated_at desc`,
     ),
     getUnifiedClientDirectory(),
@@ -59,8 +61,8 @@ export async function POST(req: Request) {
     const valid = await client.query<{ id: string }>(`select id from public.profiles where id = any($1::uuid[])`, [clientIds]);
     if (valid.rows.length !== clientIds.length) throw new Error("One or more selected clients no longer exist.");
     const driveResult = await client.query<{ id: string }>(
-      `insert into public.client_drives (name, description, project_id, created_by_kind, created_by_id)
-       values ($1, $2, $3::uuid, 'admin', $4) returning id`,
+      `insert into public.client_drives (name, description, project_id, created_by_kind, created_by_id, shared_with_admin)
+       values ($1, $2, $3::uuid, 'admin', $4, true) returning id`,
       [name, description, body.projectId || null, session.email],
     );
     const driveId = driveResult.rows[0].id;

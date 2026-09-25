@@ -20,6 +20,7 @@ export function isCreatePrivateAssetPath(actor: Pick<CreateActor, "kind" | "id">
 
 export type LetterheadRecord = {
   id: string;
+  scope: LetterheadScope;
   title: string;
   bodyHtml: string;
   paperSize: "a4" | "legal";
@@ -38,6 +39,8 @@ export type LetterheadRecord = {
   signatureWidth: number;
   signaturePage: "first" | "last";
   status: "draft" | "ready" | "archived";
+  deliveredByCds: boolean;
+  deliveredAt: string | null;
   lastExportedAt: string | null;
   createdAt: string;
   updatedAt: string;
@@ -50,7 +53,7 @@ export function sanitizeLetterheadBody(value: unknown) {
       "*": ["style", "align", "data-align"],
       a: ["href", "target", "rel"],
       img: ["src", "alt", "width", "height", "data-align"],
-      font: ["color"],
+      font: ["color", "size"],
     },
     allowedSchemes: ["http", "https", "data", "mailto"],
     allowedSchemesByTag: { img: ["https", "data"] },
@@ -72,6 +75,28 @@ export function sanitizeLetterheadBody(value: unknown) {
       },
     },
   });
+}
+
+export const EXECUTIVE_BOARD_IDENTITY = {
+  companyShort: "CDS Space",
+  companyFull: "CDS Space Branding Agency LTD",
+  senderName: "Chris O. John",
+} as const;
+
+/**
+ * Official Executive Board correspondence must never retain generic sender
+ * placeholders. The full legal-style company name replaces formal company
+ * placeholders; writers can still use the established short name, CDS Space,
+ * naturally elsewhere in the document.
+ */
+export function applyExecutiveBoardIdentity(value: unknown) {
+  return (typeof value === "string" ? value : "")
+    .replace(/\[\s*your(?:\s|&nbsp;)+company(?:\s|&nbsp;)+name\s*\]/gi, EXECUTIVE_BOARD_IDENTITY.companyFull)
+    .replace(/\byour(?:\s|&nbsp;)+company(?:\s|&nbsp;)+name\b/gi, EXECUTIVE_BOARD_IDENTITY.companyFull)
+    .replace(/\[\s*company(?:\s|&nbsp;)+name\s*\]/gi, EXECUTIVE_BOARD_IDENTITY.companyFull)
+    .replace(/\[\s*your(?:\s|&nbsp;)+name\s*\]/gi, EXECUTIVE_BOARD_IDENTITY.senderName)
+    .replace(/\byour(?:\s|&nbsp;)+name\b/gi, EXECUTIVE_BOARD_IDENTITY.senderName)
+    .replace(/\[\s*sender(?:\s|&nbsp;)+name\s*\]/gi, EXECUTIVE_BOARD_IDENTITY.senderName);
 }
 
 function title(value: unknown) {
@@ -98,13 +123,17 @@ function assetUrl(actor: CreateActor, id: unknown, kind: "firstPage" | "secondPa
 }
 
 async function fromRow(actor: CreateActor, row: Record<string, unknown>): Promise<LetterheadRecord> {
+  const scope = letterheadScope(row.scope);
+  const bodyHtml = String(row.body_html || "");
+  const documentTitle = String(row.title || "Untitled letter");
   const firstPageUrl = assetUrl(actor, row.id, "firstPage", row.first_page_path);
   const secondPageUrl = assetUrl(actor, row.id, "secondPage", row.second_page_path);
   const signatureUrl = assetUrl(actor, row.id, "signature", row.signature_path);
   return {
     id: String(row.id),
-    title: String(row.title || "Untitled letter"),
-    bodyHtml: String(row.body_html || ""),
+    scope,
+    title: scope === "executive_board" ? applyExecutiveBoardIdentity(documentTitle) : documentTitle,
+    bodyHtml: scope === "executive_board" ? applyExecutiveBoardIdentity(bodyHtml) : bodyHtml,
     paperSize: row.paper_size === "legal" ? "legal" : "a4",
     hasSecondPage: Boolean(row.has_second_page),
     firstPagePath: typeof row.first_page_path === "string" ? row.first_page_path : null,
@@ -121,16 +150,19 @@ async function fromRow(actor: CreateActor, row: Record<string, unknown>): Promis
     signatureWidth: Number(row.signature_width || 24),
     signaturePage: row.signature_page === "first" ? "first" : "last",
     status: row.status === "ready" || row.status === "archived" ? row.status : "draft",
+    deliveredByCds: Boolean(row.delivered_by_cds),
+    deliveredAt: row.delivered_at ? String(row.delivered_at) : null,
     lastExportedAt: row.last_exported_at ? String(row.last_exported_at) : null,
     createdAt: String(row.created_at || new Date().toISOString()),
     updatedAt: String(row.updated_at || new Date().toISOString()),
   };
 }
 
-const RETURNING = `id, title, body_html, paper_size, has_second_page,
+const RETURNING = `id, scope, title, body_html, paper_size, has_second_page,
   first_page_path, first_page_name, first_page_size_bytes, second_page_path, second_page_name, second_page_size_bytes,
   signature_path, signature_name, signature_size_bytes, signature_x, signature_y, signature_width,
-  signature_page, status, last_exported_at, created_at, updated_at`;
+  signature_page, status, delivered_by_cds, delivered_from_letterhead_id,
+  delivered_by_admin, delivered_at, last_exported_at, created_at, updated_at`;
 
 /**
  * Which studio a document belongs to. Executive Board letters are company
@@ -172,10 +204,12 @@ export async function createLetterhead(actor: CreateActor, scope: LetterheadScop
   return fromRow(actor, row);
 }
 
-export async function updateLetterhead(actor: CreateActor, id: string, input: Record<string, unknown>) {
+export async function updateLetterhead(actor: CreateActor, id: string, input: Record<string, unknown>, scope: LetterheadScope = "create") {
+  const cleanTitle = title(input.title);
+  const cleanBody = sanitizeLetterheadBody(input.bodyHtml);
   const patch = {
-    title: title(input.title),
-    bodyHtml: sanitizeLetterheadBody(input.bodyHtml),
+    title: scope === "executive_board" ? applyExecutiveBoardIdentity(cleanTitle) : cleanTitle,
+    bodyHtml: scope === "executive_board" ? applyExecutiveBoardIdentity(cleanBody) : cleanBody,
     paperSize: input.paperSize === "legal" ? "legal" : "a4",
     hasSecondPage: Boolean(input.hasSecondPage),
     signatureX: numberInRange(input.signatureX, 0, 95, 62),
@@ -198,10 +232,10 @@ export async function updateLetterhead(actor: CreateActor, id: string, input: Re
 export async function duplicateLetterhead(actor: CreateActor, id: string) {
   const row = await glashMaybeOne<Record<string, unknown>>(
     `insert into public.create_letterheads
-      (owner_kind, owner_id, actor_email, title, body_html, paper_size, has_second_page,
+      (owner_kind, owner_id, actor_email, scope, title, body_html, paper_size, has_second_page,
        first_page_path, first_page_name, first_page_size_bytes, second_page_path, second_page_name, second_page_size_bytes,
        signature_path, signature_name, signature_size_bytes, signature_x, signature_y, signature_width, signature_page, status)
-     select owner_kind, owner_id, $4, left(title || ' copy', 160), body_html, paper_size, has_second_page,
+     select owner_kind, owner_id, $4, scope, left(title || ' copy', 160), body_html, paper_size, has_second_page,
        first_page_path, first_page_name, first_page_size_bytes, second_page_path, second_page_name, second_page_size_bytes,
        signature_path, signature_name, signature_size_bytes, signature_x, signature_y, signature_width, signature_page, 'draft'
      from public.create_letterheads

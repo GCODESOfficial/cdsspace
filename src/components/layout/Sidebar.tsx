@@ -6,7 +6,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { cn } from "@/lib/utils";
 import { motion, AnimatePresence } from "framer-motion";
-import { LogOut, LayoutDashboard, Newspaper, FileText, Image as ImageIcon, Package, MessageSquare, ShoppingBag, Settings, ReceiptText, FolderOpen, Palette, CalendarRange, ChevronDown, PenLine, Gift, Video } from "lucide-react";
+import { LogOut, LayoutDashboard, Newspaper, FileText, Image as ImageIcon, Package, MessageSquare, ShoppingBag, Settings, ReceiptText, FolderOpen, Palette, CalendarRange, ChevronDown, PenLine, Gift, Video, GraduationCap } from "lucide-react";
 import { useClientAccount, type ClientAccountSnapshot } from "@/components/dashboard/ClientAccountProvider";
 import type { ClientModuleKey, ClientModuleVisibility } from "@/lib/client-modules";
 
@@ -38,6 +38,7 @@ const navigationSections: { name: string; items: NavigationItem[] }[] = [
         name: "Creative services",
         items: [
             { name: "Create Studio", href: "/create?workspace=client", icon: PenLine, module: "documents" },
+            { name: "Tutorials", href: "/dashboard/tutorials", icon: GraduationCap, module: "overview" },
             { name: "Banners", href: "/dashboard/banners", icon: ImageIcon, module: "banners" },
             { name: "Merch", href: "/dashboard/merch", icon: Package, module: "merch" },
             { name: "cGifts", href: "/dashboard/cgifts", icon: Gift, module: "cgifts" },

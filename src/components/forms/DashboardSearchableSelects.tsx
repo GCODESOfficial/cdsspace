@@ -201,7 +201,7 @@ export function DashboardSearchableSelects() {
   const label = fieldLabel(select);
 
   return createPortal(
-    <div className="fixed inset-0 z-[10020]" data-dashboard-searchable-select>
+    <div className="layer-popover fixed inset-0" data-dashboard-searchable-select>
       <button
         type="button"
         className="absolute inset-0 cursor-default bg-slate-950/10 sm:bg-transparent"

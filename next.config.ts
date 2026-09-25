@@ -80,9 +80,9 @@ const nextConfig: NextConfig = {
     serverActions: {
       bodySizeLimit: "512kb",
     },
-    // Content Hub Visual Library accepts videos up to 100MB. The proxy buffers
+    // Product video gateways accept videos up to 150MB. The proxy buffers
     // multipart overhead too, so leave a little headroom above the per-file cap.
-    proxyClientMaxBodySize: "110mb",
+    proxyClientMaxBodySize: "165mb",
   },
   // Generated database types are out of date with the live schema.
   // Don't fail the production build on stale-type errors.

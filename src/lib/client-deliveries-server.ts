@@ -8,9 +8,9 @@ import { BRAND_IDENTITY_BUCKET } from "@/lib/brand-identity";
 import {
   CLIENT_DELIVERABLES_BUCKET,
   MAX_DELIVERY_BATCH_BYTES,
-  MAX_DELIVERY_FILE_BYTES,
   MAX_DELIVERY_FILES,
   isGoogleDeliverableUrl,
+  deliveryFileMaximumBytes,
   type ClientDeliveryType,
 } from "@/lib/client-deliveries";
 import { deliverClientDeliveryEmail } from "@/lib/client-delivery-email";
@@ -140,7 +140,7 @@ export async function completeClientDeliveryChunkUpload(
       },
       {
         allow: ["image", "pdf", "office", "zip", "design"],
-        maxBytes: MAX_DELIVERY_FILE_BYTES,
+        maxBytes: deliveryFileMaximumBytes(input.fileName),
       },
     );
   } catch (error) {
@@ -299,7 +299,7 @@ export async function uploadClientDeliveryFiles(
   }
   const batchBytes = files.reduce((total, file) => total + file.size, 0);
   if (batchBytes > MAX_DELIVERY_BATCH_BYTES) {
-    throw new DeliveryWorkflowError("The combined upload is larger than the 100MB request limit.", 413);
+    throw new DeliveryWorkflowError("The combined upload is larger than the 200MB request limit.", 413);
   }
   const db = getGlashDbAdmin() as any;
   const bucket = delivery.delivery_type === "brand_identity"
@@ -319,7 +319,7 @@ export async function uploadClientDeliveryFiles(
     try {
       const safe = await assertSafeUpload(file, {
         allow: ["image", "pdf", "office", "zip", "design"],
-        maxBytes: MAX_DELIVERY_FILE_BYTES,
+        maxBytes: deliveryFileMaximumBytes(file.name),
       });
       validatedFiles.push({ file, relativePath, safe });
     } catch (error) {

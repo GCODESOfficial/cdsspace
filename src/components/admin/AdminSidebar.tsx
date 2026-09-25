@@ -320,6 +320,12 @@ const createNavItems = [
 
 const contentHubNavItems = [
   {
+    label: "Tutorials",
+    href: "/admin/tutorials",
+    icon: GraduationCap,
+    permission: "content_hub",
+  },
+  {
     label: "Dashboard",
     href: "/admin/content-hub",
     icon: LayoutDashboard,
