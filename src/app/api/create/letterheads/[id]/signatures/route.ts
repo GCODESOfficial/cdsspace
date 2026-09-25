@@ -3,7 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 import sharp from "sharp";
 import { renderPageAsImage } from "unpdf";
 import { getCreateActorFromRequest } from "@/lib/create-platform/session";
-import { createPrivateAssetPrefix, getLetterhead, LETTERHEAD_BUCKET, LETTERHEAD_MAX_BYTES } from "@/lib/create-platform/letterheads";
+import { clearLetterheadAsset, createPrivateAssetPrefix, getLetterhead, isCreatePrivateAssetPath, LETTERHEAD_BUCKET, LETTERHEAD_MAX_BYTES } from "@/lib/create-platform/letterheads";
 import { getGlashDbAdmin } from "@/lib/glashdb";
 import { glashQuery } from "@/lib/glashdb/postgres";
 import { assertSafeUpload, UploadSecurityError } from "@/lib/upload-security";
@@ -117,4 +117,40 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   } finally {
     await releaseClientStorageReservation(reservationId).catch(() => undefined);
   }
+}
+
+/** Remove every signature from one document while deliberately retaining its seal. */
+export async function DELETE(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const actor = await getCreateActorFromRequest(req);
+  const { id } = await params;
+  if (!actor) return NextResponse.json({ error: "Sign in to use Create." }, { status: 401 });
+  if (actor.accessLocked) return NextResponse.json({ error: "Create is not available on this account yet." }, { status: 403 });
+  if (!UUID.test(id)) return NextResponse.json({ error: "Invalid letterhead ID." }, { status: 400 });
+  const existing = await getLetterhead(actor, id);
+  if (!existing) return NextResponse.json({ error: "Letterhead not found." }, { status: 404 });
+
+  const additional = await glashQuery<{ storage_path: string | null }>(
+    `delete from public.create_letterhead_signatures signature
+      using public.create_letterheads letterhead
+      where signature.letterhead_id = letterhead.id and letterhead.id = $3::uuid
+        and letterhead.owner_kind = $1 and letterhead.owner_id = $2 and letterhead.deleted_at is null
+      returning signature.storage_path`,
+    [actor.kind, actor.id, id],
+  );
+  const { previous } = await clearLetterheadAsset(actor, id, "signature");
+  const paths = Array.from(new Set([previous.path, ...additional.map((row) => row.storage_path)].filter((path): path is string => Boolean(path) && isCreatePrivateAssetPath(actor, path))));
+  const db = getGlashDbAdmin() as any;
+  for (const path of paths) {
+    const references = await glashQuery<{ total: string }>(
+      `select (
+         (select count(*) from public.create_letterheads
+           where deleted_at is null and ($1 = first_page_path or $1 = second_page_path or $1 = signature_path or $1 = stamp_path))
+         + (select count(*) from public.create_letterhead_signatures where storage_path = $1)
+         + (select count(*) from public.create_saved_signatures where storage_path = $1 and deleted_at is null)
+       )::text as total`,
+      [path],
+    );
+    if (Number(references[0]?.total || 0) === 0) await db.storage.from(LETTERHEAD_BUCKET).remove([path]).catch(() => undefined);
+  }
+  return NextResponse.json({ ok: true, letterhead: await getLetterhead(actor, id) });
 }

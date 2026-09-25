@@ -117,6 +117,35 @@ test("letterheads support several private signatures and secure signer invitatio
   assert.match(delivery, /additionalSignatures/);
 });
 
+test("signatures can be removed explicitly and saved in a private named library", async () => {
+  const [migration, libraryApi, libraryAsset, libraryDelete, removeAll, removeOne, studio, storage] = await Promise.all([
+    read("glashdb/migrations/20260925_create_saved_signatures.sql"),
+    read("src/app/api/create/signatures/route.ts"),
+    read("src/app/api/create/signatures/[id]/asset/route.ts"),
+    read("src/app/api/create/signatures/[id]/route.ts"),
+    read("src/app/api/create/letterheads/[id]/signatures/route.ts"),
+    read("src/app/api/create/letterheads/[id]/signatures/[signatureId]/route.ts"),
+    read("src/components/create/LetterheadStudio.tsx"),
+    read("src/lib/client-storage.ts"),
+  ]);
+
+  assert.match(migration, /create table if not exists public\.create_saved_signatures/);
+  assert.match(migration, /owner_kind, owner_id, lower\(name\)/);
+  assert.match(migration, /enable row level security/);
+  assert.match(libraryApi, /action === "save"/);
+  assert.match(libraryApi, /action === "apply"/);
+  assert.match(libraryApi, /signature-library/);
+  assert.match(libraryAsset, /isCreatePrivateAssetPath/);
+  assert.match(libraryAsset, /private, no-store/);
+  assert.match(libraryDelete, /set deleted_at = now\(\)/);
+  assert.match(removeAll, /Remove every signature from one document/);
+  assert.match(removeOne, /delete from public\.create_letterhead_signatures/);
+  assert.match(studio, /Remove all signatures/);
+  assert.match(studio, /Saved signatures/);
+  assert.match(studio, /Save signature for later/);
+  assert.match(storage, /from public\.create_saved_signatures/);
+});
+
 test("account-free invitees preview the exact letterhead and can place only their own signature", async () => {
   const [signApi, publicAsset, signingPage, studio] = await Promise.all([
     read("src/app/api/letterhead-sign/[token]/route.ts"),

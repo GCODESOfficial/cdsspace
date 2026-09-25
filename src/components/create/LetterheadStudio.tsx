@@ -3,7 +3,7 @@
 /* eslint-disable @next/next/no-img-element */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ArrowLeft, Archive, Check, ChevronDown, ClipboardPaste, Copy, Download, FileText, Loader2, LockKeyhole, PenLine, Plus, RefreshCw, Send, Stamp, Trash2, Upload, Users, X } from "lucide-react";
+import { ArrowLeft, Archive, Bookmark, Check, ChevronDown, ClipboardPaste, Copy, Download, FileText, Library, Loader2, LockKeyhole, PenLine, Plus, RefreshCw, Send, Stamp, Trash2, Upload, Users, X } from "lucide-react";
 import { RichDocEditor } from "@/components/cdocs/rich-doc-editor";
 import { appConfirm } from "@/lib/app-notify";
 import { offerClientStorageRequest } from "@/lib/client-storage-ui";
@@ -63,6 +63,8 @@ type AssetKind = "firstPage" | "secondPage" | "signature" | "stamp";
 type SaveState = "idle" | "saving" | "saved" | "error";
 type WorkspaceKind = "client" | "team" | "admin";
 type DeliveryClient = { id: string; platform_user_id: string | null; has_platform_account: boolean; name: string; brand_name: string | null; email: string | null };
+type SavedSignature = { id: string; name: string; assetUrl: string; updatedAt: string };
+type SignatureSaveSource = { kind: "primary" } | { kind: "additional"; id: string; suggestedName: string };
 
 function apiPath(path: string, workspaceKind: WorkspaceKind, scope: "create" | "executive_board" = "create") {
   const joined = `${path}${path.includes("?") ? "&" : "?"}workspace=${workspaceKind}`;
@@ -232,6 +234,10 @@ export function LetterheadStudio({
   const [inviteEmail, setInviteEmail] = useState("");
   const [inviteBusy, setInviteBusy] = useState(false);
   const [inviteResult, setInviteResult] = useState<{ shareUrl: string; emailed: boolean } | null>(null);
+  const [savedSignatures, setSavedSignatures] = useState<SavedSignature[]>([]);
+  const [signatureLibraryBusy, setSignatureLibraryBusy] = useState<string | null>(null);
+  const [signatureSaveSource, setSignatureSaveSource] = useState<SignatureSaveSource | null>(null);
+  const [signatureSaveName, setSignatureSaveName] = useState("");
   const [deliveryDialogOpen, setDeliveryDialogOpen] = useState(false);
   const [deliveryClients, setDeliveryClients] = useState<DeliveryClient[]>([]);
   const [deliverySearch, setDeliverySearch] = useState("");
@@ -255,14 +261,21 @@ export function LetterheadStudio({
     setLoading(false);
     if (!response.ok) { setError(payload.error || "Letterheads could not be loaded."); return; }
     setItems(payload.letterheads || []);
-  }, [workspaceKind]);
+  }, [scope, workspaceKind]);
+
+  const loadSavedSignatures = useCallback(async () => {
+    const response = await fetch(apiPath("/api/create/signatures", workspaceKind, scope), { cache: "no-store" });
+    const payload = await response.json().catch(() => ({}));
+    if (response.ok) setSavedSignatures(payload.signatures || []);
+  }, [scope, workspaceKind]);
 
   useEffect(() => {
     void load();
+    void loadSavedSignatures();
     // Download and initialise the heavy renderer while the saved-document
     // library is being read, rather than after somebody opens a document.
     void loadPreviewRuntime();
-  }, [load]);
+  }, [load, loadSavedSignatures]);
 
   useEffect(() => {
     if (!initialLetterheadId || deepLinkOpened.current || active) return;
@@ -457,6 +470,92 @@ export function LetterheadStudio({
     if (!response.ok) { setError(payload.error || "Signature status could not be refreshed."); return; }
     setActive(payload.letterhead);
     setItems((current) => current.map((item) => item.id === active.id ? payload.letterhead : item));
+  }
+
+  function useUpdatedLetterhead(letterhead: Letterhead) {
+    setActive(letterhead);
+    setItems((current) => current.map((item) => item.id === letterhead.id ? letterhead : item));
+  }
+
+  async function removeAdditionalSignature(signature: AdditionalSignature) {
+    if (!active) return;
+    const label = signature.signerName || signature.signerEmail || "this signature";
+    const verb = signature.status === "pending" || signature.status === "opened" ? "Cancel and remove" : "Remove";
+    if (!(await appConfirm(`${verb} ${label}? This removes it from this document only.`))) return;
+    setSignatureLibraryBusy(`remove:${signature.id}`); setError(null);
+    const response = await fetch(apiPath(`/api/create/letterheads/${active.id}/signatures/${signature.id}`, workspaceKind, scope), { method: "DELETE" });
+    const payload = await response.json().catch(() => ({}));
+    setSignatureLibraryBusy(null);
+    if (!response.ok) { setError(payload.error || "The signature could not be removed."); return; }
+    useUpdatedLetterhead(payload.letterhead);
+  }
+
+  async function removeAllSignatures() {
+    if (!active) return;
+    if (!(await appConfirm("Remove all signatures and cancel outstanding signature requests for this document? Your saved signature library and company seal will not be affected."))) return;
+    setSignatureLibraryBusy("remove-all"); setError(null);
+    const response = await fetch(apiPath(`/api/create/letterheads/${active.id}/signatures`, workspaceKind, scope), { method: "DELETE" });
+    const payload = await response.json().catch(() => ({}));
+    setSignatureLibraryBusy(null);
+    if (!response.ok) { setError(payload.error || "The signatures could not be removed."); return; }
+    useUpdatedLetterhead(payload.letterhead);
+  }
+
+  function openSaveSignature(source: SignatureSaveSource) {
+    setSignatureSaveSource(source);
+    setSignatureSaveName(source.kind === "additional" ? source.suggestedName : active?.signatureName?.replace(/\.[^.]+$/, "") || "My signature");
+  }
+
+  async function saveSignatureToLibrary() {
+    if (!active || !signatureSaveSource || !signatureSaveName.trim()) return;
+    setSignatureLibraryBusy("save"); setError(null);
+    const response = await fetch(apiPath("/api/create/signatures", workspaceKind, scope), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        action: "save",
+        letterheadId: active.id,
+        name: signatureSaveName,
+        sourceKind: signatureSaveSource.kind,
+        sourceId: signatureSaveSource.kind === "additional" ? signatureSaveSource.id : undefined,
+      }),
+    });
+    const payload = await response.json().catch(() => ({}));
+    setSignatureLibraryBusy(null);
+    if (!response.ok) {
+      if (workspaceKind === "client" && await offerClientStorageRequest(payload.code)) return;
+      setError(payload.error || "The signature could not be saved."); return;
+    }
+    setSavedSignatures(payload.signatures || []);
+    setSignatureSaveSource(null);
+    setSignatureSaveName("");
+  }
+
+  async function applySavedSignature(signature: SavedSignature) {
+    if (!active) return;
+    setSignatureLibraryBusy(`apply:${signature.id}`); setError(null);
+    const response = await fetch(apiPath("/api/create/signatures", workspaceKind, scope), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "apply", letterheadId: active.id, signatureId: signature.id }),
+    });
+    const payload = await response.json().catch(() => ({}));
+    setSignatureLibraryBusy(null);
+    if (!response.ok) {
+      if (workspaceKind === "client" && await offerClientStorageRequest(payload.code)) return;
+      setError(payload.error || "The saved signature could not be added."); return;
+    }
+    useUpdatedLetterhead(payload.letterhead);
+  }
+
+  async function deleteSavedSignature(signature: SavedSignature) {
+    if (!(await appConfirm(`Delete “${signature.name}” from your saved signature library? Signatures already placed on documents will remain.`))) return;
+    setSignatureLibraryBusy(`delete:${signature.id}`); setError(null);
+    const response = await fetch(apiPath(`/api/create/signatures/${signature.id}`, workspaceKind, scope), { method: "DELETE" });
+    const payload = await response.json().catch(() => ({}));
+    setSignatureLibraryBusy(null);
+    if (!response.ok) { setError(payload.error || "The saved signature could not be deleted."); return; }
+    setSavedSignatures((current) => current.filter((item) => item.id !== signature.id));
   }
 
   async function openDelivery() {
@@ -766,9 +865,23 @@ export function LetterheadStudio({
             </div>}
           </div>
           )}
-          <div className="flex flex-wrap items-center gap-2 rounded-xl border border-gray-100 bg-gray-50 p-2.5">
-            <span className="mr-auto text-[11px] font-semibold text-gray-500">Refine the current document with AI</span>
-            {[["improve", "Improve"], ["formalize", "Make formal"], ["concise", "Make concise"], ["proofread", "Proofread"]].map(([mode, label]) => <button key={mode} disabled={refining} onClick={() => refine(mode)} className="rounded-lg border border-gray-200 bg-white px-2.5 py-1.5 text-[11px] font-semibold text-gray-600 hover:border-blue-200 hover:text-[#0A4FE8] disabled:opacity-50">{refining ? "Working…" : label}</button>)}
+          {/* On a phone these four sit on one line, small and closely spaced,
+              scrolling sideways if the screen is very narrow rather than
+              wrapping into a block of chunky buttons. */}
+          <div className="rounded-xl border border-gray-100 bg-gray-50 p-2 sm:p-2.5">
+            <span className="block text-[10.5px] font-semibold text-gray-500 sm:text-[11px]">Refine the current document with AI</span>
+            <div className="-mx-2 mt-1.5 flex items-center gap-1 overflow-x-auto px-2 pb-0.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden sm:mx-0 sm:mt-2 sm:flex-wrap sm:gap-2 sm:overflow-visible sm:px-0">
+              {[["improve", "Improve"], ["formalize", "Make formal"], ["concise", "Make concise"], ["proofread", "Proofread"]].map(([mode, label]) => (
+                <button
+                  key={mode}
+                  disabled={refining}
+                  onClick={() => refine(mode)}
+                  className="shrink-0 whitespace-nowrap rounded-lg border border-gray-200 bg-white px-2 py-1 text-[10.5px] font-semibold text-gray-600 hover:border-blue-200 hover:text-[#0A4FE8] disabled:opacity-50 sm:px-2.5 sm:py-1.5 sm:text-[11px]"
+                >
+                  {refining ? "Working…" : label}
+                </button>
+              ))}
+            </div>
           </div>
           <RichDocEditor value={active.bodyHtml} onChange={(bodyHtml) => patch({ bodyHtml })} placeholder="Write your official letter…" />
         </section>
@@ -808,20 +921,62 @@ export function LetterheadStudio({
             {signingConfigOpen && <div className="border-t border-gray-100 p-4">
               <p className="text-[11px] text-gray-400">Upload or paste a signature, sign live with cSign, upload several signatures together, or securely invite another person.</p>
               <div className="mt-3"><AssetUpload label="Primary signature image" name={active.signatureName} kind="signature" busy={uploading === "signature"} onFile={upload} paste /></div>
-              <div className="mt-2 grid gap-2 sm:grid-cols-3"><button type="button" onClick={() => setSignatureDialogOpen(true)} className="inline-flex h-10 items-center justify-center gap-2 rounded-xl border border-blue-200 bg-blue-50 px-3 text-[11px] font-semibold text-[#0A4FE8] hover:bg-blue-100"><PenLine className="h-4 w-4" />Sign live</button><button type="button" onClick={() => multipleSignatureInput.current?.click()} disabled={uploading === "signature"} className="inline-flex h-10 items-center justify-center gap-2 rounded-xl border border-blue-200 bg-white px-3 text-[11px] font-semibold text-[#0A4FE8] hover:bg-blue-50 disabled:opacity-50">{uploading === "signature" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}Upload multiple</button><button type="button" onClick={() => { setInviteResult(null); setInviteDialogOpen(true); }} className="inline-flex h-10 items-center justify-center gap-2 rounded-xl bg-[#0A4FE8] px-3 text-[11px] font-semibold text-white hover:bg-[#083EC0]"><Users className="h-4 w-4" />Invite signer</button></div>
+              <div className="mt-2 grid gap-2 sm:grid-cols-3">
+                <button type="button" onClick={() => setSignatureDialogOpen(true)} className="inline-flex h-10 items-center justify-center gap-2 rounded-xl border border-blue-200 bg-blue-50 px-3 text-[11px] font-semibold text-[#0A4FE8] hover:bg-blue-100"><PenLine className="h-4 w-4" />Sign live</button>
+                <button type="button" onClick={() => multipleSignatureInput.current?.click()} disabled={uploading === "signature"} className="inline-flex h-10 items-center justify-center gap-2 rounded-xl border border-blue-200 bg-white px-3 text-[11px] font-semibold text-[#0A4FE8] hover:bg-blue-50 disabled:opacity-50">{uploading === "signature" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}Upload multiple</button>
+                <button type="button" onClick={() => { setInviteResult(null); setInviteDialogOpen(true); }} className="inline-flex h-10 items-center justify-center gap-2 rounded-xl bg-[#0A4FE8] px-3 text-[11px] font-semibold text-white hover:bg-[#083EC0]"><Users className="h-4 w-4" />Invite signer</button>
+              </div>
               <input ref={multipleSignatureInput} type="file" multiple accept={ACCEPT} className="hidden" onChange={(event) => { if (event.target.files?.length) void uploadMultipleSignatures(event.target.files); event.currentTarget.value = ""; }} />
-              {active.signatureUrl && <div className="mt-3 grid grid-cols-2 gap-3"><label className="text-[11px] font-semibold text-gray-600">Primary signature page<select value={active.signaturePage} onChange={(event) => patch({ signaturePage: event.target.value === "first" ? "first" : "last" })} className="mt-1 h-9 w-full rounded-lg border border-gray-200 bg-white px-2 text-[11px]"><option value="last">Last page</option><option value="first">First page</option></select></label><label className="text-[11px] font-semibold text-gray-600">Primary signature size<input type="range" min="8" max="50" value={active.signatureWidth} onChange={(event) => patch({ signatureWidth: Number(event.target.value) })} className="mt-3 w-full accent-[#0A4FE8]" /></label></div>}
-              {active.signatures.length > 0 && <div className="mt-4 space-y-2"><div className="flex items-center justify-between"><h3 className="text-[11.5px] font-semibold text-[#07133B]">Additional signers</h3><button type="button" onClick={() => void refreshActiveSignatures()} className="inline-flex items-center gap-1 text-[10.5px] font-semibold text-[#0A4FE8]"><RefreshCw className="h-3.5 w-3.5" />Refresh status</button></div>{active.signatures.map((signature) => <div key={signature.id} className="rounded-xl border border-slate-200 bg-slate-50 p-3"><div className="flex items-center justify-between gap-3"><span className="min-w-0"><strong className="block truncate text-[11px] text-[#07133B]">{signature.signerName || signature.signerEmail || "Uploaded signature"}</strong><span className="text-[10px] capitalize text-slate-500">{signature.status === "ready" ? "Ready" : signature.status}</span></span>{signature.shareUrl && (signature.status === "pending" || signature.status === "opened") && <UniversalShareButton title={`Signature request for ${active.title}`} text={`Please review and sign ${active.title} securely on CDS Space.`} url={signature.shareUrl} label="Share link" className="h-8 min-h-8 px-2 text-[10px]" />}</div>{signature.signatureUrl && <div className="mt-2 grid grid-cols-2 gap-2"><label className="text-[10px] font-semibold text-slate-600">Page<select value={signature.signaturePage} onChange={(event) => patch({ signatures: active.signatures.map((item) => item.id === signature.id ? { ...item, signaturePage: event.target.value === "first" ? "first" : "last" } : item) })} className="mt-1 h-8 w-full rounded-lg border border-slate-200 bg-white px-2 text-[10px]"><option value="last">Last page</option><option value="first">First page</option></select></label><label className="text-[10px] font-semibold text-slate-600">Size<input type="range" min="8" max="50" value={signature.signatureWidth} onChange={(event) => patch({ signatures: active.signatures.map((item) => item.id === signature.id ? { ...item, signatureWidth: Number(event.target.value) } : item) })} className="mt-2.5 w-full accent-[#0A4FE8]" /></label></div>}</div>)}</div>}
+
+              {active.signatureUrl && <div className="mt-3 rounded-xl border border-slate-200 bg-slate-50 p-3">
+                <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                  <span className="text-[11px] font-semibold text-[#07133B]">Primary signature</span>
+                  <span className="flex flex-wrap gap-1.5">
+                    <button type="button" onClick={() => openSaveSignature({ kind: "primary" })} className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-blue-200 bg-white px-2.5 text-[10px] font-semibold text-[#0A4FE8] hover:bg-blue-50"><Bookmark className="h-3.5 w-3.5" />Save for later</button>
+                    <button type="button" onClick={() => void removeAsset("signature")} className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-rose-200 bg-white px-2.5 text-[10px] font-semibold text-rose-600 hover:bg-rose-50"><Trash2 className="h-3.5 w-3.5" />Delete</button>
+                  </span>
+                </div>
+                <div className="grid grid-cols-2 gap-3"><label className="text-[11px] font-semibold text-gray-600">Page<select value={active.signaturePage} onChange={(event) => patch({ signaturePage: event.target.value === "first" ? "first" : "last" })} className="mt-1 h-9 w-full rounded-lg border border-gray-200 bg-white px-2 text-[11px]"><option value="last">Last page</option><option value="first">First page</option></select></label><label className="text-[11px] font-semibold text-gray-600">Size<input type="range" min="8" max="50" value={active.signatureWidth} onChange={(event) => patch({ signatureWidth: Number(event.target.value) })} className="mt-3 w-full accent-[#0A4FE8]" /></label></div>
+              </div>}
+
+              {active.signatures.length > 0 && <div className="mt-4 space-y-2">
+                <div className="flex items-center justify-between"><h3 className="text-[11.5px] font-semibold text-[#07133B]">Additional signers</h3><button type="button" onClick={() => void refreshActiveSignatures()} className="inline-flex items-center gap-1 text-[10.5px] font-semibold text-[#0A4FE8]"><RefreshCw className="h-3.5 w-3.5" />Refresh status</button></div>
+                {active.signatures.map((signature) => <div key={signature.id} className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+                  <div className="flex items-center justify-between gap-3"><span className="min-w-0"><strong className="block truncate text-[11px] text-[#07133B]">{signature.signerName || signature.signerEmail || "Uploaded signature"}</strong><span className="text-[10px] capitalize text-slate-500">{signature.status === "ready" ? "Ready" : signature.status}</span></span>{signature.shareUrl && (signature.status === "pending" || signature.status === "opened") && <UniversalShareButton title={`Signature request for ${active.title}`} text={`Please review and sign ${active.title} securely on CDS Space.`} url={signature.shareUrl} label="Share link" className="h-8 min-h-8 px-2 text-[10px]" />}</div>
+                  {signature.signatureUrl && <div className="mt-2 grid grid-cols-2 gap-2"><label className="text-[10px] font-semibold text-slate-600">Page<select value={signature.signaturePage} onChange={(event) => patch({ signatures: active.signatures.map((item) => item.id === signature.id ? { ...item, signaturePage: event.target.value === "first" ? "first" : "last" } : item) })} className="mt-1 h-8 w-full rounded-lg border border-slate-200 bg-white px-2 text-[10px]"><option value="last">Last page</option><option value="first">First page</option></select></label><label className="text-[10px] font-semibold text-slate-600">Size<input type="range" min="8" max="50" value={signature.signatureWidth} onChange={(event) => patch({ signatures: active.signatures.map((item) => item.id === signature.id ? { ...item, signatureWidth: Number(event.target.value) } : item) })} className="mt-2.5 w-full accent-[#0A4FE8]" /></label></div>}
+                  <div className="mt-2 flex justify-end gap-1.5">
+                    {signature.signatureUrl && <button type="button" onClick={() => openSaveSignature({ kind: "additional", id: signature.id, suggestedName: signature.signerName || signature.signerEmail || "Saved signature" })} className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-blue-200 bg-white px-2.5 text-[10px] font-semibold text-[#0A4FE8] hover:bg-blue-50"><Bookmark className="h-3.5 w-3.5" />Save</button>}
+                    <button type="button" disabled={signatureLibraryBusy === `remove:${signature.id}`} onClick={() => void removeAdditionalSignature(signature)} className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-rose-200 bg-white px-2.5 text-[10px] font-semibold text-rose-600 hover:bg-rose-50 disabled:opacity-50">{signatureLibraryBusy === `remove:${signature.id}` ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}{signature.status === "pending" || signature.status === "opened" ? "Cancel request" : "Delete"}</button>
+                  </div>
+                </div>)}
+              </div>}
+
+              {(active.signatureUrl || active.signatures.length > 0) && <button type="button" disabled={signatureLibraryBusy === "remove-all"} onClick={() => void removeAllSignatures()} className="mt-3 inline-flex h-9 w-full items-center justify-center gap-2 rounded-xl border border-rose-200 bg-rose-50 px-3 text-[10.5px] font-semibold text-rose-700 hover:bg-rose-100 disabled:opacity-50">{signatureLibraryBusy === "remove-all" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}Remove all signatures</button>}
+
+              <div className="my-4 border-t border-gray-100" />
+              <div className="flex items-center gap-2"><Library className="h-4 w-4 text-[#0A4FE8]" /><h3 className="text-[12px] font-semibold text-[#07133B]">Saved signatures</h3></div>
+              <p className="mt-1 text-[11px] text-gray-400">Private named signatures you can reuse on new Create Studio documents.</p>
+              {savedSignatures.length ? <div className="mt-3 grid gap-2 sm:grid-cols-2">{savedSignatures.map((signature) => <div key={signature.id} className="rounded-xl border border-slate-200 bg-white p-2.5"><div className="flex h-14 items-center justify-center rounded-lg bg-slate-50 p-2"><img src={signature.assetUrl} alt={`${signature.name} signature`} className="max-h-full max-w-full object-contain" /></div><p className="mt-2 truncate text-[10.5px] font-semibold text-[#07133B]">{signature.name}</p><div className="mt-2 grid grid-cols-[1fr_auto] gap-1.5"><button type="button" disabled={Boolean(signatureLibraryBusy)} onClick={() => void applySavedSignature(signature)} className="inline-flex h-8 items-center justify-center gap-1.5 rounded-lg bg-[#0A4FE8] px-2 text-[10px] font-semibold text-white hover:bg-[#083EC0] disabled:opacity-50">{signatureLibraryBusy === `apply:${signature.id}` ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <PenLine className="h-3.5 w-3.5" />}Use signature</button><button type="button" disabled={Boolean(signatureLibraryBusy)} onClick={() => void deleteSavedSignature(signature)} aria-label={`Delete saved signature ${signature.name}`} className="grid h-8 w-8 place-items-center rounded-lg border border-rose-200 text-rose-600 hover:bg-rose-50 disabled:opacity-50">{signatureLibraryBusy === `delete:${signature.id}` ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}</button></div></div>)}</div> : <div className="mt-3 rounded-xl border border-dashed border-slate-200 bg-slate-50 px-3 py-4 text-center text-[10.5px] text-slate-500">Save a current signature here to reuse it on future documents.</div>}
+
               <div className="my-4 border-t border-gray-100" />
               <div className="flex items-center gap-2"><Stamp className="h-4 w-4 text-[#0A4FE8]" /><h3 className="text-[12px] font-semibold text-[#07133B]">Company stamp / seal</h3></div>
               <p className="mt-1 text-[11px] text-gray-400">Upload or paste a transparent stamp or seal image, then drag it anywhere on the preview just like the signatures.</p>
               <div className="mt-3"><AssetUpload label="Stamp or seal image" name={active.stampName} kind="stamp" busy={uploading === "stamp"} onFile={upload} paste /></div>
-              {active.stampUrl && <div className="mt-3 grid grid-cols-2 gap-3"><label className="text-[11px] font-semibold text-gray-600">Place on<select value={active.stampPage} onChange={(event) => patch({ stampPage: event.target.value === "first" ? "first" : "last" })} className="mt-1 h-9 w-full rounded-lg border border-gray-200 bg-white px-2 text-[11px]"><option value="last">Last page</option><option value="first">First page</option></select></label><label className="text-[11px] font-semibold text-gray-600">Size<input type="range" min="8" max="50" value={active.stampWidth} onChange={(event) => patch({ stampWidth: Number(event.target.value) })} className="mt-3 w-full accent-[#0A4FE8]" /></label></div>}
+              {active.stampUrl && <div className="mt-3"><div className="mb-2 flex justify-end"><button type="button" onClick={() => void removeAsset("stamp")} className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-rose-200 bg-white px-2.5 text-[10px] font-semibold text-rose-600 hover:bg-rose-50"><Trash2 className="h-3.5 w-3.5" />Delete seal</button></div><div className="grid grid-cols-2 gap-3"><label className="text-[11px] font-semibold text-gray-600">Place on<select value={active.stampPage} onChange={(event) => patch({ stampPage: event.target.value === "first" ? "first" : "last" })} className="mt-1 h-9 w-full rounded-lg border border-gray-200 bg-white px-2 text-[11px]"><option value="last">Last page</option><option value="first">First page</option></select></label><label className="text-[11px] font-semibold text-gray-600">Size<input type="range" min="8" max="50" value={active.stampWidth} onChange={(event) => patch({ stampWidth: Number(event.target.value) })} className="mt-3 w-full accent-[#0A4FE8]" /></label></div></div>}
             </div>}
           </div>
         </aside>
       </div>
 
+      <Dialog open={Boolean(signatureSaveSource)} onOpenChange={(open) => { if (!open && signatureLibraryBusy !== "save") { setSignatureSaveSource(null); setSignatureSaveName(""); } }}>
+        <DialogContent className="sm:max-w-[480px]">
+          <DialogHeader><DialogTitle>Save signature for later</DialogTitle><DialogDescription>Give this private signature a clear name. It will appear in your saved signature library on every new Create Studio letterhead.</DialogDescription></DialogHeader>
+          <div className="mt-3 space-y-3">
+            <label className="block text-[11.5px] font-semibold text-gray-600">Signature name<input value={signatureSaveName} onChange={(event) => setSignatureSaveName(event.target.value)} maxLength={80} autoFocus placeholder="For example, Chris O. John" className="mt-1.5 h-10 w-full rounded-xl border border-gray-200 px-3 text-[12px] outline-none focus:border-[#0A4FE8]" /></label>
+            <button type="button" disabled={!signatureSaveName.trim() || signatureLibraryBusy === "save"} onClick={() => void saveSignatureToLibrary()} className="inline-flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-[#0A4FE8] px-4 text-[12px] font-semibold text-white hover:bg-[#083EC0] disabled:opacity-50">{signatureLibraryBusy === "save" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Bookmark className="h-4 w-4" />}{signatureLibraryBusy === "save" ? "Saving signature…" : "Save signature"}</button>
+          </div>
+        </DialogContent>
+      </Dialog>
       <Dialog open={exportDialogOpen} onOpenChange={(open) => { if (!exportingSize) setExportDialogOpen(open); }}>
         <DialogContent className="sm:max-w-[560px]">
           <DialogHeader>

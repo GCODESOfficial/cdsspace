@@ -58,6 +58,11 @@ const CLIENT_USAGE_SQL = `
      where letterhead.owner_kind = 'client' and letterhead.owner_id = $1
        and letterhead.deleted_at is null and signature.storage_path is not null
      group by signature.storage_path
+    union
+    select storage_path as path, max(size_bytes)::bigint as bytes
+      from public.create_saved_signatures
+     where owner_kind = 'client' and owner_id = $1 and deleted_at is null
+     group by storage_path
   ), letterhead_usage as (
     select coalesce(sum(bytes), 0)::bigint as bytes from letterhead_assets
   )
