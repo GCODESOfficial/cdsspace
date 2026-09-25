@@ -3,6 +3,7 @@ import { BRAND_IDENTITY_BUCKET } from "@/lib/brand-identity";
 import { readClientDashboardSessionUser } from "@/lib/client-dashboard-session";
 import { getGlashDbAdmin } from "@/lib/glashdb";
 import { glashMaybeOne } from "@/lib/glashdb/postgres";
+import { verifySignedClientFileQuery } from "@/lib/client-file-links";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -20,14 +21,17 @@ function safeDownloadName(fileName: string) {
 }
 
 export async function GET(
-  _request: Request,
+  request: Request,
   { params }: { params: Promise<{ fileId: string }> },
 ) {
   const { fileId } = await params;
   if (!UUID_PATTERN.test(fileId)) return new NextResponse("File not found", { status: 404 });
 
-  const user = await readClientDashboardSessionUser();
-  if (!user) return new NextResponse("Unauthorized", { status: 401 });
+  // The session (web cookie or app token), or a short-lived signed link issued by
+  // the list route for the app's in-app browser.
+  const sessionUser = await readClientDashboardSessionUser();
+  const userId = sessionUser?.id || verifySignedClientFileQuery(fileId, new URL(request.url).searchParams);
+  if (!userId) return new NextResponse("Unauthorized", { status: 401 });
 
   const file = await glashMaybeOne<{
     file_name: string;
@@ -47,7 +51,7 @@ export async function GET(
           select 1 from public.user_legal_agreements a where a.user_id = d.user_id
         )
       limit 1`,
-    [fileId, user.id],
+    [fileId, userId],
   );
   if (!file) return new NextResponse("File not found", { status: 404 });
 

@@ -43,18 +43,21 @@ export async function GET(request: Request) {
       }
     }
 
+    // Newest `limit` messages (older ones page in with `before`), returned
+    // oldest-first as before. Sorting ascending with a limit returned the
+    // oldest messages, so a long conversation never showed its latest replies.
     let query = supabaseAdmin
       .from("chat_messages")
       .select("*")
       .eq("room_id", roomId)
-      .order("created_at", { ascending: true })
+      .order("created_at", { ascending: false })
       .limit(limit);
 
     if (before) query = query.lt("created_at", before);
 
     const { data, error } = await query;
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-    return NextResponse.json({ messages: data });
+    return NextResponse.json({ messages: (data || []).reverse() });
   } catch (err) {
     console.error("GET /api/chat/messages error:", err);
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });
