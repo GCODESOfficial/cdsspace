@@ -1,7 +1,7 @@
 import "server-only";
 
 import { spawn } from "node:child_process";
-import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, stat, statfs, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import ffmpegPath from "ffmpeg-static";
@@ -30,6 +30,14 @@ export type CompressionResult = {
   reason?: string;
 };
 
+/**
+ * Runs ffmpeg over files in the working directory.
+ *
+ * MP4 cannot be read from a pipe: the index sits at the end of the file and
+ * the demuxer has to seek, so a piped attempt produces a partial file. The
+ * source therefore has to land on disk, which is why the free space is checked
+ * before a video is re-encoded at all.
+ */
 function runFfmpeg(args: string[]) {
   const executable = ffmpegPath;
   if (!executable) throw new Error("The video compressor is unavailable.");
@@ -38,8 +46,18 @@ function runFfmpeg(args: string[]) {
     let stderr = "";
     child.stderr.on("data", (chunk: Buffer) => { stderr += String(chunk).slice(-8_000); });
     child.on("error", reject);
-    child.on("close", (code) => (code === 0 ? resolve() : reject(new Error(`Compression failed (${code}): ${stderr.slice(-500)}`))));
+    child.on("close", (code) => (code === 0 ? resolve() : reject(new Error(`Compression failed (${code}): ${stderr.slice(-400)}`))));
   });
+}
+
+/** Working space available for the source and the encoded copy. */
+async function freeWorkingBytes() {
+  try {
+    const stats = await statfs(os.tmpdir());
+    return stats.bavail * stats.bsize;
+  } catch {
+    return Number.POSITIVE_INFINITY;
+  }
 }
 
 /**
@@ -48,10 +66,26 @@ function runFfmpeg(args: string[]) {
  */
 export async function compressTutorialVideo(input: Buffer, fileName = "tutorial.mp4"): Promise<CompressionResult & { output: Buffer }> {
   const originalBytes = input.byteLength;
+  const keepOriginal = (reason: string) => ({
+    changed: false as const,
+    originalBytes,
+    compressedBytes: originalBytes,
+    saving: 0,
+    reason,
+    output: input,
+  });
+
+  // The source plus its encoded copy have to fit, with a little room to spare.
+  const free = await freeWorkingBytes();
+  if (free < originalBytes * 2.2) {
+    return keepOriginal(
+      `Not enough working space to compress this video (${Math.round(free / (1024 * 1024))}MB free, about ${Math.round((originalBytes * 2.2) / (1024 * 1024))}MB needed). It was stored as uploaded.`,
+    );
+  }
+
   const workspace = await mkdtemp(path.join(os.tmpdir(), "cds-tutorial-"));
   const source = path.join(workspace, `source${path.extname(fileName) || ".mp4"}`);
   const target = path.join(workspace, "compressed.mp4");
-
   try {
     await writeFile(source, input);
     await runFfmpeg([
@@ -67,20 +101,16 @@ export async function compressTutorialVideo(input: Buffer, fileName = "tutorial.
       "-movflags", "+faststart",
       target,
     ]);
-
     const compressedBytes = (await stat(target)).size;
     const saving = originalBytes > 0 ? 1 - compressedBytes / originalBytes : 0;
     if (compressedBytes <= 0 || saving < COMPRESSION_MIN_SAVING) {
-      return {
-        changed: false,
-        originalBytes,
-        compressedBytes: originalBytes,
-        saving: Math.max(0, saving),
-        reason: "The upload was already well compressed, so it was kept as it is.",
-        output: input,
-      };
+      return keepOriginal("The upload was already well compressed, so it was kept as it is.");
     }
     return { changed: true, originalBytes, compressedBytes, saving, output: await readFile(target) };
+  } catch (error) {
+    // A tutorial that cannot be compressed still plays: keep the original.
+    console.error("[tutorial-compression] falling back to the original video", error);
+    return keepOriginal(error instanceof Error ? error.message.slice(0, 200) : "Compression was not possible.");
   } finally {
     await rm(workspace, { recursive: true, force: true }).catch(() => undefined);
   }
@@ -123,7 +153,9 @@ export async function compressStoredTutorialVideo(tutorialId: string) {
   const result = await compressTutorialVideo(original, media.video_name || "tutorial.mp4");
   if (!result.changed) return result;
 
-  const replacement = `${path.dirname(media.video_path)}/video-compressed-${Date.now()}.mp4`;
+  // Same folder as the original, without needing the node path module.
+  const folder = media.video_path.slice(0, media.video_path.lastIndexOf("/"));
+  const replacement = `${folder}/video-compressed-${Date.now()}.mp4`;
   const uploaded = await storage.upload(replacement, result.output, { contentType: "video/mp4", upsert: false });
   if (uploaded.error) return result;
 

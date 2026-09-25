@@ -38,10 +38,13 @@ test("an upload that stops can be carried on or discarded", async () => {
   assert.match(manager, /Continue upload/);
   assert.match(manager, /Discard/);
   // Parts are stored by index, so they can arrive in any order and be retried.
-  assert.match(session, /partName\(index\)/);
+  assert.match(session, /partPath\(id, index\)/);
   assert.match(session, /is missing \$\{session\.totalParts - parts\.length\}/);
-  // One admin's parts are not reachable by another.
-  assert.match(session, /session\.owner !== owner/);
+  // Parts live in storage, not on the server's 64MB temporary disk.
+  assert.match(session, /TUTORIAL_BUCKET/);
+  assert.doesNotMatch(session, /os\.tmpdir\(\)/);
+  // One admin's parts are not reachable by another: every lookup is by owner.
+  assert.match(session, /where id = \$1::uuid and owner = \$2/);
 });
 
 test("the stored video is compressed for streaming", async () => {
@@ -53,4 +56,7 @@ test("the stored video is compressed for streaming", async () => {
   assert.match(compression, /saving < COMPRESSION_MIN_SAVING/);
   // The original is only removed once the replacement is recorded.
   assert.match(compression, /storage\.remove\(\[media\.video_path\]\)/);
+  // Re-encoding needs room for the source and its copy, on a 64MB disk.
+  assert.match(compression, /freeWorkingBytes/);
+  assert.match(compression, /Not enough working space to compress/);
 });
