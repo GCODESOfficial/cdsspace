@@ -13,6 +13,7 @@ export type LetterheadPdfOptions = {
   title: string;
   bodyHtml: string;
   paperSize: "a4" | "legal";
+  bottomMargin: "wide" | "small";
   firstPageUrl?: string | null;
   secondPageUrl?: string | null;
   hasSecondPage: boolean;
@@ -21,6 +22,19 @@ export type LetterheadPdfOptions = {
   signatureY: number;
   signatureWidth: number;
   signaturePage: "first" | "last";
+  stampUrl?: string | null;
+  stampX: number;
+  stampY: number;
+  stampWidth: number;
+  stampPage: "first" | "last";
+  signatures?: Array<{
+    signatureUrl?: string | null;
+    signatureX: number;
+    signatureY: number;
+    signatureWidth: number;
+    signaturePage: "first" | "last";
+    status: string;
+  }>;
 };
 
 export type LetterheadExportSize = "original" | "compressed" | "lite";
@@ -33,6 +47,8 @@ export type LetterheadExportSize = "original" | "compressed" | "lite";
  */
 export const LETTERHEAD_CONTENT_BOTTOM_SAFE_AREA_RATIO = 0.16;
 export const LETTERHEAD_CONTENT_BOTTOM_MIN_MM = 48;
+export const LETTERHEAD_CONTENT_BOTTOM_SMALL_AREA_RATIO = 0.08;
+export const LETTERHEAD_CONTENT_BOTTOM_SMALL_MIN_MM = 24;
 
 type ImageAsset = { dataUrl: string; width: number; height: number };
 
@@ -75,7 +91,7 @@ async function loadImage(url: string): Promise<ImageAsset | null> {
 
 export async function buildLetterheadPdf(
   options: LetterheadPdfOptions,
-  { includeSignature = true }: { includeSignature?: boolean } = {},
+  { includeSignature = true, includeStamp = includeSignature }: { includeSignature?: boolean; includeStamp?: boolean } = {},
 ) {
   const format: [number, number] = options.paperSize === "legal" ? [215.9, 355.6] : [210, 297];
   const doc = new jsPDF({ orientation: "portrait", unit: "mm", format, compress: true, putOnlyUsedFonts: true });
@@ -84,18 +100,21 @@ export async function buildLetterheadPdf(
   const pageHeight = doc.internal.pageSize.getHeight();
   const marginX = 20;
   const top = 38;
-  const bottom = Math.max(
-    LETTERHEAD_CONTENT_BOTTOM_MIN_MM,
-    pageHeight * LETTERHEAD_CONTENT_BOTTOM_SAFE_AREA_RATIO,
-  );
+  const bottom = options.bottomMargin === "small"
+    ? Math.max(LETTERHEAD_CONTENT_BOTTOM_SMALL_MIN_MM, pageHeight * LETTERHEAD_CONTENT_BOTTOM_SMALL_AREA_RATIO)
+    : Math.max(LETTERHEAD_CONTENT_BOTTOM_MIN_MM, pageHeight * LETTERHEAD_CONTENT_BOTTOM_SAFE_AREA_RATIO);
   const maxWidth = pageWidth - (marginX * 2);
   const bodySize = 10.9;
   const bodyLineHeight = 6.5;
-  const [firstBackground, secondBackground, signature] = await Promise.all([
+  const [firstBackground, secondBackground, signature, stamp] = await Promise.all([
     options.firstPageUrl ? loadImage(options.firstPageUrl) : Promise.resolve(null),
     options.hasSecondPage && options.secondPageUrl ? loadImage(options.secondPageUrl) : Promise.resolve(null),
     includeSignature && options.signatureUrl ? loadImage(options.signatureUrl) : Promise.resolve(null),
+    includeStamp && options.stampUrl ? loadImage(options.stampUrl) : Promise.resolve(null),
   ]);
+  const additionalSignatures = includeSignature
+    ? (await Promise.all((options.signatures || []).map(async (placed) => ({ placed, asset: placed.signatureUrl ? await loadImage(placed.signatureUrl) : null })))).filter((entry) => entry.asset)
+    : [];
 
   function drawBackground(pageNumber: number) {
     doc.setFillColor(255, 255, 255);
@@ -345,6 +364,27 @@ export async function buildLetterheadPdf(
     const x = Math.min(pageWidth - width, Math.max(0, pageWidth * options.signatureX / 100));
     const signatureY = Math.min(pageHeight - height, Math.max(0, pageHeight * options.signatureY / 100));
     doc.addImage(signature.dataUrl, "PNG", x, signatureY, width, height);
+  }
+
+  for (const { placed, asset } of additionalSignatures) {
+    if (!asset || (placed.status !== "ready" && placed.status !== "signed")) continue;
+    const targetPage = placed.signaturePage === "first" ? 1 : pageNumber;
+    doc.setPage(targetPage);
+    const width = pageWidth * Math.min(80, Math.max(5, placed.signatureWidth)) / 100;
+    const height = width * asset.height / asset.width;
+    const x = Math.min(pageWidth - width, Math.max(0, pageWidth * placed.signatureX / 100));
+    const placedY = Math.min(pageHeight - height, Math.max(0, pageHeight * placed.signatureY / 100));
+    doc.addImage(asset.dataUrl, "PNG", x, placedY, width, height);
+  }
+
+  if (stamp && includeStamp) {
+    const targetPage = options.stampPage === "first" ? 1 : pageNumber;
+    doc.setPage(targetPage);
+    const width = pageWidth * Math.min(80, Math.max(5, options.stampWidth)) / 100;
+    const height = width * stamp.height / stamp.width;
+    const x = Math.min(pageWidth - width, Math.max(0, pageWidth * options.stampX / 100));
+    const stampY = Math.min(pageHeight - height, Math.max(0, pageHeight * options.stampY / 100));
+    doc.addImage(stamp.dataUrl, "PNG", x, stampY, width, height);
   }
 
   doc.setProperties({

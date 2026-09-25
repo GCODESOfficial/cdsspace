@@ -8,7 +8,7 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-const COLUMN = { firstPage: "first_page_path", secondPage: "second_page_path", signature: "signature_path" } as const;
+const COLUMN = { firstPage: "first_page_path", secondPage: "second_page_path", signature: "signature_path", stamp: "stamp_path" } as const;
 
 /**
  * Streams a letterhead image to its owner.

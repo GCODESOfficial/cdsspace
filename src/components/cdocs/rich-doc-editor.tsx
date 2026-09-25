@@ -9,6 +9,7 @@ import {
   List, ListOrdered, Heading1, Heading2, Heading3, Minus, Link as LinkIcon,
   Image as ImageIcon, Palette, Type, Undo2, Redo2, Quote, Code, RemoveFormatting,
 } from "lucide-react";
+import { ViewportPortal } from "@/components/ui/ViewportPortal";
 
 /**
  * CDS Space branded rich editor.
@@ -45,6 +46,19 @@ export function RichDocEditor({ value, onChange, theme = "light", placeholder = 
   const [colorOpen, setColorOpen] = useState(false);
   const [fontSizeOpen, setFontSizeOpen] = useState(false);
   const [savedSelection, setSavedSelection] = useState<Range | null>(null);
+  const [colorPosition, setColorPosition] = useState({ left: 12, top: 72 });
+  const [fontSizePosition, setFontSizePosition] = useState({ left: 12, top: 72 });
+  const colorAnchor = useRef<HTMLDivElement>(null);
+  const fontSizeAnchor = useRef<HTMLDivElement>(null);
+
+  function popupPosition(anchor: HTMLDivElement | null, width: number) {
+    const bounds = anchor?.getBoundingClientRect();
+    if (!bounds) return { left: 12, top: 72 };
+    return {
+      left: Math.max(10, Math.min(window.innerWidth - width - 10, bounds.left)),
+      top: Math.max(10, Math.min(window.innerHeight - 220, bounds.bottom + 6)),
+    };
+  }
 
   // Paint initial value once; after that contentEditable owns it
   useEffect(() => {
@@ -201,7 +215,8 @@ export function RichDocEditor({ value, onChange, theme = "light", placeholder = 
       {/* Toolbar */}
       <div
         onMouseDown={(e) => { saveSelection(); e.preventDefault(); /* keep selection while clicking buttons */ }}
-        className={`sticky top-[56px] z-20 flex flex-wrap items-center gap-0.5 overflow-visible px-2 py-2 rounded-xl border mb-4 ${
+        onScroll={() => { setColorOpen(false); setFontSizeOpen(false); }}
+        className={`sticky top-[56px] z-20 flex flex-nowrap items-center gap-0.5 overflow-x-auto overflow-y-hidden overscroll-x-contain whitespace-nowrap px-2 py-2 rounded-xl border mb-4 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden sm:flex-wrap sm:overflow-visible ${
           isDark ? "bg-[#10225A] border-white/10" : "bg-white border-gray-100 shadow-sm"
         }`}
       >
@@ -225,12 +240,13 @@ export function RichDocEditor({ value, onChange, theme = "light", placeholder = 
         <Divider dark={isDark} />
 
         {/* Color */}
-        <div className="relative shrink-0">
-          <TBtn icon={<Palette className="w-3.5 h-3.5" />} title="Text color" onClick={() => setColorOpen((v) => !v)} dark={isDark} />
+        <div ref={colorAnchor} className="relative shrink-0">
+          <TBtn icon={<Palette className="w-3.5 h-3.5" />} title="Text color" onClick={() => { setColorPosition(popupPosition(colorAnchor.current, 164)); setColorOpen((v) => !v); setFontSizeOpen(false); }} dark={isDark} />
           {colorOpen && (
-            <div
+            <ViewportPortal><div
               onMouseDown={(e) => e.preventDefault()}
-              className="absolute z-30 top-full left-0 mt-1 bg-white rounded-xl shadow-xl ring-1 ring-gray-100 p-2 grid grid-cols-5 gap-1"
+              className="fixed layer-popover grid grid-cols-5 gap-1 rounded-xl bg-white p-2 shadow-xl ring-1 ring-gray-100"
+              style={colorPosition}
             >
               {COLORS.map((c) => (
                 <button
@@ -241,17 +257,18 @@ export function RichDocEditor({ value, onChange, theme = "light", placeholder = 
                   title={c}
                 />
               ))}
-            </div>
+            </div></ViewportPortal>
           )}
         </div>
 
         {/* Font size */}
-        <div className="relative shrink-0">
-          <TBtn icon={<span className="text-[10px] font-bold">AA</span>} title="Font size" onClick={() => setFontSizeOpen((v) => !v)} dark={isDark} />
+        <div ref={fontSizeAnchor} className="relative shrink-0">
+          <TBtn icon={<span className="text-[10px] font-bold">AA</span>} title="Font size" onClick={() => { setFontSizePosition(popupPosition(fontSizeAnchor.current, 144)); setFontSizeOpen((v) => !v); setColorOpen(false); }} dark={isDark} />
           {fontSizeOpen && (
-            <div
+            <ViewportPortal><div
               onMouseDown={(e) => e.preventDefault()}
-              className="layer-popover absolute left-0 top-full mt-1 flex w-36 min-w-36 shrink-0 flex-col overflow-hidden rounded-xl bg-white p-1 shadow-xl ring-1 ring-gray-100"
+              className="fixed layer-popover flex w-36 min-w-36 shrink-0 flex-col overflow-hidden rounded-xl bg-white p-1 shadow-xl ring-1 ring-gray-100"
+              style={fontSizePosition}
             >
               {FONT_SIZES.map((s) => (
                 <button
@@ -262,7 +279,7 @@ export function RichDocEditor({ value, onChange, theme = "light", placeholder = 
                   {s.label}
                 </button>
               ))}
-            </div>
+            </div></ViewportPortal>
           )}
         </div>
         <Divider dark={isDark} />
