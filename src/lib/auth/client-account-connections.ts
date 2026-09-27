@@ -11,7 +11,7 @@ import {
 import { getGlashDbServiceRoleConfig } from "@/lib/glashdb/env";
 import { glashMaybeOne, glashQuery } from "@/lib/glashdb/postgres";
 
-export type ClientAuthProvider = "google" | "linkedin";
+export type ClientAuthProvider = "google" | "linkedin" | "apple";
 
 export type ClientAuthConnection = {
   provider: ClientAuthProvider;
@@ -53,7 +53,7 @@ const LINK_LIFETIME_SECONDS = 10 * 60;
 const PROVIDERS = new Set<ClientAuthProvider>(["google", "linkedin"]);
 
 export function isClientAuthProvider(value: unknown): value is ClientAuthProvider {
-  return value === "google" || value === "linkedin";
+  return value === "google" || value === "linkedin" || value === "apple";
 }
 
 function signingSecret() {
@@ -157,6 +157,7 @@ export function oauthProviderForUser(user: User): ClientAuthProvider | null {
   if (isClientAuthProvider(declared)) return declared;
   if (providerSubject(user, "linkedin")) return "linkedin";
   if (providerSubject(user, "google")) return "google";
+  if (providerSubject(user, "apple")) return "apple";
   return null;
 }
 
@@ -208,7 +209,7 @@ export async function recordProviderLogin(input: {
  * provider. It can therefore move that provider sign-in from a separate,
  * previously-created profile onto the active user ID without merging data.
  */
-async function connectProviderToClient(input: {
+export async function connectProviderToClient(input: {
   clientUserId: string;
   provider: ClientAuthProvider;
   subject: string;
