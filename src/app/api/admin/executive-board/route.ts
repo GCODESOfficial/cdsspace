@@ -105,24 +105,60 @@ async function syncRevenueModelTargets(actor: string) {
   );
 }
 
-/** Everything the board page needs, in one round trip. */
-async function loadBoard(draftActorId: string) {
+type ExecutiveBoardView = "overview" | "budgets" | "expansion-budgets" | "targets" | "models" | "vault";
+
+function executiveBoardView(value: string): ExecutiveBoardView {
+  return ["budgets", "expansion-budgets", "targets", "models", "vault"].includes(value)
+    ? value as ExecutiveBoardView
+    : "overview";
+}
+
+const VIEW_PERMISSION: Record<ExecutiveBoardView, string> = {
+  overview: "executive_board.view",
+  budgets: "executive_board.budgets_view",
+  "expansion-budgets": "executive_board.expansion_budgets_view",
+  targets: "executive_board.targets_view",
+  models: "executive_board.models_view",
+  vault: "executive_board.vault_view",
+};
+
+/** Load only the board area the current route is authorised to expose. */
+async function loadBoard(draftActorId: string, view: ExecutiveBoardView) {
+  const overview = view === "overview";
   const [budgets, expansionBudgets, expansionDrafts, models, steps, targets, folders, files, shares] = await Promise.all([
-    glashQuery<any>(`select * from public.executive_budgets order by period_start desc nulls last, created_at desc limit 500`),
-    glashQuery<any>(`select * from public.executive_expansion_budgets order by target_start asc, created_at desc limit 500`),
-    glashQuery<any>(
-      `select payload, updated_at
-         from public.executive_expansion_budget_drafts
-        where actor_id=$1
-        limit 1`,
-      [draftActorId],
-    ),
-    glashQuery<any>(`select * from public.executive_revenue_models order by position asc, created_at asc limit 200`),
-    glashQuery<any>(`select * from public.executive_revenue_steps order by position asc, created_at asc limit 2000`),
-    glashQuery<any>(`select * from public.executive_targets order by due_on asc nulls last, created_at desc limit 500`),
-    glashQuery<any>(`select id, parent_id, name, description, password_hash, created_at from public.executive_vault_folders order by name asc limit 500`),
-    glashQuery<any>(`select id, folder_id, title, description, kind, file_name, file_mime, file_size_bytes, password_hash, created_at, source_kind, source_id, link_url from public.executive_vault_files order by created_at desc limit 1000`),
-    glashQuery<any>(`select * from public.executive_vault_shares order by created_at desc limit 500`),
+    overview || view === "budgets"
+      ? glashQuery<any>(`select * from public.executive_budgets order by period_start desc nulls last, created_at desc limit 500`)
+      : Promise.resolve([]),
+    overview || view === "expansion-budgets"
+      ? glashQuery<any>(`select * from public.executive_expansion_budgets order by target_start asc, created_at desc limit 500`)
+      : Promise.resolve([]),
+    view === "expansion-budgets"
+      ? glashQuery<any>(
+        `select payload, updated_at
+           from public.executive_expansion_budget_drafts
+          where actor_id=$1
+          limit 1`,
+        [draftActorId],
+      )
+      : Promise.resolve([]),
+    overview || view === "models"
+      ? glashQuery<any>(`select * from public.executive_revenue_models order by position asc, created_at asc limit 200`)
+      : Promise.resolve([]),
+    overview || view === "models"
+      ? glashQuery<any>(`select * from public.executive_revenue_steps order by position asc, created_at asc limit 2000`)
+      : Promise.resolve([]),
+    overview || view === "targets"
+      ? glashQuery<any>(`select * from public.executive_targets order by due_on asc nulls last, created_at desc limit 500`)
+      : Promise.resolve([]),
+    overview || view === "vault"
+      ? glashQuery<any>(`select id, parent_id, name, description, password_hash, created_at from public.executive_vault_folders order by name asc limit 500`)
+      : Promise.resolve([]),
+    overview || view === "vault"
+      ? glashQuery<any>(`select id, folder_id, title, description, kind, file_name, file_mime, file_size_bytes, password_hash, created_at, source_kind, source_id, link_url from public.executive_vault_files order by created_at desc limit 1000`)
+      : Promise.resolve([]),
+    view === "vault"
+      ? glashQuery<any>(`select * from public.executive_vault_shares order by created_at desc limit 500`)
+      : Promise.resolve([]),
   ]);
 
   const folderHasPassword = new Map<string, boolean>();
@@ -150,18 +186,21 @@ async function loadBoard(draftActorId: string) {
 }
 
 export async function GET(req: NextRequest) {
-  const { session, denied } = await requireAdmin(req, "executive_board.view");
+  const view = executiveBoardView(str(req.nextUrl.searchParams.get("view"), 40));
+  const { session, denied } = await requireAdmin(req, VIEW_PERMISSION[view]);
   if (denied) return denied;
   try {
     // Kept current on read, so a new month brings its targets with it without
     // anyone having to remember. Failing here must not take the board down.
-    try {
-      await syncRevenueModelTargets(session?.email || "system");
-    } catch {
-      // The board is still perfectly usable without this month's generated rows.
+    if (view === "overview" || view === "targets") {
+      try {
+        await syncRevenueModelTargets(session?.email || "system");
+      } catch {
+        // The board is still perfectly usable without this month's generated rows.
+      }
     }
     const draftActorId = session?.memberId || session?.email.toLowerCase() || "system";
-    return NextResponse.json({ ok: true, ...(await loadBoard(draftActorId)) });
+    return NextResponse.json({ ok: true, ...(await loadBoard(draftActorId, view)) });
   } catch (error) {
     return NextResponse.json(
       { ok: false, error: error instanceof Error ? error.message : "Could not load the Executive Board." },

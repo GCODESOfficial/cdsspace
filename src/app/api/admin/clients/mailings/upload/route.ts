@@ -9,6 +9,30 @@ export const dynamic = "force-dynamic";
 
 const BUCKET = "sales-mailing-images";
 
+export async function GET(req: NextRequest) {
+  const { denied } = await requireAdmin(req, "clients.mailings.view");
+  if (denied) return denied;
+
+  const storagePath = req.nextUrl.searchParams.get("path")?.trim() || "";
+  if (!storagePath.startsWith("sales-mailings/") || storagePath.includes("..")) {
+    return NextResponse.json({ error: "Invalid campaign image path." }, { status: 400 });
+  }
+
+  const db = getGlashDbAdmin() as any;
+  const { data, error } = await db.storage.from(BUCKET).download(storagePath);
+  if (error || !data) {
+    return NextResponse.json({ error: "Campaign image not found." }, { status: 404 });
+  }
+
+  return new NextResponse(await data.arrayBuffer(), {
+    headers: {
+      "Content-Type": data.type || "application/octet-stream",
+      "Cache-Control": "private, max-age=300",
+      "X-Content-Type-Options": "nosniff",
+    },
+  });
+}
+
 export async function POST(req: NextRequest) {
   const { denied } = await requireAdmin(req, "clients.mailings.create");
   if (denied) return denied;
@@ -26,7 +50,6 @@ export async function POST(req: NextRequest) {
       upsert: false,
     });
     if (error) throw new Error(error.message);
-    const { data: preview } = await db.storage.from(BUCKET).createSignedUrl(storagePath, 15 * 60);
     return NextResponse.json({
       ok: true,
       storage_path: storagePath,
@@ -35,7 +58,7 @@ export async function POST(req: NextRequest) {
       size_bytes: safe.buffer.byteLength,
       width: safe.width,
       height: safe.height,
-      preview_url: preview?.signedUrl || null,
+      preview_url: `/api/admin/clients/mailings/upload?path=${encodeURIComponent(storagePath)}`,
     });
   } catch (error) {
     const status = error instanceof UploadSecurityError ? error.status : 500;

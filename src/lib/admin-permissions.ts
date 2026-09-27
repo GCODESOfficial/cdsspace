@@ -386,7 +386,7 @@ export const PERMISSION_GROUPS: PermissionGroup[] = [
     ],
   },
   {
-    key: "clients",
+    key: "clients_directory",
     label: "Clients / Brands",
     route: "/admin/clients",
     permissions: [
@@ -416,6 +416,19 @@ export const PERMISSION_GROUPS: PermissionGroup[] = [
         description: "Download client lists",
       },
       {
+        key: CLIENT_IDENTITY_PERMISSION,
+        label: "See Client Identity",
+        description:
+          "See client names, email addresses and phone numbers. Withheld from every admin until it is granted here, and never implied by any other permission.",
+      },
+    ],
+  },
+  {
+    key: "clients_banners",
+    label: "Banner Commerce",
+    route: "/admin/clients/banners",
+    permissions: [
+      {
         key: "clients.banners.view",
         label: "View Banner Commerce",
         description:
@@ -427,6 +440,13 @@ export const PERMISSION_GROUPS: PermissionGroup[] = [
         description:
           "Set banner production and design prices used for client invoices",
       },
+    ],
+  },
+  {
+    key: "clients_merch",
+    label: "Merch Commerce",
+    route: "/admin/clients/merch",
+    permissions: [
       {
         key: "clients.merch.view",
         label: "View Merch Commerce",
@@ -439,6 +459,13 @@ export const PERMISSION_GROUPS: PermissionGroup[] = [
         description:
           "Manage merch products, presentation visuals, variants, production prices, and design fees",
       },
+    ],
+  },
+  {
+    key: "clients_sales_settings",
+    label: "Sales Settings",
+    route: "/admin/clients/sales-settings",
+    permissions: [
       {
         key: "clients.sales_settings.view",
         label: "View Sales Settings",
@@ -451,6 +478,13 @@ export const PERMISSION_GROUPS: PermissionGroup[] = [
         description:
           "Manage shared offers and fulfilment rules used across client orders",
       },
+    ],
+  },
+  {
+    key: "clients_sales_scripts",
+    label: "Sales Scripts",
+    route: "/admin/clients/sales-scripts",
+    permissions: [
       {
         key: "clients.sales_scripts.view",
         label: "View Sales Scripts",
@@ -461,6 +495,13 @@ export const PERMISSION_GROUPS: PermissionGroup[] = [
         label: "Manage Sales Scripts",
         description: "Create, edit, publish, archive, and restore Sales Hub scripts",
       },
+    ],
+  },
+  {
+    key: "clients_growth",
+    label: "Growth Engine",
+    route: "/admin/clients/growth",
+    permissions: [
       {
         key: "clients.growth.view",
         label: "View Growth Engine",
@@ -484,12 +525,13 @@ export const PERMISSION_GROUPS: PermissionGroup[] = [
         description:
           "Deliver an approved email through the CDS Space email account",
       },
-      {
-        key: CLIENT_IDENTITY_PERMISSION,
-        label: "See Client Identity",
-        description:
-          "See client names, email addresses and phone numbers. Withheld from every admin until it is granted here, and never implied by any other permission.",
-      },
+    ],
+  },
+  {
+    key: "clients_modules",
+    label: "Dashboard Modules",
+    route: "/admin/clients/modules",
+    permissions: [
       {
         key: "clients.modules.view",
         label: "View Dashboard Modules",
@@ -501,6 +543,13 @@ export const PERMISSION_GROUPS: PermissionGroup[] = [
         description:
           "Turn client dashboard sections on or off platform-wide or per client",
       },
+    ],
+  },
+  {
+    key: "clients_mailings",
+    label: "Client Mailings",
+    route: "/admin/clients/mailings",
+    permissions: [
       {
         key: "clients.mailings.view",
         label: "View client mailings",
@@ -580,54 +629,114 @@ export const PERMISSION_GROUPS: PermissionGroup[] = [
 
   // ─────────────── Executive Board ───────────────
   {
-    key: "executive_board",
-    label: "Executive Board",
+    key: "executive_board_overview",
+    label: "Overview",
     route: "/admin/executive-board",
     permissions: [
       {
         key: "executive_board.view",
-        label: "View Executive Board",
-        description:
-          "See budgets, expansion plans, targets, revenue models, and the vault index",
+        label: "View overview",
+        description: "See Executive Board summaries and headline figures",
+      },
+    ],
+  },
+  {
+    key: "executive_board_budgets",
+    label: "Budgets",
+    route: "/admin/executive-board/budgets",
+    permissions: [
+      {
+        key: "executive_board.budgets_view",
+        label: "View budgets",
+        description: "Open budget lines and financial summaries without changing them",
       },
       {
         key: "executive_board.budgets",
-        label: "Manage Budgets",
+        label: "Manage budgets",
         description: "Create, edit, and delete budget lines",
+      },
+    ],
+  },
+  {
+    key: "executive_board_expansion_budgets",
+    label: "Expansion budgets",
+    route: "/admin/executive-board/expansion-budgets",
+    permissions: [
+      {
+        key: "executive_board.expansion_budgets_view",
+        label: "View expansion budgets",
+        description: "Open future company investment plans without changing them",
       },
       {
         key: "executive_board.expansion_budgets",
         label: "Manage expansion budgets",
         description: "Plan and update future company expansion budgets",
       },
+    ],
+  },
+  {
+    key: "executive_board_targets",
+    label: "Targets",
+    route: "/admin/executive-board/targets",
+    permissions: [
+      {
+        key: "executive_board.targets_view",
+        label: "View targets",
+        description: "Open company targets and progress without changing them",
+      },
       {
         key: "executive_board.targets",
-        label: "Manage Targets",
+        label: "Manage targets",
         description: "Create, edit, and delete company targets",
+      },
+    ],
+  },
+  {
+    key: "executive_board_models",
+    label: "Revenue models",
+    route: "/admin/executive-board/revenue-models",
+    permissions: [
+      {
+        key: "executive_board.models_view",
+        label: "View revenue models",
+        description: "Open revenue models and execution steps without changing them",
       },
       {
         key: "executive_board.models",
-        label: "Manage Revenue Models",
+        label: "Manage revenue models",
         description:
           "Create revenue models and their step-by-step execution plans",
       },
+    ],
+  },
+  {
+    key: "executive_board_vault",
+    label: "Document vault",
+    route: "/admin/executive-board/vault",
+    permissions: [
       {
         key: "executive_board.vault_view",
-        label: "Open Vault Files",
+        label: "Open vault files",
         description:
           "Download legal documents and attachments held in the vault",
       },
       {
         key: "executive_board.vault_manage",
-        label: "Manage Vault",
+        label: "Manage vault",
         description:
           "Upload files, build folders, set passwords, and issue share links",
       },
+    ],
+  },
+  {
+    key: "executive_board_letterhead",
+    label: "Create LH doc",
+    route: "/admin/executive-board/letterhead",
+    permissions: [
       {
-        key: "executive_board.letterhead_manage",
-        label: "Set Company Letterhead",
-        description:
-          "Replace the CDS Space letterhead applied to every official letter",
+        key: "executive_board.letterhead_view",
+        label: "View official letters",
+        description: "Open, preview, and export Executive Board letterhead documents",
       },
     ],
   },
@@ -1489,6 +1598,117 @@ export const PERMISSION_GROUPS: PermissionGroup[] = [
   },
 ];
 
+export interface PermissionSection {
+  key: string;
+  label: string;
+  groups: PermissionGroup[];
+}
+
+/**
+ * Permission-picker structure in the same order and hierarchy as the live
+ * admin sidebar. The permission keys remain stable; this only replaces the
+ * obsolete flat sitemap presentation used when roles are created or edited.
+ */
+const PERMISSION_SECTION_DEFINITIONS: Array<{
+  key: string;
+  label: string;
+  groupKeys: string[];
+}> = [
+  { key: "dashboard", label: "Dashboard", groupKeys: ["dashboard"] },
+  { key: "chat", label: "Chat", groupKeys: ["team_chat"] },
+  { key: "web_content", label: "Web Content", groupKeys: ["upload_works", "faqs", "portfolio"] },
+  { key: "deals", label: "Deals", groupKeys: ["deals"] },
+  {
+    key: "sales_hub",
+    label: "Sales Hub",
+    groupKeys: [
+      "messages",
+      "consultations",
+      "clients_mailings",
+      "brand_briefs",
+      "clients_banners",
+      "clients_merch",
+      "pricing",
+      "clients_sales_settings",
+      "clients_sales_scripts",
+      "clients_modules",
+      "orders",
+      "deliveries",
+      "clients_growth",
+      "integrations",
+    ],
+  },
+  {
+    key: "executive_board",
+    label: "Executive Board",
+    groupKeys: [
+      "executive_board_overview",
+      "executive_board_budgets",
+      "executive_board_expansion_budgets",
+      "executive_board_targets",
+      "executive_board_models",
+      "executive_board_letterhead",
+      "executive_board_vault",
+    ],
+  },
+  { key: "compliance", label: "Compliance", groupKeys: ["equipment_inventory", "audit_report", "legal"] },
+  { key: "taskboard", label: "Taskboard", groupKeys: ["team_today"] },
+  { key: "create", label: "Create", groupKeys: ["create"] },
+  { key: "content_hub", label: "Content Hub", groupKeys: ["content_hub"] },
+  { key: "intelligence", label: "Intelligence", groupKeys: ["blog"] },
+  {
+    key: "finance",
+    label: "Finance",
+    groupKeys: [
+      "finance",
+      "finance_invoices",
+      "finance_quotations",
+      "finance_pricelists",
+      "finance_pricelist",
+      "finance_expenditures",
+      "finance_payroll",
+      "team_payroll",
+      "finance_audit",
+    ],
+  },
+  { key: "projects", label: "Projects", groupKeys: ["projects"] },
+  { key: "crm", label: "CRM", groupKeys: ["clients_directory", "testimonials"] },
+  { key: "team_compliance", label: "Team compliance", groupKeys: ["team_compliance"] },
+  {
+    key: "hrm",
+    label: "HRM",
+    groupKeys: [
+      "applicants",
+      "team_members",
+      "hr_compliance",
+      "timebook",
+      "work_tracking",
+      "team_reports",
+      "departments",
+      "sub_admins",
+    ],
+  },
+  { key: "workspace", label: "Workspace", groupKeys: ["workspace"] },
+];
+
+const permissionGroupByKey = new Map(PERMISSION_GROUPS.map((group) => [group.key, group]));
+const assignedPermissionGroups = new Set(PERMISSION_SECTION_DEFINITIONS.flatMap((section) => section.groupKeys));
+
+export const PERMISSION_SECTIONS: PermissionSection[] = [
+  ...PERMISSION_SECTION_DEFINITIONS.map((section) => ({
+    key: section.key,
+    label: section.label,
+    groups: section.groupKeys
+      .map((groupKey) => permissionGroupByKey.get(groupKey))
+      .filter((group): group is PermissionGroup => Boolean(group)),
+  })),
+  {
+    key: "other",
+    label: "Other administration",
+    groups: PERMISSION_GROUPS.filter((group) => !assignedPermissionGroups.has(group.key)),
+  },
+].filter((section) => section.groups.length > 0);
+
 /** Flat list of all permissions, for validation and role-catalogue UIs. */
 export const ALL_PERMISSIONS = PERMISSION_GROUPS.flatMap((g) => g.permissions);
 
@@ -1500,6 +1720,30 @@ export const ALL_PERMISSIONS = PERMISSION_GROUPS.flatMap((g) => g.permissions);
 export function hasPermission(permissions: string[], key: string): boolean {
   if (permissions.includes("all")) return true;
   if (permissions.includes(key)) return true;
+  // Preserve historical parent grants after the permission catalogue was
+  // reorganised to mirror the current sidebar. Newly assigned roles receive
+  // the narrower page groups below; old `clients` / `executive_board` grants
+  // continue to mean the full section rather than silently losing access.
+  if (
+    key.startsWith("clients.")
+    && key !== CLIENT_IDENTITY_PERMISSION
+    && permissions.includes("clients")
+  )
+    return true;
+  if (key.startsWith("executive_board.") && permissions.includes("executive_board"))
+    return true;
+  if (
+    permissions.includes("executive_board.view")
+    && [
+      "executive_board.budgets_view",
+      "executive_board.expansion_budgets_view",
+      "executive_board.targets_view",
+      "executive_board.models_view",
+      "executive_board.letterhead_view",
+      "executive_board.vault_view",
+    ].includes(key)
+  )
+    return true;
   // Expansion budgets were split from the original budget permission after
   // roles were already in use. Existing budget managers retain write access
   // to that part of the same Executive Board workflow.
@@ -1507,6 +1751,24 @@ export function hasPermission(permissions: string[], key: string): boolean {
     key === "executive_board.expansion_budgets" &&
     permissions.includes("executive_board.budgets")
   )
+    return true;
+  if (
+    key === "executive_board.letterhead_view" &&
+    permissions.includes("executive_board.letterhead_manage")
+  )
+    return true;
+  if (
+    key === "executive_board.vault_view" &&
+    permissions.includes("executive_board.vault_manage")
+  )
+    return true;
+  const executiveViewGrant: Record<string, string> = {
+    "executive_board.budgets_view": "executive_board.budgets",
+    "executive_board.expansion_budgets_view": "executive_board.expansion_budgets",
+    "executive_board.targets_view": "executive_board.targets",
+    "executive_board.models_view": "executive_board.models",
+  };
+  if (executiveViewGrant[key] && permissions.includes(executiveViewGrant[key]))
     return true;
   // Client identity is never inherited. Every rule below this line widens a
   // grant - a parent group implies its children, finance.manage implies the
@@ -1615,7 +1877,7 @@ export function getPermissionForRoute(pathname: string): string | null {
     return "deals.prospects";
   if (pathname.startsWith("/admin/deals/prospects")) return "deals.prospects";
   if (pathname.startsWith("/admin/deals")) return "deals";
-  if (pathname.startsWith("/admin/vendors")) return "clients";
+  if (pathname.startsWith("/admin/vendors")) return "clients.view";
   if (pathname.startsWith("/admin/clients/deliveries")) return "deliveries";
   if (pathname.startsWith("/admin/clients/mailings"))
     return "clients.mailings.view";
@@ -1628,8 +1890,23 @@ export function getPermissionForRoute(pathname: string): string | null {
   if (pathname.startsWith("/admin/clients/banners"))
     return "clients.banners.view";
   if (pathname.startsWith("/admin/clients/merch")) return "clients.merch.view";
-  if (pathname.startsWith("/admin/clients")) return "clients";
+  if (pathname.startsWith("/admin/clients")) return "clients.view";
   if (pathname.startsWith("/admin/testimonials")) return "testimonials";
+
+  if (pathname.startsWith("/admin/executive-board/expansion-budgets"))
+    return "executive_board.expansion_budgets_view";
+  if (pathname.startsWith("/admin/executive-board/budgets"))
+    return "executive_board.budgets_view";
+  if (pathname.startsWith("/admin/executive-board/targets"))
+    return "executive_board.targets_view";
+  if (pathname.startsWith("/admin/executive-board/revenue-models"))
+    return "executive_board.models_view";
+  if (pathname.startsWith("/admin/executive-board/letterhead"))
+    return "executive_board.letterhead_view";
+  if (pathname.startsWith("/admin/executive-board/vault"))
+    return "executive_board.vault_view";
+  if (pathname.startsWith("/admin/executive-board"))
+    return "executive_board.view";
 
   if (pathname.startsWith("/admin/finance/pricelists"))
     return "finance_pricelists";

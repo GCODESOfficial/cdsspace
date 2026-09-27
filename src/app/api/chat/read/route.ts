@@ -2,8 +2,11 @@ import { NextResponse } from "next/server";
 import { verifyUser } from "@/lib/admin-auth";
 import { getClientChatAdminActor } from "@/lib/client-chat-admin";
 import { supabaseAdmin } from "@/lib/supabase";
+import { isLegacyClientUuid } from "@/lib/client-routes";
 
 export const dynamic = "force-dynamic";
+
+const CLIENT_MESSAGE_LINK_PREFIX = "/dashboard/messages";
 
 export async function POST(request: Request) {
   try {
@@ -51,6 +54,26 @@ export async function POST(request: Request) {
 
     if (error) {
       return NextResponse.json({ error: error.message }, { status: 500 });
+    }
+
+    // A chat message and its bell entry are two representations of the same
+    // unread event. Clear the matching notification when the conversation is
+    // read so the bell cannot continue advertising a message already seen.
+    const notificationOwnerId = isAdmin ? admin!.id : userSession!.user.id;
+    if (!isAdmin || isLegacyClientUuid(notificationOwnerId)) {
+      let notificationQuery = supabaseAdmin
+        .from("notifications")
+        .update({ is_read: true })
+        .eq("user_id", notificationOwnerId)
+        .eq("type", "new_message")
+        .eq("is_read", false);
+      notificationQuery = isAdmin
+        ? notificationQuery.eq("link", `/chat?room=${roomId}`)
+        : notificationQuery.like("link", `${CLIENT_MESSAGE_LINK_PREFIX}%`);
+      const { error: notificationError } = await notificationQuery;
+      if (notificationError) {
+        return NextResponse.json({ error: notificationError.message }, { status: 500 });
+      }
     }
 
     return NextResponse.json({ success: true });

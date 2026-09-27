@@ -2,7 +2,7 @@ import crypto from "crypto";
 import { NextRequest, NextResponse } from "next/server";
 import sharp from "sharp";
 import { renderPageAsImage } from "unpdf";
-import { getCreateActorFromRequest } from "@/lib/create-platform/session";
+import { createActorCanUseLetterheadScope, getCreateActorFromRequest } from "@/lib/create-platform/session";
 import { clearLetterheadAsset, createPrivateAssetPrefix, getLetterhead, getLetterheadAssetReplacement, LETTERHEAD_BUCKET, LETTERHEAD_MAX_BYTES, updateLetterheadAsset } from "@/lib/create-platform/letterheads";
 import { getGlashDbAdmin } from "@/lib/glashdb";
 import { assertSafeUpload, UploadSecurityError } from "@/lib/upload-security";
@@ -42,7 +42,11 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   if (!actor) return NextResponse.json({ error: "Sign in to use Create." }, { status: 401 });
   if (actor.accessLocked) return NextResponse.json({ error: "Create is not available on client accounts yet." }, { status: 403 });
   if (!UUID.test(id)) return NextResponse.json({ error: "Invalid letterhead ID." }, { status: 400 });
-  if (!(await getLetterhead(actor, id))) return NextResponse.json({ error: "Letterhead not found." }, { status: 404 });
+  const existing = await getLetterhead(actor, id);
+  if (!existing) return NextResponse.json({ error: "Letterhead not found." }, { status: 404 });
+  if (!createActorCanUseLetterheadScope(actor, existing.scope, "manage")) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
 
   const form = await req.formData().catch(() => null);
   const file = form?.get("file");
@@ -105,6 +109,11 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
     return NextResponse.json({ error: "Invalid asset type." }, { status: 400 });
   }
   try {
+    const existing = await getLetterhead(actor, id);
+    if (!existing) return NextResponse.json({ error: "Letterhead not found." }, { status: 404 });
+    if (!createActorCanUseLetterheadScope(actor, existing.scope, "manage")) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
     const { letterhead, previous } = await clearLetterheadAsset(actor, id, kind as AssetKind);
     // A duplicated document can share the same file, so it is only deleted
     // when this was the last document pointing at it.

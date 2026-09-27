@@ -118,6 +118,7 @@ export const SignUpForm = ({
                             type="text"
                             placeholder="Enter your full name"
                             disabled={isLoading}
+                            style={{ borderRadius: "inherit" }}
                             className="w-full bg-transparent outline-none text-brand-navy text-[13px] lg:text-[14px] 2xl:text-[15px] font-medium placeholder:text-brand-mute disabled:opacity-50"
                         />
                     </div>
@@ -134,6 +135,7 @@ export const SignUpForm = ({
                             placeholder="Enter your email"
                             readOnly={Boolean(clientInvite && invitedEmail)}
                             disabled={isLoading}
+                            style={{ borderRadius: "inherit" }}
                             className="w-full bg-transparent outline-none text-brand-navy text-[13px] lg:text-[14px] 2xl:text-[15px] font-medium placeholder:text-brand-mute disabled:opacity-50"
                         />
                     </div>
@@ -152,6 +154,7 @@ export const SignUpForm = ({
                             type="text"
                             placeholder="Enter your company's name"
                             disabled={isLoading}
+                            style={{ borderRadius: "inherit" }}
                             className="w-full bg-transparent outline-none text-brand-navy text-[13px] lg:text-[14px] 2xl:text-[15px] font-medium placeholder:text-brand-mute disabled:opacity-50"
                         />
                     </div>
@@ -186,6 +189,7 @@ export const SignUpForm = ({
                             type={showPassword ? "text" : "password"}
                             placeholder="Create a password"
                             disabled={isLoading}
+                            style={{ borderRadius: "inherit" }}
                             className="w-full bg-transparent outline-none text-brand-navy text-[13px] lg:text-[14px] 2xl:text-[15px] font-medium placeholder:text-brand-mute disabled:opacity-50"
                         />
                         <button
@@ -221,7 +225,7 @@ export const SignUpForm = ({
                     disabled={isLoading || !botToken}
                     className="w-full h-[40px] lg:h-[48px] 2xl:h-[56px] rounded-full p-[2px] bg-brand-bg border border-[#648EFC] shadow-[0_4px_8px_rgba(0,0,0,0.04)] group overflow-hidden disabled:opacity-70 disabled:cursor-not-allowed"
                 >
-                    <div className="w-full h-full rounded-full flex items-center justify-center transition-opacity group-hover:opacity-90 bg-[#0A4FE8]">
+                    <div style={{ borderRadius: "inherit" }} className="w-full h-full flex items-center justify-center transition-opacity group-hover:opacity-90 bg-[#0A4FE8]">
                         {isLoading ? (
                             <Loader2 className="w-4 h-4 lg:w-5 lg:h-5 2xl:w-6 2xl:h-6 animate-spin text-white" />
                         ) : (

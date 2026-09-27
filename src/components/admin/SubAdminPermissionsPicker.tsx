@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react";
 import { Check, ChevronDown, Shield } from "lucide-react";
 import {
-  PERMISSION_GROUPS,
+  PERMISSION_SECTIONS,
   type PermissionGroup,
 } from "@/lib/admin-permissions";
 
@@ -30,7 +30,13 @@ export function SubAdminPermissionsPicker({
 }) {
   const selected = useMemo(() => new Set(value), [value]);
 
-  const groups = PERMISSION_GROUPS.filter((g) => !HIDDEN_GROUP_KEYS.has(g.key));
+  const sections = PERMISSION_SECTIONS
+    .map((section) => ({
+      ...section,
+      groups: section.groups.filter((group) => !HIDDEN_GROUP_KEYS.has(group.key)),
+    }))
+    .filter((section) => section.groups.length > 0);
+  const groups = sections.flatMap((section) => section.groups);
 
   function toggle(key: string) {
     const next = new Set(selected);
@@ -75,14 +81,24 @@ export function SubAdminPermissionsPicker({
       </div>
 
       <div className={`space-y-2 ${compact ? "" : "max-h-[420px] overflow-y-auto pr-1"}`}>
-        {groups.map((g) => (
-          <GroupCard
-            key={g.key}
-            group={g}
-            selected={selected}
-            onToggleGroup={() => toggleGroup(g)}
-            onToggleItem={toggle}
-          />
+        {sections.map((section) => (
+          <section key={section.key} className="rounded-2xl border border-slate-200 bg-white p-2.5">
+            <div className="px-1.5 pb-2 pt-0.5">
+              <p className="text-[12px] font-semibold text-[#0D1B39]">{section.label}</p>
+              <p className="mt-0.5 text-[10px] text-slate-400">Matches the {section.label} area in the admin navigation.</p>
+            </div>
+            <div className="space-y-2">
+              {section.groups.map((group) => (
+                <GroupCard
+                  key={group.key}
+                  group={group}
+                  selected={selected}
+                  onToggleGroup={() => toggleGroup(group)}
+                  onToggleItem={toggle}
+                />
+              ))}
+            </div>
+          </section>
         ))}
       </div>
 

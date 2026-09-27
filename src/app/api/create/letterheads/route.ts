@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getCreateActorFromRequest } from "@/lib/create-platform/session";
+import { createActorHasAdminPermission, getCreateActorFromRequest, type CreateActor } from "@/lib/create-platform/session";
 import { createLetterhead, letterheadScope, listLetterheads } from "@/lib/create-platform/letterheads";
 import { applyCompanyLetterhead, getCompanyLetterhead } from "@/lib/create-platform/company-letterhead";
 
@@ -14,10 +14,19 @@ async function actorOrResponse(request: Request) {
 }
 
 /** Executive Board documents are company correspondence, so only admins keep them. */
-function scopeOrResponse(request: NextRequest, actorKind: string) {
+function scopeOrResponse(request: NextRequest, actor: CreateActor, permission: "view" | "manage") {
   const scope = letterheadScope(new URL(request.url).searchParams.get("scope"));
-  if (scope === "executive_board" && actorKind !== "admin") {
+  if (scope === "executive_board" && actor.kind !== "admin") {
     return { response: NextResponse.json({ error: "Executive Board letterheads are admin only." }, { status: 403 }) } as const;
+  }
+  if (
+    scope === "executive_board"
+    && !createActorHasAdminPermission(
+      actor,
+      permission === "manage" ? "executive_board.letterhead_manage" : "executive_board.letterhead_view",
+    )
+  ) {
+    return { response: NextResponse.json({ error: "Forbidden" }, { status: 403 }) } as const;
   }
   return { scope } as const;
 }
@@ -25,7 +34,7 @@ function scopeOrResponse(request: NextRequest, actorKind: string) {
 export async function GET(request: NextRequest) {
   const auth = await actorOrResponse(request);
   if ("response" in auth) return auth.response;
-  const scoped = scopeOrResponse(request, auth.actor.kind);
+  const scoped = scopeOrResponse(request, auth.actor, "view");
   if ("response" in scoped) return scoped.response;
   try {
     return NextResponse.json(
@@ -40,7 +49,7 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   const auth = await actorOrResponse(request);
   if ("response" in auth) return auth.response;
-  const scoped = scopeOrResponse(request, auth.actor.kind);
+  const scoped = scopeOrResponse(request, auth.actor, "manage");
   if ("response" in scoped) return scoped.response;
   try {
     const letterhead = await createLetterhead(auth.actor, scoped.scope);

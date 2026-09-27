@@ -44,7 +44,7 @@ async function pngFromUpload(file: File) {
 }
 
 export async function GET(req: NextRequest) {
-  const { session, denied } = await requireAdmin(req, "executive_board.view");
+  const { session, denied } = await requireAdmin(req, "executive_board.letterhead_view");
   if (denied || !session) return denied || NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   const company = await getCompanyLetterhead();
   return NextResponse.json({

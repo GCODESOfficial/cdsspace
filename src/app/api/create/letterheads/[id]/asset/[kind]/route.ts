@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getCreateActorFromRequest } from "@/lib/create-platform/session";
+import { createActorCanUseLetterheadScope, getCreateActorFromRequest } from "@/lib/create-platform/session";
 import { glashMaybeOne } from "@/lib/glashdb/postgres";
 import { getGlashDbAdmin } from "@/lib/supabase";
 import { isCreatePrivateAssetPath, LETTERHEAD_BUCKET } from "@/lib/create-platform/letterheads";
@@ -29,13 +29,16 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
   // Ownership is enforced in the query itself: another account's letterhead
   // returns nothing, exactly as a letterhead that does not exist would.
   const column = COLUMN[kind as keyof typeof COLUMN];
-  const row = await glashMaybeOne<{ path: string | null }>(
-    `select ${column} as path from public.create_letterheads
+  const row = await glashMaybeOne<{ path: string | null; scope: string }>(
+    `select ${column} as path, scope from public.create_letterheads
       where id = $3::uuid and owner_kind = $1 and owner_id = $2 and deleted_at is null`,
     [actor.kind, actor.id, id],
   );
   if (!row?.path || !isCreatePrivateAssetPath(actor, row.path)) {
     return NextResponse.json({ error: "Not found." }, { status: 404 });
+  }
+  if (!createActorCanUseLetterheadScope(actor, row.scope, "view")) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any

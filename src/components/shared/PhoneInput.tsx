@@ -137,7 +137,8 @@ export const PhoneInput = React.forwardRef<HTMLInputElement, PhoneInputProps>(
                         type="button"
                         disabled={disabled}
                         onClick={() => setIsOpen(!isOpen)}
-                        className="bg-[#E9EBF0] h-8 lg:h-10 2xl:h-12 px-2 lg:px-2.5 rounded-md lg:rounded-lg 2xl:rounded-[10px] flex items-center gap-1.5 lg:gap-2 2xl:gap-3 shrink-0 hover:bg-[#dfe1e6] transition-colors disabled:opacity-50"
+                        style={{ borderRadius: "inherit" }}
+                        className="bg-[#E9EBF0] h-8 lg:h-10 2xl:h-12 px-2 lg:px-2.5 flex items-center gap-1.5 lg:gap-2 2xl:gap-3 shrink-0 hover:bg-[#dfe1e6] transition-colors disabled:opacity-50"
                     >
                         <div className="size-5 lg:size-6 2xl:size-[30px] bg-white rounded-full flex items-center justify-center shadow-sm relative overflow-hidden shrink-0">
                             {/* Object cover and scale makes the 3x2 flag fill the circle perfectly */}
@@ -165,6 +166,7 @@ export const PhoneInput = React.forwardRef<HTMLInputElement, PhoneInputProps>(
                         onBlur={onBlur}
                         placeholder="000 000 0000"
                         disabled={disabled}
+                        style={{ borderRadius: "inherit" }}
                         className="w-full bg-transparent outline-none text-brand-navy text-[13px] lg:text-[14px] 2xl:text-[15px] font-medium placeholder:text-brand-mute disabled:opacity-50"
                     />
                 </div>

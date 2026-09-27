@@ -110,7 +110,7 @@ const contentWebNavItems = [
     label: "FAQs",
     href: "/admin/faqs",
     icon: HelpCircle,
-    permission: "dashboard",
+    permission: "faqs",
   },
 ];
 
@@ -119,7 +119,7 @@ const clientEngagementNavItems = [
     label: "Overview",
     href: "/admin/clients",
     icon: BarChart3,
-    permission: "clients",
+    permission: "clients.view",
   },
   {
     label: "Chat/Meet",
@@ -143,7 +143,7 @@ const clientEngagementNavItems = [
     label: "Brand Briefs",
     href: "/admin/brand-briefs",
     icon: FileText,
-    permission: "dashboard",
+    permission: "brand_briefs",
   },
   {
     label: "Banner Commerce",
@@ -245,37 +245,37 @@ const executiveBoardNavItems = [
     label: "Budgets",
     href: "/admin/executive-board/budgets",
     icon: Wallet,
-    permission: "executive_board.view",
+    permission: "executive_board.budgets_view",
   },
   {
     label: "Expansion budgets",
     href: "/admin/executive-board/expansion-budgets",
     icon: Building2,
-    permission: "executive_board.view",
+    permission: "executive_board.expansion_budgets_view",
   },
   {
     label: "Targets",
     href: "/admin/executive-board/targets",
     icon: Target,
-    permission: "executive_board.view",
+    permission: "executive_board.targets_view",
   },
   {
     label: "Revenue models",
     href: "/admin/executive-board/revenue-models",
     icon: Rocket,
-    permission: "executive_board.view",
+    permission: "executive_board.models_view",
   },
   {
     label: "Create LH doc",
     href: "/admin/executive-board/letterhead",
     icon: PenLine,
-    permission: "executive_board.view",
+    permission: "executive_board.letterhead_view",
   },
   {
     label: "Document vault",
     href: "/admin/executive-board/vault",
     icon: Lock,
-    permission: "executive_board.view",
+    permission: "executive_board.vault_view",
   },
 ];
 
@@ -308,7 +308,7 @@ const createNavItems = [
     label: "Create Studio",
     href: "/create?workspace=admin",
     icon: PenLine,
-    permission: "content_hub",
+    permission: "create.view",
   },
   {
     label: "Create management",
@@ -461,13 +461,13 @@ const workspaceNavItems = [
     label: "Protect Docs",
     href: "/admin/protect-docs",
     icon: ShieldCheck,
-    permission: "workspace",
+    permission: "workspace.protect_docs",
   },
   {
     label: "cMeet",
     href: "/admin/cmeet",
     icon: Video,
-    permission: "workspace",
+    permission: "workspace.cmeet",
   },
   {
     label: "cMeet API access",
@@ -479,19 +479,19 @@ const workspaceNavItems = [
     label: "cDocs",
     href: "/admin/cdocs",
     icon: FileText,
-    permission: "workspace",
+    permission: "workspace.cdocs",
   },
   {
     label: "cSign",
     href: "/admin/csign",
     icon: PenLine,
-    permission: "workspace",
+    permission: "workspace.csign",
   },
   {
     label: "cResume",
     href: "/admin/cresume",
     icon: UserRound,
-    permission: "workspace",
+    permission: "workspace.cresume",
   },
 ];
 
@@ -620,7 +620,7 @@ const financeNavItems = [
     label: "Pricelists",
     href: "/admin/finance/pricelists",
     icon: Tag,
-    permission: "finance_pricelist",
+    permission: "finance_pricelists",
   },
   {
     label: "Expenditure",
@@ -680,19 +680,19 @@ const clientsNavItems = [
     label: "Overview",
     href: "/admin/clients",
     icon: BarChart3,
-    permission: "clients",
+    permission: "clients.view",
   },
   {
     label: "Client / Brand List",
     href: "/admin/clients/list",
     icon: Building2,
-    permission: "clients",
+    permission: "clients.view",
   },
   {
     label: "Vendors",
     href: "/admin/vendors",
     icon: UserCog,
-    permission: "clients",
+    permission: "clients.view",
   },
   {
     label: "Testimonials",

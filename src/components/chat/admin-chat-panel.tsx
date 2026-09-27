@@ -417,12 +417,13 @@ export function AdminChatPanel() {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ roomId: selectedRoom }),
-    }).then(() => {
+    }).then((response) => {
       setRooms((prev) =>
         prev.map((r) =>
           r.roomId === selectedRoom ? { ...r, unreadCount: 0 } : r
         )
       );
+      if (response.ok) window.dispatchEvent(new Event("cds:notification-pulse"));
     });
   }, [selectedRoom]);
 

@@ -46,7 +46,7 @@ test("company stationery exposes separate first and continuation page controls",
   assert.match(studio, /Continuation letterhead/);
   assert.match(studio, /Page 2 and later/);
   assert.match(route, /form\?\.get\("page"\) === "second"/);
-  assert.match(assetRoute, /executive_board\.view/);
+  assert.match(assetRoute, /executive_board\.letterhead_view/);
   assert.match(assetRoute, /Cache-Control.*private, no-store/);
 });
 
@@ -89,5 +89,5 @@ test("saved letterhead cards preview the opening document content", async () => 
   assert.match(studio, /new IntersectionObserver/);
   assert.match(studio, /buildLetterheadPdf\(\{ \.\.\.item, signatureUrl: null \}/);
   assert.match(studio, /pdf\.getPage\(1\)/);
-  assert.match(studio, /<SavedLetterheadPreview item=\{item\} \/>/);
+  assert.match(studio, /<SavedLetterheadPreview item=\{item\} workspaceKind=\{workspaceKind\} scope=\{scope\} \/>/);
 });

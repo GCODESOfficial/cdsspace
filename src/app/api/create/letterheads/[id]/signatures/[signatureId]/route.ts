@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getCreateActorFromRequest } from "@/lib/create-platform/session";
+import { createActorCanUseLetterheadScope, getCreateActorFromRequest } from "@/lib/create-platform/session";
 import { getLetterhead, isCreatePrivateAssetPath, LETTERHEAD_BUCKET } from "@/lib/create-platform/letterheads";
 import { getGlashDbAdmin } from "@/lib/glashdb";
 import { glashMaybeOne } from "@/lib/glashdb/postgres";
@@ -14,6 +14,11 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
   const { id, signatureId } = await params;
   if (!actor) return NextResponse.json({ error: "Sign in to use Create." }, { status: 401 });
   if (!UUID.test(id) || !UUID.test(signatureId)) return NextResponse.json({ error: "Invalid signature ID." }, { status: 400 });
+  const letterhead = await getLetterhead(actor, id);
+  if (!letterhead) return NextResponse.json({ error: "Letterhead not found." }, { status: 404 });
+  if (!createActorCanUseLetterheadScope(actor, letterhead.scope, "manage")) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
   const row = await glashMaybeOne<{ storage_path: string | null }>(
     `delete from public.create_letterhead_signatures signature
       using public.create_letterheads letterhead

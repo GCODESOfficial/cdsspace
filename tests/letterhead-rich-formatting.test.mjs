@@ -178,6 +178,18 @@ test("Create Studio overview includes recent letterhead documents", async () => 
   assert.match(createApp, /setRequestedLetterheadId\(item\.letterhead\.id\)/);
 });
 
+test("letterhead card and exact previews use a private versioned browser cache", async () => {
+  const studio = await read("src/components/create/LetterheadStudio.tsx");
+  assert.match(studio, /cds-private-letterhead-previews-v1/);
+  assert.match(studio, /window\.crypto\.subtle\.digest\("SHA-256"/);
+  assert.match(studio, /readCachedPreview\(cacheBase\)/);
+  assert.match(studio, /cachePreview\(cacheBase, \[previewBlob\]\)/);
+  assert.match(studio, /cachePreview\(cacheBase, generatedBlobs\)/);
+  assert.match(studio, /PREVIEW_CACHE_TTL_MS = 7 \* 24 \* 60 \* 60 \* 1000/);
+  assert.match(studio, /firstPageUrl: item\.firstPageUrl/);
+  assert.match(studio, /bottomMargin: item\.bottomMargin/);
+});
+
 test("the mobile writing toolbar stays on one horizontally scrollable row", async () => {
   const editor = await read("src/components/cdocs/rich-doc-editor.tsx");
   assert.match(editor, /flex-nowrap/);

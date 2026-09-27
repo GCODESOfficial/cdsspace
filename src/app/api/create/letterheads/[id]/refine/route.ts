@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { chatComplete } from "@/lib/ai/openai";
-import { getCreateActorFromRequest } from "@/lib/create-platform/session";
+import { createActorCanUseLetterheadScope, getCreateActorFromRequest } from "@/lib/create-platform/session";
 import {
   applyExecutiveBoardIdentity,
   EXECUTIVE_BOARD_IDENTITY,
@@ -28,6 +28,9 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   if (!UUID.test(id)) return NextResponse.json({ error: "Invalid letterhead ID." }, { status: 400 });
   const letterhead = await getLetterhead(actor, id);
   if (!letterhead) return NextResponse.json({ error: "Letterhead not found." }, { status: 404 });
+  if (!createActorCanUseLetterheadScope(actor, letterhead.scope, "manage")) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
   const body = await req.json().catch(() => ({})) as Record<string, unknown>;
   const executiveBoard = letterhead.scope === "executive_board";
   const sanitizedHtml = sanitizeLetterheadBody(body.bodyHtml);

@@ -10,11 +10,9 @@
  * "Send mail as" address inside the contact.cdsspace@gmail.com account,
  * otherwise Gmail rewrites the From header back to the authenticated account.
  *
- * HOSTING / SMTP BLOCK: some hosts (GlashDB app hosting) block all outbound
- * SMTP, so the SMTP transport times out. Set RESEND_API_KEY and
- * `createEmailTransport()` returns a nodemailer transport that delivers over
- * Resend's HTTPS API (port 443) instead - same sendMail interface, no SMTP.
- * With no key it falls back to Gmail SMTP (local dev / SMTP-allowed hosts).
+ * Set EMAIL_TRANSPORT=smtp|gmail_api|resend to choose the primary delivery
+ * route without removing any provider credentials. Other configured routes
+ * remain available as failover for immediate transactional messages.
  */
 import { createHash } from "crypto";
 import nodemailer from "nodemailer";
@@ -31,6 +29,25 @@ declare global {
 }
 
 export const EMAIL_FROM = process.env.EMAIL_FROM || "support@cdsspace.pro";
+type EmailMode = "gmail_api" | "resend" | "smtp";
+
+function requestedEmailMode(): EmailMode | null {
+  const requested = process.env.EMAIL_TRANSPORT?.trim().toLowerCase();
+  return requested === "gmail_api" || requested === "resend" || requested === "smtp"
+    ? requested
+    : null;
+}
+
+function defaultEmailMode(): EmailMode {
+  return gmailApiCredsFromEnv()
+    ? "gmail_api"
+    : process.env.RESEND_API_KEY
+      ? "resend"
+      : "smtp";
+}
+
+/** The explicitly selected transport, or the safest configured default. */
+export const EMAIL_MODE: EmailMode = requestedEmailMode() || defaultEmailMode();
 
 /** Build a From header with a display name, e.g. `"CDS Space" <support@cdsspace.pro>`. */
 export function emailFrom(displayName: string): string {
@@ -56,31 +73,7 @@ export function notificationThreadRoot(recipientEmail: string, category: string)
  * error in a few seconds so the route can respond cleanly.
  */
 export function createEmailTransport() {
-  // Preferred: send through your own Gmail over the Gmail HTTPS API. Still a
-  // nodemailer transport (same sendMail API), but port 443 instead of an SMTP
-  // socket, so it works on hosts that block outbound SMTP - no third party.
-  const gmail = gmailApiCredsFromEnv();
-  if (gmail) return createGmailApiTransport(gmail);
-
-  // Alternative HTTPS path: Resend, if a key is set.
-  if (process.env.RESEND_API_KEY) {
-    return createResendHttpTransport(process.env.RESEND_API_KEY);
-  }
-
-  // Fallback: real Gmail SMTP (for local dev / hosts that allow SMTP egress).
-  // Default to smtp.gmail.com:587 (STARTTLS); overridable via env.
-  const port = Number(process.env.EMAIL_PORT || 587);
-  return nodemailer.createTransport({
-    host: process.env.EMAIL_HOST || "smtp.gmail.com",
-    port,
-    secure: process.env.EMAIL_SECURE ? process.env.EMAIL_SECURE === "true" : port === 465,
-    auth: { user: process.env.EMAIL_USER, pass: process.env.EMAIL_PASS },
-    pool: true,
-    maxConnections: 3,
-    connectionTimeout: 10_000,
-    greetingTimeout: 10_000,
-    socketTimeout: 20_000,
-  });
+  return createTransportForMode(EMAIL_MODE);
 }
 
 export interface SendEmailInput {
@@ -121,21 +114,14 @@ export interface SendEmailInput {
   digestCategory?: string;
 }
 
-/** Active transport, in priority order: Gmail HTTPS API → Resend HTTPS → Gmail SMTP. */
-export const EMAIL_MODE: "gmail_api" | "resend" | "smtp" = gmailApiCredsFromEnv()
-  ? "gmail_api"
-  : process.env.RESEND_API_KEY
-    ? "resend"
-    : "smtp";
-
-type EmailMode = typeof EMAIL_MODE;
-
 function configuredEmailModes(): EmailMode[] {
   const modes: EmailMode[] = [];
   if (gmailApiCredsFromEnv()) modes.push("gmail_api");
   if (process.env.RESEND_API_KEY) modes.push("resend");
   if (process.env.EMAIL_USER && process.env.EMAIL_PASS) modes.push("smtp");
-  return modes;
+  return modes.includes(EMAIL_MODE)
+    ? [EMAIL_MODE, ...modes.filter((mode) => mode !== EMAIL_MODE)]
+    : modes;
 }
 
 function createTransportForMode(mode: EmailMode) {
@@ -168,9 +154,8 @@ function emailErrorMessage(error: unknown) {
 }
 
 /**
- * Send one email through nodemailer. The transport chosen by
- * `createEmailTransport()` is HTTPS (Resend) when RESEND_API_KEY is set, or
- * Gmail SMTP otherwise. Either way the From address is EMAIL_FROM.
+ * Send one email through nodemailer. The primary transport is selected by
+ * EMAIL_TRANSPORT when provided; the From address is always EMAIL_FROM.
  */
 /**
  * A send must fail rather than hang.
@@ -375,28 +360,27 @@ export async function verifyEmailReady(
     }
   }
 
-  const failures: string[] = [];
-  const gmail = gmailApiCredsFromEnv();
-  if (gmail) {
-    const error = await verifyGmailApi(gmail);
-    if (!error) return null;
-    failures.push(error);
+  // Health checks must validate the selected primary route. Testing any
+  // available fallback can otherwise report SMTP as healthy while the host is
+  // silently blocking every SMTP port.
+  if (EMAIL_MODE === "gmail_api") {
+    const gmail = gmailApiCredsFromEnv();
+    if (!gmail) return "Gmail API email is selected but not configured.";
+    return verifyGmailApi(gmail);
   }
-  // Resend's send-only API keys cannot be verified with the account/domain
-  // endpoints. Presence is enough here; sendEmail performs real failover if
-  // the provider rejects the subsequent message.
-  if (process.env.RESEND_API_KEY) return null;
+  if (EMAIL_MODE === "resend") {
+    return process.env.RESEND_API_KEY ? null : "Resend email is selected but not configured.";
+  }
+
   if (!process.env.EMAIL_USER || !process.env.EMAIL_PASS) {
-    if (failures.length) return failures.join(" ");
-    return "Email is not configured (set GMAIL_REFRESH_TOKEN, RESEND_API_KEY, or EMAIL_USER/EMAIL_PASS).";
+    return "SMTP email is selected but EMAIL_USER or EMAIL_PASS is missing.";
   }
   const t = createTransportForMode("smtp");
   try {
     await t.verify();
     return null;
   } catch (e) {
-    failures.push(`Email server connection failed: ${e instanceof Error ? e.message : "unknown error"}`);
-    return failures.join(" ");
+    return `Email server connection failed: ${e instanceof Error ? e.message : "unknown error"}`;
   } finally {
     t.close();
   }

@@ -94,13 +94,96 @@ function loadPreviewRuntime() {
   return previewRuntimePromise;
 }
 
-function canvasObjectUrl(canvas: HTMLCanvasElement) {
-  return new Promise<string>((resolve, reject) => {
+function canvasBlob(canvas: HTMLCanvasElement) {
+  return new Promise<Blob>((resolve, reject) => {
     canvas.toBlob((blob) => {
       if (!blob) reject(new Error("The preview page could not be prepared."));
-      else resolve(URL.createObjectURL(blob));
+      else resolve(blob);
     }, "image/webp", 0.9);
   });
+}
+
+const PREVIEW_CACHE_NAME = "cds-private-letterhead-previews-v1";
+const PREVIEW_CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+const PREVIEW_MEMORY_LIMIT = 16;
+const previewBlobMemory = new Map<string, { blobs: Blob[]; savedAt: number }>();
+
+async function previewCacheBase(item: Letterhead, workspaceKind: WorkspaceKind, scope: "create" | "executive_board", variant: "card" | "exact") {
+  const source = JSON.stringify({
+    id: item.id,
+    title: item.title,
+    bodyHtml: item.bodyHtml,
+    paperSize: item.paperSize,
+    bottomMargin: item.bottomMargin,
+    hasSecondPage: item.hasSecondPage,
+    firstPageUrl: item.firstPageUrl,
+    secondPageUrl: item.secondPageUrl,
+  });
+  let fingerprint = "";
+  try {
+    const digest = await window.crypto.subtle.digest("SHA-256", new TextEncoder().encode(source));
+    fingerprint = Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
+  } catch {
+    // Older embedded browsers still get a deterministic versioned cache key.
+    let hash = 2166136261;
+    for (let index = 0; index < source.length; index += 1) hash = Math.imul(hash ^ source.charCodeAt(index), 16777619);
+    fingerprint = `${source.length}-${(hash >>> 0).toString(16)}`;
+  }
+  return `${window.location.origin}/__cds-private-preview-cache__/${encodeURIComponent(workspaceKind)}/${encodeURIComponent(scope)}/${encodeURIComponent(item.id)}/${variant}/${fingerprint}`;
+}
+
+function rememberPreview(base: string, blobs: Blob[], savedAt = Date.now()) {
+  previewBlobMemory.delete(base);
+  previewBlobMemory.set(base, { blobs, savedAt });
+  while (previewBlobMemory.size > PREVIEW_MEMORY_LIMIT) {
+    const oldest = previewBlobMemory.keys().next().value as string | undefined;
+    if (!oldest) break;
+    previewBlobMemory.delete(oldest);
+  }
+}
+
+async function readCachedPreview(base: string): Promise<Blob[] | null> {
+  const memory = previewBlobMemory.get(base);
+  if (memory && Date.now() - memory.savedAt < PREVIEW_CACHE_TTL_MS) {
+    rememberPreview(base, memory.blobs, memory.savedAt);
+    return memory.blobs;
+  }
+  if (typeof window.caches === "undefined") return null;
+  try {
+    const cache = await window.caches.open(PREVIEW_CACHE_NAME);
+    const manifestResponse = await cache.match(`${base}/manifest`);
+    if (!manifestResponse) return null;
+    const manifest = await manifestResponse.json() as { pageCount?: number; savedAt?: number };
+    if (!manifest.pageCount || !manifest.savedAt || Date.now() - manifest.savedAt >= PREVIEW_CACHE_TTL_MS) {
+      await cache.delete(`${base}/manifest`);
+      return null;
+    }
+    const pages = await Promise.all(Array.from({ length: manifest.pageCount }, (_, index) => cache.match(`${base}/page-${index}.webp`)));
+    if (pages.some((page) => !page)) return null;
+    const blobs = await Promise.all(pages.map((page) => page!.blob()));
+    rememberPreview(base, blobs, manifest.savedAt);
+    return blobs;
+  } catch {
+    return null;
+  }
+}
+
+async function cachePreview(base: string, blobs: Blob[]) {
+  const savedAt = Date.now();
+  rememberPreview(base, blobs, savedAt);
+  if (typeof window.caches === "undefined") return;
+  try {
+    const cache = await window.caches.open(PREVIEW_CACHE_NAME);
+    const currentPrefix = base.slice(0, base.lastIndexOf("/") + 1);
+    const keys = await cache.keys();
+    await Promise.all(keys.filter((request) => request.url.startsWith(currentPrefix) && !request.url.startsWith(`${base}/`)).map((request) => cache.delete(request)));
+    await Promise.all([
+      cache.put(`${base}/manifest`, new Response(JSON.stringify({ pageCount: blobs.length, savedAt }), { headers: { "Content-Type": "application/json", "Cache-Control": "private, max-age=604800" } })),
+      ...blobs.map((blob, index) => cache.put(`${base}/page-${index}.webp`, new Response(blob, { headers: { "Content-Type": "image/webp", "Cache-Control": "private, max-age=604800" } }))),
+    ]);
+  } catch {
+    // Preview rendering remains functional when Cache Storage is unavailable.
+  }
 }
 
 /**
@@ -108,7 +191,7 @@ function canvasObjectUrl(canvas: HTMLCanvasElement) {
  * Work begins only when the card approaches the viewport so a large library
  * does not build dozens of PDFs at once.
  */
-function SavedLetterheadPreview({ item }: { item: Letterhead }) {
+function SavedLetterheadPreview({ item, workspaceKind, scope }: { item: Letterhead; workspaceKind: WorkspaceKind; scope: "create" | "executive_board" }) {
   const frame = useRef<HTMLDivElement | null>(null);
   const [visible, setVisible] = useState(false);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
@@ -139,6 +222,14 @@ function SavedLetterheadPreview({ item }: { item: Letterhead }) {
     void (async () => {
       setRendering(true);
       try {
+        const cacheBase = await previewCacheBase(item, workspaceKind, scope, "card");
+        const cached = await readCachedPreview(cacheBase);
+        if (cached?.[0]) {
+          generatedUrl = URL.createObjectURL(cached[0]);
+          if (cancelled) { URL.revokeObjectURL(generatedUrl); generatedUrl = null; return; }
+          setPreviewUrl(generatedUrl);
+          return;
+        }
         const { buildLetterheadPdf, pdfjs } = await loadPreviewRuntime();
         const pdfDocument = await buildLetterheadPdf({ ...item, signatureUrl: null }, { includeSignature: false });
         loadingTask = pdfjs.getDocument({ data: new Uint8Array(pdfDocument.output("arraybuffer")) });
@@ -153,7 +244,9 @@ function SavedLetterheadPreview({ item }: { item: Letterhead }) {
         context.fillStyle = "#ffffff";
         context.fillRect(0, 0, canvas.width, canvas.height);
         await page.render({ canvas, canvasContext: context, viewport }).promise;
-        generatedUrl = await canvasObjectUrl(canvas);
+        const previewBlob = await canvasBlob(canvas);
+        generatedUrl = URL.createObjectURL(previewBlob);
+        void cachePreview(cacheBase, [previewBlob]);
         page.cleanup();
         canvas.width = 1;
         canvas.height = 1;
@@ -175,7 +268,7 @@ function SavedLetterheadPreview({ item }: { item: Letterhead }) {
       if (generatedUrl) URL.revokeObjectURL(generatedUrl);
       void loadingTask?.destroy().catch(() => undefined);
     };
-  }, [item.bodyHtml, item.firstPageUrl, item.hasSecondPage, item.id, item.paperSize, item.secondPageUrl, item.updatedAt, visible]);
+  }, [item.bodyHtml, item.bottomMargin, item.firstPageUrl, item.hasSecondPage, item.id, item.paperSize, item.secondPageUrl, item.title, item.updatedAt, scope, visible, workspaceKind]);
 
   return (
     <div ref={frame} className="absolute inset-0 bg-white">
@@ -702,68 +795,89 @@ export function LetterheadStudio({
     }
 
     let cancelled = false;
-    const timer = window.setTimeout(async () => {
-      setPreviewBusy(true);
-      setPreviewError(null);
-      const generatedUrls: string[] = [];
-      let loadingTask: ReturnType<(typeof import("pdfjs-dist/legacy/build/pdf.mjs"))["getDocument"]> | null = null;
-      try {
-        const { buildLetterheadPdf, pdfjs } = await loadPreviewRuntime();
+    let timer: number | null = null;
 
-        // The preview is rendered from the same jsPDF document used by the
-        // download. Signature stays as an interactive overlay, but its
-        // percentage coordinates map to the identical page dimensions.
-        const doc = await buildLetterheadPdf(previewSource, { includeSignature: false });
-        loadingTask = pdfjs.getDocument({ data: new Uint8Array(doc.output("arraybuffer")) });
-        const pdf = await loadingTask.promise;
-        for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
-          if (cancelled) break;
-          const page = await pdf.getPage(pageNumber);
-          // This is comfortably sharper than the largest on-screen preview,
-          // without producing multi-megabyte base64 strings for every page.
-          const viewport = page.getViewport({ scale: 1.25 });
-          const canvas = document.createElement("canvas");
-          canvas.width = Math.ceil(viewport.width);
-          canvas.height = Math.ceil(viewport.height);
-          const context = canvas.getContext("2d", { alpha: false });
-          if (!context) throw new Error("This browser cannot render the PDF preview.");
-          await page.render({ canvas, canvasContext: context, viewport }).promise;
-          const objectUrl = await canvasObjectUrl(canvas);
-          generatedUrls.push(objectUrl);
-          page.cleanup();
-          canvas.width = 1;
-          canvas.height = 1;
-          if (!cancelled) {
-            if (generatedUrls.length === 1) {
-              const previousUrls = previewUrls.current;
-              previewUrls.current = [...generatedUrls];
-              setPreviewPages([...generatedUrls]);
-              window.setTimeout(() => previousUrls.forEach((url) => URL.revokeObjectURL(url)), 0);
-            } else {
-              previewUrls.current = [...generatedUrls];
-              setPreviewPages([...generatedUrls]);
+    void (async () => {
+      const cacheBase = await previewCacheBase(previewSource, workspaceKind, scope, "exact");
+      const cached = await readCachedPreview(cacheBase);
+      if (cancelled) return;
+      if (cached?.length) {
+        const cachedUrls = cached.map((blob) => URL.createObjectURL(blob));
+        const previousUrls = previewUrls.current;
+        previewUrls.current = cachedUrls;
+        setPreviewPages(cachedUrls);
+        setPreviewError(null);
+        setPreviewBusy(false);
+        window.setTimeout(() => previousUrls.forEach((url) => URL.revokeObjectURL(url)), 0);
+        return;
+      }
+
+      // Let the writer finish a short typing burst before rebuilding every PDF
+      // page. This prevents an older render flashing over newer content.
+      timer = window.setTimeout(async () => {
+        setPreviewBusy(true);
+        setPreviewError(null);
+        const generatedUrls: string[] = [];
+        const generatedBlobs: Blob[] = [];
+        let loadingTask: ReturnType<(typeof import("pdfjs-dist/legacy/build/pdf.mjs"))["getDocument"]> | null = null;
+        try {
+          const { buildLetterheadPdf, pdfjs } = await loadPreviewRuntime();
+
+          // The preview is rendered from the same jsPDF document used by the
+          // download. Signature stays as an interactive overlay, but its
+          // percentage coordinates map to the identical page dimensions.
+          const doc = await buildLetterheadPdf(previewSource, { includeSignature: false });
+          loadingTask = pdfjs.getDocument({ data: new Uint8Array(doc.output("arraybuffer")) });
+          const pdf = await loadingTask.promise;
+          for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
+            if (cancelled) break;
+            const page = await pdf.getPage(pageNumber);
+            // This is comfortably sharper than the largest on-screen preview,
+            // without producing multi-megabyte base64 strings for every page.
+            const viewport = page.getViewport({ scale: 1.25 });
+            const canvas = document.createElement("canvas");
+            canvas.width = Math.ceil(viewport.width);
+            canvas.height = Math.ceil(viewport.height);
+            const context = canvas.getContext("2d", { alpha: false });
+            if (!context) throw new Error("This browser cannot render the PDF preview.");
+            await page.render({ canvas, canvasContext: context, viewport }).promise;
+            const blob = await canvasBlob(canvas);
+            const objectUrl = URL.createObjectURL(blob);
+            generatedBlobs.push(blob);
+            generatedUrls.push(objectUrl);
+            page.cleanup();
+            canvas.width = 1;
+            canvas.height = 1;
+            if (!cancelled) {
+              if (generatedUrls.length === 1) {
+                const previousUrls = previewUrls.current;
+                previewUrls.current = [...generatedUrls];
+                setPreviewPages([...generatedUrls]);
+                window.setTimeout(() => previousUrls.forEach((url) => URL.revokeObjectURL(url)), 0);
+              } else {
+                previewUrls.current = [...generatedUrls];
+                setPreviewPages([...generatedUrls]);
+              }
             }
           }
+          if (cancelled) generatedUrls.filter((url) => !previewUrls.current.includes(url)).forEach((url) => URL.revokeObjectURL(url));
+          else if (generatedBlobs.length) void cachePreview(cacheBase, generatedBlobs);
+        } catch (previewFailure) {
+          console.error("[letterhead preview]", previewFailure);
+          generatedUrls.filter((url) => !previewUrls.current.includes(url)).forEach((url) => URL.revokeObjectURL(url));
+          if (!cancelled) setPreviewError("The exact PDF preview could not be rendered in this browser. Your document remains saved.");
+        } finally {
+          await loadingTask?.destroy().catch(() => undefined);
+          if (!cancelled) setPreviewBusy(false);
         }
-        if (cancelled) generatedUrls.filter((url) => !previewUrls.current.includes(url)).forEach((url) => URL.revokeObjectURL(url));
-      } catch (previewFailure) {
-        console.error("[letterhead preview]", previewFailure);
-        generatedUrls.filter((url) => !previewUrls.current.includes(url)).forEach((url) => URL.revokeObjectURL(url));
-        if (!cancelled) setPreviewError("The exact PDF preview could not be rendered in this browser. Your document remains saved.");
-      } finally {
-        await loadingTask?.destroy().catch(() => undefined);
-        if (!cancelled) setPreviewBusy(false);
-      }
-    // Let the writer finish a short typing burst before rebuilding every PDF
-    // page. This gives the layout engine enough settling time and prevents an
-    // older render from flashing over newer content on slower/mobile devices.
-    }, previewUrls.current.length ? 850 : 120);
+      }, previewUrls.current.length ? 850 : 120);
+    })();
 
     return () => {
       cancelled = true;
-      window.clearTimeout(timer);
+      if (timer !== null) window.clearTimeout(timer);
     };
-  }, [previewSource]);
+  }, [previewSource, scope, workspaceKind]);
 
   if (loading) return <div className="grid min-h-72 place-items-center"><Loader2 className="h-6 w-6 animate-spin text-[#0A4FE8]" /></div>;
 
@@ -787,7 +901,7 @@ export function LetterheadStudio({
               <button type="button" onClick={() => open(item)} className="block w-full text-left">
                 <div className="relative aspect-[16/6] overflow-hidden border-b border-gray-100 bg-[#F3F6FB]">
                   {item.firstPageUrl ? (
-                    <SavedLetterheadPreview item={item} />
+                    <SavedLetterheadPreview item={item} workspaceKind={workspaceKind} scope={scope} />
                   ) : (
                     <div className="grid h-full place-items-center text-center"><span><FileText className="mx-auto h-7 w-7 text-blue-300" /><span className="mt-1.5 block text-[10px] font-semibold text-gray-400">Add letterhead artwork</span></span></div>
                   )}

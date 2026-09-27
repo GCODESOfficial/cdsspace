@@ -2,7 +2,7 @@ import crypto from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
 import sharp from "sharp";
 import { renderPageAsImage } from "unpdf";
-import { getCreateActorFromRequest } from "@/lib/create-platform/session";
+import { createActorCanUseLetterheadScope, getCreateActorFromRequest } from "@/lib/create-platform/session";
 import { clearLetterheadAsset, createPrivateAssetPrefix, getLetterhead, isCreatePrivateAssetPath, LETTERHEAD_BUCKET, LETTERHEAD_MAX_BYTES } from "@/lib/create-platform/letterheads";
 import { getGlashDbAdmin } from "@/lib/glashdb";
 import { glashQuery } from "@/lib/glashdb/postgres";
@@ -47,6 +47,9 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   if (!UUID.test(id)) return NextResponse.json({ error: "Invalid letterhead ID." }, { status: 400 });
   const letterhead = await getLetterhead(actor, id);
   if (!letterhead) return NextResponse.json({ error: "Letterhead not found." }, { status: 404 });
+  if (!createActorCanUseLetterheadScope(actor, letterhead.scope, "manage")) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
 
   if (req.headers.get("content-type")?.includes("application/json")) {
     const body = await req.json().catch(() => ({}));
@@ -128,6 +131,9 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
   if (!UUID.test(id)) return NextResponse.json({ error: "Invalid letterhead ID." }, { status: 400 });
   const existing = await getLetterhead(actor, id);
   if (!existing) return NextResponse.json({ error: "Letterhead not found." }, { status: 404 });
+  if (!createActorCanUseLetterheadScope(actor, existing.scope, "manage")) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
 
   const additional = await glashQuery<{ storage_path: string | null }>(
     `delete from public.create_letterhead_signatures signature

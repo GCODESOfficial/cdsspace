@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getCreateActorFromRequest } from "@/lib/create-platform/session";
+import { createActorCanUseLetterheadScope, getCreateActorFromRequest } from "@/lib/create-platform/session";
 import { isCreatePrivateAssetPath, LETTERHEAD_BUCKET } from "@/lib/create-platform/letterheads";
 import { glashMaybeOne } from "@/lib/glashdb/postgres";
 import { getGlashDbAdmin } from "@/lib/glashdb";
@@ -14,8 +14,8 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
   if (!actor) return NextResponse.json({ error: "Sign in to use Create." }, { status: 401 });
   const { id, signatureId } = await params;
   if (!UUID.test(id) || !UUID.test(signatureId)) return NextResponse.json({ error: "Not found." }, { status: 404 });
-  const row = await glashMaybeOne<{ storage_path: string | null }>(
-    `select signature.storage_path
+  const row = await glashMaybeOne<{ storage_path: string | null; scope: string }>(
+    `select signature.storage_path, letterhead.scope
        from public.create_letterhead_signatures signature
        join public.create_letterheads letterhead on letterhead.id = signature.letterhead_id
       where signature.id = $4::uuid and signature.letterhead_id = $3::uuid
@@ -23,6 +23,9 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     [actor.kind, actor.id, id, signatureId],
   );
   if (!row?.storage_path || !isCreatePrivateAssetPath(actor, row.storage_path)) return NextResponse.json({ error: "Not found." }, { status: 404 });
+  if (!createActorCanUseLetterheadScope(actor, row.scope, "view")) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
   const db = getGlashDbAdmin() as any;
   const { data, error } = await db.storage.from(LETTERHEAD_BUCKET).download(row.storage_path);
   if (error || !data) return NextResponse.json({ error: "The signature could not be read." }, { status: 502 });

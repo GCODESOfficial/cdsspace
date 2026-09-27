@@ -2,9 +2,10 @@
 
 import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
-import { PERMISSION_GROUPS, ALL_PERMISSIONS } from "@/lib/admin-permissions";
+import { ALL_PERMISSIONS, PERMISSION_GROUPS } from "@/lib/admin-permissions";
+import { SubAdminPermissionsPicker } from "@/components/admin/SubAdminPermissionsPicker";
 import { useToast } from "@/hooks/use-toast";
-import { Trash2, Loader2, Plus, Eye, EyeOff, Shield, UserPlus, Check, ToggleLeft, ToggleRight, ChevronDown, ChevronRight, Copy, Mail, Link2, X, Send, ShieldPlus, Pencil } from "lucide-react";
+import { Trash2, Loader2, Plus, Eye, EyeOff, Shield, UserPlus, Check, ToggleLeft, ToggleRight, Copy, Mail, Link2, X, Send, ShieldPlus, Pencil } from "lucide-react";
 import { appAlert, appConfirm, appPrompt } from "@/lib/app-notify";
 import Link from "next/link";
 
@@ -50,7 +51,6 @@ export default function SubAdminsPage() {
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [selectedPermissions, setSelectedPermissions] = useState<string[]>([]);
-  const [expandedGroups, setExpandedGroups] = useState<string[]>([]);
 
   // Invite link shown after creating a sub-admin
   const [invite, setInvite] = useState<null | {
@@ -71,7 +71,6 @@ export default function SubAdminsPage() {
   const [roleName, setRoleName] = useState("");
   const [roleDescription, setRoleDescription] = useState("");
   const [rolePermissions, setRolePermissions] = useState<string[]>([]);
-  const [roleExpandedGroups, setRoleExpandedGroups] = useState<string[]>([]);
   const [isSavingRole, setIsSavingRole] = useState(false);
 
   // Role-picker on the sub-admin form
@@ -95,7 +94,6 @@ export default function SubAdminsPage() {
     setRoleName("");
     setRoleDescription("");
     setRolePermissions([]);
-    setRoleExpandedGroups([]);
     setShowRoleModal(true);
   }
 
@@ -104,26 +102,7 @@ export default function SubAdminsPage() {
     setRoleName(role.name);
     setRoleDescription(role.description ?? "");
     setRolePermissions(role.permissions ?? []);
-    setRoleExpandedGroups([]);
     setShowRoleModal(true);
-  }
-
-  function toggleRolePermission(key: string) {
-    setRolePermissions((prev) =>
-      prev.includes(key) ? prev.filter((p) => p !== key) : [...prev, key],
-    );
-  }
-
-  function toggleRoleGroupPermissions(groupKey: string) {
-    const group = PERMISSION_GROUPS.find((g) => g.key === groupKey);
-    if (!group) return;
-    const keys = group.permissions.map((p) => p.key);
-    const allSelected = keys.every((k) => rolePermissions.includes(k));
-    setRolePermissions((prev) =>
-      allSelected
-        ? prev.filter((p) => !keys.includes(p))
-        : Array.from(new Set([...prev, ...keys])),
-    );
   }
 
   async function saveRole(e: React.FormEvent) {
@@ -201,24 +180,6 @@ export default function SubAdminsPage() {
     if (!error) setSubAdmins(data || []);
     if (!teamRes.error) setTeamAdmins((teamRes.data as TeamAdmin[]) || []);
     setIsFetching(false);
-  }
-
-  function togglePermission(key: string) {
-    setSelectedPermissions((prev) =>
-      prev.includes(key) ? prev.filter((p) => p !== key) : [...prev, key]
-    );
-  }
-
-  function toggleGroup(groupKey: string) {
-    const group = PERMISSION_GROUPS.find(g => g.key === groupKey);
-    if (!group) return;
-    const groupPermKeys = group.permissions.map(p => p.key);
-    const allSelected = groupPermKeys.every(k => selectedPermissions.includes(k));
-    if (allSelected) {
-      setSelectedPermissions(prev => prev.filter(p => !groupPermKeys.includes(p)));
-    } else {
-      setSelectedPermissions(prev => Array.from(new Set([...prev, ...groupPermKeys])));
-    }
   }
 
   function selectAllPermissions() {
@@ -528,77 +489,10 @@ export default function SubAdminsPage() {
                 </button>
               </div>
 
-              <div className="space-y-3">
-                {PERMISSION_GROUPS.map((group) => {
-                  const groupKeys = group.permissions.map(p => p.key);
-                  const groupSelectedCount = groupKeys.filter(k => selectedPermissions.includes(k)).length;
-                  const allGroupSelected = groupSelectedCount === groupKeys.length;
-                  const someGroupSelected = groupSelectedCount > 0;
-                  const isExpanded = expandedGroups.includes(group.key);
-
-                  return (
-                    <div key={group.key} className={`border rounded-xl overflow-hidden transition ${
-                      someGroupSelected ? "border-[#0A4FE8]/30 bg-blue-50/30" : "border-gray-200 bg-gray-50/50"
-                    }`}>
-                      {/* Group header */}
-                      <div className="flex items-center gap-3 px-4 py-3">
-                        <button
-                          type="button"
-                          onClick={() => toggleGroup(group.key)}
-                          className={`w-5 h-5 rounded-md flex items-center justify-center flex-shrink-0 transition ${
-                            allGroupSelected ? "bg-[#0A4FE8]" : someGroupSelected ? "bg-[#0A4FE8]/40" : "bg-gray-200"
-                          }`}
-                        >
-                          {allGroupSelected && <Check className="w-3 h-3 text-white" />}
-                          {!allGroupSelected && someGroupSelected && <div className="w-2 h-0.5 bg-white rounded-full" />}
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setExpandedGroups(prev => prev.includes(group.key) ? prev.filter(g => g !== group.key) : [...prev, group.key])}
-                          className="flex-1 flex items-center justify-between text-left"
-                        >
-                          <div>
-                            <p className="text-[13px] font-semibold text-[#0D1B39]">{group.label}</p>
-                            <p className="text-[11px] text-gray-400">{groupSelectedCount} of {groupKeys.length} permissions</p>
-                          </div>
-                          {isExpanded ? <ChevronDown className="w-4 h-4 text-gray-400" /> : <ChevronRight className="w-4 h-4 text-gray-400" />}
-                        </button>
-                      </div>
-
-                      {/* Sub-permissions */}
-                      {isExpanded && (
-                        <div className="px-4 pb-3 pt-1 space-y-1.5 border-t border-gray-100/60">
-                          {group.permissions.map((perm) => {
-                            const isSelected = selectedPermissions.includes(perm.key);
-                            return (
-                              <button
-                                key={perm.key}
-                                type="button"
-                                onClick={() => togglePermission(perm.key)}
-                                className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-left transition ${
-                                  isSelected ? "bg-blue-50" : "hover:bg-white"
-                                }`}
-                              >
-                                <div className={`w-4 h-4 rounded flex items-center justify-center flex-shrink-0 transition ${
-                                  isSelected ? "bg-[#0A4FE8]" : "bg-gray-200"
-                                }`}>
-                                  {isSelected && <Check className="w-2.5 h-2.5 text-white" />}
-                                </div>
-                                <div>
-                                  <p className={`text-[12px] font-medium ${isSelected ? "text-[#0D1B39]" : "text-gray-600"}`}>
-                                    {perm.label}
-                                  </p>
-                                  <p className="text-[10px] text-gray-400">{perm.description}</p>
-                                </div>
-                              </button>
-                            );
-                          })}
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
+              <SubAdminPermissionsPicker
+                value={selectedPermissions}
+                onChange={setSelectedPermissions}
+              />
             </div>
 
             <button
@@ -897,94 +791,10 @@ export default function SubAdminsPage() {
                   </button>
                 </div>
 
-                <div className="space-y-3">
-                  {PERMISSION_GROUPS.map((group) => {
-                    const groupKeys = group.permissions.map((p) => p.key);
-                    const selectedCount = groupKeys.filter((k) => rolePermissions.includes(k)).length;
-                    const allSelected = selectedCount === groupKeys.length;
-                    const someSelected = selectedCount > 0;
-                    const isExpanded = roleExpandedGroups.includes(group.key);
-                    return (
-                      <div
-                        key={group.key}
-                        className={`border rounded-xl overflow-hidden transition ${
-                          someSelected ? "border-[#0A4FE8]/30 bg-blue-50/30" : "border-gray-200 bg-gray-50/50"
-                        }`}
-                      >
-                        <div className="flex items-center gap-3 px-4 py-3">
-                          <button
-                            type="button"
-                            onClick={() => toggleRoleGroupPermissions(group.key)}
-                            className={`w-5 h-5 rounded-md flex items-center justify-center flex-shrink-0 transition ${
-                              allSelected ? "bg-[#0A4FE8]" : someSelected ? "bg-[#0A4FE8]/40" : "bg-gray-200"
-                            }`}
-                          >
-                            {allSelected && <Check className="w-3 h-3 text-white" />}
-                            {!allSelected && someSelected && <div className="w-2 h-0.5 bg-white rounded-full" />}
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() =>
-                              setRoleExpandedGroups((prev) =>
-                                prev.includes(group.key)
-                                  ? prev.filter((g) => g !== group.key)
-                                  : [...prev, group.key],
-                              )
-                            }
-                            className="flex-1 flex items-center justify-between text-left"
-                          >
-                            <div>
-                              <p className="text-[13px] font-semibold text-[#0D1B39]">{group.label}</p>
-                              <p className="text-[11px] text-gray-400">
-                                {selectedCount} of {groupKeys.length} permissions
-                              </p>
-                            </div>
-                            {isExpanded ? (
-                              <ChevronDown className="w-4 h-4 text-gray-400" />
-                            ) : (
-                              <ChevronRight className="w-4 h-4 text-gray-400" />
-                            )}
-                          </button>
-                        </div>
-                        {isExpanded && (
-                          <div className="px-4 pb-3 pt-1 space-y-1.5 border-t border-gray-100/60">
-                            {group.permissions.map((perm) => {
-                              const isSelected = rolePermissions.includes(perm.key);
-                              return (
-                                <button
-                                  key={perm.key}
-                                  type="button"
-                                  onClick={() => toggleRolePermission(perm.key)}
-                                  className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-left transition ${
-                                    isSelected ? "bg-blue-50" : "hover:bg-white"
-                                  }`}
-                                >
-                                  <div
-                                    className={`w-4 h-4 rounded flex items-center justify-center flex-shrink-0 transition ${
-                                      isSelected ? "bg-[#0A4FE8]" : "bg-gray-200"
-                                    }`}
-                                  >
-                                    {isSelected && <Check className="w-2.5 h-2.5 text-white" />}
-                                  </div>
-                                  <div>
-                                    <p
-                                      className={`text-[12px] font-medium ${
-                                        isSelected ? "text-[#0D1B39]" : "text-gray-600"
-                                      }`}
-                                    >
-                                      {perm.label}
-                                    </p>
-                                    <p className="text-[10px] text-gray-400">{perm.description}</p>
-                                  </div>
-                                </button>
-                              );
-                            })}
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
+                <SubAdminPermissionsPicker
+                  value={rolePermissions}
+                  onChange={setRolePermissions}
+                />
               </div>
             </div>
 

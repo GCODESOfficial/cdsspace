@@ -1,6 +1,6 @@
 import crypto from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
-import { getCreateActorFromRequest } from "@/lib/create-platform/session";
+import { createActorCanUseLetterheadScope, getCreateActorFromRequest } from "@/lib/create-platform/session";
 import {
   createPrivateAssetPrefix,
   getLetterhead,
@@ -71,6 +71,9 @@ export async function POST(req: NextRequest) {
   if (!UUID.test(letterheadId)) return NextResponse.json({ error: "Invalid letterhead ID." }, { status: 400 });
   const letterhead = await getLetterhead(actor, letterheadId);
   if (!letterhead) return NextResponse.json({ error: "Letterhead not found." }, { status: 404 });
+  if (!createActorCanUseLetterheadScope(actor, letterhead.scope, "manage")) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
 
   if (action === "save") {
     const name = String(body.name || "").trim().replace(/\s+/g, " ").slice(0, 80);

@@ -139,7 +139,7 @@ export default function ExecutiveBoardApp({ view }: { view: BoardView }) {
 
   const load = useCallback(async () => {
     try {
-      const response = await fetch("/api/admin/executive-board", { cache: "no-store" });
+      const response = await fetch(`/api/admin/executive-board?view=${encodeURIComponent(view)}`, { cache: "no-store" });
       const json = await response.json().catch(() => ({}));
       if (!response.ok || !json.ok) throw new Error(json.error || "Could not load the Executive Board.");
       setBoard({
@@ -152,7 +152,7 @@ export default function ExecutiveBoardApp({ view }: { view: BoardView }) {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [view]);
 
   useEffect(() => { void load(); }, [load]);
 

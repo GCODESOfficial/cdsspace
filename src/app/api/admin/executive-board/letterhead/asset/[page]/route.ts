@@ -9,7 +9,7 @@ export const dynamic = "force-dynamic";
 
 /** Streams private company stationery without exposing its storage path. */
 export async function GET(req: NextRequest, { params }: { params: Promise<{ page: string }> }) {
-  const { session, denied } = await requireAdmin(req, "executive_board.view");
+  const { session, denied } = await requireAdmin(req, "executive_board.letterhead_view");
   if (denied || !session) return denied || NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const requestedPage = (await params).page;
