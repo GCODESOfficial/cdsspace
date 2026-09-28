@@ -10,6 +10,8 @@ import { emailInvoiceReceipt } from "@/lib/finance/receipt-server";
 import { deliverInvoicePaymentConfirmation } from "@/lib/finance/payment-confirmation";
 import { recordInvoicePayment } from "@/lib/finance/invoice-payments";
 import { getAdminSessionAsync } from "@/app/api/admin-check/route";
+import { denyPaidInvoiceEdit } from "@/lib/finance/paid-invoice-lock";
+import { diffInvoiceSnapshots } from "@/lib/finance/invoice-diff";
 
 async function getInvoiceSnapshot(sb: any, id: string) {
   const { data: invoice, error } = await sb
@@ -167,6 +169,9 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     }
   }
 
+  const locked = await denyPaidInvoiceEdit(req, before.invoice);
+  if (locked) return locked;
+
   if ("delivery_period" in body) {
     const { data: linkedBanner } = await sb
       .from("banner_requests")
@@ -287,16 +292,47 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     .eq("invoice_id", id)
     .order("position");
 
+  // An invoice is created once. Later saves of the same record are updates,
+  // compared against the last committed version rather than the editor's
+  // autosaves, so the change list reflects everything done in that session.
+  let previouslyCreated = false;
+  let baseline = before;
+  if (isFinalSave) {
+    const { data: committedVersions } = await sb
+      .from("admin_resource_versions")
+      .select("action, after_data")
+      .eq("resource_type", "invoice")
+      .eq("resource_id", id)
+      .neq("action", "invoice.draft_saved")
+      .order("created_at", { ascending: false })
+      .limit(50);
+    previouslyCreated = (committedVersions ?? []).some((version: any) => version.action === "invoice.create");
+    const committed = (committedVersions ?? []).find((version: any) => version.after_data?.invoice);
+    if (committed) baseline = { invoice: committed.after_data.invoice, items: committed.after_data.items ?? [] };
+  }
+
   const action = patch.status === "paid"
     ? "invoice.mark_paid"
     : isAutosave
       ? "invoice.draft_saved"
-    : isFinalSave && before.invoice.status === "draft"
+    : isFinalSave && before.invoice.status === "draft" && !previouslyCreated
       ? "invoice.create"
     : patch.status === "sent"
       ? "invoice.send"
       : "invoice.update";
-  const activityMetadata = isFinalSave
+  const changes = action === "invoice.update"
+    ? diffInvoiceSnapshots(baseline, { invoice: data, items: afterItems ?? before.items })
+    : null;
+  const activityMetadata = changes
+    ? {
+        "Invoice": data?.invoice_number,
+        "Client": data?.client_name,
+        "Added": changes.added.join("; "),
+        "Removed": changes.removed.join("; "),
+        "Changed": changes.changed.join("; "),
+        "Total": formatMoney(data?.total, data?.currency),
+      }
+    : isFinalSave
     ? {
         "Invoice": data?.invoice_number,
         "Client": data?.client_name,

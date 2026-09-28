@@ -2,6 +2,8 @@ import { NextResponse, type NextRequest } from "next/server";
 import {
   applicationRateProfile,
   clientNetworkFromHeaders,
+  rateLimitBuckets,
+  RATE_LIMIT_SESSION_COOKIES,
 } from "@/lib/security/request-guard-core.mjs";
 
 const UNSAFE_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
@@ -27,7 +29,8 @@ const MAX_REQUEST_BUCKETS = 20_000;
 
 function requestFingerprint(value: string) {
   // A small, non-cryptographic hash is sufficient here: this map is ephemeral,
-  // never logged, and only keeps raw network addresses out of memory keys.
+  // never logged, and only keeps raw network addresses and session tokens out
+  // of memory keys.
   let hash = 2166136261;
   for (let index = 0; index < value.length; index += 1) {
     hash ^= value.charCodeAt(index);
@@ -56,19 +59,22 @@ function exceedsApplicationRate(request: NextRequest) {
   const profile = applicationRateProfile(request.nextUrl.pathname, request.method);
   if (!profile) return false;
   pruneRequestBuckets(now);
-  const key = `${profile.name}:${requestFingerprint(clientNetworkFromHeaders(request.headers))}`;
-  const current = requestBuckets.get(key) || {
-    tokens: profile.capacity,
-    lastRefill: now,
-    lastSeen: now,
-  };
-  const elapsedSeconds = Math.max(0, (now - current.lastRefill) / 1_000);
-  current.tokens = Math.min(profile.capacity, current.tokens + elapsedSeconds * profile.refillPerSecond);
-  current.lastRefill = now;
-  current.lastSeen = now;
-  const allowed = current.tokens >= 1;
-  if (allowed) current.tokens -= 1;
-  requestBuckets.set(key, current);
+  const sessionToken = RATE_LIMIT_SESSION_COOKIES
+    .map((name) => request.cookies.get(name)?.value)
+    .find((value) => Boolean(value));
+  const buckets = rateLimitBuckets(profile, clientNetworkFromHeaders(request.headers), sessionToken).map((limit) => {
+    const key = requestFingerprint(limit.key);
+    const current = requestBuckets.get(key) || { tokens: limit.capacity, lastRefill: now, lastSeen: now };
+    const elapsedSeconds = Math.max(0, (now - current.lastRefill) / 1_000);
+    current.tokens = Math.min(limit.capacity, current.tokens + elapsedSeconds * limit.refillPerSecond);
+    current.lastRefill = now;
+    current.lastSeen = now;
+    requestBuckets.set(key, current);
+    return current;
+  });
+  // A request spends a token only when every bucket it belongs to has one.
+  const allowed = buckets.every((bucket) => bucket.tokens >= 1);
+  if (allowed) for (const bucket of buckets) bucket.tokens -= 1;
   return !allowed;
 }
 

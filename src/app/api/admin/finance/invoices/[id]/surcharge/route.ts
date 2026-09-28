@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { financeDb, requireFinanceAdminAsync } from "@/lib/finance/api-auth";
 import { logActivity } from "@/lib/activity-log";
 import { recordResourceVersion } from "@/lib/admin-versioning";
+import { denyPaidInvoiceEdit } from "@/lib/finance/paid-invoice-lock";
 
 async function getInvoiceSnapshot(sb: any, id: string) {
   const { data: invoice } = await sb
@@ -40,6 +41,8 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     .eq("id", id)
     .single();
   if (invErr || !invoice) return NextResponse.json({ error: "Invoice not found" }, { status: 404 });
+  const locked = await denyPaidInvoiceEdit(req, before.invoice);
+  if (locked) return locked;
 
   // Wipe any existing surcharge row so repeated speed changes don't stack.
   await sb

@@ -16,10 +16,10 @@
 import jsPDF from "jspdf";
 import { installBrandFont } from "./pdf/pdf-fonts";
 import {
-  budgetVariance, convertMoney, currencyUnit, expansionFundingGap, expansionRequirement,
+  BUDGET_MONTH_NAMES, budgetsInPeriod, budgetVariance, budgetYearRollup, convertMoney, currencyUnit, expansionFundingGap, expansionRequirement,
   formatBytes, planProgress, targetProgress,
   EXPANSION_TYPE_LABELS, KIND_LABELS, STATUS_LABELS,
-  type BoardViewCurrency, type Budget, type ExpansionBudget, type RevenueModel, type Target,
+  type BoardViewCurrency, type Budget, type BudgetPeriod, type ExpansionBudget, type RevenueModel, type Target,
   type VaultFile, type VaultFolder,
 } from "./executive-board";
 
@@ -312,12 +312,45 @@ function money(amount: number, view: BoardViewCurrency) {
   return pdfMoney(amount, view);
 }
 
-export function budgetsPdf(budgets: Budget[], view: BoardViewCurrency) {
+export function budgetsPdf(allBudgets: Budget[], view: BoardViewCurrency, period?: BudgetPeriod) {
+  const budgets = period ? budgetsInPeriod(allBudgets, period) : allBudgets;
   const planned = budgets.reduce((sum, budget) => sum + into(budget.planned_amount, budget.currency, view), 0);
   const actual = budgets.reduce((sum, budget) => sum + into(budget.actual_amount, budget.currency, view), 0);
+  const annual = period?.month === "annual" ? budgetYearRollup(allBudgets, period.year, view) : null;
+  const rollupSections: Section[] = annual ? [
+    {
+      title: "Month by month",
+      empty: "No months have been budgeted.",
+      columns: [
+        { header: "Month", width: 28 },
+        { header: "Lines", width: 12, align: "right" as const },
+        { header: "Planned", width: 20, align: "right" as const },
+        { header: "Actual", width: 20, align: "right" as const },
+        { header: "Variance", width: 20, align: "right" as const },
+      ],
+      rows: annual.months.map((month) => [
+        month.name, String(month.lines), money(month.planned, view), money(month.actual, view), money(month.planned - month.actual, view),
+      ]),
+    },
+    {
+      title: "By category",
+      empty: "No categories yet.",
+      columns: [
+        { header: "Category", width: 28 },
+        { header: "Lines", width: 12, align: "right" as const },
+        { header: "Planned", width: 20, align: "right" as const },
+        { header: "Actual", width: 20, align: "right" as const },
+        { header: "Variance", width: 20, align: "right" as const },
+      ],
+      rows: annual.categories.map((category) => [
+        category.category, String(category.lines), money(category.planned, view), money(category.actual, view), money(category.planned - category.actual, view),
+      ]),
+    },
+  ] : [];
+  const periodName = !period ? "" : period.month === "annual" ? `${period.year}` : `${BUDGET_MONTH_NAMES[period.month - 1]} ${period.year}`;
   return {
     view: "budgets",
-    title: "Budgets",
+    title: !period ? "Budgets" : period.month === "annual" ? `Annual operations budget ${periodName}` : `Budget for ${periodName}`,
     subtitle: "What we planned to spend, what we have spent, and where the gap is.",
     currency: view,
     headline: [
@@ -326,8 +359,8 @@ export function budgetsPdf(budgets: Budget[], view: BoardViewCurrency) {
       { label: "Actual", value: money(actual, view) },
       { label: "Variance", value: money(planned - actual, view), hint: planned - actual < 0 ? "Over plan" : "Under plan" },
     ],
-    sections: [{
-      title: "All budget lines",
+    sections: [...rollupSections, {
+      title: period ? `Budget lines, ${periodName}` : "All budget lines",
       empty: "No budgets have been set.",
       columns: [
         { header: "Title", width: 22 },

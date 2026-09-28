@@ -35,7 +35,11 @@ export interface SalesBankAccount {
   sort_order: number;
 }
 
+/** What CDS Space charges to design a client's letterhead, per billing currency. */
+export type LetterheadDesignPriceSet = Record<(typeof SALES_CURRENCIES)[number], number>;
+
 export interface SalesSettingsConfig {
+  letterheadDesign: LetterheadDesignPriceSet;
   countries: SalesCountry[];
   deliveryZones: SalesDeliveryZone[];
   pickupLocations: SalesPickupLocation[];

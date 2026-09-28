@@ -13,6 +13,8 @@ export type LetterheadPdfOptions = {
   title: string;
   bodyHtml: string;
   paperSize: "a4" | "legal";
+  /** Body leading multiplier: 1 is single spacing, 1.5 one-and-a-half, 2 double. */
+  lineSpacing?: number;
   bottomMargin: "wide" | "small";
   firstPageUrl?: string | null;
   secondPageUrl?: string | null;
@@ -105,7 +107,12 @@ export async function buildLetterheadPdf(
     : Math.max(LETTERHEAD_CONTENT_BOTTOM_MIN_MM, pageHeight * LETTERHEAD_CONTENT_BOTTOM_SAFE_AREA_RATIO);
   const maxWidth = pageWidth - (marginX * 2);
   const bodySize = 10.9;
-  const bodyLineHeight = 6.5;
+  // Single spacing stays exactly as before, so existing letters are unchanged.
+  const lineSpacing = Math.max(1, Math.min(3, Number(options.lineSpacing) || 1));
+  const bodyLineHeight = 6.5 * lineSpacing;
+  // The gap between paragraphs opens up with the leading, but more gently, so
+  // double spacing does not leave a chasm between them.
+  const paragraphGap = 1.5 * (1 + (lineSpacing - 1) * 0.6);
   const [firstBackground, secondBackground, signature, stamp] = await Promise.all([
     options.firstPageUrl ? loadImage(options.firstPageUrl) : Promise.resolve(null),
     options.hasSecondPage && options.secondPageUrl ? loadImage(options.secondPageUrl) : Promise.resolve(null),
@@ -353,7 +360,7 @@ export async function buildLetterheadPdf(
       continue;
     }
     drawRichSpans(block.spans, { size: bodySize, lineHeight: bodyLineHeight, align: block.align });
-    addVerticalSpace(1.5);
+    addVerticalSpace(paragraphGap);
   }
 
   if (signature && includeSignature) {

@@ -25,6 +25,8 @@ export type LetterheadRecord = {
   bodyHtml: string;
   paperSize: "a4" | "legal";
   bottomMargin: "wide" | "small";
+  /** Body leading multiplier: 1 single, 1.5 one-and-a-half, 2 double. */
+  lineSpacing: number;
   hasSecondPage: boolean;
   firstPagePath: string | null;
   firstPageName: string | null;
@@ -199,6 +201,7 @@ async function fromRow(actor: CreateActor, row: Record<string, unknown>): Promis
     bodyHtml: scope === "executive_board" ? applyExecutiveBoardIdentity(bodyHtml) : bodyHtml,
     paperSize: row.paper_size === "legal" ? "legal" : "a4",
     bottomMargin: row.bottom_margin === "small" ? "small" : "wide",
+    lineSpacing: Math.max(1, Math.min(3, Number(row.line_spacing) || 1)),
     hasSecondPage: Boolean(row.has_second_page),
     firstPagePath: typeof row.first_page_path === "string" ? row.first_page_path : null,
     firstPageName: typeof row.first_page_name === "string" ? row.first_page_name : null,
@@ -230,7 +233,7 @@ async function fromRow(actor: CreateActor, row: Record<string, unknown>): Promis
   };
 }
 
-const RETURNING = `id, scope, title, body_html, paper_size, bottom_margin, has_second_page,
+const RETURNING = `id, scope, title, body_html, paper_size, bottom_margin, line_spacing, has_second_page,
   first_page_path, first_page_name, first_page_size_bytes, second_page_path, second_page_name, second_page_size_bytes,
   signature_path, signature_name, signature_size_bytes, signature_x, signature_y, signature_width,
   signature_page, stamp_path, stamp_name, stamp_size_bytes, stamp_x, stamp_y, stamp_width, stamp_page,
@@ -285,6 +288,7 @@ export async function updateLetterhead(actor: CreateActor, id: string, input: Re
     bodyHtml: scope === "executive_board" ? applyExecutiveBoardIdentity(cleanBody) : cleanBody,
     paperSize: input.paperSize === "legal" ? "legal" : "a4",
     bottomMargin: input.bottomMargin === "small" ? "small" : "wide",
+    lineSpacing: numberInRange(input.lineSpacing, 1, 3, 1),
     hasSecondPage: Boolean(input.hasSecondPage),
     signatureX: numberInRange(input.signatureX, 0, 95, 62),
     signatureY: numberInRange(input.signatureY, 0, 95, 74),
@@ -299,10 +303,10 @@ export async function updateLetterhead(actor: CreateActor, id: string, input: Re
     `update public.create_letterheads set
        title = $4, body_html = $5, paper_size = $6, bottom_margin = $7, has_second_page = $8,
        signature_x = $9, signature_y = $10, signature_width = $11, signature_page = $12,
-       stamp_x = $13, stamp_y = $14, stamp_width = $15, stamp_page = $16
+       stamp_x = $13, stamp_y = $14, stamp_width = $15, stamp_page = $16, line_spacing = $17
      where id = $3::uuid and owner_kind = $1 and owner_id = $2 and deleted_at is null
      returning ${RETURNING}`,
-    [actor.kind, actor.id, id, patch.title, patch.bodyHtml, patch.paperSize, patch.bottomMargin, patch.hasSecondPage, patch.signatureX, patch.signatureY, patch.signatureWidth, patch.signaturePage, patch.stampX, patch.stampY, patch.stampWidth, patch.stampPage],
+    [actor.kind, actor.id, id, patch.title, patch.bodyHtml, patch.paperSize, patch.bottomMargin, patch.hasSecondPage, patch.signatureX, patch.signatureY, patch.signatureWidth, patch.signaturePage, patch.stampX, patch.stampY, patch.stampWidth, patch.stampPage, patch.lineSpacing],
   );
   if (!row) throw new Error("This letterhead could not be saved.");
   if (Array.isArray(input.signatures)) {

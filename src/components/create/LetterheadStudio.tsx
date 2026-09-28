@@ -3,7 +3,8 @@
 /* eslint-disable @next/next/no-img-element */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ArrowLeft, Archive, Bookmark, Check, ChevronDown, ClipboardPaste, Copy, Download, FileText, Library, Loader2, LockKeyhole, PenLine, Plus, RefreshCw, Send, Stamp, Trash2, Upload, Users, X } from "lucide-react";
+import Link from "next/link";
+import { ArrowLeft, Archive, Bookmark, Check, ChevronDown, CreditCard, ClipboardPaste, Copy, Download, FileText, Library, Loader2, LockKeyhole, PenLine, Plus, RefreshCw, Send, Stamp, Trash2, Upload, Users, X } from "lucide-react";
 import { RichDocEditor } from "@/components/cdocs/rich-doc-editor";
 import { appConfirm } from "@/lib/app-notify";
 import { offerClientStorageRequest } from "@/lib/client-storage-ui";
@@ -34,6 +35,8 @@ type Letterhead = {
   bodyHtml: string;
   paperSize: "a4" | "legal";
   bottomMargin: "wide" | "small";
+  /** Body leading multiplier: 1 single, 1.5 one-and-a-half, 2 double. */
+  lineSpacing: number;
   hasSecondPage: boolean;
   firstPageName: string | null;
   firstPageUrl: string | null;
@@ -268,7 +271,7 @@ function SavedLetterheadPreview({ item, workspaceKind, scope }: { item: Letterhe
       if (generatedUrl) URL.revokeObjectURL(generatedUrl);
       void loadingTask?.destroy().catch(() => undefined);
     };
-  }, [item.bodyHtml, item.bottomMargin, item.firstPageUrl, item.hasSecondPage, item.id, item.paperSize, item.secondPageUrl, item.title, item.updatedAt, scope, visible, workspaceKind]);
+  }, [item.bodyHtml, item.bottomMargin, item.lineSpacing, item.firstPageUrl, item.hasSecondPage, item.id, item.paperSize, item.secondPageUrl, item.title, item.updatedAt, scope, visible, workspaceKind]);
 
   return (
     <div ref={frame} className="absolute inset-0 bg-white">
@@ -313,6 +316,10 @@ export function LetterheadStudio({
   const [error, setError] = useState<string | null>(null);
   const [uploading, setUploading] = useState<AssetKind | null>(null);
   const [refining, setRefining] = useState(false);
+  // Asking the CDS Space team to design a letterhead raises an invoice, so the
+  // outcome is held here and shown in place rather than as a transient toast.
+  const [designRequest, setDesignRequest] = useState<{ invoiceNumber: string; publicToken: string; total: number; currency: string; alreadyRequested: boolean } | null>(null);
+  const [requestingDesign, setRequestingDesign] = useState(false);
   const [previewPages, setPreviewPages] = useState<string[]>([]);
   const [previewBusy, setPreviewBusy] = useState(false);
   const [previewError, setPreviewError] = useState<string | null>(null);
@@ -416,6 +423,7 @@ export function LetterheadStudio({
           bodyHtml: draft.bodyHtml,
           paperSize: draft.paperSize,
           bottomMargin: draft.bottomMargin,
+          lineSpacing: draft.lineSpacing,
           hasSecondPage: draft.hasSecondPage,
           signatureX: draft.signatureX,
           signatureY: draft.signatureY,
@@ -446,7 +454,7 @@ export function LetterheadStudio({
     setSaveState("idle");
     saveTimer.current = setTimeout(() => void persist(active), 850);
     return () => { if (saveTimer.current) clearTimeout(saveTimer.current); };
-  }, [active?.id, active?.title, active?.bodyHtml, active?.paperSize, active?.bottomMargin, active?.hasSecondPage, active?.signatureX, active?.signatureY, active?.signatureWidth, active?.signaturePage, active?.stampX, active?.stampY, active?.stampWidth, active?.stampPage, active?.signatures, persist]);
+  }, [active?.id, active?.title, active?.bodyHtml, active?.paperSize, active?.bottomMargin, active?.lineSpacing, active?.hasSecondPage, active?.signatureX, active?.signatureY, active?.signatureWidth, active?.signaturePage, active?.stampX, active?.stampY, active?.stampWidth, active?.stampPage, active?.signatures, persist]);
 
   const awaitingSignatureKey = active?.signatures
     .filter((signature) => signature.status === "pending" || signature.status === "opened")
@@ -777,6 +785,27 @@ export function LetterheadStudio({
     }
   }
 
+  async function requestLetterheadDesign() {
+    setRequestingDesign(true);
+    setError(null);
+    try {
+      const response = await fetch("/api/create/letterheads/design-request", { method: "POST" });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(payload.error || "The request could not be sent.");
+      setDesignRequest({
+        invoiceNumber: String(payload.invoice?.invoice_number || ""),
+        publicToken: String(payload.invoice?.public_token || ""),
+        total: Number(payload.invoice?.total || 0),
+        currency: String(payload.invoice?.currency || "NGN"),
+        alreadyRequested: Boolean(payload.alreadyRequested),
+      });
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : "The request could not be sent.");
+    } finally {
+      setRequestingDesign(false);
+    }
+  }
+
   const previewSource = useMemo<Letterhead | null>(() => active ? {
     ...active,
     // Signature and stamp placement do not change pagination and are painted
@@ -785,7 +814,7 @@ export function LetterheadStudio({
     signatureUrl: null,
     stampUrl: null,
     signatures: active.signatures.map((signature) => ({ ...signature, signatureUrl: null })),
-  } : null, [active?.id, active?.bodyHtml, active?.paperSize, active?.bottomMargin, active?.firstPageUrl, active?.secondPageUrl, active?.hasSecondPage]);
+  } : null, [active?.id, active?.bodyHtml, active?.paperSize, active?.bottomMargin, active?.lineSpacing, active?.firstPageUrl, active?.secondPageUrl, active?.hasSecondPage]);
 
   useEffect(() => {
     if (!previewSource) {
@@ -944,15 +973,72 @@ export function LetterheadStudio({
           <button onClick={openExportChoices} disabled={preparingExport || Boolean(exportingSize)} className="inline-flex items-center gap-1.5 rounded-lg bg-[#0A4FE8] px-4 py-2 text-[12px] font-bold text-white hover:bg-[#083EC0] disabled:cursor-wait disabled:opacity-65">{preparingExport ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />}{preparingExport ? "Preparing…" : "Export PDF"}</button>
         </div>
       </div>
+      {workspaceKind === "client" && !lockedLetterhead && (
+        <div className="rounded-2xl border border-blue-100 bg-blue-50/60 p-4">
+          {designRequest ? (
+            <div className="text-[12px] text-[#07133B]">
+              <p className="font-semibold">
+                {designRequest.alreadyRequested
+                  ? `You already have a letterhead design request waiting on invoice ${designRequest.invoiceNumber}.`
+                  : `Request received. Invoice ${designRequest.invoiceNumber} for ${designRequest.currency} ${designRequest.total.toLocaleString()} is ready.`}
+              </p>
+              <p className="mt-1 text-[11px] text-[#475467]">
+                Design starts once payment is confirmed, and your finished letterhead is delivered within 24 hours and
+                appears here automatically.
+              </p>
+              <div className="mt-2 flex flex-wrap items-center gap-2">
+                {/* Payment is the step that actually starts the work, so it is
+                    offered here rather than only from the invoices list. */}
+                {designRequest.publicToken && (
+                  <Link
+                    href={`/invoice/${designRequest.publicToken}#payment`}
+                    target="_blank"
+                    className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-[#0A4FE8] px-3 text-[11px] font-semibold text-white hover:bg-[#083EC0]"
+                  >
+                    <CreditCard className="h-3.5 w-3.5" />
+                    Pay now
+                  </Link>
+                )}
+                <Link
+                  href="/dashboard/invoices"
+                  className="inline-flex h-9 items-center rounded-lg border border-blue-200 bg-white px-3 text-[11px] font-semibold text-[#0A4FE8] hover:bg-blue-50"
+                >
+                  Open the invoice
+                </Link>
+              </div>
+            </div>
+          ) : (
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div className="min-w-0">
+                <p className="text-[12px] font-semibold text-[#07133B]">No letterhead of your own yet?</p>
+                <p className="mt-0.5 text-[11px] text-[#475467]">
+                  Ask the CDS Space team to design one. We raise the invoice straight away in your billing currency,
+                  and your letterhead is delivered within 24 hours of payment.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => void requestLetterheadDesign()}
+                disabled={requestingDesign}
+                className="inline-flex h-10 shrink-0 items-center gap-2 rounded-xl bg-[#0A4FE8] px-4 text-[12px] font-semibold text-white hover:bg-[#083EC0] disabled:opacity-60"
+              >
+                {requestingDesign ? <Loader2 className="h-4 w-4 animate-spin" /> : <PenLine className="h-4 w-4" />}
+                Request a letterhead design
+              </button>
+            </div>
+          )}
+        </div>
+      )}
       {workspaceKind === "client" && <ContextualTutorialPrompt tool="official-letterhead" label="the Create letterhead tool" />}
       {!lockedLetterhead && <PrivacyNotice />}
       {error && <p className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-[12px] text-rose-700">{error}</p>}
 
       <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_minmax(360px,0.72fr)]">
         <section className="min-w-0 space-y-4 rounded-2xl border border-gray-100 bg-white p-4 shadow-sm sm:p-5">
-          <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_150px_170px]">
+          <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_150px_150px_170px]">
             <label className="text-[12px] font-semibold text-gray-600">Document title<input value={active.title} onChange={(event) => patch({ title: event.target.value })} className="mt-1.5 h-10 w-full rounded-xl border border-gray-200 bg-gray-50 px-3 text-[13px] outline-none focus:border-blue-300 focus:bg-white" /></label>
             <label className="text-[12px] font-semibold text-gray-600">Paper size<select value={active.paperSize} onChange={(event) => patch({ paperSize: event.target.value === "legal" ? "legal" : "a4" })} className="mt-1.5 h-10 w-full rounded-xl border border-gray-200 bg-white px-3 text-[13px] outline-none"><option value="a4">A4 portrait</option><option value="legal">Legal portrait</option></select></label>
+            <label className="text-[12px] font-semibold text-gray-600">Line spacing<select value={String(active.lineSpacing ?? 1)} onChange={(event) => patch({ lineSpacing: Number(event.target.value) || 1 })} className="mt-1.5 h-10 w-full rounded-xl border border-gray-200 bg-white px-3 text-[13px] outline-none"><option value="1">Single</option><option value="1.15">1.15</option><option value="1.5">One and a half</option><option value="2">Double</option></select></label>
             <label className="text-[12px] font-semibold text-gray-600">Bottom margin<select value={active.bottomMargin} onChange={(event) => patch({ bottomMargin: event.target.value === "small" ? "small" : "wide" })} className="mt-1.5 h-10 w-full rounded-xl border border-gray-200 bg-white px-3 text-[13px] outline-none"><option value="wide">Wide margin</option><option value="small">Small margin</option></select></label>
           </div>
           {lockedLetterhead ? (

@@ -4,6 +4,7 @@ import { brandedEmailHtml } from "@/lib/email-template";
 import { createEmailTransport, sendEmail } from "@/lib/email-from";
 import { glashQuery } from "@/lib/glashdb/postgres";
 import { notifySuperAdmin } from "@/lib/notify-admin";
+import { summariseList } from "@/lib/finance/invoice-diff";
 
 const SUPER_ADMIN_EMAIL = "contact.cdsspace@gmail.com";
 const SITE_URL = (process.env.NEXT_PUBLIC_SITE_URL || "https://cdsspace.pro").replace(/\/$/, "");
@@ -263,10 +264,34 @@ export function criticalActivityNotification(input: {
   resource_id?: string | null;
   resource_label?: string | null;
   metadata?: Record<string, unknown>;
+  actor_name?: string | null;
 }) {
   const label = input.resource_label || input.resource_id || "Business activity";
+  const by = input.actor_name && input.actor_name !== "System" ? ` by ${input.actor_name}` : "";
+  if (input.action === "invoice.update") {
+    // Only an edit that actually changed something is worth a notification.
+    const meta = input.metadata || {};
+    const listed = (key: string) => String(meta[key] || "").split("; ").filter(Boolean);
+    const added = listed("Added");
+    const removed = listed("Removed");
+    const changed = listed("Changed");
+    if (!added.length && !removed.length && !changed.length) return null;
+    const summary = [
+      added.length ? `Added: ${summariseList(added)}.` : "",
+      removed.length ? `Removed: ${summariseList(removed)}.` : "",
+      changed.length ? `Changed: ${summariseList(changed)}.` : "",
+    ].filter(Boolean).join(" ");
+    return {
+      permissionKeys: ADMIN_FEATURE_PERMISSION_KEYS.invoices,
+      title: "Invoice updated",
+      body: `${label} was updated${by}. ${summary}`,
+      link: input.resource_id ? `/admin/finance/invoices/${input.resource_id}` : "/admin/finance/invoices",
+      eyebrow: "Finance · Invoices",
+      details: { "Updated by": input.actor_name || "System", ...meta },
+    };
+  }
   const eventByAction: Record<string, { permissionKeys: readonly string[]; title: string; body: string; link: string; eyebrow: string }> = {
-    "invoice.create": { permissionKeys: ADMIN_FEATURE_PERMISSION_KEYS.invoices, title: "Invoice saved", body: `${label} was completed and saved.`, link: "/admin/finance/invoices", eyebrow: "Finance · Invoices" },
+    "invoice.create": { permissionKeys: ADMIN_FEATURE_PERMISSION_KEYS.invoices, title: "Invoice created", body: `${label} was completed and saved${by}.`, link: "/admin/finance/invoices", eyebrow: "Finance · Invoices" },
     "invoice.payment_confirmed": { permissionKeys: ADMIN_FEATURE_PERMISSION_KEYS.invoices, title: "Invoice payment confirmed", body: `${label} has a confirmed payment.`, link: "/admin/finance/invoices", eyebrow: "Finance · Payments" },
     "quotation.create": { permissionKeys: ADMIN_FEATURE_PERMISSION_KEYS.quotations, title: "Quotation created", body: `${label} was created.`, link: "/admin/finance/quotations", eyebrow: "Finance · Quotations" },
     "quotation.convert": { permissionKeys: ADMIN_FEATURE_PERMISSION_KEYS.invoices, title: "Quotation converted", body: `${label} was converted into an invoice.`, link: "/admin/finance/invoices", eyebrow: "Finance · Invoices" },

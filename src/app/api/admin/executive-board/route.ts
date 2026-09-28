@@ -12,6 +12,7 @@ import {
   MODEL_STATUSES,
   STEP_STATUSES,
   TARGET_STATUSES,
+  currentBudgetPeriod,
 } from "@/lib/executive-board";
 
 export const runtime = "nodejs";
@@ -127,7 +128,7 @@ async function loadBoard(draftActorId: string, view: ExecutiveBoardView) {
   const overview = view === "overview";
   const [budgets, expansionBudgets, expansionDrafts, models, steps, targets, folders, files, shares] = await Promise.all([
     overview || view === "budgets"
-      ? glashQuery<any>(`select * from public.executive_budgets order by period_start desc nulls last, created_at desc limit 500`)
+      ? glashQuery<any>(`select * from public.executive_budgets order by budget_year desc, budget_month desc, created_at desc limit 2000`)
       : Promise.resolve([]),
     overview || view === "expansion-budgets"
       ? glashQuery<any>(`select * from public.executive_expansion_budgets order by target_start asc, created_at desc limit 500`)
@@ -341,6 +342,12 @@ export async function POST(req: NextRequest) {
       const id = uuid(body.id);
       const title = str(body.title, 200);
       if (!title) return NextResponse.json({ ok: false, error: "A budget needs a title." }, { status: 400 });
+      const today = currentBudgetPeriod();
+      const budgetYear = Number(body.budget_year ?? today.year);
+      const budgetMonth = Number(body.budget_month ?? today.month);
+      if (!Number.isInteger(budgetYear) || budgetYear < 2000 || budgetYear > 2100 || !Number.isInteger(budgetMonth) || budgetMonth < 1 || budgetMonth > 12) {
+        return NextResponse.json({ ok: false, error: "Choose the month and year this budget line belongs to." }, { status: 400 });
+      }
       const values = [
         title,
         pick(body.category, BUDGET_CATEGORIES, "operations"),
@@ -354,20 +361,22 @@ export async function POST(req: NextRequest) {
         pick(body.status, BUDGET_STATUSES, "draft"),
         str(body.notes, 4000) || null,
         actor,
+        budgetYear,
+        budgetMonth,
       ];
       const row = id
         ? await glashMaybeOne<any>(
             `update public.executive_budgets
                 set title=$1, category=$2, period_label=$3, period_start=$4, period_end=$5, currency=$6,
                     planned_amount=$7, actual_amount=$8, owner=$9, status=$10, notes=$11,
-                    updated_by=$12, updated_at=now()
-              where id=$13 returning *`,
+                    updated_by=$12, budget_year=$13, budget_month=$14, updated_at=now()
+              where id=$15 returning *`,
             [...values, id],
           )
         : await glashMaybeOne<any>(
             `insert into public.executive_budgets
-               (title,category,period_label,period_start,period_end,currency,planned_amount,actual_amount,owner,status,notes,created_by,updated_by)
-             values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$12) returning *`,
+               (title,category,period_label,period_start,period_end,currency,planned_amount,actual_amount,owner,status,notes,created_by,updated_by,budget_year,budget_month)
+             values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$12,$13,$14) returning *`,
             values,
           );
       await logActivity({

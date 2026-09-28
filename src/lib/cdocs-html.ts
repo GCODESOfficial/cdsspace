@@ -213,7 +213,17 @@ function visitBlock(node: Node, out: RichBlock[], ctx: InlineCtx) {
     return;
   }
 
-  // Inline-level tag at the block root - wrap as a paragraph
+  // An inline-level tag can still wrap real blocks: pasted or AI-rewritten
+  // bodies arrive as <span><p>…</p><p>…</p></span>. Flattening that with
+  // collectInline glued every paragraph into one run, so the PDF printed
+  // "2026Subject:" with no break. Recurse whenever block children exist.
+  const BLOCK_CHILDREN = "p,div,h1,h2,h3,ul,ol,li,blockquote,pre,hr,figure,img,table";
+  if (el.querySelector?.(BLOCK_CHILDREN)) {
+    Array.from(el.childNodes).forEach((child) => visitBlock(child, out, ctx));
+    return;
+  }
+
+  // Genuinely inline at the block root - wrap as a paragraph.
   const spans = collectInline(el, ctx);
   if (spans.length) out.push({ kind: "paragraph", spans });
 }
