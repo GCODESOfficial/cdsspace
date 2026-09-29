@@ -10,6 +10,7 @@ import {
   completeClientOAuthLinkAttempt,
 } from "@/lib/auth/client-account-connections";
 import { prepareDirectOAuthUser } from "@/lib/auth/direct-oauth-user";
+import { clearMobileOAuthCookie, mobileOAuthFailure, mobileOAuthSuccess } from "@/lib/auth/mobile-oauth";
 
 const STATE_COOKIE = "cds_linkedin_login_state";
 const NEXT_COOKIE = "cds_oauth_next";
@@ -59,6 +60,7 @@ function cookieOptions(maxAge: number) {
 }
 
 function clearLoginCookies(response: NextResponse) {
+  clearMobileOAuthCookie(response);
   response.cookies.set(STATE_COOKIE, "", cookieOptions(0));
   response.cookies.set(NEXT_COOKIE, "", cookieOptions(0));
   return response;
@@ -159,14 +161,14 @@ export async function completeDirectLinkedInLogin(request: NextRequest): Promise
   const next = safeOAuthNext(request.cookies.get(NEXT_COOKIE)?.value || null);
   const suppliedState = request.nextUrl.searchParams.get("state") || "";
   const oauthError = request.nextUrl.searchParams.get("error");
-  if (oauthError) return clearLoginCookies(loginError(next, "linkedin_cancelled"));
+  if (oauthError) return clearLoginCookies(mobileOAuthFailure(request, "linkedin_cancelled") || loginError(next, "linkedin_cancelled"));
   if (!validState(expectedState, suppliedState)) {
-    return clearLoginCookies(loginError(next, "linkedin_state_failed"));
+    return clearLoginCookies(mobileOAuthFailure(request, "linkedin_state_failed") || loginError(next, "linkedin_state_failed"));
   }
 
   const code = request.nextUrl.searchParams.get("code") || "";
   if (!code || code.length > 4096) {
-    return clearLoginCookies(loginError(next, "linkedin_callback_failed"));
+    return clearLoginCookies(mobileOAuthFailure(request, "linkedin_callback_failed") || loginError(next, "linkedin_callback_failed"));
   }
 
   try {
@@ -185,7 +187,10 @@ export async function completeDirectLinkedInLogin(request: NextRequest): Promise
       user,
       next,
     });
-    const payload = await finalized.clone().json().catch(() => ({})) as { next?: unknown };
+    const payload = await finalized.clone().json().catch(() => ({})) as { next?: unknown; ok?: unknown; clientUserId?: unknown; email?: unknown; error?: unknown };
+    // Started from the mobile app: hand the app a one-time code, no web session.
+    const mobile = await mobileOAuthSuccess(request, payload);
+    if (mobile) return clearLoginCookies(mobile);
     const destination = typeof payload.next === "string" ? safeOAuthNext(payload.next) : oauthFailurePage(next);
     const response = copyResponseCookies(
       finalized,
@@ -194,6 +199,6 @@ export async function completeDirectLinkedInLogin(request: NextRequest): Promise
     return clearLoginCookies(response);
   } catch (error) {
     console.error("[client-auth] Direct LinkedIn sign-in failed", error instanceof Error ? error.message : "Unknown error");
-    return clearLoginCookies(loginError(next, "linkedin_callback_failed"));
+    return clearLoginCookies(mobileOAuthFailure(request, "linkedin_callback_failed") || loginError(next, "linkedin_callback_failed"));
   }
 }

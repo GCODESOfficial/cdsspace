@@ -12,6 +12,7 @@ import {
   Camera, Clock, ListChecks, RotateCcw, Minus, Maximize2, Moon, Sun, Info, VolumeX,
   Plus,
   LockKeyhole,
+  Share2,
 } from "lucide-react";
 import {
   requestAdmission, pollAdmission, fetchWaitingGuests, decideAdmission, fetchCMeetIceServers,
@@ -329,6 +330,81 @@ function PeerAudio({ stream, enabled }: { stream: MediaStream; enabled: boolean 
 /* ------------------------------------------------------------------ */
 /*  Page                                                              */
 /* ------------------------------------------------------------------ */
+// An embedded room (?embed=1) reports close/minimize to whatever hosts it: the
+// dashboard's iframe, or the mobile app's in-app web view, which runs the room
+// as a top-level page. Returns false when nothing hosts it.
+const fileSafeTitle = (title?: string | null) =>
+  (title || "cmeet-call").replace(/[^a-z0-9]+/gi, "-").replace(/^-|-$/g, "").toLowerCase() || "cmeet-call";
+const fileStamp = () => new Date().toISOString().replace(/[:.]/g, "-");
+
+function blobToBase64(blob: Blob) {
+  return new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result).split(",")[1] || "");
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(blob);
+  });
+}
+
+// Hands a file (recording, screenshot) to the mobile app in base64 pieces;
+// the app writes them to a file and saves or shares it.
+async function sendFileToApp(blob: Blob, name: string, kind: "recording" | "screenshot") {
+  const id = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  postToEmbedHost({ type: "cmeet:file-start", id, name, mime: blob.type, kind });
+  const slice = 3 * 170 * 1024; // a multiple of 3, so each piece encodes on its own
+  for (let offset = 0; offset < blob.size; offset += slice) {
+    postToEmbedHost({ type: "cmeet:file-chunk", id, data: await blobToBase64(blob.slice(offset, offset + slice)) });
+  }
+  postToEmbedHost({ type: "cmeet:file-end", id });
+}
+
+// A picture of the call: every visible video tile in a grid, cropped like the
+// tiles on screen. Remote WebRTC and camera video can be drawn to a canvas.
+function captureCallImage(): Promise<Blob | null> {
+  const videos = Array.from(document.querySelectorAll("video")).filter((video) => {
+    const box = video.getBoundingClientRect();
+    return video.videoWidth > 0 && box.width > 40 && box.height > 40;
+  });
+  if (!videos.length) return Promise.resolve(null);
+  const cols = Math.ceil(Math.sqrt(videos.length));
+  const rows = Math.ceil(videos.length / cols);
+  const cellW = 640, cellH = 480, gap = 12;
+  const canvas = document.createElement("canvas");
+  canvas.width = cols * cellW + (cols + 1) * gap;
+  canvas.height = rows * cellH + (rows + 1) * gap;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return Promise.resolve(null);
+  ctx.fillStyle = "#0A1130";
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  videos.forEach((video, index) => {
+    const x = gap + (index % cols) * (cellW + gap);
+    const y = gap + Math.floor(index / cols) * (cellH + gap);
+    const scale = Math.max(cellW / video.videoWidth, cellH / video.videoHeight);
+    const sw = cellW / scale, sh = cellH / scale;
+    ctx.drawImage(video, (video.videoWidth - sw) / 2, (video.videoHeight - sh) / 2, sw, sh, x, y, cellW, cellH);
+  });
+  return new Promise((resolve) => canvas.toBlob((blob) => resolve(blob), "image/jpeg", 0.9));
+}
+
+type NativeHostWindow = Window & { ReactNativeWebView?: { postMessage(data: string): void } };
+
+function inMobileApp() {
+  return Boolean((window as NativeHostWindow).ReactNativeWebView);
+}
+
+function postToEmbedHost(message: { type: string } & Record<string, unknown>) {
+  const native = (window as NativeHostWindow).ReactNativeWebView;
+  if (native) {
+    native.postMessage(JSON.stringify(message));
+    return true;
+  }
+  if (window.parent !== window) {
+    window.parent.postMessage(message, window.location.origin);
+    return true;
+  }
+  return false;
+}
+
 export default function MeetRoomPage() {
   const params = useParams<{ code: string }>();
   const router = useRouter();
@@ -384,6 +460,10 @@ export default function MeetRoomPage() {
   const recordingAudioTrackRef = useRef<MediaStreamTrack | null>(null);
   const recordingStopResolverRef = useRef<(() => void) | null>(null);
   const embeddedRef = useRef(false);
+  // Running inside the CDS Space mobile app (embedded in its web view): some
+  // browser-only features are handed to the app instead (see postToEmbedHost).
+  const inAppRef = useRef(false);
+  const [inApp, setInApp] = useState(false);
   const autoJoinAttemptedRef = useRef(false);
 
   // Peers
@@ -459,6 +539,8 @@ export default function MeetRoomPage() {
   useEffect(() => {
     if (!code) return;
     embeddedRef.current = new URLSearchParams(window.location.search).get("embed") === "1";
+    inAppRef.current = embeddedRef.current && inMobileApp();
+    setInApp(inAppRef.current);
     (async () => {
       const r = await fetch(`/api/cmeet/${code}`, { cache: "no-store" });
       const j = await r.json().catch(() => ({}));
@@ -1156,6 +1238,11 @@ export default function MeetRoomPage() {
       await stopScreenShare();
       return;
     }
+    // Phones don't let an in-app web page capture the screen (no getDisplayMedia).
+    if (inAppRef.current) {
+      await appAlert("Screen sharing isn't available in the mobile app yet. Join this meeting from a computer to share your screen.");
+      return;
+    }
 
     try {
       const disp = await navigator.mediaDevices.getDisplayMedia({
@@ -1248,7 +1335,11 @@ export default function MeetRoomPage() {
       recorder.onstop = () => {
         const type = recorder.mimeType || mimeType || "video/webm";
         const blob = new Blob(recordingChunksRef.current, { type });
-        if (blob.size) {
+        if (blob.size && inAppRef.current) {
+          // The app's web view can't download; the app saves or shares the file.
+          const extension = type.includes("mp4") ? (videoTrack ? "mp4" : "m4a") : "webm";
+          void sendFileToApp(blob, `${fileSafeTitle(meeting?.title)}-${fileStamp()}.${extension}`, "recording");
+        } else if (blob.size) {
           const objectUrl = URL.createObjectURL(blob);
           const anchor = document.createElement("a");
           const safeTitle = (meeting?.title || "cmeet-call").replace(/[^a-z0-9]+/gi, "-").replace(/^-|-$/g, "").toLowerCase();
@@ -1364,6 +1455,22 @@ export default function MeetRoomPage() {
       return;
     }
     if (capturingScreenshot) return;
+    // In the app there is no screen capture: capture the call itself (every
+    // visible video tile) and let the app save it to Photos.
+    if (inAppRef.current) {
+      setCapturingScreenshot(true);
+      try {
+        const image = await captureCallImage();
+        if (!image) {
+          await appAlert("There is no video on screen to capture yet.");
+          return;
+        }
+        await sendFileToApp(image, `${fileSafeTitle(meeting?.title)}-${fileStamp()}.jpg`, "screenshot");
+      } finally {
+        setCapturingScreenshot(false);
+      }
+      return;
+    }
     if (!navigator.mediaDevices?.getDisplayMedia) {
       await appAlert("Full-screen screenshots are not supported by this browser. Try cMeet in the latest Chrome, Edge, or Safari and use your device screenshot shortcut if needed.");
       return;
@@ -1441,8 +1548,8 @@ export default function MeetRoomPage() {
     setShowMoreControls(false);
     setJoined(false);
     if (opts?.notice) appAlert(opts.notice);
-    if (embeddedRef.current && window.parent !== window) {
-      window.parent.postMessage({ type: "cmeet:close" }, window.location.origin);
+    if (embeddedRef.current && postToEmbedHost({ type: "cmeet:close" })) {
+      // The host (dashboard iframe or the mobile app) closes the room.
     } else if (opts?.exit) {
       router.push(exitPath);
     } else {
@@ -1519,6 +1626,12 @@ export default function MeetRoomPage() {
   }
 
   async function minimizeMeeting() {
+    // In the mobile app, the app shrinks the call to a floating pill and keeps
+    // this page running untouched, so the room is exactly as it was on return.
+    if (embeddedRef.current && inMobileApp()) {
+      postToEmbedHost({ type: "cmeet:minimize" });
+      return;
+    }
     const video = pictureInPictureVideoRef.current as PictureInPictureVideo | null;
     if (video && pictureInPictureStream?.getVideoTracks().some((track) => track.readyState === "live")) {
       video.srcObject = pictureInPictureStream;
@@ -1535,9 +1648,7 @@ export default function MeetRoomPage() {
       }
     }
     setMinimized(true);
-    if (embeddedRef.current && window.parent !== window) {
-      window.parent.postMessage({ type: "cmeet:minimize" }, window.location.origin);
-    }
+    if (embeddedRef.current) postToEmbedHost({ type: "cmeet:minimize" });
   }
 
   /* -------- Derived: is the viewer host/admin? -------- */
@@ -2096,7 +2207,7 @@ export default function MeetRoomPage() {
           <ControlButton dark={isDark} onClick={() => requestControlAction({ title: camOn ? "Turn camera off?" : "Turn camera on?", description: camOn ? "Your video will be hidden while your audio continues." : "Other participants will be able to see your camera feed.", confirmLabel: camOn ? "Turn off" : "Turn on", run: toggleCam })} active={!camOn} icon={camOn ? <Video className="w-4 h-4" /> : <VideoOff className="w-4 h-4" />} title={camOn ? "Turn camera off" : "Turn camera on"} />
         )}
         {!meeting.audio_only && (
-          <ControlButton dark={isDark} onClick={() => requestControlAction({ title: sharing ? "Stop sharing your screen?" : "Share your screen?", description: sharing ? "Participants will return to your camera view." : "Your browser will ask which screen or window you want everyone to see.", confirmLabel: sharing ? "Stop sharing" : "Choose a screen", run: toggleShare })} active={sharing} icon={sharing ? <ScreenShareOff className="w-4 h-4" /> : <ScreenShare className="w-4 h-4" />} title={sharing ? "Stop sharing" : "Share your screen"} />
+          <ControlButton dark={isDark} onClick={() => requestControlAction({ title: sharing ? "Stop sharing your screen?" : "Share your screen?", description: sharing ? "Participants will return to your camera view." : inApp ? "Screen sharing isn't available in the mobile app yet. Join this meeting from a computer to share your screen." : "Your browser will ask which screen or window you want everyone to see.", confirmLabel: sharing ? "Stop sharing" : inApp ? "OK" : "Choose a screen", run: inApp && !sharing ? async () => undefined : toggleShare })} active={sharing} icon={sharing ? <ScreenShareOff className="w-4 h-4" /> : <ScreenShare className="w-4 h-4" />} title={sharing ? "Stop sharing" : "Share your screen"} />
         )}
         <ControlButton dark={isDark} onClick={() => requestControlAction({ title: showChat ? "Close meeting chat?" : "Open meeting chat?", description: "The in-call chat lets you exchange short messages without interrupting the speaker.", confirmLabel: showChat ? "Close chat" : "Open chat", run: () => setShowChat(!showChat) })} active={showChat} icon={<MessageCircle className="w-4 h-4" />} title="Chat" />
         <ControlButton dark={isDark} onClick={() => requestControlAction({ title: "Open meeting agenda?", description: "View the planned discussion items and mark each one as discussed.", confirmLabel: "Open agenda", run: () => setShowAgenda(true) })} active={showAgenda} icon={<ListChecks className="h-4 w-4" />} title="Meeting agenda" />
@@ -2110,8 +2221,8 @@ export default function MeetRoomPage() {
         <ControlButton dark={isDark} onClick={toggleRaisedHand} active={handRaised} icon={<Hand className="h-4 w-4" />} title={handRaised ? "Lower hand" : "Raise hand"} />
         {isHost && <ControlButton dark={isDark} onClick={() => requestControlAction({ title: meeting.audio_only ? "Switch this room to video?" : "Switch this room to audio?", description: meeting.audio_only ? "Video mode will open for everyone with every camera off. Each participant can choose when to turn their camera on." : "Every participant camera and active screen share will stop when the room changes to audio mode.", confirmLabel: meeting.audio_only ? "Switch to video" : "Switch to audio", run: switchMeetingMode })} active={false} icon={meeting.audio_only ? <Video className="h-4 w-4" /> : <Mic className="h-4 w-4" />} title={meeting.audio_only ? "Switch to video call" : "Switch to audio call"} />}
         {isHost && <ControlButton dark={isDark} onClick={muteEveryoneElse} active={false} icon={<VolumeX className="h-4 w-4" />} title="Mute everyone else" />}
-        {isHost && <ControlButton dark={isDark} onClick={() => requestControlAction({ title: recording ? "Stop and save recording?" : "Record this meeting?", description: recording ? "The recording will stop and download to this device." : "A local recording will be created in this browser and downloaded when you stop it.", confirmLabel: recording ? "Stop and save" : "Start recording", run: () => recording ? stopRecording() : startRecording() })} active={recording} icon={recording ? <CircleStop className="h-4 w-4" /> : <Circle className="h-4 w-4" />} title={recording ? "Stop and save recording" : "Record this call to your device"} />}
-        {isHost && <ControlButton dark={isDark} onClick={() => requestControlAction({ title: "Take a screenshot?", description: "Your browser will ask which screen to capture, then save the screenshot to your device.", confirmLabel: "Choose a screen", run: takeScreenScreenshot })} active={capturingScreenshot} icon={capturingScreenshot ? <Loader2 className="h-4 w-4 animate-spin" /> : <Camera className="h-4 w-4" />} title="Screenshot entire screen" />}
+        {isHost && <ControlButton dark={isDark} onClick={() => requestControlAction({ title: recording ? "Stop and save recording?" : "Record this meeting?", description: recording ? (inApp ? "The recording will stop, and you can save it to your phone or share it." : "The recording will stop and download to this device.") : (inApp ? "The call will be recorded on this phone. When you stop, you can save or share the recording." : "A local recording will be created in this browser and downloaded when you stop it."), confirmLabel: recording ? "Stop and save" : "Start recording", run: () => recording ? stopRecording() : startRecording() })} active={recording} icon={recording ? <CircleStop className="h-4 w-4" /> : <Circle className="h-4 w-4" />} title={recording ? "Stop and save recording" : "Record this call to your device"} />}
+        {isHost && <ControlButton dark={isDark} onClick={() => requestControlAction({ title: "Take a screenshot?", description: inApp ? "A picture of everyone's video in this call will be saved to your Photos." : "Your browser will ask which screen to capture, then save the screenshot to your device.", confirmLabel: inApp ? "Take screenshot" : "Choose a screen", run: takeScreenScreenshot })} active={capturingScreenshot} icon={capturingScreenshot ? <Loader2 className="h-4 w-4 animate-spin" /> : <Camera className="h-4 w-4" />} title="Screenshot entire screen" />}
         <UniversalShareButton
           title={meeting.title}
           text={`Join the live meeting "${meeting.title}" on CDS Space cMeet.`}
@@ -2147,7 +2258,7 @@ export default function MeetRoomPage() {
           <MoreControlsModal onClose={() => setShowMoreControls(false)}>
             <MoreControlButton icon={micOn ? <Mic /> : <MicOff />} label={micOn ? "Mute" : "Unmute"} active={!micOn} onClick={() => requestMoreControlAction({ title: micOn ? "Mute microphone?" : "Unmute microphone?", description: micOn ? "Other participants will stop hearing your microphone until you turn it back on." : "Other participants will be able to hear your microphone again.", confirmLabel: micOn ? "Mute" : "Unmute", run: toggleMic })} />
             {!meeting.audio_only && <MoreControlButton icon={camOn ? <Video /> : <VideoOff />} label={camOn ? "Camera off" : "Camera on"} active={!camOn} onClick={() => requestMoreControlAction({ title: camOn ? "Turn camera off?" : "Turn camera on?", description: camOn ? "Your video will be hidden while your audio continues." : "Other participants will be able to see your camera feed.", confirmLabel: camOn ? "Turn off" : "Turn on", run: toggleCam })} />}
-            {!meeting.audio_only && <MoreControlButton icon={sharing ? <ScreenShareOff /> : <ScreenShare />} label={sharing ? "Stop sharing" : "Share screen"} active={sharing} onClick={() => requestMoreControlAction({ title: sharing ? "Stop sharing your screen?" : "Share your screen?", description: sharing ? "Participants will return to your camera view." : "Your browser will ask which screen or window you want everyone to see.", confirmLabel: sharing ? "Stop sharing" : "Choose a screen", run: toggleShare })} />}
+            {!meeting.audio_only && <MoreControlButton icon={sharing ? <ScreenShareOff /> : <ScreenShare />} label={sharing ? "Stop sharing" : "Share screen"} active={sharing} onClick={() => requestMoreControlAction({ title: sharing ? "Stop sharing your screen?" : "Share your screen?", description: sharing ? "Participants will return to your camera view." : inApp ? "Screen sharing isn't available in the mobile app yet. Join this meeting from a computer to share your screen." : "Your browser will ask which screen or window you want everyone to see.", confirmLabel: sharing ? "Stop sharing" : inApp ? "OK" : "Choose a screen", run: inApp && !sharing ? async () => undefined : toggleShare })} />}
             <MoreControlButton icon={<MessageCircle />} label="Chat" active={showChat} onClick={() => { setShowChat(!showChat); setShowMoreControls(false); }} />
             <MoreControlButton icon={<ListChecks />} label="Agenda" active={showAgenda} onClick={() => { setShowAgenda(true); setShowMoreControls(false); }} />
             <MoreControlButton icon={<Languages />} label="Live translation" active={translation.enabled} onClick={() => { setShowTranslation(true); setShowMoreControls(false); }} />
@@ -2155,15 +2266,33 @@ export default function MeetRoomPage() {
             {isSuperAdmin && <MoreControlButton icon={<Users />} label="Participants" active={showParticipantList} onClick={() => { setShowParticipantList(true); setShowMoreControls(false); }} />}
             {isHost && <MoreControlButton icon={meeting.audio_only ? <Video /> : <Mic />} label={meeting.audio_only ? "Switch to video" : "Switch to audio"} onClick={() => requestMoreControlAction({ title: meeting.audio_only ? "Switch this room to video?" : "Switch this room to audio?", description: meeting.audio_only ? "Video mode will open for everyone with every camera off. Each participant can choose when to turn their camera on." : "Every participant camera and active screen share will stop when the room changes to audio mode.", confirmLabel: meeting.audio_only ? "Switch to video" : "Switch to audio", run: switchMeetingMode })} />}
             {isHost && <MoreControlButton icon={<VolumeX />} label="Mute everyone" onClick={muteEveryoneElse} />}
-            {isHost && <MoreControlButton icon={recording ? <CircleStop /> : <Circle />} label={recording ? "Stop recording" : "Record call"} active={recording} onClick={() => requestMoreControlAction({ title: recording ? "Stop and save recording?" : "Record this meeting?", description: recording ? "The recording will stop and download to this device." : "A local recording will be created in this browser and downloaded when you stop it.", confirmLabel: recording ? "Stop and save" : "Start recording", run: () => recording ? stopRecording() : startRecording() })} />}
-            {isHost && <MoreControlButton icon={capturingScreenshot ? <Loader2 className="animate-spin" /> : <Camera />} label="Screenshot" active={capturingScreenshot} onClick={() => requestMoreControlAction({ title: "Take a screenshot?", description: "Your browser will ask which screen to capture, then save the screenshot to your device.", confirmLabel: "Choose a screen", run: takeScreenScreenshot })} />}
-            <UniversalShareButton
-              title={meeting.title}
-              text={`Join the live meeting "${meeting.title}" on CDS Space cMeet.`}
-              url={buildCMeetPath(code, meeting.title)}
-              label="Share invite"
-              className="min-h-[76px] w-full flex-col rounded-2xl border-white/10 bg-white/5 px-2 text-[11px] font-medium text-white shadow-none hover:border-[#6B92FF] hover:bg-white/10"
-            />
+            {isHost && <MoreControlButton icon={recording ? <CircleStop /> : <Circle />} label={recording ? "Stop recording" : "Record call"} active={recording} onClick={() => requestMoreControlAction({ title: recording ? "Stop and save recording?" : "Record this meeting?", description: recording ? (inApp ? "The recording will stop, and you can save it to your phone or share it." : "The recording will stop and download to this device.") : (inApp ? "The call will be recorded on this phone. When you stop, you can save or share the recording." : "A local recording will be created in this browser and downloaded when you stop it."), confirmLabel: recording ? "Stop and save" : "Start recording", run: () => recording ? stopRecording() : startRecording() })} />}
+            {isHost && <MoreControlButton icon={capturingScreenshot ? <Loader2 className="animate-spin" /> : <Camera />} label="Screenshot" active={capturingScreenshot} onClick={() => requestMoreControlAction({ title: "Take a screenshot?", description: inApp ? "A picture of everyone's video in this call will be saved to your Photos." : "Your browser will ask which screen to capture, then save the screenshot to your device.", confirmLabel: inApp ? "Take screenshot" : "Choose a screen", run: takeScreenScreenshot })} />}
+            {inApp ? (
+              // The share options open new windows, which the app's web view
+              // blocks; the phone's own share sheet is used instead.
+              <MoreControlButton
+                icon={<Share2 />}
+                label="Share invite"
+                onClick={() => {
+                  setShowMoreControls(false);
+                  postToEmbedHost({
+                    type: "cmeet:share",
+                    title: meeting.title,
+                    text: `Join the live meeting "${meeting.title}" on CDS Space cMeet.`,
+                    url: new URL(buildCMeetPath(code, meeting.title), window.location.origin).toString(),
+                  });
+                }}
+              />
+            ) : (
+              <UniversalShareButton
+                title={meeting.title}
+                text={`Join the live meeting "${meeting.title}" on CDS Space cMeet.`}
+                url={buildCMeetPath(code, meeting.title)}
+                label="Share invite"
+                className="min-h-[76px] w-full flex-col rounded-2xl border-white/10 bg-white/5 px-2 text-[11px] font-medium text-white shadow-none hover:border-[#6B92FF] hover:bg-white/10"
+              />
+            )}
             {canEndStream && <MoreControlButton icon={<CircleStop />} label="End stream" tone="danger" onClick={() => { setShowEndConfirm(true); setShowMoreControls(false); }} />}
             <MoreControlButton icon={<PhoneOff />} label="Leave" tone="danger" onClick={() => requestMoreControlAction({ title: "Leave this meeting?", description: "Your camera, microphone, translation and meeting connections will close. You can rejoin while the meeting remains open.", confirmLabel: "Leave meeting", tone: "danger", run: () => hangUp() })} />
           </MoreControlsModal>
@@ -2688,11 +2817,14 @@ function ParticipantTile({
           <Hand className="h-4 w-4" />
         </div>
       )}
-      <MediaStatusBadges hasAudio={hasAudio} hasVideo={hasVideo} onMute={onMute} onRemove={onRemove} participantName={label} className="bottom-2 left-1/2 -translate-x-1/2" />
+      {/* Name and controls sit on the bottom edge, clear of the face in the
+          middle of the frame; the fade keeps them readable on any video. */}
+      <div aria-hidden className="pointer-events-none absolute inset-x-0 bottom-0 h-12 rounded-b-[inherit] bg-gradient-to-t from-black/70 to-transparent" />
       {caption && <ParticipantCaption text={caption} />}
-      <div className={`absolute bottom-11 left-1/2 max-w-[85%] -translate-x-1/2 truncate rounded-md border border-white/15 bg-[#071225]/90 px-2 py-1 font-medium text-white shadow-sm backdrop-blur-sm ${large ? "text-[11px]" : "text-[9.5px]"}`}>
+      <div className={`absolute bottom-2 left-2 max-w-[55%] truncate rounded-md bg-black/45 px-1.5 py-0.5 font-medium text-white backdrop-blur-sm ${large ? "text-[11px]" : "text-[9.5px]"}`}>
         {label}
       </div>
+      <MediaStatusBadges compact hasAudio={hasAudio} hasVideo={hasVideo} onMute={onMute} onRemove={onRemove} participantName={label} className="bottom-2 right-2" />
     </div>
   );
 }
@@ -2705,30 +2837,38 @@ function MediaStatusBadges({
   onRemove,
   participantName,
   className,
+  compact = false,
 }: {
   hasAudio: boolean;
   hasVideo: boolean;
   audioOnly?: boolean;
+  /** Smaller badges for the corner of a video tile. */
+  compact?: boolean;
   onMute?: () => void;
   onRemove?: () => void;
   participantName?: string;
   className: string;
 }) {
-  const microphoneClass = `grid h-7 w-7 place-items-center rounded-full border-2 border-white shadow-md transition ${hasAudio ? "bg-[#0A4FE8] text-white" : "bg-rose-600 text-white"}`;
+  const badge = compact ? "h-6 w-6 border-[1.5px]" : "h-7 w-7 border-2";
+  // mobile.css gives every labelled button a 40px minimum. Compact buttons keep
+  // that touch area as an invisible ring around a small visible badge.
+  const tapArea = compact ? "relative !min-h-0 !min-w-0 after:absolute after:-inset-2 after:rounded-full after:content-['']" : "";
+  const icon = compact ? "h-3 w-3" : "h-3.5 w-3.5";
+  const microphoneClass = `grid ${badge} place-items-center rounded-full border-white shadow-md transition ${hasAudio ? "bg-[#0A4FE8] text-white" : "bg-rose-600 text-white"}`;
   const microphoneTitle = hasAudio
     ? onMute ? "Microphone on. Click to mute this participant." : "Microphone on"
     : "Microphone muted";
-  const microphone = hasAudio ? <Mic className="h-3.5 w-3.5" /> : <MicOff className="h-3.5 w-3.5" />;
+  const microphone = hasAudio ? <Mic className={icon} /> : <MicOff className={icon} />;
 
   return (
     <div className={`absolute z-30 flex items-center gap-1 ${className}`}>
       {onRemove && (
-        <button type="button" onClick={onRemove} className="grid h-7 w-7 place-items-center rounded-full border-2 border-white bg-rose-600 text-white shadow-md transition hover:scale-105 hover:bg-rose-700" aria-label={`Remove ${participantName || "participant"}`} title={`Remove ${participantName || "participant"}`}>
-          <XIcon className="h-3.5 w-3.5" />
+        <button type="button" onClick={onRemove} className={`grid ${badge} ${tapArea} place-items-center rounded-full border-white bg-rose-600 text-white shadow-md transition hover:scale-105 hover:bg-rose-700`} aria-label={`Remove ${participantName || "participant"}`} title={`Remove ${participantName || "participant"}`}>
+          <XIcon className={icon} />
         </button>
       )}
       {onMute && hasAudio ? (
-        <button type="button" onClick={onMute} className={`${microphoneClass} hover:scale-105 hover:bg-rose-600`} aria-label="Mute participant" title={microphoneTitle}>
+        <button type="button" onClick={onMute} className={`${microphoneClass} ${tapArea} hover:scale-105 hover:bg-rose-600`} aria-label="Mute participant" title={microphoneTitle}>
           {microphone}
         </button>
       ) : (
@@ -2737,8 +2877,8 @@ function MediaStatusBadges({
         </span>
       )}
       {!audioOnly && (
-        <span className={`grid h-7 w-7 place-items-center rounded-full border-2 border-white shadow-md ${hasVideo ? "bg-[#0A4FE8] text-white" : "bg-rose-600 text-white"}`} aria-label={hasVideo ? "Camera on" : "Camera off"} title={hasVideo ? "Camera on" : "Camera off"}>
-          {hasVideo ? <Video className="h-3.5 w-3.5" /> : <VideoOff className="h-3.5 w-3.5" />}
+        <span className={`grid ${badge} place-items-center rounded-full border-white shadow-md ${hasVideo ? "bg-[#0A4FE8] text-white" : "bg-rose-600 text-white"}`} aria-label={hasVideo ? "Camera on" : "Camera off"} title={hasVideo ? "Camera on" : "Camera off"}>
+          {hasVideo ? <Video className={icon} /> : <VideoOff className={icon} />}
         </span>
       )}
     </div>

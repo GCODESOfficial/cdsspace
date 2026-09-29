@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { glashMaybeOne, glashQuery } from "@/lib/glashdb/postgres";
-import { assertTrustedMutationOrigin, cleanText, requestFingerprint } from "@/lib/intelligence/security";
+import { cleanText, requestFingerprint } from "@/lib/intelligence/security";
 import { checkIntelligenceRateLimit } from "@/lib/intelligence/rate-limit";
+import { intelligenceViewer, trustedClientMutation } from "@/lib/intelligence/viewer";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -11,7 +12,7 @@ type Params = Promise<{ slug: string }>;
 export async function GET(_req: NextRequest, { params }: { params: Params }) {
   const { slug } = await params;
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const user = await intelligenceViewer(supabase);
   const comments = await glashQuery(
     `select c.id, c.parent_id, c.body, c.likes_count, c.edited_at, c.created_at,
             p.full_name as author_name, p.avatar_url as author_avatar
@@ -29,9 +30,9 @@ export async function GET(_req: NextRequest, { params }: { params: Params }) {
 }
 
 export async function POST(req: NextRequest, { params }: { params: Params }) {
-  if (!assertTrustedMutationOrigin(req)) return NextResponse.json({ ok: false, error: "Untrusted request origin" }, { status: 403 });
+  if (!(await trustedClientMutation(req))) return NextResponse.json({ ok: false, error: "Untrusted request origin" }, { status: 403 });
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const user = await intelligenceViewer(supabase);
   if (!user) return NextResponse.json({ ok: false, error: "Please sign in to comment." }, { status: 401 });
 
   const fingerprint = requestFingerprint(req);

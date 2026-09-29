@@ -208,7 +208,7 @@ export async function recordProviderLogin(input: {
  * provider. It can therefore move that provider sign-in from a separate,
  * previously-created profile onto the active user ID without merging data.
  */
-async function connectProviderToClient(input: {
+export async function connectProviderToClient(input: {
   clientUserId: string;
   provider: ClientAuthProvider;
   subject: string;

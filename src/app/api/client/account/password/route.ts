@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/glashdb/server";
 import { readClientDashboardSessionUser } from "@/lib/client-dashboard-session";
 import { clearClientLoginFailures } from "@/lib/client-login-security";
+import { readRequestMobileToken, revokeAllClientMobileSessions } from "@/lib/client-mobile-session";
 
 export const dynamic = "force-dynamic";
 
@@ -48,6 +49,8 @@ export async function POST(request: NextRequest) {
   }
 
   await clearClientLoginFailures(user.email);
+  // A new password signs every other mobile device out; this one stays signed in.
+  await revokeAllClientMobileSessions(user.id, "password_changed", await readRequestMobileToken());
 
   return NextResponse.json({ ok: true });
 }

@@ -1,17 +1,18 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { glashQuery, glashMaybeOne } from "@/lib/glashdb/postgres";
-import { assertTrustedMutationOrigin, requestFingerprint } from "@/lib/intelligence/security";
+import { requestFingerprint } from "@/lib/intelligence/security";
 import { checkIntelligenceRateLimit } from "@/lib/intelligence/rate-limit";
+import { intelligenceViewer, trustedClientMutation } from "@/lib/intelligence/viewer";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 /** Like / Love toggle - logged-in users only. value: 1 (like) | 2 (love). */
 export async function POST(req: NextRequest) {
-  if (!assertTrustedMutationOrigin(req)) return NextResponse.json({ ok: false, error: "Untrusted request origin" }, { status: 403 });
+  if (!(await trustedClientMutation(req))) return NextResponse.json({ ok: false, error: "Untrusted request origin" }, { status: 403 });
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const user = await intelligenceViewer(supabase);
   if (!user) return NextResponse.json({ ok: false, error: "Please sign in to react." }, { status: 401 });
 
   const body = await req.json().catch(() => ({}));
@@ -71,7 +72,7 @@ export async function GET(req: NextRequest) {
   const slug = new URL(req.url).searchParams.get("slug") || "";
   if (!slug) return NextResponse.json({ ok: true, mine: null });
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const user = await intelligenceViewer(supabase);
   if (!user) return NextResponse.json({ ok: true, mine: null });
   const row = await glashMaybeOne<{ value: number }>(
     `select r.value from public.blog_post_reactions r

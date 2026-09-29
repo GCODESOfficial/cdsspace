@@ -1,17 +1,18 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { glashMaybeOne, glashQuery } from "@/lib/glashdb/postgres";
-import { assertTrustedMutationOrigin, cleanText, requestFingerprint } from "@/lib/intelligence/security";
+import { cleanText, requestFingerprint } from "@/lib/intelligence/security";
 import { checkIntelligenceRateLimit } from "@/lib/intelligence/rate-limit";
+import { intelligenceViewer, trustedClientMutation } from "@/lib/intelligence/viewer";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 type Params = Promise<{ slug: string }>;
 
 export async function POST(req: NextRequest, { params }: { params: Params }) {
-  if (!assertTrustedMutationOrigin(req)) return NextResponse.json({ ok: false, error: "Untrusted request origin" }, { status: 403 });
+  if (!(await trustedClientMutation(req))) return NextResponse.json({ ok: false, error: "Untrusted request origin" }, { status: 403 });
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const user = await intelligenceViewer(supabase);
   if (!user) return NextResponse.json({ ok: false, error: "Sign in with the assigned client account." }, { status: 401 });
   if (!checkIntelligenceRateLimit(`private-report:${user.id}`, 10, 10 * 60_000).allowed) return NextResponse.json({ ok: false, error: "Please wait and try again." }, { status: 429 });
   const { slug } = await params;

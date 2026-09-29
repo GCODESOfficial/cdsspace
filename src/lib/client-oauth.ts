@@ -134,7 +134,9 @@ export async function finalizeClientOAuthSignIn(input: {
     NextResponse.json(
       // The address comes back so the browser can remember which account and
       // which provider was used, for the hint on the sign-in page.
-      { ok: true, next: clientDashboardPath(profile.public_user_id, safeClientPath(input.next)), email: profile.email || "" },
+      // clientUserId is the resolved account (a connected provider maps to its
+      // client); the mobile sign-in hand-off uses it, browsers ignore it.
+      { ok: true, next: clientDashboardPath(profile.public_user_id, safeClientPath(input.next)), email: profile.email || "", clientUserId: profile.id },
       { headers: { "Cache-Control": "no-store" } },
     ),
     dashboardUser,

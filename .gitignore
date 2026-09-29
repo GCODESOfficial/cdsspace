@@ -60,3 +60,6 @@ public/downloads/*.dmg
 
 # Debug and verification screenshots, not app source
 artifacts/
+
+# scripts/dev.mjs route rescan nudge
+src/app/.dev-route-rescan

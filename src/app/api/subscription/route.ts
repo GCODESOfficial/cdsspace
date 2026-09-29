@@ -25,6 +25,18 @@ async function loadPendingSubscription(userId: string) {
     return { ...pending, invoice: invoice || null };
 }
 
+// Billing is monthly from activation; the design allowance resets on the 1st of
+// each month (see the reset below). Returned so clients can show both dates.
+function billingDates(subscription: { activated_at?: string | null; created_at?: string | null } | null) {
+    if (!subscription) return { next_billing_at: null, quota_resets_at: null };
+    const now = new Date();
+    const quotaReset = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1));
+    const start = new Date(subscription.activated_at || subscription.created_at || now.toISOString());
+    const next = new Date(start);
+    while (next <= now) next.setUTCMonth(next.getUTCMonth() + 1);
+    return { next_billing_at: next.toISOString(), quota_resets_at: quotaReset.toISOString() };
+}
+
 export async function GET() {
     try {
         const session = await verifyUser();
@@ -72,11 +84,11 @@ export async function GET() {
                     return NextResponse.json({ error: "Internal Server Error" }, { status: 500 });
                 }
 
-                return NextResponse.json({ subscription: updated, pending });
+                return NextResponse.json({ subscription: updated, pending, ...billingDates(updated) });
             }
         }
 
-        return NextResponse.json({ subscription, pending });
+        return NextResponse.json({ subscription, pending, ...billingDates(subscription) });
     } catch (error) {
         console.error("API Error [subscription]:", error);
         return NextResponse.json({ error: "Internal Server Error" }, { status: 500 });

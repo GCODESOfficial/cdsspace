@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { verifyUser } from "@/lib/admin-auth";
 import { clearClientDashboardSessionOnResponse } from "@/lib/client-dashboard-session";
 import { glashMaybeOne, glashQuery } from "@/lib/glashdb/postgres";
+import { revokeAllClientMobileSessions } from "@/lib/client-mobile-session";
 import {
   ACCOUNT_CLOSURE_OTP_MAX_ATTEMPTS,
   ACCOUNT_CLOSURE_OTP_MAX_SENDS_PER_HOUR,
@@ -192,6 +193,7 @@ export async function PATCH(request: Request) {
   }
 
   await session.supabase.auth.signOut({ scope: "global" }).catch(() => undefined);
+  await revokeAllClientMobileSessions(closed.id, "account_closed").catch(() => undefined);
 
   return clearClientDashboardSessionOnResponse(NextResponse.json({
     ok: true,
