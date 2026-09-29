@@ -15,8 +15,7 @@ export const dynamic = "force-dynamic";
 
 export async function GET(request: NextRequest, { params }: { params: Promise<{ provider: string }> }) {
   const { provider } = await params;
-  // Apple is connected natively from the iPhone app (/api/mobile/v1/auth/apple).
-  if (!isClientAuthProvider(provider) || provider === "apple") {
+  if (!isClientAuthProvider(provider)) {
     return NextResponse.json({ error: "Unsupported sign-in provider." }, { status: 404 });
   }
 

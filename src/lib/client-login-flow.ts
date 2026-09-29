@@ -5,6 +5,7 @@ import "server-only";
 // the mobile API (which returns the binding to the app and receives it back).
 // The binding ties the emailed code to the device that entered the password.
 
+import { after } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { ensureClientProfile, isPasswordAccount } from '@/lib/client-account'
 import { clearClientDashboardSessionCookie } from '@/lib/client-dashboard-session'
@@ -25,6 +26,7 @@ import {
     createClientLoginChallenge,
     createLoginBinding,
     generateClientEmailOtp,
+    redeemClientLoginSession,
     getClientLoginChallenge,
     isClientLoginLocked,
     maskClientEmail,
@@ -44,6 +46,27 @@ export type LoginInput = {
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
+// Development only: one line per sign-in showing where the time went, e.g.
+// "[client-login timing] checks 820ms, password 2.1s, profile 1.4s, challenge 300ms (total 4.6s)".
+function loginTimer() {
+    const started = Date.now();
+    let last = started;
+    const steps: string[] = [];
+    const ms = (n: number) => (n >= 1000 ? `${(n / 1000).toFixed(1)}s` : `${n}ms`);
+    return {
+        step(label: string) {
+            const now = Date.now();
+            steps.push(`${label} ${ms(now - last)}`);
+            last = now;
+        },
+        done() {
+            if (process.env.NODE_ENV !== 'production') {
+                console.info(`[client-login timing] ${steps.join(', ')} (total ${ms(Date.now() - started)})`);
+            }
+        },
+    };
+}
+
 function getSafeNextPath(next?: string | null) {
     return next?.startsWith('/') && !next.startsWith('//') ? next : '/dashboard';
 }
@@ -56,18 +79,30 @@ export async function startClientLogin(formData: LoginInput) {
     }
     if (isBlockedEmail(email)) return { result: { error: BLOCKED_EMAIL_MESSAGE } }
 
-    const context = await clientRequestContext();
-    const human = await verifyBotProtection({ token: formData.botToken, remoteIp: context.ip, action: 'client_login' });
-    if (!human) return { result: { error: 'Security verification failed. Refresh the page and try again.' } }
+    const timer = loginTimer();
+    try {
+        return await startClientLoginTimed(email, password, formData, timer);
+    } finally {
+        timer.done();
+    }
+}
 
-    const [networkBlocked, identityBurstBlocked] = await Promise.all([
+async function startClientLoginTimed(email: string, password: string, formData: LoginInput, timer: ReturnType<typeof loginTimer>) {
+    const context = await clientRequestContext();
+    // Independent database checks run together (each is a round trip to the
+    // remote database); their answers are still applied in this order.
+    const [human, networkBlocked, identityBurstBlocked, locked] = await Promise.all([
+        verifyBotProtection({ token: formData.botToken, remoteIp: context.ip, action: 'client_login' }),
         consumeSecurityRateLimit({ bucket: 'client-login-network', identifier: context.ipHash, limit: 30, windowSeconds: 15 * 60, blockSeconds: 15 * 60 }),
         consumeSecurityRateLimit({ bucket: 'client-login-identity', identifier: email, limit: 12, windowSeconds: 15 * 60, blockSeconds: 15 * 60 }),
+        isClientLoginLocked(email),
     ]);
+    timer.step('checks');
+    if (!human) return { result: { error: 'Security verification failed. Refresh the page and try again.' } }
     if (networkBlocked || identityBurstBlocked) {
         return { result: { error: 'Too many sign-in requests. Use password recovery or try again later.', locked: true } }
     }
-    if (await isClientLoginLocked(email)) {
+    if (locked) {
         return { result: { error: 'This account requires a password reset after five unsuccessful sign-in attempts.', locked: true } }
     }
 
@@ -77,6 +112,7 @@ export async function startClientLogin(formData: LoginInput) {
         email,
         password,
     })
+    timer.step('password')
 
     if (error) {
         // GlashDB refuses accounts it never confirmed with "email not verified".
@@ -116,6 +152,7 @@ export async function startClientLogin(formData: LoginInput) {
     }
 
     const profile = await ensureClientProfile(data.user)
+    timer.step('profile')
     if (profile.account_status !== 'active') {
         await supabase.auth.signOut({ scope: 'global' })
         await clearClientDashboardSessionCookie()
@@ -127,7 +164,7 @@ export async function startClientLogin(formData: LoginInput) {
     const nextPath = getSafeNextPath(formData.next);
     const binding = createLoginBinding();
     try {
-        const otp = await generateClientEmailOtp(email);
+        const otp = generateClientEmailOtp();
         const challenge = await createClientLoginChallenge({
             userId: data.user.id,
             email,
@@ -136,7 +173,12 @@ export async function startClientLogin(formData: LoginInput) {
             nextPath,
         });
         if (!challenge) throw new Error('Could not create login verification.');
-        await sendClientLoginOtp({ email, name: profile.full_name, otp });
+        timer.step('challenge');
+        // Sent after the response so the person isn't kept waiting on the mail
+        // server (often several seconds). If it fails, Resend issues a new code.
+        after(() => sendClientLoginOtp({ email, name: profile.full_name, otp }).catch((sendError: unknown) => {
+            console.error('[client-login] sign-in code email failed:', sendError instanceof Error ? sendError.message : sendError);
+        }));
         return { binding, result: {
             requiresOtp: true,
             challengeId: challenge.id,
@@ -144,7 +186,8 @@ export async function startClientLogin(formData: LoginInput) {
             expiresInSeconds: CLIENT_LOGIN_OTP_TTL_MINUTES * 60,
             resendInSeconds: CLIENT_LOGIN_OTP_RESEND_SECONDS,
         } }
-    } catch {
+    } catch (error) {
+        console.error('[client-login] sign-in code step failed:', error instanceof Error ? error.message : error);
         return { result: { error: 'We could not send the sign-in code. Please try again.' } }
     } finally {
         await supabase.auth.signOut({ scope: 'local' }).catch(() => undefined)
@@ -202,7 +245,11 @@ export async function verifyClientLoginChallenge(input: { challengeId: string; o
     }
 
     const supabase = await createClient();
-    const { data, error } = await supabase.auth.verifyOtp({ email: challenge.email, token: otp, type: 'email' });
+    const { data, error } = await redeemClientLoginSession(supabase, challenge.email)
+        .catch((redeemError: unknown) => {
+            console.error('[client-login] session step failed:', redeemError instanceof Error ? redeemError.message : redeemError);
+            return { data: { user: null }, error: redeemError };
+        });
     if (error || !data.user) {
         await glashQuery('delete from public.client_login_verifications where id = $1::uuid', [challenge.id]);
         return { error: 'That code is no longer valid. Start the sign-in process again.', expired: true }
@@ -220,10 +267,11 @@ export async function verifyClientLoginChallenge(input: { challengeId: string; o
     await Promise.all([
         clearClientLoginFailures(challenge.email),
         glashQuery('delete from public.client_login_verifications where user_id = $1::uuid', [challenge.user_id]),
-        deliverClientWelcome(profile.id).catch((deliveryError) => {
-            console.error('[client-welcome] login delivery failed', deliveryError)
-        }),
     ]);
+    // The welcome email doesn't need to hold up the sign-in.
+    after(() => deliverClientWelcome(profile.id).catch((deliveryError) => {
+        console.error('[client-welcome] login delivery failed', deliveryError)
+    }));
     return {
         success: true as const,
         user: data.user,
@@ -251,7 +299,7 @@ export async function resendClientLoginChallenge(input: { challengeId: string; b
     }
 
     try {
-        const otp = await generateClientEmailOtp(challenge.email);
+        const otp = generateClientEmailOtp();
         const expiresAt = new Date(Date.now() + CLIENT_LOGIN_OTP_TTL_MINUTES * 60_000);
         const resendAt = new Date(Date.now() + CLIENT_LOGIN_OTP_RESEND_SECONDS * 1_000);
         await glashQuery(
@@ -267,7 +315,8 @@ export async function resendClientLoginChallenge(input: { challengeId: string; b
             expiresInSeconds: CLIENT_LOGIN_OTP_TTL_MINUTES * 60,
             resendInSeconds: CLIENT_LOGIN_OTP_RESEND_SECONDS,
         }
-    } catch {
+    } catch (error) {
+        console.error('[client-login] resend code step failed:', error instanceof Error ? error.message : error);
         await glashQuery(
             "update public.client_login_verifications set resend_available_at = now() where id = $1::uuid",
             [challenge.id],

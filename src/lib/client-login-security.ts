@@ -1,6 +1,6 @@
 import "server-only";
 
-import { createHash, createHmac, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
+import { createHash, createHmac, randomBytes, randomInt, randomUUID, timingSafeEqual } from "node:crypto";
 import { headers } from "next/headers";
 import { brandedEmailHtml } from "@/lib/email-template";
 import { sendEmail } from "@/lib/email-from";
@@ -404,17 +404,28 @@ export async function createClientLoginChallenge(input: {
   );
 }
 
-export async function generateClientEmailOtp(email: string) {
-  // The service-role client is server-only. generateLink returns the raw email
-  // OTP for delivery through CDS Space's own branded mail transport.
+// The six-digit sign-in code is CDS Space's own: only its hash is stored and it
+// is checked by clientLoginOtpMatches. It used to be GlashDB's magic-link OTP,
+// but GlashDB's codes are no longer six digits, and every screen (web, app,
+// email) is built around six.
+export function generateClientEmailOtp() {
+  return String(randomInt(0, 1_000_000)).padStart(6, "0");
+}
+
+// After the code has been checked, open the GlashDB session: mint a single-use
+// magic-link token for the account and redeem it at once. Nothing is emailed.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export async function redeemClientLoginSession(authClient: any, email: string) {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const admin = getGlashDbAdmin() as any;
   const { data, error } = await admin.auth.admin.generateLink({ type: "magiclink", email });
-  const otp = data?.properties?.email_otp;
-  if (error || !/^\d{6}$/.test(String(otp || ""))) {
-    throw new Error("Could not generate a secure email code.");
+  const tokenHash = data?.properties?.hashed_token;
+  if (error || !tokenHash) {
+    const reason = error ? `${error.status || ""} ${error.code || ""} ${error.message || ""}`.trim() : "no hashed_token in response";
+    throw new Error(`Could not prepare the sign-in session (${reason}).`);
   }
-  return String(otp);
+  const type = data.properties.verification_type || "magiclink";
+  return authClient.auth.verifyOtp({ token_hash: tokenHash, type });
 }
 
 function escapeHtml(value: unknown) {
