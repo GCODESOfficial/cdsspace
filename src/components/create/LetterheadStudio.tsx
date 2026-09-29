@@ -1056,12 +1056,12 @@ export function LetterheadStudio({
           ) : (
           <div className="rounded-2xl border border-slate-200 bg-slate-50/70">
             <button type="button" onClick={() => setLetterheadConfigOpen((value) => !value)} aria-expanded={letterheadConfigOpen} className="flex w-full items-center gap-3 px-4 py-3.5 text-left"><span className="grid h-9 w-9 place-items-center rounded-xl bg-blue-50 text-[#0A4FE8]"><FileText className="h-4 w-4" /></span><span className="min-w-0 flex-1"><span className="block text-[12.5px] font-semibold text-[#07133B]">Configure letterhead</span><span className="mt-0.5 block text-[10.5px] text-slate-500">{active.firstPageName && (!active.hasSecondPage || active.secondPageName) ? "Letterhead pages configured" : "Add the first-page and optional continuation designs"}</span></span>{active.firstPageName && (!active.hasSecondPage || active.secondPageName) && <span className="rounded-full bg-emerald-50 px-2 py-1 text-[9.5px] font-semibold text-emerald-700">Complete</span>}<ChevronDown className={`h-4 w-4 text-slate-400 transition ${letterheadConfigOpen ? "rotate-180" : ""}`} /></button>
-            {letterheadConfigOpen && <div className="grid gap-3 border-t border-slate-200 p-4 sm:grid-cols-2">
-              <AssetUpload label="First-page letterhead design" name={active.firstPageName} kind="firstPage" busy={uploading === "firstPage"} onFile={upload} />
-              <div className="space-y-2">
-                <label className="flex items-center gap-2 text-[12px] font-semibold text-gray-600"><input type="checkbox" checked={active.hasSecondPage} onChange={(event) => patch({ hasSecondPage: event.target.checked })} className="h-4 w-4 rounded border-gray-300 text-[#0A4FE8]" />Use a separate design from page two onward</label>
+            {letterheadConfigOpen && <div className="space-y-3 border-t border-slate-200 p-4">
+              <div className="grid items-start gap-3 sm:grid-cols-2">
+                <AssetUpload label="First-page letterhead design" name={active.firstPageName} kind="firstPage" busy={uploading === "firstPage"} onFile={upload} />
                 {active.hasSecondPage && <AssetUpload label="Page two and later design" name={active.secondPageName} kind="secondPage" busy={uploading === "secondPage"} onFile={upload} />}
               </div>
+              <label className="flex items-center gap-2 border-t border-slate-200 pt-3 text-[12px] font-semibold text-gray-600"><input type="checkbox" checked={active.hasSecondPage} onChange={(event) => patch({ hasSecondPage: event.target.checked })} className="h-4 w-4 rounded border-gray-300 text-[#0A4FE8]" />Use a separate design from page two onward</label>
             </div>}
           </div>
           )}

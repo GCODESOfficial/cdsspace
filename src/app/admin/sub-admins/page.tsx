@@ -5,7 +5,7 @@ import { supabase } from "@/lib/supabase";
 import { ALL_PERMISSIONS, PERMISSION_GROUPS } from "@/lib/admin-permissions";
 import { SubAdminPermissionsPicker } from "@/components/admin/SubAdminPermissionsPicker";
 import { useToast } from "@/hooks/use-toast";
-import { Trash2, Loader2, Plus, Eye, EyeOff, Shield, UserPlus, Check, ToggleLeft, ToggleRight, Copy, Mail, Link2, X, Send, ShieldPlus, Pencil } from "lucide-react";
+import { Trash2, Loader2, Plus, Eye, EyeOff, Shield, UserPlus, Check, ToggleLeft, ToggleRight, Copy, Mail, Link2, X, Send, ShieldPlus, Pencil, Globe } from "lucide-react";
 import { appAlert, appConfirm, appPrompt } from "@/lib/app-notify";
 import Link from "next/link";
 
@@ -35,6 +35,7 @@ interface TeamAdmin {
   role_title: string | null;
   permissions: string[] | null;
   is_active: boolean;
+  access_anywhere: boolean | null;
 }
 
 export default function SubAdminsPage() {
@@ -173,7 +174,7 @@ export default function SubAdminsPage() {
       // Team members who have been granted an admin role (is_sub_admin) show here too.
       supabase
         .from("team_members")
-        .select("id, full_name, email, role_title, permissions, is_active")
+        .select("id, full_name, email, role_title, permissions, is_active, access_anywhere")
         .eq("is_sub_admin", true)
         .order("full_name", { ascending: true }),
     ]);
@@ -287,6 +288,43 @@ export default function SubAdminsPage() {
       toast({ title: "Copied", description: "Invite link copied to clipboard", variant: "success" });
     } catch {
       toast({ title: "Copy failed", description: "Select the link and copy manually", variant: "destructive" });
+    }
+  }
+
+  // Only a super admin may let an admin work outside the office geofence.
+  const [isSuperAdmin, setIsSuperAdmin] = useState(false);
+  const [savingAnywhereFor, setSavingAnywhereFor] = useState<string | null>(null);
+  useEffect(() => {
+    fetch("/api/admin-check", { cache: "no-store" })
+      .then((response) => (response.ok ? response.json() : null))
+      .then((data) => setIsSuperAdmin(data?.role === "super_admin"))
+      .catch(() => undefined);
+  }, []);
+
+  async function toggleAccessAnywhere(member: TeamAdmin) {
+    const enabled = !member.access_anywhere;
+    const question = enabled
+      ? `Let ${member.full_name} sign in and clock in from anywhere? The office geofence will no longer apply to them. Their location is still recorded.`
+      : `Hold ${member.full_name} to the office geofence again?`;
+    if (!(await appConfirm(question))) return;
+    setSavingAnywhereFor(member.id);
+    try {
+      const response = await fetch(`/api/admin/team-members/${member.id}/access-anywhere`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ enabled }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok || !data.ok) throw new Error(data.error || "The change could not be saved.");
+      setTeamAdmins((current) => current.map((item) => item.id === member.id ? { ...item, access_anywhere: enabled } : item));
+      toast({
+        title: enabled ? "Access from anywhere on" : "Office geofence applies",
+        description: enabled ? `${member.full_name} can now work from any location.` : `${member.full_name} must be at the office on office days.`,
+      });
+    } catch (error) {
+      appAlert(error instanceof Error ? error.message : "The change could not be saved.");
+    } finally {
+      setSavingAnywhereFor(null);
     }
   }
 
@@ -622,6 +660,11 @@ export default function SubAdminsPage() {
                           {!member.is_active && (
                             <span className="px-2 py-0.5 rounded-md bg-gray-100 text-gray-400 text-[10px] font-medium">DISABLED</span>
                           )}
+                          {member.access_anywhere && (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-emerald-50 text-emerald-700 text-[10px] font-medium">
+                              <Globe className="w-3 h-3" /> Access from anywhere
+                            </span>
+                          )}
                         </div>
                         <p className="text-[12px] text-gray-400 mt-0.5">{member.email || "-"}</p>
                         <div className="flex flex-wrap gap-1.5 mt-2">
@@ -640,13 +683,32 @@ export default function SubAdminsPage() {
                         </div>
                       </div>
                     </div>
-                    <Link
-                      href="/admin/team-members"
-                      className="flex-shrink-0 inline-flex items-center gap-1.5 rounded-lg border border-gray-200 px-3 py-1.5 text-[12px] font-semibold text-gray-500 hover:border-[#0A4FE8] hover:text-[#0A4FE8] transition"
-                      title="Manage this team member"
-                    >
-                      <Pencil className="w-3.5 h-3.5" /> Manage
-                    </Link>
+                    <div className="flex flex-shrink-0 flex-wrap items-center justify-end gap-2">
+                      {isSuperAdmin && (
+                        <button
+                          type="button"
+                          onClick={() => toggleAccessAnywhere(member)}
+                          disabled={savingAnywhereFor === member.id}
+                          aria-pressed={Boolean(member.access_anywhere)}
+                          className={`inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-[12px] font-semibold transition disabled:opacity-50 ${
+                            member.access_anywhere
+                              ? "border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100"
+                              : "border-gray-200 text-gray-500 hover:border-[#0A4FE8] hover:text-[#0A4FE8]"
+                          }`}
+                          title={member.access_anywhere ? "Hold this admin to the office geofence again" : "Let this admin sign in and clock in from any location"}
+                        >
+                          {savingAnywhereFor === member.id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Globe className="w-3.5 h-3.5" />}
+                          {member.access_anywhere ? "Anywhere: on" : "Allow anywhere"}
+                        </button>
+                      )}
+                      <Link
+                        href="/admin/team-members"
+                        className="inline-flex items-center gap-1.5 rounded-lg border border-gray-200 px-3 py-1.5 text-[12px] font-semibold text-gray-500 hover:border-[#0A4FE8] hover:text-[#0A4FE8] transition"
+                        title="Manage this team member"
+                      >
+                        <Pencil className="w-3.5 h-3.5" /> Manage
+                      </Link>
+                    </div>
                   </div>
                 </div>
               );

@@ -11,9 +11,9 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import {
-  Building2, CalendarClock, CalendarRange, Check, ChevronDown, ChevronRight, Copy, Download, ExternalLink,
+  ArrowRightLeft, Building2, CalendarClock, CalendarRange, Check, ChevronDown, ChevronRight, Copy, Download, ExternalLink,
   FileText, Folder, FolderPlus, Landmark, Link2, Loader2, Lock, Paperclip, Pencil,
-  Plus, Rocket, ScrollText, Search, ShieldCheck, Target as TargetIcon, Trash2, Unlock,
+  Plus, Repeat, Rocket, ScrollText, Search, ShieldCheck, Target as TargetIcon, Trash2, Unlock,
   Upload, Wallet, X,
 } from "lucide-react";
 import {
@@ -434,6 +434,12 @@ const emptyBudget = (period?: { year: number; month: number }): Partial<Budget> 
   };
 };
 
+const monthAfterPeriod = (period: { year: number; month: number }, steps: number) => {
+  const index = period.year * 12 + (period.month - 1) + steps;
+  return { year: Math.floor(index / 12), month: (index % 12) + 1 };
+};
+const nextMonth = (period: { year: number; month: number }) => monthAfterPeriod(period, 1);
+
 const periodName = (period: BudgetPeriod) =>
   period.month === "annual" ? `${period.year}` : `${BUDGET_MONTH_NAMES[period.month - 1]} ${period.year}`;
 
@@ -577,6 +583,8 @@ function AnnualBudget({ budgets, year, setPeriod }: { budgets: Budget[]; year: n
 
 function Budgets({ board, busy, run, period, setPeriod }: { board: Board; busy: string; run: Run; period: BudgetPeriod; setPeriod: (next: BudgetPeriod) => void }) {
   const [draft, setDraft] = useState<Partial<Budget> | null>(null);
+  // How many following months a new line repeats into: none, one, or two.
+  const [repeatMonths, setRepeatMonths] = useState(0);
   const monthPeriod = period.month === "annual" ? null : { year: period.year, month: period.month };
   // A blank form on every "new", with the last unsaved attempt offered beside it.
   const recovery = useUnsavedDraft<Partial<Budget>>({
@@ -589,17 +597,61 @@ function Budgets({ board, busy, run, period, setPeriod }: { board: Board; busy: 
 
   const save = async () => {
     if (!draft) return;
-    const done = await run("/api/admin/executive-board", { action: "save_budget", ...draft }, "budget", "Budget saved.");
+    const repeating = !draft.id && repeatMonths > 0;
+    const done = await run(
+      "/api/admin/executive-board",
+      { action: "save_budget", ...draft, ...(repeating ? { repeat_months: repeatMonths } : {}) },
+      "budget",
+      repeating ? `Budget saved and repeated for the next ${repeatMonths === 1 ? "month" : `${repeatMonths} months`}.` : "Budget saved.",
+    );
     if (done) {
       recovery.clear();
       setDraft(null);
+      setRepeatMonths(0);
       // Follow the line to the month it was saved in.
       if (draft.budget_year && draft.budget_month) setPeriod({ year: Number(draft.budget_year), month: Number(draft.budget_month) });
     }
   };
 
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [moving, setMoving] = useState<{ ids: string[]; year: number; month: number } | null>(null);
+  // A selection belongs to the month on screen.
+  useEffect(() => { setSelected(new Set()); }, [period.year, period.month]);
+
+  const toggleSelected = (id: string) => setSelected((current) => {
+    const next = new Set(current);
+    if (next.has(id)) next.delete(id); else next.add(id);
+    return next;
+  });
+
+  const openMove = (ids: string[]) => {
+    const target = monthPeriod ? nextMonth(monthPeriod) : currentBudgetPeriod();
+    setMoving({ ids, ...target });
+  };
+
+  const move = async () => {
+    if (!moving) return;
+    const count = moving.ids.length;
+    const done = await run(
+      "/api/admin/executive-board",
+      { action: "move_budgets", ids: moving.ids, budget_year: moving.year, budget_month: moving.month },
+      "budget",
+      `${count} budget line${count === 1 ? "" : "s"} moved to ${periodName({ year: moving.year, month: moving.month })}.`,
+    );
+    if (done) { setMoving(null); setSelected(new Set()); }
+  };
+
+  const repeat = async (ids: string[], months: number) => {
+    if (!monthPeriod) return;
+    const through = periodName(monthAfterPeriod(monthPeriod, months));
+    if (!(await appConfirm(`Repeat ${ids.length} budget line${ids.length === 1 ? "" : "s"} each month through ${through}? The copies start with nothing spent.`))) return;
+    const done = await run("/api/admin/executive-board", { action: "repeat_budgets", ids, months }, "budget", `Repeated through ${through}. Months that already had the line were left as they were.`);
+    if (done) setSelected(new Set());
+  };
+
   const view = useBoardCurrency();
   const lines = useMemo(() => budgetsInPeriod(board.budgets, period), [board.budgets, period]);
+  const allSelected = lines.length > 0 && lines.every((line) => selected.has(line.id));
   const totals = useMemo(() => {
     const into = (amount: number, from: string) => convertMoney(amount, from, view) ?? Number(amount || 0);
     return {
@@ -618,7 +670,7 @@ function Budgets({ board, busy, run, period, setPeriod }: { board: Board; busy: 
           {period.month === "annual" ? `Annual operations budget ${period.year}` : `Budget for ${periodName(period)}`}
         </h2>
         {monthPeriod && (
-          <button type="button" onClick={() => setDraft(emptyBudget(monthPeriod))} className="inline-flex h-10 items-center gap-2 rounded-xl bg-[#0A4FE8] px-4 text-sm font-bold text-white">
+          <button type="button" onClick={() => { setRepeatMonths(0); setDraft(emptyBudget(monthPeriod)); }} className="inline-flex h-10 items-center gap-2 rounded-xl bg-[#0A4FE8] px-4 text-sm font-bold text-white">
             <Plus className="h-4 w-4" /> New budget line
           </button>
         )}
@@ -627,11 +679,30 @@ function Budgets({ board, busy, run, period, setPeriod }: { board: Board; busy: 
       {period.month === "annual" ? <AnnualBudget budgets={board.budgets} year={period.year} setPeriod={setPeriod} /> : (
         <>
           <BudgetTotals planned={totals.planned} actual={totals.actual} currency={totals.currency} />
+          {selected.size > 0 && (
+            <div className="flex flex-wrap items-center gap-2 rounded-2xl border border-blue-100 bg-blue-50/70 px-4 py-3 text-sm">
+              <span className="font-semibold text-[#07133B]">{selected.size} selected</span>
+              <span className="hidden h-4 w-px bg-blue-200 sm:block" />
+              <button type="button" onClick={() => openMove(Array.from(selected))} disabled={busy === "budget"} className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 font-semibold text-slate-700 hover:border-[#0A4FE8] hover:text-[#0A4FE8] disabled:opacity-50">
+                <ArrowRightLeft className="h-4 w-4" /> Move to another month
+              </button>
+              <button type="button" onClick={() => void repeat(Array.from(selected), 1)} disabled={busy === "budget"} className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 font-semibold text-slate-700 hover:border-[#0A4FE8] hover:text-[#0A4FE8] disabled:opacity-50">
+                <Repeat className="h-4 w-4" /> Repeat next month
+              </button>
+              <button type="button" onClick={() => void repeat(Array.from(selected), 2)} disabled={busy === "budget"} className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 font-semibold text-slate-700 hover:border-[#0A4FE8] hover:text-[#0A4FE8] disabled:opacity-50">
+                <Repeat className="h-4 w-4" /> Repeat for 2 months
+              </button>
+              <button type="button" onClick={() => setSelected(new Set())} className="ml-auto text-xs font-semibold text-slate-500 hover:text-slate-700">Clear</button>
+            </div>
+          )}
           {lines.length === 0 ? <Empty text={`No budget lines for ${periodName(period)} yet.`} /> : (
             <div className="overflow-x-auto rounded-2xl border border-slate-200 bg-white">
               <table className="w-full min-w-[820px] text-sm">
                 <thead className="bg-slate-50 text-left text-[11px] font-semibold text-slate-500">
                   <tr>
+                    <th className="w-10 py-3 pl-4">
+                      <input type="checkbox" checked={allSelected} onChange={() => setSelected(allSelected ? new Set() : new Set(lines.map((line) => line.id)))} className="h-4 w-4 rounded border-slate-300 text-[#0A4FE8]" aria-label="Select every line this month" />
+                    </th>
                     <th className="px-4 py-3">Line</th><th className="px-4 py-3">Period</th>
                     <th className="px-4 py-3 text-right">Planned</th><th className="px-4 py-3 text-right">Actual</th>
                     <th className="px-4 py-3 text-right">Variance</th><th className="px-4 py-3">Status</th><th className="px-4 py-3" />
@@ -641,9 +712,19 @@ function Budgets({ board, busy, run, period, setPeriod }: { board: Board; busy: 
                   {lines.map((budget) => {
                     const variance = budgetVariance(budget);
                     return (
-                      <tr key={budget.id}>
+                      <tr key={budget.id} className={selected.has(budget.id) ? "bg-blue-50/40" : undefined}>
+                        <td className="py-3 pl-4">
+                          <input type="checkbox" checked={selected.has(budget.id)} onChange={() => toggleSelected(budget.id)} className="h-4 w-4 rounded border-slate-300 text-[#0A4FE8]" aria-label={`Select ${budget.title}`} />
+                        </td>
                         <td className="px-4 py-3">
-                          <p className="font-semibold text-[#07133B]">{budget.title}</p>
+                          <p className="flex flex-wrap items-center gap-1.5 font-semibold text-[#07133B]">
+                            {budget.title}
+                            {budget.recurrence_group_id && (
+                              <span className="inline-flex items-center gap-1 rounded-full bg-blue-50 px-2 py-0.5 text-[10.5px] font-semibold text-[#0A4FE8]" title="This line repeats in other months">
+                                <Repeat className="h-3 w-3" /> Repeats
+                              </span>
+                            )}
+                          </p>
                           <p className="text-xs text-slate-400">{budget.category}{budget.owner ? ` · ${budget.owner}` : ""}</p>
                         </td>
                         <td className="px-4 py-3 text-slate-500">{budget.period_label || (budget.period_start ? `${budget.period_start} to ${budget.period_end || "open"}` : "-")}</td>
@@ -654,6 +735,7 @@ function Budgets({ board, busy, run, period, setPeriod }: { board: Board; busy: 
                         <td className="px-4 py-3">
                           <div className="flex justify-end gap-1">
                             <button type="button" onClick={() => void exportBoardToPdf(budgetPdf(budget, view))} className="rounded-lg p-1.5 text-slate-400 hover:bg-blue-50 hover:text-[#0A4FE8]" aria-label={`Download ${budget.title} with its implementation plan`} title="Download this budget and its implementation plan"><Download className="h-4 w-4" /></button>
+                            <button type="button" onClick={() => openMove([budget.id])} className="rounded-lg p-1.5 text-slate-400 hover:bg-blue-50 hover:text-[#0A4FE8]" aria-label={`Move ${budget.title} to another month`} title="Move to another month"><ArrowRightLeft className="h-4 w-4" /></button>
                             <button type="button" onClick={() => setDraft(budget)} className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100" aria-label="Edit"><Pencil className="h-4 w-4" /></button>
                             <button type="button" onClick={() => run("/api/admin/executive-board", { action: "delete_budget", id: budget.id }, "budget", "Budget removed.")} className="rounded-lg p-1.5 text-slate-400 hover:bg-rose-50 hover:text-rose-600" aria-label="Delete"><Trash2 className="h-4 w-4" /></button>
                           </div>
@@ -705,9 +787,45 @@ function Budgets({ board, busy, run, period, setPeriod }: { board: Board; busy: 
             <Field label="Planned"><input type="number" step="0.01" className={inputClass} value={String(draft.planned_amount ?? 0)} onChange={(e) => setDraft({ ...draft, planned_amount: Number(e.target.value) })} /></Field>
             <Field label="Actual"><input type="number" step="0.01" className={inputClass} value={String(draft.actual_amount ?? 0)} onChange={(e) => setDraft({ ...draft, actual_amount: Number(e.target.value) })} /></Field>
             <div className="sm:col-span-2"><Field label="Notes"><textarea rows={3} className={areaClass} value={draft.notes || ""} onChange={(e) => setDraft({ ...draft, notes: e.target.value })} /></Field></div>
+            {!draft.id && draft.budget_year && draft.budget_month && (
+              <div className="sm:col-span-2">
+                <Field label="Repeat">
+                  <select className={inputClass} value={repeatMonths} onChange={(e) => setRepeatMonths(Number(e.target.value))}>
+                    <option value={0}>Don&apos;t repeat</option>
+                    <option value={1}>Also plan it for {periodName(nextMonth({ year: Number(draft.budget_year), month: Number(draft.budget_month) }))}</option>
+                    <option value={2}>Also plan it for the next 2 months, through {periodName(monthAfterPeriod({ year: Number(draft.budget_year), month: Number(draft.budget_month) }, 2))}</option>
+                  </select>
+                </Field>
+                <p className="mt-1 text-[11px] text-slate-400">A line can repeat for up to 2 months after its own month. Each copy starts with nothing spent.</p>
+              </div>
+            )}
           </div>
           <button type="button" onClick={save} disabled={busy === "budget" || !draft.title} className="mt-5 inline-flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-[#0A4FE8] text-sm font-bold text-white disabled:opacity-50">
             {busy === "budget" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />} Save budget line
+          </button>
+        </Modal>
+      )}
+
+      {moving && (
+        <Modal title={moving.ids.length === 1 ? "Move budget line" : `Move ${moving.ids.length} budget lines`} onClose={() => setMoving(null)}>
+          <p className="mb-4 text-sm text-slate-500">
+            {moving.ids.length === 1 ? "The line keeps its amounts and status" : "The lines keep their amounts and status"}, and {moving.ids.length === 1 ? "leaves" : "leave"} {monthPeriod ? periodName(monthPeriod) : "this month"}.
+          </p>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <Field label="Month">
+              <select className={inputClass} value={moving.month} onChange={(e) => setMoving({ ...moving, month: Number(e.target.value) })}>
+                {BUDGET_MONTH_NAMES.map((name, index) => <option key={name} value={index + 1}>{name}</option>)}
+              </select>
+            </Field>
+            <Field label="Year"><input type="number" min={2000} max={2100} className={inputClass} value={String(moving.year)} onChange={(e) => setMoving({ ...moving, year: Number(e.target.value) })} /></Field>
+          </div>
+          <button
+            type="button"
+            onClick={move}
+            disabled={busy === "budget" || Boolean(monthPeriod && moving.year === monthPeriod.year && moving.month === monthPeriod.month)}
+            className="mt-5 inline-flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-[#0A4FE8] text-sm font-bold text-white disabled:opacity-50"
+          >
+            {busy === "budget" ? <Loader2 className="h-4 w-4 animate-spin" /> : <ArrowRightLeft className="h-4 w-4" />} Move to {periodName({ year: moving.year, month: moving.month })}
           </button>
         </Modal>
       )}

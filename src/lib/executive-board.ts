@@ -122,6 +122,8 @@ export interface Budget {
   /** The calendar month (1-12) of budget_year this line is planned for. */
   budget_year: number;
   budget_month: number;
+  /** Shared by a line and the copies it was repeated into. */
+  recurrence_group_id?: string | null;
   currency: string;
   planned_amount: number;
   actual_amount: number;

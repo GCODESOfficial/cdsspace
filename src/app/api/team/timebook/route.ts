@@ -20,6 +20,7 @@ import {
   type WorkMode,
 } from "@/lib/timebook";
 import { getTimebookOffice } from "@/lib/timebook-office";
+import { memberHasAccessAnywhere } from "@/lib/team-login-security";
 import { notifySuperAdmin } from "@/lib/notify-admin";
 import { autoCheckoutOpenTimeEntries } from "@/lib/timebook-auto-checkout";
 import { ADMIN_FEATURE_PERMISSION_KEYS, notifyAdminFeatureEvent } from "@/lib/admin-feature-notifications";
@@ -231,7 +232,8 @@ export async function GET() {
       work_date: workDate,
       max_sessions: MAX_DAILY_SESSIONS,
       sessions_used: entry ? completedSessions(entry).length + (entry.clock_in_at && !entry.clock_out_at ? 1 : 0) : 0,
-      office_required: officeRequiredFor(profile.work_mode, profile.hybrid_office_days ?? [], workDate),
+      office_required: !(await memberHasAccessAnywhere(session.id))
+        && officeRequiredFor(profile.work_mode, profile.hybrid_office_days ?? [], workDate),
       history: history ?? [],
       leave_requests: hydratedLeaveRequests,
     });
@@ -265,7 +267,10 @@ export async function POST(req: NextRequest) {
     }
     const profile = await ensureProfile(db, session.id);
     const workMode = (profile.work_mode || "onsite") as WorkMode;
-    const officeRequired = officeRequiredFor(workMode, profile.hybrid_office_days ?? [], workDate);
+    // A member a super admin has allowed to work from anywhere is never held
+    // to the office geofence; their location is still recorded below.
+    const officeRequired = !(await memberHasAccessAnywhere(session.id))
+      && officeRequiredFor(workMode, profile.hybrid_office_days ?? [], workDate);
 
     if (action === "request_leave") {
       const { leave_type, start_date, end_date, reason } = body;

@@ -119,7 +119,7 @@ export async function GET(req: NextRequest) {
   }
 
   const [members, profiles, entries, leaveRequests, bypassCodes] = await Promise.all([
-    glashQuery("select id, full_name, email, role_title, department, is_active from public.team_members where is_active = true order by full_name asc"),
+    glashQuery("select id, full_name, email, role_title, department, is_active, access_anywhere from public.team_members where is_active = true order by full_name asc"),
     glashQuery("select * from public.team_time_profiles"),
     glashQuery("select * from public.team_time_entries where work_date >= $1 and work_date <= $2 order by work_date desc", [from, to]),
     glashQuery(
@@ -171,7 +171,7 @@ export async function GET(req: NextRequest) {
     const entry = entryByMemberDate.get(`${member.id}:${date}`) ?? null;
     const leave = leaveByMember.get(member.id) ?? null;
     const workMode = (profile.work_mode || "onsite") as WorkMode;
-    const officeRequired = isWorkDay(date) && officeRequiredFor(workMode, profile.hybrid_office_days ?? [], date);
+    const officeRequired = !member.access_anywhere && isWorkDay(date) && officeRequiredFor(workMode, profile.hybrid_office_days ?? [], date);
     const computedStatus = entry?.attendance_status
       || (leave ? "approved_leave" : isWorkDay(date) ? "absent" : "approved_leave");
     const flags = Array.from(new Set([

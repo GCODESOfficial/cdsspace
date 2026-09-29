@@ -4,6 +4,8 @@ import { supabaseAdmin } from "@/lib/supabase";
 import { getToolActor } from "@/lib/team-tools-auth";
 import { closeStaleCmeets } from "@/lib/cmeet-autoclose";
 import { getClientAccountState } from "@/lib/client-account";
+import { CALL_RING_SECONDS } from "@/lib/cmeet-call-handling";
+import { glashMaybeOne } from "@/lib/glashdb/postgres";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -49,8 +51,47 @@ export async function GET(_req: Request, ctx: { params: Promise<{ code: string }
             is_super_admin: false,
           }
         : null;
+  // A client who called support needs to know whether anyone is coming. The
+  // room used to give them a ringtone and nothing else.
+  let support: {
+    waitingForStaff: boolean;
+    ringingSeconds: number;
+    unavailable: boolean;
+    rescheduledFor: string | null;
+    passedTo: string | null;
+  } | null = null;
+  if (data.created_by_client) {
+    const call = await glashMaybeOne<{ staff_joined: boolean; ringing_seconds: number }>(
+      `select (invitation.joined_at is not null) as staff_joined,
+              extract(epoch from (now() - coalesce(meeting.started_at, meeting.created_at)))::int as ringing_seconds
+         from public.team_meetings meeting
+         left join public.cmeet_staff_invitations invitation on invitation.meeting_id = meeting.id
+        where meeting.id = $1::uuid
+        order by invitation.joined_at nulls last
+        limit 1`,
+      [data.id],
+    ).catch(() => null);
+    const outcome = await glashMaybeOne<{ action: string; scheduled_for: string | null; target_label: string | null }>(
+      `select action, scheduled_for::text, target_label
+         from public.cmeet_call_actions
+        where meeting_id = $1::uuid and action in ('rescheduled', 'redirected')
+        order by created_at desc limit 1`,
+      [data.id],
+    ).catch(() => null);
+    const ringingSeconds = Number(call?.ringing_seconds || 0);
+    const staffJoined = Boolean(call?.staff_joined);
+    support = {
+      waitingForStaff: !staffJoined && data.status === "live",
+      ringingSeconds,
+      unavailable: !staffJoined && ringingSeconds >= CALL_RING_SECONDS && outcome?.action !== "rescheduled",
+      rescheduledFor: outcome?.action === "rescheduled" ? outcome.scheduled_for : null,
+      passedTo: outcome?.action === "redirected" ? outcome.target_label : null,
+    };
+  }
+
   return NextResponse.json({
     ok: true,
+    support,
     meeting: {
       ...data,
       created_by: actor || account ? data.created_by : null,

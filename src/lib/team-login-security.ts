@@ -112,11 +112,27 @@ export async function ensureTeamTimeProfile(memberId: string) {
   );
 }
 
+/**
+ * Whether a super admin has let this member work from anywhere. Such a member
+ * is never held to the office geofence; their location is still recorded.
+ */
+export async function memberHasAccessAnywhere(memberId: string) {
+  const member = await glashMaybeOne<{ access_anywhere: boolean | null }>(
+    "select access_anywhere from public.team_members where id = $1 limit 1",
+    [memberId],
+  );
+  return Boolean(member?.access_anywhere);
+}
+
 export async function getLoginOfficeRequirement(memberId: string, workDate = lagosDate()) {
-  const profile = await ensureTeamTimeProfile(memberId);
-  const officeRequired = isWorkDay(workDate)
+  const [profile, accessAnywhere] = await Promise.all([
+    ensureTeamTimeProfile(memberId),
+    memberHasAccessAnywhere(memberId),
+  ]);
+  const officeRequired = !accessAnywhere
+    && isWorkDay(workDate)
     && officeRequiredFor(profile.work_mode, profile.hybrid_office_days ?? [], workDate);
-  return { profile, workDate, officeRequired };
+  return { profile, workDate, officeRequired, accessAnywhere };
 }
 
 function clientIp(req: NextRequest) {
