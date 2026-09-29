@@ -250,12 +250,15 @@ export default function ClientMessagesPage() {
         const hasUnreadAdminMessage = raw.some(
           (message: any) => message.sender_role === "admin" && message.is_read === false,
         );
-        if (hasUnreadAdminMessage) {
-          await fetch("/api/chat/read", {
+        // The initial open also clears any legacy bell entry left behind by
+        // older releases that marked the chat row but not its notification.
+        if (hasUnreadAdminMessage || !quiet) {
+          const readResponse = await fetch("/api/chat/read", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ roomId: selectedId, actor: "client" }),
           });
+          if (readResponse.ok) window.dispatchEvent(new Event("cds:notification-pulse"));
         }
       } else {
         const nextMessages = (payload.messages || []).map((message: any) => ({

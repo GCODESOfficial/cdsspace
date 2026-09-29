@@ -167,7 +167,7 @@ export function AppNotifyRoot() {
 
       {/* Toast rail */}
       {snap.toasts.length > 0 && (
-        <div className="fixed inset-x-3 bottom-3 z-[9999] flex flex-col gap-2 w-auto md:inset-x-auto md:bottom-auto md:top-4 md:right-4 md:w-[min(92vw,360px)]">
+        <div className="fixed inset-x-3 bottom-3 layer-modal-top flex flex-col gap-2 w-auto md:inset-x-auto md:bottom-auto md:top-4 md:right-4 md:w-[min(92vw,360px)]">
           {snap.toasts.map((t) => (
             <ToastCard key={t.id} rec={t} />
           ))}
@@ -199,7 +199,7 @@ function Shell({
 }) {
   return (
     <div
-      className="fixed inset-0 z-[9998] bg-[#040b37]/60 backdrop-blur-sm flex items-end justify-center p-3 sm:items-center sm:p-4 animate-fadeIn"
+      className="layer-modal-top fixed inset-0 bg-[#040b37]/60 backdrop-blur-sm flex items-end justify-center p-3 sm:items-center sm:p-4 animate-fadeIn"
       onClick={onBackdrop}
     >
       <div

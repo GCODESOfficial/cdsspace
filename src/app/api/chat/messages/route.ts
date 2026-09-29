@@ -12,6 +12,7 @@ import { isLegacyClientUuid } from "@/lib/client-routes";
 import { ADMIN_FEATURE_PERMISSION_KEYS, notifyAdminFeatureEvent } from "@/lib/admin-feature-notifications";
 import { queueAdminAlert } from "@/lib/admin-alerts";
 import { resolveChatSticker } from "@/lib/chat-sticker-server";
+import { glashMaybeOne } from "@/lib/glashdb/postgres";
 
 export const dynamic = "force-dynamic";
 
@@ -270,7 +271,33 @@ export async function POST(request: Request) {
           console.error("Admin chat notification failed:", notificationError.message);
         }
       }
-      const senderName = String(userSession?.user.user_metadata?.full_name || userSession?.user.email || "A client");
+      const { data: senderProfile } = await supabaseAdmin
+        .from("profiles")
+        .select("full_name, company_name, email")
+        .eq("id", userSession!.user.id)
+        .maybeSingle();
+      const senderEmail = String(senderProfile?.email || userSession?.user.email || "").trim() || null;
+      const directoryClient = await glashMaybeOne<{ display_name: string | null }>(
+        `select coalesce(
+           nullif(trim(contact_person), ''),
+           nullif(trim(name), ''),
+           nullif(trim(brand_name), '')
+         ) as display_name
+         from public.clients
+         where platform_user_id::text = $1
+            or ($2 <> '' and lower(email) = lower($2))
+         order by (platform_user_id::text = $1) desc
+         limit 1`,
+        [userSession!.user.id, senderEmail || ""],
+      ).catch(() => null);
+      const senderName = String(
+        senderProfile?.full_name
+        || userSession?.user.user_metadata?.full_name
+        || directoryClient?.display_name
+        || senderProfile?.company_name
+        || userSession?.user.email
+        || "A client",
+      );
       await notifyAdminFeatureEvent({
         permissionKeys: ADMIN_FEATURE_PERMISSION_KEYS.messages,
         title: `New client message from ${senderName}`,
@@ -287,14 +314,14 @@ export async function POST(request: Request) {
         subject: senderName,
         details: [
           ["Client", senderName],
-          ["Email", userSession?.user.email],
+          ["Email", senderEmail],
           ["Channel", outboundSource === "web" ? "Client dashboard" : outboundSource],
           ["Attachment", fileUrl ? "Yes" : null],
         ],
         body: message,
         actionPath: `/admin/messages?room=${encodeURIComponent(roomId)}`,
         actionLabel: "Open the conversation",
-        ...(userSession?.user.email ? { replyTo: userSession.user.email } : {}),
+        ...(senderEmail ? { replyTo: senderEmail } : {}),
       });
     }
 

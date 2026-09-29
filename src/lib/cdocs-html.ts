@@ -18,10 +18,15 @@ export type RichSpan = {
   fontSize?: number;  // pt
 };
 
+export type RichAlignment = "left" | "center" | "right" | "justify";
+
 export type RichBlock =
-  | { kind: "h1"; spans: RichSpan[]; align?: "left" | "center" | "right" }
-  | { kind: "h2"; spans: RichSpan[]; align?: "left" | "center" | "right" }
-  | { kind: "paragraph"; spans: RichSpan[]; align?: "left" | "center" | "right" }
+  | { kind: "h1"; spans: RichSpan[]; align?: RichAlignment }
+  | { kind: "h2"; spans: RichSpan[]; align?: RichAlignment }
+  | { kind: "h3"; spans: RichSpan[]; align?: RichAlignment }
+  | { kind: "paragraph"; spans: RichSpan[]; align?: RichAlignment }
+  | { kind: "blockquote"; spans: RichSpan[]; align?: RichAlignment }
+  | { kind: "pre"; spans: RichSpan[]; align?: RichAlignment }
   | { kind: "bullet"; spans: RichSpan[] }
   | { kind: "ordered"; spans: RichSpan[]; index: number }
   | { kind: "image"; src: string; width?: number; height?: number; align?: "left" | "center" | "right" }
@@ -30,21 +35,21 @@ export type RichBlock =
 
 export function isHtmlBody(body: string): boolean {
   if (!body) return false;
-  return /^\s*<(h1|h2|h3|p|div|ul|ol|li|img|strong|b|em|i|u|span|hr|figure|blockquote)\b/i.test(body);
+  return /^\s*<(h1|h2|h3|p|div|pre|ul|ol|li|img|strong|b|em|i|u|span|hr|figure|blockquote)\b/i.test(body);
 }
 
 const ALLOWED_TAGS = new Set([
   "h1", "h2", "h3", "p", "div", "br", "hr",
   "ul", "ol", "li",
   "strong", "b", "em", "i", "u",
-  "span", "font", "a", "img", "figure", "figcaption", "blockquote",
+  "span", "font", "a", "img", "figure", "figcaption", "blockquote", "pre", "code",
 ]);
 const ALLOWED_ATTRS: Record<string, Set<string>> = {
   "*": new Set(["style", "align", "data-align"]),
   a: new Set(["href", "target", "rel"]),
   img: new Set(["src", "alt", "width", "height", "data-align"]),
   span: new Set(["style"]),
-  font: new Set(["color"]),
+  font: new Set(["color", "size"]),
 };
 
 /**
@@ -129,7 +134,7 @@ function stripTags(html: string): string {
   return html.replace(/<[^>]+>/g, "");
 }
 
-type InlineCtx = { bold: boolean; italic: boolean; underline: boolean; color?: string };
+type InlineCtx = { bold: boolean; italic: boolean; underline: boolean; color?: string; fontSize?: number };
 
 function visitBlock(node: Node, out: RichBlock[], ctx: InlineCtx) {
   if (node.nodeType === Node.TEXT_NODE) {
@@ -150,7 +155,7 @@ function visitBlock(node: Node, out: RichBlock[], ctx: InlineCtx) {
 
   if (tag === "h1" || tag === "h2" || tag === "h3") {
     const spans = collectInline(el, ctx);
-    out.push({ kind: tag === "h1" ? "h1" : "h2", spans, align });
+    out.push({ kind: tag, spans, align });
     return;
   }
 
@@ -185,18 +190,40 @@ function visitBlock(node: Node, out: RichBlock[], ctx: InlineCtx) {
 
   if (tag === "p" || tag === "div") {
     const spans = collectInline(el, ctx);
-    if (spans.length === 0) { out.push({ kind: "blank" }); return; }
+    if (spans.length === 0 || spans.every((span) => !span.text.replace(/\u00a0/g, " ").trim())) {
+      out.push({ kind: "blank" });
+      return;
+    }
     out.push({ kind: "paragraph", spans, align });
     return;
   }
 
-  if (tag === "figure" || tag === "blockquote") {
-    // Dive into children
+  if (tag === "blockquote" || tag === "pre") {
+    const spans = collectInline(el, ctx);
+    if (spans.length === 0 || spans.every((span) => !span.text.replace(/\u00a0/g, " ").trim())) {
+      out.push({ kind: "blank" });
+      return;
+    }
+    out.push({ kind: tag, spans, align });
+    return;
+  }
+
+  if (tag === "figure") {
     Array.from(el.childNodes).forEach((c) => visitBlock(c, out, ctx));
     return;
   }
 
-  // Inline-level tag at the block root - wrap as a paragraph
+  // An inline-level tag can still wrap real blocks: pasted or AI-rewritten
+  // bodies arrive as <span><p>…</p><p>…</p></span>. Flattening that with
+  // collectInline glued every paragraph into one run, so the PDF printed
+  // "2026Subject:" with no break. Recurse whenever block children exist.
+  const BLOCK_CHILDREN = "p,div,h1,h2,h3,ul,ol,li,blockquote,pre,hr,figure,img,table";
+  if (el.querySelector?.(BLOCK_CHILDREN)) {
+    Array.from(el.childNodes).forEach((child) => visitBlock(child, out, ctx));
+    return;
+  }
+
+  // Genuinely inline at the block root - wrap as a paragraph.
   const spans = collectInline(el, ctx);
   if (spans.length) out.push({ kind: "paragraph", spans });
 }
@@ -215,7 +242,11 @@ function collectInline(el: HTMLElement, ctx: InlineCtx): RichSpan[] {
 }
 
 function sameStyle(a: RichSpan, b: RichSpan) {
-  return !!a.bold === !!b.bold && !!a.italic === !!b.italic && !!a.underline === !!b.underline && (a.color || "") === (b.color || "");
+  return !!a.bold === !!b.bold
+    && !!a.italic === !!b.italic
+    && !!a.underline === !!b.underline
+    && (a.color || "") === (b.color || "")
+    && (a.fontSize || 0) === (b.fontSize || 0);
 }
 
 function collect(node: Node, ctx: InlineCtx, push: (s: RichSpan) => void) {
@@ -231,9 +262,15 @@ function collect(node: Node, ctx: InlineCtx, push: (s: RichSpan) => void) {
   if (tag === "strong" || tag === "b") nextCtx.bold = true;
   if (tag === "em" || tag === "i") nextCtx.italic = true;
   if (tag === "u") nextCtx.underline = true;
+  if (tag === "a") {
+    nextCtx.underline = true;
+    nextCtx.color = "#0A4FE8";
+  }
   const style = el.getAttribute("style") || "";
   const inlineColor = pickColor(style) || el.getAttribute("color") || ctx.color;
   if (inlineColor) nextCtx.color = inlineColor;
+  const inlineFontSize = pickFontSize(style, el.getAttribute("size"));
+  if (inlineFontSize) nextCtx.fontSize = inlineFontSize;
   if (style.includes("font-weight")) {
     if (/font-weight\s*:\s*(700|bold)/.test(style)) nextCtx.bold = true;
   }
@@ -249,13 +286,32 @@ function styleOf(ctx: InlineCtx): Partial<RichSpan> {
   if (ctx.italic) s.italic = true;
   if (ctx.underline) s.underline = true;
   if (ctx.color) s.color = normalizeColor(ctx.color);
+  if (ctx.fontSize) s.fontSize = ctx.fontSize;
   return s;
 }
 
-function pickAlign(style: string, fallback: string | null): "left" | "center" | "right" | undefined {
-  const m = style.match(/text-align\s*:\s*(left|center|right)/i);
-  if (m) return m[1].toLowerCase() as any;
-  if (fallback === "center" || fallback === "right" || fallback === "left") return fallback;
+function pickAlign(style: string, fallback: string | null): RichAlignment | undefined {
+  const m = style.match(/text-align\s*:\s*(left|center|right|justify)/i);
+  if (m) return m[1].toLowerCase() as RichAlignment;
+  if (fallback === "center" || fallback === "right" || fallback === "left" || fallback === "justify") return fallback;
+  return undefined;
+}
+
+function pickFontSize(style: string, htmlSize: string | null): number | undefined {
+  const css = style.match(/font-size\s*:\s*([\d.]+)\s*(px|pt|rem|em)?/i);
+  if (css) {
+    const value = Number(css[1]);
+    const unit = (css[2] || "px").toLowerCase();
+    if (Number.isFinite(value) && value > 0) {
+      if (unit === "pt") return value;
+      if (unit === "rem" || unit === "em") return value * 12;
+      return value * 0.75;
+    }
+  }
+  if (htmlSize) {
+    const size = Math.max(1, Math.min(7, Number.parseInt(htmlSize, 10) || 3));
+    return [8, 10, 12, 14, 18, 24, 32][size - 1];
+  }
   return undefined;
 }
 

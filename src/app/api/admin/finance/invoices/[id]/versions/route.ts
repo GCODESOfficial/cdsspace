@@ -1,6 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { NextRequest, NextResponse } from "next/server";
 import { financeDb, requireFinanceAdminAsync } from "@/lib/finance/api-auth";
+import { denyPaidInvoiceEdit } from "@/lib/finance/paid-invoice-lock";
 import { listResourceVersions, recordResourceVersion } from "@/lib/admin-versioning";
 import { logActivity } from "@/lib/activity-log";
 
@@ -86,6 +87,8 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
 
   const current = await getInvoiceSnapshot(sb, id);
   if (!current.invoice) return NextResponse.json({ error: "Invoice not found" }, { status: 404 });
+  const locked = await denyPaidInvoiceEdit(req, current.invoice);
+  if (locked) return locked;
 
   const patch: Record<string, unknown> = {};
   for (const key of RESTORABLE_INVOICE_COLUMNS) {

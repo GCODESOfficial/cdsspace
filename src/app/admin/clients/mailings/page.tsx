@@ -248,7 +248,10 @@ export default function ClientMailingsPage() {
     try {
       const response = await fetch("/api/admin/clients/mailings", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          "x-cds-silent": "1",
+        },
         body: JSON.stringify({
           action: "save_draft",
           campaign_id: draftId,
@@ -609,7 +612,7 @@ export default function ClientMailingsPage() {
             <div className="border-b border-slate-100 px-5 py-4"><h2 className="flex items-center gap-2 text-[15px] font-bold text-[#0D1B39]"><Mail className="h-4 w-4 text-[#0A4FE8]" />Email preview</h2></div>
             <div className="bg-slate-100 p-4">
               <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white">
-                <div className="px-5 py-5 text-center"><div className="mx-auto grid h-12 w-12 place-items-center rounded-xl bg-[#0A4FE8] text-[15px] font-bold text-white">CDS</div><p className="mt-2 text-[14px] font-bold text-[#0D1B39]">CDS Space</p><p className="text-[9px] font-semibold text-[#0A4FE8]">Client update</p></div>
+                <div className="px-5 py-5 text-center"><div className="mx-auto grid h-12 w-12 place-items-center rounded-xl bg-[#0A4FE8] text-[15px] font-bold text-white">CDS</div><p className="mt-2 text-[14px] font-bold text-[#0D1B39]">CDS Space</p></div>
                 <div className="px-5 pb-6">{coverPreview && <img src={coverPreview} alt="" className="mb-4 max-h-44 w-full rounded-xl object-cover" />}<p className="text-[12px] text-slate-600">Hello Client,</p><div className="mt-3 whitespace-pre-wrap text-[11px] leading-5 text-slate-600">{bodyText || "Your email message will appear here."}</div></div>
                 <div className="bg-[#0D1B39] px-5 py-4 text-[9px] leading-4 text-blue-100">CDS Space · cdsspace.pro · support@cdsspace.pro</div>
               </div>

@@ -113,11 +113,15 @@ export default function InvoicesPage() {
 
   const bulkPatch = async (status: string) => {
     setWorking(true);
-    await Promise.all(
+    const responses = await Promise.all(
       Array.from(selected).map((id) =>
         fetch(`/api/admin/finance/invoices/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ status }) })
       )
     );
+    const results = await Promise.all(responses.map((response) => response.ok ? null : response.json().catch(() => ({}))));
+    const lockedCount = results.filter((result) => result?.locked).length;
+    if (lockedCount) appAlert(`${lockedCount} paid invoice${lockedCount === 1 ? " was" : "s were"} left unchanged. Only a super admin can edit a paid invoice.`);
+    else if (responses.some((response) => !response.ok)) appAlert("One or more invoices could not be updated.");
     setWorking(false); clearSelection(); load();
   };
   const bulkDelete = async () => {

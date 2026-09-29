@@ -36,7 +36,12 @@ const QUIET_SURFACES = [
  * an accident. `methods` defaults to POST alone: creating and submitting are
  * the milestone, editing a field of something that already exists is not.
  */
-type MajorWrite = { prefix: string; methods?: string[]; wording?: string };
+type MajorWrite = {
+  prefix: string;
+  methods?: string[];
+  wording?: string;
+  includeChildren?: boolean;
+};
 
 const MAJOR_WRITES: MajorWrite[] = [
   // Submissions from clients and the public.
@@ -46,8 +51,8 @@ const MAJOR_WRITES: MajorWrite[] = [
   { prefix: "/api/requests", wording: "Request submitted." },
   { prefix: "/api/submit", wording: "Submitted." },
   { prefix: "/api/client/brand-brief", wording: "Brief submitted." },
-  { prefix: "/api/brand-brief", wording: "Brief submitted." },
-  { prefix: "/api/csign", wording: "Document signed." },
+  { prefix: "/api/brand-brief", includeChildren: true, wording: "Brief submitted." },
+  { prefix: "/api/csign", includeChildren: true, wording: "Document signed." },
   { prefix: "/api/subscription", wording: "Subscription confirmed." },
 
   // Projects and the work that hangs off them.
@@ -69,7 +74,7 @@ const MAJOR_WRITES: MajorWrite[] = [
   { prefix: "/api/admin/finance/invoices", wording: "Invoice saved." },
   { prefix: "/api/admin/finance/quotations", wording: "Quotation created." },
   { prefix: "/api/admin/finance/payroll/runs", wording: "Payroll run created." },
-  { prefix: "/api/finance/invoice", wording: "Payment submitted." },
+  { prefix: "/api/finance/invoice", includeChildren: true, wording: "Payment submitted." },
   { prefix: "/api/admin/orders", methods: ["POST", "DELETE"], wording: "Order created." },
 ];
 
@@ -104,7 +109,13 @@ function majorWrite(url: string, method: string): MajorWrite | null {
   } catch {
     return null;
   }
-  const rule = MAJOR_WRITES.find((candidate) => path.startsWith(candidate.prefix));
+  // Match the intended endpoint boundary. A plain startsWith made a rule for
+  // `/api/admin/clients` announce "Client created" for unrelated descendants
+  // such as mailing autosaves, uploads, module toggles, and delivery updates.
+  const rule = MAJOR_WRITES.find((candidate) =>
+    path === candidate.prefix
+    || (candidate.includeChildren && path.startsWith(`${candidate.prefix}/`)),
+  );
   if (!rule) return null;
   const allowed = rule.methods ?? ["POST"];
   return allowed.includes(method) ? rule : null;

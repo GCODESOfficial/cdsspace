@@ -94,7 +94,7 @@ export function AgreementForm({
       </section>
 
       <section className="rounded-[16px] border border-brand-stroke bg-brand-bg p-[5px]">
-        <div className="rounded-[12px] bg-white p-5 sm:p-6">
+        <div style={{ borderRadius: "inherit" }} className="bg-white p-5 sm:p-6">
           <label htmlFor="signature-name" className="mb-2 block text-[13px] font-semibold text-brand-body">Full legal name</label>
           <input
             id="signature-name"

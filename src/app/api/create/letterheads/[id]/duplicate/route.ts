@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
-import { getCreateActorFromRequest } from "@/lib/create-platform/session";
-import { duplicateLetterhead } from "@/lib/create-platform/letterheads";
+import { createActorCanUseLetterheadScope, getCreateActorFromRequest } from "@/lib/create-platform/session";
+import { duplicateLetterhead, getLetterhead } from "@/lib/create-platform/letterheads";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -14,6 +14,11 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   if (actor.accessLocked) return NextResponse.json({ error: "Create is not available on client accounts yet." }, { status: 403 });
   if (!UUID.test(id)) return NextResponse.json({ error: "Invalid letterhead ID." }, { status: 400 });
   try {
+    const source = await getLetterhead(actor, id);
+    if (!source) return NextResponse.json({ error: "Letterhead not found." }, { status: 404 });
+    if (!createActorCanUseLetterheadScope(actor, source.scope, "manage")) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
     return NextResponse.json({ ok: true, letterhead: await duplicateLetterhead(actor, id) }, { status: 201 });
   } catch (error) {
     return NextResponse.json({ error: error instanceof Error ? error.message : "The letterhead could not be duplicated." }, { status: 400 });

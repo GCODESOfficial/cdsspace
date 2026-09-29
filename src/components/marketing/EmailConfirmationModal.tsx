@@ -185,7 +185,7 @@ export const EmailConfirmationModal = ({
                                     disabled={Boolean(onVerify) && (verifying || code.length !== 6)}
                                     className="w-full h-[56px] rounded-full p-[2px] bg-brand-bg border border-[#648EFC] shadow-[0_4px_8px_rgba(0,0,0,0.04)] group overflow-hidden cursor-pointer disabled:cursor-not-allowed disabled:opacity-60"
                                 >
-                                    <div className="w-full h-full rounded-full flex items-center justify-center transition-opacity group-hover:opacity-90 bg-[#0A4FE8]"
+                                    <div style={{ borderRadius: "inherit" }} className="w-full h-full flex items-center justify-center transition-opacity group-hover:opacity-90 bg-[#0A4FE8]"
                                     >
                                         <span className="text-brand-bg text-[18px] font-medium tracking-[-0.18px]">
                                             {onVerify ? (verifying ? "Verifying…" : "Verify and continue") : "Got it"}

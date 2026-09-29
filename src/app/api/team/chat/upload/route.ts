@@ -37,7 +37,7 @@ export async function POST(req: Request) {
       }
     }
 
-    // Authoritative size/type enforcement (images 6MB, videos 50MB) - the
+    // Authoritative size/type enforcement (images 6MB, videos 150MB) - the
     // client checks too, but never trust the client. 413 = Payload Too Large.
     const check = validateChatUpload(file.size, file.type || "");
     if (!check.ok) {

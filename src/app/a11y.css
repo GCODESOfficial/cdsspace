@@ -86,8 +86,13 @@ html.a11y-cursor * {
   filter: none !important;
   isolation: isolate;
   position: relative;
-  /* The controller must sit above every site/dashboard header and modal. */
-  z-index: 2147483000;
+  /*
+   * Above every header and app modal, but below popovers and raised dialogs.
+   * Pinning this to the maximum z-index put it above select dropdowns too, so
+   * the language and colour vision menus opened behind the panel they belong
+   * to. The shared scale in globals.css keeps that ordering honest.
+   */
+  z-index: var(--z-a11y, 1400);
 }
 
 /*

@@ -1200,7 +1200,7 @@ function ComposeEmailModal({
   }, [onClose, busy]);
 
   return (
-    <div className="fixed inset-0 z-[9998] flex items-end justify-center bg-[#040b37]/60 p-3 backdrop-blur-sm sm:items-center sm:p-6" onClick={() => { if (!busy) onClose(); }}>
+    <div className="layer-modal-top fixed inset-0 flex items-end justify-center bg-[#040b37]/60 p-3 backdrop-blur-sm sm:items-center sm:p-6" onClick={() => { if (!busy) onClose(); }}>
       <div className="flex max-h-[92vh] w-full max-w-2xl flex-col overflow-hidden rounded-[24px] bg-white shadow-[0_28px_60px_rgba(4,11,55,0.28)]" onClick={(event) => event.stopPropagation()}>
         <div className="flex items-start justify-between gap-4 border-b border-slate-100 px-5 py-4">
           <div className="min-w-0">

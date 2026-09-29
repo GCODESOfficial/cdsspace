@@ -82,7 +82,7 @@ export async function logActivity(input: LogActivityInput): Promise<void> {
             actor_name,
             actor_is_admin,
         });
-        const notification = criticalActivityNotification(input);
+        const notification = criticalActivityNotification({ ...input, actor_name });
         if (notification) await notifyAdminFeatureEvent(notification);
 
         // A finished invoice is one of the few things the desk must see the

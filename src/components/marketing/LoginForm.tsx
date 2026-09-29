@@ -328,7 +328,7 @@ export const LoginForm = ({
                 <div className="flex flex-col gap-1.5 2xl:gap-2">
                     <label className="text-brand-body text-[13px] lg:text-[14px] 2xl:text-[15px] font-medium">Email address</label>
                     <div className={`rounded-[16px] border bg-brand-bg p-[5px] transition-[border-color,box-shadow] focus-within:border-brand-blue/40 focus-within:shadow-[0_0_0_4px_rgba(219,234,254,0.8)] ${errors.email ? 'border-red-500' : 'border-brand-stroke'}`}>
-                        <div className="flex min-h-11 items-center rounded-[12px] bg-white px-3.5 shadow-[0_1px_2px_rgba(4,11,55,0.04)] lg:min-h-12 lg:px-4 2xl:min-h-14">
+                        <div style={{ borderRadius: "inherit" }} className="flex min-h-11 items-center bg-white px-3.5 shadow-[0_1px_2px_rgba(4,11,55,0.04)] lg:min-h-12 lg:px-4 2xl:min-h-14">
                             <input
                                 {...register("email")}
                                 type="email"
@@ -350,7 +350,7 @@ export const LoginForm = ({
                         </NextLink>
                     </div>
                     <div className={`rounded-[16px] border bg-brand-bg p-[5px] transition-[border-color,box-shadow] focus-within:border-brand-blue/40 focus-within:shadow-[0_0_0_4px_rgba(219,234,254,0.8)] ${errors.password ? 'border-red-500' : 'border-brand-stroke'}`}>
-                        <div className="flex min-h-11 items-center gap-3 rounded-[12px] bg-white px-3.5 shadow-[0_1px_2px_rgba(4,11,55,0.04)] lg:min-h-12 lg:px-4 2xl:min-h-14">
+                        <div style={{ borderRadius: "inherit" }} className="flex min-h-11 items-center gap-3 bg-white px-3.5 shadow-[0_1px_2px_rgba(4,11,55,0.04)] lg:min-h-12 lg:px-4 2xl:min-h-14">
                             <input
                                 {...register("password")}
                                 type={showPassword ? "text" : "password"}
@@ -387,7 +387,7 @@ export const LoginForm = ({
                     disabled={isLoading || (challenge ? otp.length !== 6 || expiresIn <= 0 : !botToken)}
                     className="w-full h-[40px] lg:h-[48px] 2xl:h-[56px] rounded-[10px] lg:rounded-[12px] 2xl:rounded-[16px] p-[2px] bg-brand-bg border border-[#648EFC] shadow-[0_4px_8px_rgba(0,0,0,0.04)] group overflow-hidden disabled:opacity-70 disabled:cursor-not-allowed"
                 >
-                    <div className="w-full h-full rounded-[8px] lg:rounded-[10px] 2xl:rounded-[14px] flex items-center justify-center transition-opacity group-hover:opacity-90 bg-[#0A4FE8]"
+                    <div style={{ borderRadius: "inherit" }} className="w-full h-full flex items-center justify-center transition-opacity group-hover:opacity-90 bg-[#0A4FE8]"
                     >
                         {isLoading ? (
                             <Loader2 className="w-4 h-4 lg:w-5 lg:h-5 2xl:w-6 2xl:h-6 animate-spin text-white" />

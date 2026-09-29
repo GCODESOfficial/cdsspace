@@ -20,8 +20,10 @@ import {
   type WorkMode,
 } from "@/lib/timebook";
 import { getTimebookOffice } from "@/lib/timebook-office";
+import { memberHasAccessAnywhere } from "@/lib/team-login-security";
 import { notifySuperAdmin } from "@/lib/notify-admin";
 import { autoCheckoutOpenTimeEntries } from "@/lib/timebook-auto-checkout";
+import { ADMIN_FEATURE_PERMISSION_KEYS, notifyAdminFeatureEvent } from "@/lib/admin-feature-notifications";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -203,6 +205,26 @@ export async function GET() {
       .order("created_at", { ascending: false })
       .limit(8);
 
+    const leaveIds = (leaveRequests ?? []).map((leave: any) => leave.id).filter(Boolean);
+    const { data: clarificationMessages, error: clarificationError } = leaveIds.length
+      ? await db
+        .from("team_leave_clarification_messages")
+        .select("id, leave_request_id, sender_type, sender_member_id, sender_label, message, created_at")
+        .in("leave_request_id", leaveIds)
+        .order("created_at", { ascending: true })
+      : { data: [], error: null };
+    if (clarificationError) throw new Error(clarificationError.message);
+    const clarificationsByLeave = new Map<string, any[]>();
+    for (const message of clarificationMessages ?? []) {
+      const current = clarificationsByLeave.get(message.leave_request_id) ?? [];
+      current.push(message);
+      clarificationsByLeave.set(message.leave_request_id, current);
+    }
+    const hydratedLeaveRequests = (leaveRequests ?? []).map((leave: any) => ({
+      ...leave,
+      clarifications: clarificationsByLeave.get(leave.id) ?? [],
+    }));
+
     return NextResponse.json({
       ok: true,
       profile,
@@ -210,9 +232,10 @@ export async function GET() {
       work_date: workDate,
       max_sessions: MAX_DAILY_SESSIONS,
       sessions_used: entry ? completedSessions(entry).length + (entry.clock_in_at && !entry.clock_out_at ? 1 : 0) : 0,
-      office_required: officeRequiredFor(profile.work_mode, profile.hybrid_office_days ?? [], workDate),
+      office_required: !(await memberHasAccessAnywhere(session.id))
+        && officeRequiredFor(profile.work_mode, profile.hybrid_office_days ?? [], workDate),
       history: history ?? [],
-      leave_requests: leaveRequests ?? [],
+      leave_requests: hydratedLeaveRequests,
     });
   } catch (error) {
     return NextResponse.json(
@@ -244,7 +267,10 @@ export async function POST(req: NextRequest) {
     }
     const profile = await ensureProfile(db, session.id);
     const workMode = (profile.work_mode || "onsite") as WorkMode;
-    const officeRequired = officeRequiredFor(workMode, profile.hybrid_office_days ?? [], workDate);
+    // A member a super admin has allowed to work from anywhere is never held
+    // to the office geofence; their location is still recorded below.
+    const officeRequired = !(await memberHasAccessAnywhere(session.id))
+      && officeRequiredFor(workMode, profile.hybrid_office_days ?? [], workDate);
 
     if (action === "request_leave") {
       const { leave_type, start_date, end_date, reason } = body;
@@ -268,6 +294,69 @@ export async function POST(req: NextRequest) {
         .single();
       if (error) return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
       return NextResponse.json({ ok: true, leave_request: data });
+    }
+
+    if (action === "reply_leave_clarification") {
+      const leaveId = String(body.leave_id || "");
+      const message = String(body.message || "").trim();
+      if (!leaveId || !message) {
+        return NextResponse.json({ ok: false, error: "Enter your response before sending." }, { status: 400 });
+      }
+      if (message.length > 2000) {
+        return NextResponse.json({ ok: false, error: "Keep the response within 2,000 characters." }, { status: 400 });
+      }
+
+      const { data: request, error: requestError } = await db
+        .from("team_leave_requests")
+        .select("id, team_member_id, leave_type, start_date, end_date, status")
+        .eq("id", leaveId)
+        .eq("team_member_id", session.id)
+        .maybeSingle();
+      if (requestError) throw new Error(requestError.message);
+      if (!request) return NextResponse.json({ ok: false, error: "Leave request not found." }, { status: 404 });
+      if (request.status !== "pending") {
+        return NextResponse.json({ ok: false, error: "This leave request has already been reviewed." }, { status: 409 });
+      }
+
+      const { data: adminQuestion } = await db
+        .from("team_leave_clarification_messages")
+        .select("id")
+        .eq("leave_request_id", leaveId)
+        .eq("sender_type", "admin")
+        .limit(1)
+        .maybeSingle();
+      if (!adminQuestion) {
+        return NextResponse.json({ ok: false, error: "HR has not requested clarification on this leave request." }, { status: 409 });
+      }
+
+      const { data: clarification, error: clarificationInsertError } = await db
+        .from("team_leave_clarification_messages")
+        .insert({
+          leave_request_id: leaveId,
+          sender_type: "team_member",
+          sender_member_id: session.id,
+          sender_label: session.full_name,
+          message,
+        })
+        .select("id, leave_request_id, sender_type, sender_member_id, sender_label, message, created_at")
+        .single();
+      if (clarificationInsertError) throw new Error(clarificationInsertError.message);
+
+      await notifyAdminFeatureEvent({
+        permissionKeys: ADMIN_FEATURE_PERMISSION_KEYS.timebook,
+        title: `${session.full_name} replied to a leave clarification`,
+        body: message,
+        link: "/admin/timebook",
+        teamLink: "/team/timebook",
+        eyebrow: "HRM · Leave request",
+        details: {
+          "Team member": session.full_name,
+          "Leave type": String(request.leave_type || "").replace(/_/g, " "),
+          Dates: `${request.start_date} to ${request.end_date}`,
+        },
+      });
+
+      return NextResponse.json({ ok: true, clarification });
     }
 
     let entry = await getTodayEntry(db, session.id, workDate);

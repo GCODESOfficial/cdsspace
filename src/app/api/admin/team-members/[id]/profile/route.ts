@@ -40,7 +40,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     );
     if (!member) return NextResponse.json({ ok: false, error: "Team member not found." }, { status: 404 });
 
-    const [workSummary, attendance, sessions, groups, leave, payrollProfile] = await Promise.all([
+    const [workSummary, attendance, sessions, groups, leave, payrollProfile, faceProfile, equipment] = await Promise.all([
       glashMaybeOne<Record<string, unknown>>(
         `select
            coalesce(sum(total_work_minutes),0)::int as total_minutes,
@@ -89,12 +89,27 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
           order by (team_member_id=$1) desc, created_at desc limit 1`,
         [id, member.email],
       ),
+      glashMaybeOne<Record<string, unknown>>(
+        `select status, enrolled_at, last_verified_at, latest_capture_at, latest_match_score,
+                latest_liveness_score, latest_verification_flag, verification_failures, reset_requested_at
+           from public.team_face_profiles where team_member_id=$1`,
+        [id],
+      ),
+      glashQuery<Record<string, unknown>>(
+        `select e.id, e.asset_tag, e.name, e.serial_number, e.manufacturer, e.model,
+                e.condition, e.status, e.assigned_at, t.name as equipment_type
+           from public.admin_equipment e
+           join public.admin_equipment_types t on t.id=e.equipment_type_id
+          where e.assigned_team_member_id=$1 and e.deleted_at is null
+          order by e.assigned_at desc, e.name`,
+        [id],
+      ),
     ]);
 
     const financialAllowed = canSeeFinancial(session);
     const hrAllowed = canSeeHrRecords(session);
     const employeeId = financialAllowed ? String(payrollProfile?.id || "") : "";
-    const [payrollHistory, records] = await Promise.all([
+    const [payrollHistory, rawRecords] = await Promise.all([
       employeeId
         ? glashQuery<Record<string, unknown>>(
             `select i.id, i.amount, i.account_number, i.bank_code, i.narration,
@@ -119,6 +134,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
         : Promise.resolve([]),
     ]);
 
+    const records = rawRecords.filter((record) => financialAllowed || record.record_type !== "bank_statement");
     const paidTotal = payrollHistory.reduce((total, item) => (
       item.status === "paid" ? total + Number(item.amount || 0) : total
     ), 0);
@@ -142,6 +158,8 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
       access_summary: { login_count: sessions.length, unique_devices: sessionDevices.size, active_sessions: sessions.filter((row) => row.active).length },
       groups,
       leave,
+      face_profile: faceProfile,
+      equipment,
       financial: financialAllowed ? { profile: payrollProfile, payroll_history: payrollHistory, total_paid: paidTotal } : null,
       hr_records: records,
       queries: records.filter((record) => record.record_type === "query" || record.record_type === "query_response"),

@@ -6,6 +6,7 @@ import { getClientAccountState } from "@/lib/client-account";
 import { clientDashboardPath } from "@/lib/client-routes";
 import { getTeamSession } from "@/lib/team-auth";
 import type { CreateRole } from "@/lib/create-platform/catalog";
+import { hasPermission } from "@/lib/admin-permissions";
 
 export interface CreateActor {
   kind: CreateRole;
@@ -24,15 +25,42 @@ export interface CreateActor {
   setupRequiredLabel?: string;
   /** CREATE is locked for this actor (clients, until the tools are perfected). */
   accessLocked?: boolean;
+  /** Server-only admin access facts; omitted by publicCreateActor. */
+  adminPermissions?: string[];
+  isSuperAdmin?: boolean;
 }
 
-export type PublicCreateActor = Omit<CreateActor, "id">;
+export type PublicCreateActor = Omit<CreateActor, "id" | "adminPermissions" | "isSuperAdmin">;
 
 /** Never serialize the internal database owner ID to the browser. */
 export function publicCreateActor(actor: CreateActor): PublicCreateActor {
-  const { id: internalOwnerId, ...safeActor } = actor;
+  const {
+    id: internalOwnerId,
+    adminPermissions: internalAdminPermissions,
+    isSuperAdmin: internalSuperAdmin,
+    ...safeActor
+  } = actor;
   void internalOwnerId;
+  void internalAdminPermissions;
+  void internalSuperAdmin;
   return safeActor;
+}
+
+export function createActorHasAdminPermission(actor: CreateActor, permission: string) {
+  return actor.kind === "admin"
+    && (actor.isSuperAdmin === true || hasPermission(actor.adminPermissions || [], permission));
+}
+
+export function createActorCanUseLetterheadScope(
+  actor: CreateActor,
+  scope: string,
+  access: "view" | "manage",
+) {
+  if (scope !== "executive_board") return true;
+  return createActorHasAdminPermission(
+    actor,
+    access === "manage" ? "executive_board.letterhead_manage" : "executive_board.letterhead_view",
+  );
 }
 
 /** Create is client-facing by default; an emergency deployment flag can explicitly disable it. */
@@ -68,6 +96,8 @@ async function getAdminCreateActor(): Promise<CreateActor | null> {
       dashboardLabel: "Admin Dashboard",
       workspaceReference: privateWorkspaceReference("admin", admin.memberId || admin.email),
       permissionLevel: admin.role === "super_admin" ? "Super admin" : "Sub-admin",
+      adminPermissions: admin.permissions,
+      isSuperAdmin: admin.role === "super_admin",
     };
   }
   return null;

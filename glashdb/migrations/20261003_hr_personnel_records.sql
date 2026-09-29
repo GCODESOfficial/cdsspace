@@ -106,6 +106,13 @@ create table if not exists public.hr_personnel_record_events (
   created_at timestamptz not null default now()
 );
 
+create table if not exists public.hr_personnel_record_drafts (
+  actor_key text primary key,
+  payload jsonb not null default '{}'::jsonb,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
 create index if not exists hr_personnel_records_member_date_idx
   on public.hr_personnel_records(team_member_id, event_date desc, created_at desc);
 create index if not exists hr_personnel_records_type_status_idx
@@ -138,9 +145,11 @@ for each row execute function public.hr_personnel_touch_updated_at();
 
 alter table public.hr_personnel_records enable row level security;
 alter table public.hr_personnel_record_events enable row level security;
+alter table public.hr_personnel_record_drafts enable row level security;
 
 grant select, insert, update, delete on table public.hr_personnel_records to service_role;
 grant select, insert, update, delete on table public.hr_personnel_record_events to service_role;
+grant select, insert, update, delete on table public.hr_personnel_record_drafts to service_role;
 grant usage, select on sequence public.hr_personnel_record_number_seq to service_role;
 
 insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)

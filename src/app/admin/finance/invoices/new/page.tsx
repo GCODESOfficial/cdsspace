@@ -200,6 +200,18 @@ export default function NewInvoicePage() {
         const d = await r.json();
         if (cancelled || !d?.invoice) return;
         const inv = d.invoice;
+        if (inv.status === "paid") {
+          const role = await fetch("/api/admin-check", { cache: "no-store" })
+            .then((response) => (response.ok ? response.json() : null))
+            .then((data) => data?.role)
+            .catch(() => null);
+          if (cancelled) return;
+          if (role !== "super_admin") {
+            appAlert("This invoice is paid and locked. Only a super admin can edit it.");
+            router.replace(`/admin/finance/invoices/${inv.id}`);
+            return;
+          }
+        }
         // Wipe any stale LS draft so the autosave effect doesn't race us.
         draft.clear();
         setScope((inv.scope as typeof scope) || "custom");
@@ -295,7 +307,9 @@ export default function NewInvoicePage() {
         issue_date: issueDate, due_date: dueDate || null, notes,
         payment_terms: paymentTerms, revisions_note: revisionsNote, working_hours: workingHours,
         delivery_speed: deliverySpeed, delivery_period: deliveryPeriod.trim() || null,
-        status: "draft",
+        // Only a new record starts as a draft. Re-sending it on an existing
+        // invoice would demote a sent or paid invoice back to draft.
+        ...(draftId ? {} : { status: "draft" }),
         items: rows.filter(r => r.name.trim()).map((r) => ({
           name: r.name, description: r.description, quantity: Number(r.quantity), unit_price: Number(r.unit_price), isNew: r.isNew,
         })),
@@ -404,7 +418,7 @@ export default function NewInvoicePage() {
       // Saving completes the invoice record; delivery is a separate, explicit
       // action from the invoice page. The share endpoint marks it sent only
       // after the email provider accepts the completed invoice.
-      status: "draft",
+      ...(savedDraftId ? {} : { status: "draft" }),
       finalize: true,
       items: cleanItems,
     };

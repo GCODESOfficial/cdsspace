@@ -21,7 +21,7 @@ export async function uploadContentHubFile(file: File, folder = "content-hub"): 
   const storage: any = getGlashDbAdmin();
   if (!storage) throw new Error("Storage not configured");
 
-  const maxBytes = validation.kind === "video" ? 100 * 1024 * 1024 : validation.kind === "image" ? 10 * 1024 * 1024 : 25 * 1024 * 1024;
+  const maxBytes = validation.kind === "video" ? 150 * 1024 * 1024 : validation.kind === "image" ? 10 * 1024 * 1024 : 25 * 1024 * 1024;
   if (file.size > maxBytes) throw new UploadSecurityError("This file is too large for the content library.", 413);
   const safe = await assertSafeUpload(file, { allow: ["image", "pdf", "office", "zip", "design"], maxBytes });
   if ((validation.kind === "image" && safe.kind !== "image")

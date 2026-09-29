@@ -10,8 +10,10 @@ import {
   GraduationCap, BadgeDollarSign, BarChart3, KeyRound, CalendarClock,
   UserPlus, X, Copy, Check, Plane,
   ClipboardCheck,
+  MessageCircleQuestion, Send,
 } from "lucide-react";
 import { toast } from "sonner";
+import { Linkified } from "@/components/chat/message-links";
 import {
   ANNUAL_LEAVE_MAX_WORKING_DAYS,
   annualLeaveLatestEndDate,
@@ -38,7 +40,16 @@ type LeaveRequest = {
   end_date: string;
   reason: string | null;
   status: string;
+  clarifications?: LeaveClarification[];
   team_members?: { full_name?: string; department?: string | null } | null;
+};
+
+type LeaveClarification = {
+  id: string;
+  sender_type: "admin" | "team_member";
+  sender_label?: string | null;
+  message: string;
+  created_at: string;
 };
 
 type Member = { id: string; full_name: string; department?: string | null };
@@ -345,6 +356,8 @@ function LeaveModal({
   const [showGrantForm, setShowGrantForm] = useState(false);
   const [grantBusy, setGrantBusy] = useState(false);
   const [grant, setGrant] = useState({ member_id: "", leave_type: "annual", start_date: "", end_date: "", reason: "" });
+  const [questionFor, setQuestionFor] = useState<string | null>(null);
+  const [questionDrafts, setQuestionDrafts] = useState<Record<string, string>>({});
 
   useEffect(() => setItems(leaveRequests), [leaveRequests]);
 
@@ -408,6 +421,35 @@ function LeaveModal({
     }
   };
 
+  const askClarification = async (leaveId: string) => {
+    const message = String(questionDrafts[leaveId] || "").trim();
+    if (!message) {
+      toast.error("Enter the clarification you need.");
+      return;
+    }
+    setBusyId(leaveId);
+    try {
+      const response = await fetch("/api/admin/timebook", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "ask_leave_clarification", leave_id: leaveId, message }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || !payload.ok) throw new Error(payload.error || "Could not send the question.");
+      setItems((current) => current.map((leave) => leave.id === leaveId
+        ? { ...leave, clarifications: [...(leave.clarifications ?? []), payload.clarification] }
+        : leave));
+      setQuestionDrafts((current) => ({ ...current, [leaveId]: "" }));
+      setQuestionFor(null);
+      toast.success("Clarification requested");
+      onReviewed();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not send the question.");
+    } finally {
+      setBusyId("");
+    }
+  };
+
   const leaveCard = (leave: LeaveRequest, showActions = false) => (
     <div key={leave.id} className="rounded-xl border border-gray-100 bg-white p-4">
       <div className="flex items-start justify-between gap-3">
@@ -415,7 +457,7 @@ function LeaveModal({
           <p className="font-semibold text-[#0D1B39] text-[14px]">{leave.team_members?.full_name || "Team member"}</p>
           <p className="text-[12px] text-gray-500 capitalize">{leave.leave_type.replace(/_/g, " ")} leave · {String(leave.start_date).slice(0, 10)} → {String(leave.end_date).slice(0, 10)}</p>
           <p className="mt-1 text-[11px] text-gray-400">{leaveWorkingDays(String(leave.start_date).slice(0, 10), String(leave.end_date).slice(0, 10))} working day(s)</p>
-          {leave.reason && <p className="mt-1 text-[12.5px] text-gray-600">{leave.reason}</p>}
+          {leave.reason && <Linkified text={leave.reason} className="mt-1 block whitespace-pre-wrap text-[12.5px] text-gray-600" />}
         </div>
         {!showActions && (
           <span className={`shrink-0 rounded-full px-2 py-1 text-[10px] font-semibold capitalize ${leave.status === "approved" ? "bg-emerald-50 text-emerald-700" : "bg-red-50 text-red-700"}`}>
@@ -423,15 +465,53 @@ function LeaveModal({
           </span>
         )}
       </div>
-      {showActions && (
-        <div className="mt-3 flex gap-2">
-          <button type="button" disabled={!!busyId} onClick={() => review(leave.id, "approved")} className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-lg bg-emerald-600 py-2 text-[13px] font-semibold text-white disabled:opacity-60">
-            {busyId === leave.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />} Approve
-          </button>
-          <button type="button" disabled={!!busyId} onClick={() => review(leave.id, "rejected")} className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-lg border border-gray-200 py-2 text-[13px] font-semibold text-gray-700 disabled:opacity-60">
-            <X className="h-3.5 w-3.5" /> Reject
-          </button>
+      {(leave.clarifications ?? []).length > 0 && (
+        <div className="mt-3 space-y-2 rounded-xl border border-blue-100 bg-blue-50/50 p-3">
+          <p className="text-[11px] font-semibold text-[#0D1B39]">Clarification thread</p>
+          {(leave.clarifications ?? []).map((message) => (
+            <div key={message.id} className={`rounded-lg px-3 py-2 text-[12px] ${message.sender_type === "admin" ? "bg-white text-gray-700" : "ml-4 bg-[#0A4FE8] text-white"}`}>
+              <p className={`mb-1 text-[10px] font-semibold ${message.sender_type === "admin" ? "text-[#0A4FE8]" : "text-white/75"}`}>
+                {message.sender_type === "admin" ? (message.sender_label || "CDS Space HR") : (message.sender_label || leave.team_members?.full_name || "Team member")}
+              </p>
+              <Linkified text={message.message} className="whitespace-pre-wrap break-words" />
+            </div>
+          ))}
         </div>
+      )}
+      {showActions && (
+        <>
+          {questionFor === leave.id && (
+            <div className="mt-3 rounded-xl border border-blue-100 bg-blue-50/40 p-3">
+              <label htmlFor={`leave-question-${leave.id}`} className="mb-1.5 block text-[11px] font-semibold text-[#0D1B39]">What would you like the team member to clarify?</label>
+              <textarea
+                id={`leave-question-${leave.id}`}
+                rows={3}
+                maxLength={2000}
+                value={questionDrafts[leave.id] || ""}
+                onChange={(event) => setQuestionDrafts((current) => ({ ...current, [leave.id]: event.target.value }))}
+                placeholder="Ask a clear question about the dates, reason, handover, or supporting details."
+                className="w-full resize-y rounded-xl border border-blue-100 bg-white px-3 py-2 text-[12.5px] text-[#0D1B39] outline-none focus:border-[#0A4FE8]"
+              />
+              <div className="mt-2 flex justify-end gap-2">
+                <button type="button" onClick={() => setQuestionFor(null)} className="rounded-lg px-3 py-2 text-xs font-semibold text-gray-600">Cancel</button>
+                <button type="button" disabled={busyId === leave.id || !String(questionDrafts[leave.id] || "").trim()} onClick={() => askClarification(leave.id)} className="inline-flex items-center gap-1.5 rounded-lg bg-[#0A4FE8] px-3 py-2 text-xs font-semibold text-white disabled:opacity-50">
+                  {busyId === leave.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />} Send question
+                </button>
+              </div>
+            </div>
+          )}
+          <div className="mt-3 grid grid-cols-3 gap-2">
+            <button type="button" disabled={!!busyId} onClick={() => review(leave.id, "approved")} className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-emerald-600 py-2 text-[12px] font-semibold text-white disabled:opacity-60">
+              {busyId === leave.id && questionFor !== leave.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />} Approve
+            </button>
+            <button type="button" disabled={!!busyId} onClick={() => setQuestionFor((current) => current === leave.id ? null : leave.id)} className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-blue-200 bg-blue-50 py-2 text-[12px] font-semibold text-[#0A4FE8] disabled:opacity-60">
+              <MessageCircleQuestion className="h-3.5 w-3.5" /> Ask
+            </button>
+            <button type="button" disabled={!!busyId} onClick={() => review(leave.id, "rejected")} className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-gray-200 py-2 text-[12px] font-semibold text-gray-700 disabled:opacity-60">
+              <X className="h-3.5 w-3.5" /> Reject
+            </button>
+          </div>
+        </>
       )}
     </div>
   );

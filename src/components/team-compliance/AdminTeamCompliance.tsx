@@ -1360,7 +1360,7 @@ export default function AdminTeamCompliance({ section }: { section: Section }) {
                     Images and videos
                   </h3>
                   <p className="mt-1 text-xs text-slate-500">
-                    PNG, JPEG, WebP, GIF up to 8 MB; MP4, MOV, WebM up to 75 MB.
+                    PNG, JPEG, WebP, GIF up to 8 MB; MP4, MOV, WebM up to 150 MB.
                   </p>
                 </div>
                 <label className="inline-flex min-h-10 cursor-pointer items-center gap-2 rounded-xl border border-blue-200 px-3 text-xs font-semibold text-[#0A4FE8] hover:bg-blue-50">

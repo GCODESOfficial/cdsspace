@@ -36,6 +36,14 @@ interface Creation {
   output: Record<string, unknown>; fileName: string | null; outputFormat: string | null;
   isFavorite: boolean; createdAt: string;
 }
+interface RecentLetterhead {
+  id: string;
+  title: string;
+  status: "draft" | "ready" | "archived";
+  firstPageUrl: string | null;
+  deliveredByCds: boolean;
+  updatedAt: string;
+}
 interface CreditAccount { monthlyCreditLimit: number; creditsUsed: number; storageLimitBytes: number; storageUsedBytes: number }
 interface AdvertBanner { imageUrl: string | null; altText: string; targetUrl: string | null; isActive: boolean; width: number | null; height: number | null; updatedAt: string | null }
 interface DashData {
@@ -286,11 +294,14 @@ export function CreateApp({
   const [category, setCategory] = useState<string | null>(null);
   const [view, setView] = useState<"home" | "creations">("home");
   const [activeTool, setActiveTool] = useState<Tool | null>(null);
+  const [requestedLetterheadId, setRequestedLetterheadId] = useState<string | null>(null);
+  const [recentLetterheads, setRecentLetterheads] = useState<RecentLetterhead[]>([]);
   const [collapsed, setCollapsed] = useState(workspaceKind === "client");
   const [theme, setTheme] = useState<"light" | "dark">(initialTheme);
   const searchRef = useRef<HTMLInputElement | null>(null);
   const storagePromptedCreationIds = useRef(new Set<string>());
   const railStorageKey = `create_rail_collapsed_${workspaceKind}`;
+  const deepLinkApplied = useRef(false);
 
   useEffect(() => {
     try {
@@ -328,9 +339,27 @@ export function CreateApp({
     if (json.ok) { setActor(json.actor); setData(json.data); setAuthed(true); }
     setLoading(false);
   }, [workspaceKind]);
+  const loadRecentLetterheads = useCallback(async () => {
+    const response = await fetch(createApiPath("/api/create/letterheads", workspaceKind), { cache: "no-store" });
+    const payload = await response.json().catch(() => ({}));
+    if (response.ok && Array.isArray(payload.letterheads)) setRecentLetterheads(payload.letterheads.slice(0, 12));
+  }, [workspaceKind]);
   // Only when the server could not hand the data over already.
   const hasInitial = Boolean(initial);
   useEffect(() => { if (!hasInitial) void load(); }, [load, hasInitial]);
+  useEffect(() => { if (authed) void loadRecentLetterheads(); }, [authed, loadRecentLetterheads]);
+
+  useEffect(() => {
+    if (!data || deepLinkApplied.current) return;
+    const params = new URLSearchParams(window.location.search);
+    const requestedTool = params.get("tool");
+    if (!requestedTool) return;
+    const tool = data.tools.find((item) => item.slug === requestedTool && item.status !== "disabled");
+    if (!tool) return;
+    deepLinkApplied.current = true;
+    setRequestedLetterheadId(params.get("letterhead"));
+    setActiveTool(tool);
+  }, [data]);
 
   const favorites = useMemo(() => new Set(data?.favoriteToolSlugs || []), [data]);
 
@@ -405,6 +434,10 @@ export function CreateApp({
   );
   const featured = allTools.filter((t) => t.isFeatured && t.slug !== "official-letterhead").slice(0, 4);
   const letterheadTool = allTools.find((t) => t.slug === "official-letterhead") || null;
+  const recentOverview = [
+    ...recentLetterheads.map((letterhead) => ({ kind: "letterhead" as const, timestamp: letterhead.updatedAt, letterhead })),
+    ...(data?.recentCreations || []).map((creation) => ({ kind: "creation" as const, timestamp: creation.createdAt, creation })),
+  ].sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()).slice(0, 6);
   const credit = data?.creditAccount;
   const shownCategories = category ? [category] : Array.from(new Set(filtered.map((t) => t.category)));
   const dark = theme === "dark";
@@ -518,7 +551,7 @@ export function CreateApp({
 
           {activeTool ? (
             activeTool.slug === "official-letterhead"
-              ? <LetterheadStudio workspaceKind={workspaceKind} onBack={() => setActiveTool(null)} />
+              ? <LetterheadStudio workspaceKind={workspaceKind} initialLetterheadId={requestedLetterheadId} onBack={() => { setActiveTool(null); setRequestedLetterheadId(null); void loadRecentLetterheads(); }} />
               : <ToolPage workspaceKind={workspaceKind} tool={activeTool} onBack={() => setActiveTool(null)} onSaved={load} />
           ) : view === "creations" ? (
             <CreationsView workspaceKind={workspaceKind} data={data} dark={dark} onBack={() => setView("home")} reload={load} />
@@ -582,14 +615,16 @@ export function CreateApp({
               )}
 
               {/* Recent creations */}
-              {!q && !category && (data?.recentCreations?.length || 0) > 0 && (
+              {!q && !category && recentOverview.length > 0 && (
                 <section className="mt-8">
                   <div className="mb-3 flex items-center justify-between">
                     <div><h2 className="text-[17px] font-bold">Recent creations</h2><p className={`mt-0.5 text-[12px] ${dark ? "text-slate-400" : "text-slate-500"}`}>Continue where you left off.</p></div>
                     <button onClick={() => setView("creations")} className="rounded-lg px-3 py-2 text-[12px] font-semibold text-[#0A4FE8] hover:bg-blue-50">View all</button>
                   </div>
                   <div className="grid max-w-full grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6">
-                    {data!.recentCreations.slice(0, 6).map((c) => <CreationCard workspaceKind={workspaceKind} key={c.id} c={c} compact dark={dark} />)}
+                    {recentOverview.map((item) => item.kind === "letterhead"
+                      ? <LetterheadRecentCard key={`letterhead-${item.letterhead.id}`} item={item.letterhead} dark={dark} onOpen={() => { if (!letterheadTool) return; setRequestedLetterheadId(item.letterhead.id); setActiveTool(letterheadTool); }} />
+                      : <CreationCard workspaceKind={workspaceKind} key={item.creation.id} c={item.creation} compact dark={dark} />)}
                   </div>
                 </section>
               )}
@@ -674,6 +709,19 @@ function RailItem({ icon: Icon, label, active, primary, pinned, dark, collapsed,
     >
       <Icon className="h-[19px] w-[19px] shrink-0" />
       {!collapsed && <span className="truncate text-[13px] font-semibold">{label}</span>}
+    </button>
+  );
+}
+
+function LetterheadRecentCard({ item, dark, onOpen }: { item: RecentLetterhead; dark: boolean; onOpen: () => void }) {
+  return (
+    <button type="button" onClick={onOpen} className={`group min-w-0 overflow-hidden rounded-2xl border text-left shadow-sm transition hover:-translate-y-0.5 hover:border-blue-300 hover:shadow-md ${dark ? "border-[#1D396B] bg-[#0C1833]" : "border-gray-100 bg-white"}`}>
+      <span className={`relative grid aspect-square place-items-center overflow-hidden ${dark ? "bg-[#07132B]" : "bg-[#F6F7FB]"}`}>
+        {item.firstPageUrl ? <img src={item.firstPageUrl} alt={`${item.title} letterhead preview`} className="absolute inset-x-0 top-0 h-auto w-full bg-white object-contain" /> : <FileText className="h-8 w-8 text-blue-300" />}
+        <span className="absolute left-2 top-2 rounded-full bg-[#0A4FE8] px-2 py-1 text-[9px] font-semibold text-white">Letterhead</span>
+        {item.deliveredByCds && <span className="absolute bottom-2 left-2 rounded-full bg-white px-2 py-1 text-[8.5px] font-semibold text-[#0A4FE8] shadow-sm">Delivered by CDS Space</span>}
+      </span>
+      <span className="block p-2.5"><strong className="block truncate text-[12px] text-inherit" title={item.title}>{item.title}</strong><span className="mt-0.5 block truncate text-[10.5px] text-gray-400">Open in letterhead studio</span></span>
     </button>
   );
 }

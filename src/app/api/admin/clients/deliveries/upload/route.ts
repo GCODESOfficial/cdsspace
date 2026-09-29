@@ -10,7 +10,7 @@ import {
 } from "@/lib/client-deliveries-server";
 import {
   isIgnoredDeliveryPath,
-  MAX_DELIVERY_FILE_BYTES,
+  deliveryFileMaximumBytes,
   MAX_DELIVERY_UPLOAD_CHUNK_BYTES,
 } from "@/lib/client-deliveries";
 import { UploadSecurityError } from "@/lib/upload-security";
@@ -90,8 +90,8 @@ function validateMetadata(input: ReturnType<typeof readUploadMetadata>) {
   if (isIgnoredDeliveryPath(input.relativePath)) {
     throw new DeliveryWorkflowError(`${input.relativePath} is system metadata, not a deliverable. It is skipped automatically - refresh the page and add the folder again.`);
   }
-  if (!input.fileSize || input.fileSize > MAX_DELIVERY_FILE_BYTES) {
-    throw new DeliveryWorkflowError("Each client delivery file must be 50MB or smaller.", 413);
+  if (!input.fileSize || input.fileSize > deliveryFileMaximumBytes(input.fileName)) {
+    throw new DeliveryWorkflowError("Videos must be 150MB or smaller; other delivery files must be 50MB or smaller.", 413);
   }
   const expectedChunks = Math.ceil(input.fileSize / MAX_DELIVERY_UPLOAD_CHUNK_BYTES);
   if (input.chunkCount !== expectedChunks || input.chunkIndex < 0 || input.chunkIndex >= input.chunkCount) {

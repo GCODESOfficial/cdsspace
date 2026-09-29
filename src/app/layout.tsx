@@ -85,6 +85,7 @@ import { WriteConfirmations } from "@/components/WriteConfirmations";
 import { AccessibilityWidget } from "@/components/a11y/AccessibilityWidget";
 import { TranslationEngine } from "@/components/a11y/TranslationEngine";
 import { DashboardGuide } from "@/components/assistant/DashboardGuide";
+import { DashboardSearchableSelects } from "@/components/forms/DashboardSearchableSelects";
 
 export default function RootLayout({
   children,
@@ -133,6 +134,7 @@ export default function RootLayout({
         <AppNotifyRoot />
         <SonnerProvider />
         <WriteConfirmations />
+        <DashboardSearchableSelects />
         <AccessibilityWidget />
         <DashboardGuide />
         <TranslationEngine />

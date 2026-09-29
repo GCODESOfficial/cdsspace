@@ -25,6 +25,15 @@ test("a database fault never demotes a signed-in admin", async () => {
   assert.match(route, /const cookieOnly = getAdminSession\(req\);/);
 });
 
+test("large permission sets use a compressed compatible admin cookie", async () => {
+  const cookie = await read("src/lib/admin-session-cookie.ts");
+  assert.match(cookie, /deflateRawSync/);
+  assert.match(cookie, /inflateRawSync/);
+  assert.match(cookie, /COMPRESSED_PREFIX/);
+  // Existing signed cookies must remain valid during the rollout.
+  assert.match(cookie, /Continue accepting already-issued uncompressed cookies/);
+});
+
 test("both portals reconnect on their own", async () => {
   const [admin, team] = await Promise.all([
     read("src/app/admin/layout.tsx"),

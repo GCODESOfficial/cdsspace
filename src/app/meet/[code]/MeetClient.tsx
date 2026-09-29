@@ -411,6 +411,14 @@ export default function MeetRoomPage() {
   const code = params?.code;
 
   const [meeting, setMeeting] = useState<Meeting | null>(null);
+  // Whether anyone from support is coming, for a client who called in.
+  const [support, setSupport] = useState<{
+    waitingForStaff: boolean;
+    ringingSeconds: number;
+    unavailable: boolean;
+    rescheduledFor: string | null;
+    passedTo: string | null;
+  } | null>(null);
   const [exitPath, setExitPath] = useState<"/admin/cmeet" | "/team/cmeet" | "/dashboard/cmeet" | "/login">("/login");
   const [me, setMe] = useState<{ id: string | null; full_name: string; avatar_url: string | null; kind: CMeetParticipantKind; is_super_admin: boolean } | null>(null);
   const [name, setName] = useState("");
@@ -538,6 +546,7 @@ export default function MeetRoomPage() {
       const j = await r.json().catch(() => ({}));
       if (r.ok && j.ok) {
         setMeeting(j.meeting);
+        setSupport(j.support ?? null);
         setExitPath(
           j.return_to === "/admin/cmeet" || j.return_to === "/team/cmeet" || j.return_to === "/dashboard/cmeet"
             ? j.return_to
@@ -576,7 +585,10 @@ export default function MeetRoomPage() {
     const timer = window.setInterval(async () => {
       const response = await fetch(`/api/cmeet/${encodeURIComponent(code)}`, { cache: "no-store" }).catch(() => null);
       const payload = await response?.json().catch(() => null);
-      if (active && response?.ok && payload?.meeting) setMeeting(payload.meeting);
+      if (active && response?.ok && payload?.meeting) {
+        setMeeting(payload.meeting);
+        setSupport(payload.support ?? null);
+      }
     }, 4_000);
     return () => { active = false; window.clearInterval(timer); };
   }, [code, meeting?.approval_status]);
@@ -667,6 +679,7 @@ export default function MeetRoomPage() {
       const response = await fetch(`/api/cmeet/${encodeURIComponent(code)}`, { cache: "no-store" }).catch(() => null);
       const payload = await response?.json().catch(() => null);
       if (active && response?.ok && payload?.meeting) {
+        setSupport(payload.support ?? null);
         if (payload.meeting.status === "ended") {
           await hangUp({ notice: "The host has ended this meeting.", exit: true });
           return;
@@ -1983,6 +1996,31 @@ export default function MeetRoomPage() {
       {!minimized && (
       <main className="relative flex min-h-0 flex-1 overflow-hidden pb-[72px]">
         <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-2 p-2 sm:gap-3 sm:p-3">
+          {/* A client who called support is told what is happening, rather
+              than being left with a ringtone and no answer. */}
+          {support?.rescheduledFor && (
+            <div className="rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-[13px] text-[#07133B]">
+              <p className="font-semibold">Your call has been rescheduled.</p>
+              <p className="mt-0.5 text-[12px] leading-5 text-[#475467]">
+                The team has offered {new Date(support.rescheduledFor).toLocaleString("en-GB", { dateStyle: "full", timeStyle: "short" })}.
+                It is in your dashboard under cMeet.
+              </p>
+            </div>
+          )}
+          {!support?.rescheduledFor && support?.unavailable && (
+            <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-[13px] text-amber-900">
+              <p className="font-semibold">Support team currently unavailable</p>
+              <p className="mt-0.5 text-[12px] leading-5 text-amber-900/80">
+                Nobody was free to take this call. Send a message in chat and the team will come back to you, or try again shortly.
+              </p>
+            </div>
+          )}
+          {!support?.unavailable && support?.passedTo && (
+            <div className="rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-[13px] text-[#07133B]">
+              <p className="font-semibold">Your call is being passed to {support.passedTo}.</p>
+              <p className="mt-0.5 text-[12px] leading-5 text-[#475467]">Stay on the line, they are joining now.</p>
+            </div>
+          )}
           {meeting.audio_only ? (
             <AudioParticipantGrid
               local={{
@@ -2849,7 +2887,7 @@ function MediaStatusBadges({
 
 function ParticipantCaption({ text }: { text: string }) {
   return (
-    <div aria-live="polite" className="pointer-events-none absolute inset-x-2 bottom-10 z-10 max-h-[4.5em] overflow-hidden rounded-lg bg-black/80 px-2.5 py-1.5 text-center text-[10px] font-medium leading-[1.35] text-white shadow-lg backdrop-blur-sm sm:text-xs">
+    <div aria-live="polite" className="pointer-events-none absolute inset-x-2 bottom-20 z-10 max-h-[4.5em] overflow-hidden rounded-lg bg-black/80 px-2.5 py-1.5 text-center text-[10px] font-medium leading-[1.35] text-white shadow-lg backdrop-blur-sm sm:text-xs">
       {text}
     </div>
   );

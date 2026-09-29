@@ -7,6 +7,7 @@ import {
   Landmark,
   Loader2,
   MapPinned,
+  PenLine,
   Plus,
   Save,
   Settings2,
@@ -77,6 +78,10 @@ export default function SalesSettingsPage() {
   const updateZone = (id: string, patch: Partial<SalesDeliveryZone>) => setConfig((current) => current ? ({ ...current, deliveryZones: current.deliveryZones.map((item) => item.id === id ? { ...item, ...patch } : item) }) : current);
   const updatePickup = (id: string, patch: Partial<SalesPickupLocation>) => setConfig((current) => current ? ({ ...current, pickupLocations: current.pickupLocations.map((item) => item.id === id ? { ...item, ...patch } : item) }) : current);
   const updateOffer = (id: string, patch: Partial<SalesOfferCode>) => setConfig((current) => current ? ({ ...current, offerCodes: current.offerCodes.map((item) => item.id === id ? { ...item, ...patch } : item) }) : current);
+  const updateLetterheadPrice = (currency: string, value: number) => setConfig((current) => current
+    ? ({ ...current, letterheadDesign: { ...current.letterheadDesign, [currency]: Math.max(0, value) } })
+    : current);
+
   const updateBank = (id: string, patch: Partial<SalesBankAccount>) => setConfig((current) => current ? ({ ...current, bankAccounts: current.bankAccounts.map((item) => item.id === id ? { ...item, ...patch } : item) }) : current);
 
   const addCountry = () => setConfig((current) => current ? ({ ...current, countries: [...current.countries, { id: crypto.randomUUID(), country_code: "", country_name: "New country", is_domestic: false, delivery_mode: "quoted", prices: {}, active: false, sort_order: current.countries.length * 10 + 10 }] }) : current);
@@ -125,6 +130,35 @@ export default function SalesSettingsPage() {
           { icon: Truck, label: "Fixed delivery rules", value: fixedDeliveryRules, note: "Other routes are billed separately" },
         ].map((item) => <div key={item.label} className="rounded-[20px] border border-slate-200 bg-white p-5 shadow-sm"><span className="grid h-10 w-10 place-items-center rounded-2xl bg-blue-50 text-[#0A4FE8]"><item.icon className="h-5 w-5" /></span><p className="mt-4 text-[25px] font-bold text-[#0D1B39]">{item.value}</p><p className="text-[12px] font-semibold text-[#0D1B39]">{item.label}</p><p className="mt-1 text-[10px] text-slate-400">{item.note}</p></div>)}
       </div>
+
+      <section className="overflow-hidden rounded-[24px] border border-slate-200 bg-white shadow-sm">
+        <SectionTitle
+          icon={PenLine}
+          title="Letterhead design"
+          description="What a client pays when they ask the CDS Space team to design their letterhead from the Create letterhead tool. The invoice is raised instantly in the currency their account is billed in."
+        />
+        <div className="p-5 lg:p-6">
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+            {SALES_CURRENCIES.map((currency) => (
+              <label key={currency} className="relative">
+                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-[10px] font-bold text-slate-400">{currency}</span>
+                <input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={Number(config.letterheadDesign?.[currency]) || ""}
+                  onChange={(event) => updateLetterheadPrice(currency, Number(event.target.value) || 0)}
+                  placeholder="Not set"
+                  className={`${INPUT} w-full pl-12`}
+                />
+              </label>
+            ))}
+          </div>
+          <p className="mt-2 text-[10px] leading-4 text-slate-400">
+            These are set market prices, not conversions of one another, so each currency is saved exactly as entered. Naira and Rwandan francs are local-market prices; the others follow the US dollar price.
+          </p>
+        </div>
+      </section>
 
       <section className="overflow-hidden rounded-[24px] border border-slate-200 bg-white shadow-sm">
         <SectionTitle icon={TicketPercent} title="Special Offer Codes" description="Create percentage offers that can be validated server-side and used across eligible client orders before their invoice is paid." action={<button onClick={addOffer} className="inline-flex h-10 items-center justify-center gap-2 rounded-xl border border-blue-200 px-4 text-[11px] font-semibold text-[#0A4FE8] hover:bg-blue-50"><Plus className="h-4 w-4" />Add offer</button>} />

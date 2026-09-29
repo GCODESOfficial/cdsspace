@@ -1473,7 +1473,7 @@ export function TeamChatPanel({
       return;
     }
 
-    // Size policy: images 6MB, videos 50MB. Bigger files should go to Google
+    // Size policy: images 6MB, videos 150MB. Bigger files should go to Google
     // Drive (the message says so). Mirrors the server-side enforcement.
     const sizeCheck = validateChatUpload(file.size, file.type || "");
     if (!sizeCheck.ok) {

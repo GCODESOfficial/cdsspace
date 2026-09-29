@@ -12,11 +12,21 @@ async function actor() {
   return session.role === "super_admin" || hasPermission(session.permissions || [], "deliveries") ? session : null;
 }
 
+async function visibleDrive(id: string) {
+  return glashMaybeOne(
+    `select id, name, description, project_id, created_by_kind, shared_with_admin, status, created_at, updated_at
+       from public.client_drives
+      where id = $1::uuid
+        and (created_by_kind = 'admin' or shared_with_admin = true)`,
+    [id],
+  );
+}
+
 export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
   const session = await actor();
   if (!session) return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
   const { id } = await params;
-  const drive = await glashMaybeOne(`select id, name, description, project_id, status, created_at, updated_at from public.client_drives where id = $1::uuid`, [id]);
+  const drive = await visibleDrive(id);
   if (!drive) return NextResponse.json({ ok: false, error: "Drive not found" }, { status: 404 });
   return NextResponse.json({ ok: true, drive, ...(await loadDriveContents(id)) });
 }
@@ -25,6 +35,8 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
   const session = await actor();
   if (!session) return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
   const { id } = await params;
+  const drive = await visibleDrive(id);
+  if (!drive) return NextResponse.json({ ok: false, error: "Drive not found" }, { status: 404 });
   const body = await req.json().catch(() => ({}));
   if (Array.isArray(body.members)) {
     for (const member of body.members) {
@@ -50,7 +62,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   const session = await actor();
   if (!session) return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
   const { id } = await params;
-  const drive = await glashMaybeOne(`select id from public.client_drives where id = $1::uuid`, [id]);
+  const drive = await visibleDrive(id);
   if (!drive) return NextResponse.json({ ok: false, error: "Drive not found" }, { status: 404 });
   const form = await req.formData();
   const action = String(form.get("action") || "upload");

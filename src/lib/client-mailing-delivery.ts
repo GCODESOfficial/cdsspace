@@ -122,15 +122,17 @@ function campaignEmailHtml(input: { name: string; body: string; hasImage: boolea
      <p style="margin:0 0 15px;">Hello ${escapeHtml(input.name || "there")},</p>
      ${bodyParagraphs(input.body)}
      <p style="margin:22px 0 0;padding-top:16px;border-top:1px solid #E8EDF5;color:#69738D;font-size:12px;line-height:1.6;">This message was sent by CDS Space because you are a client or opted to receive a direct business communication. To stop future campaign emails, reply with “Unsubscribe”.</p>`,
-    { eyebrow: "Client update", preheader: input.body.replace(/\s+/g, " ").slice(0, 180) },
+    { preheader: input.body.replace(/\s+/g, " ").slice(0, 180) },
   );
 }
 
 export async function signedClientMailingPreview(path: string | null) {
   if (!path) return null;
-  const db = getGlashDbAdmin() as any;
-  const { data } = await db.storage.from(CLIENT_MAILING_IMAGE_BUCKET).createSignedUrl(path, 15 * 60);
-  return data?.signedUrl || null;
+  if (!path.startsWith("sales-mailings/")) return null;
+  // Keep previews behind the authenticated admin route. Storage-issued URLs
+  // can point at an internal or short-lived origin and were rendering as a
+  // broken image in the mailing composer.
+  return `/api/admin/clients/mailings/upload?path=${encodeURIComponent(path)}`;
 }
 
 export async function resolveClientMailingRecipients(campaign: ClientEmailCampaign) {

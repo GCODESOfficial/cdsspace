@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { initials } from "@/lib/utils";
 import {
   Loader2,
@@ -473,7 +474,6 @@ export default function AdminTeamMembersPage() {
                 }}
                 onPromote={() => setPromotingMember(m)}
                 onDelete={() => remove(m)}
-                onView={() => setViewingMember(m)}
               />
             ))}
           </div>
@@ -530,7 +530,6 @@ function MemberRow({
   onToggleLead,
   onPromote,
   onDelete,
-  onView,
 }: {
   m: TeamMember;
   selected: boolean;
@@ -539,7 +538,6 @@ function MemberRow({
   onToggleLead: () => void;
   onPromote: () => void;
   onDelete: () => void;
-  onView: () => void;
 }) {
   const [showShare, setShowShare] = useState(false);
   const inviteUrl =
@@ -559,12 +557,12 @@ function MemberRow({
         onChange={onToggleSelect}
         className="w-4 h-4 rounded border-gray-300 text-[#0A4FE8] cursor-pointer shrink-0"
       />
-      <div className="w-10 h-10 rounded-full bg-[#0A4FE8] text-white text-sm font-bold flex items-center justify-center">
+      <Link href={`/admin/team-members/${m.id}`} aria-label={`Open ${m.full_name}'s full HR profile`} className="w-10 h-10 rounded-full bg-[#0A4FE8] text-white text-sm font-bold flex items-center justify-center hover:ring-4 hover:ring-blue-100 transition">
         {initials(m.full_name)}
-      </div>
+      </Link>
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2 flex-wrap">
-          <p className="text-[14px] font-semibold text-[#0D1B39]">{m.full_name}</p>
+          <Link href={`/admin/team-members/${m.id}`} className="text-[14px] font-semibold text-[#0D1B39] hover:text-[#0A4FE8] hover:underline">{m.full_name}</Link>
           <MemberStatusBadge status={m.availability_status || "offline"} />
           {m.is_sub_admin && (
             <span className="text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded bg-[#0A4FE8] text-white inline-flex items-center gap-1">
@@ -619,13 +617,13 @@ function MemberRow({
             <Share2 className="w-4 h-4" />
           </button>
         )}
-        <button
-          onClick={onView}
+        <Link
+          href={`/admin/team-members/${m.id}`}
           className="p-2 rounded-lg text-gray-400 hover:text-[#0A4FE8] hover:bg-blue-50 transition"
           title="View full profile"
         >
           <Eye className="w-4 h-4" />
-        </button>
+        </Link>
         <button
           onClick={onPromote}
           className={`p-2 rounded-lg transition ${

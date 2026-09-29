@@ -435,6 +435,9 @@ export default function ClientDeliveriesPage() {
     class SkippedFileError extends Error {}
     const isFileRejection = (status: number) => status === 400 || status === 413 || status === 415 || status === 422;
 
+    let totalUploadBytes = 0;
+    let bytesAlreadySent = 0;
+
     const uploadFileInChunks = async (deliveryId: string, file: File, fileIndex: number, fileTotal: number) => {
       if (!file.size) throw new Error(`${file.name} is empty and cannot be uploaded.`);
       const uploadId = crypto.randomUUID();
@@ -456,9 +459,13 @@ export default function ClientDeliveriesPage() {
           const chunk = file.slice(start, end);
           const params = new URLSearchParams(baseParams);
           params.set("chunk_index", String(chunkIndex));
+          // Percentage across the whole handover, not just this file, so the
+          // number only ever climbs while a folder of assets goes up.
+          const sentSoFar = bytesAlreadySent + start;
+          const percent = totalUploadBytes ? Math.min(99, Math.round((sentSoFar / totalUploadBytes) * 100)) : 0;
           setNotice({
             tone: "ok",
-            text: `Uploading file ${fileIndex + 1} of ${fileTotal}, chunk ${chunkIndex + 1} of ${chunkCount}…`,
+            text: `Uploading ${percent}% - file ${fileIndex + 1} of ${fileTotal}, chunk ${chunkIndex + 1} of ${chunkCount}…`,
           });
 
           let uploaded = false;
@@ -523,6 +530,7 @@ export default function ClientDeliveriesPage() {
       : "";
     try {
       const filesToUpload = [...selectedFiles];
+      totalUploadBytes = filesToUpload.reduce((total, file) => total + file.size, 0);
       if (filesToUpload.length) {
         if (intent !== "update") {
           json = await postDelivery(intent === "draft" ? "draft" : "upload", Boolean(coverFile), false);
@@ -538,6 +546,7 @@ export default function ClientDeliveriesPage() {
             if (!(error instanceof SkippedFileError)) throw error;
             skippedFiles.push(error.message);
           }
+          bytesAlreadySent += file.size;
           const completedKey = fileSelectionKey(file);
           setSelectedFiles((current) => current.filter((candidate) => fileSelectionKey(candidate) !== completedKey));
         }

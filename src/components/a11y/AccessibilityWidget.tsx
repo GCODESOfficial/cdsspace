@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { usePathname } from "next/navigation";
 import {
   Accessibility, X, RotateCcw, Contrast, Link2, Eye, Square, Type,
@@ -246,7 +247,8 @@ function AccessibilityWidgetContent() {
     });
   };
 
-  return (
+  if (!ready) return null;
+  return createPortal(
     <div id="cds-a11y-widget">
       <ColourVisionFilters />
 
@@ -277,7 +279,7 @@ function AccessibilityWidgetContent() {
           top: pos?.y,
           bottom: pos ? undefined : LAUNCHER_MARGIN,
           visibility: pos ? undefined : "hidden",
-          backgroundImage: "linear-gradient(146deg, #0035C1 8%, #0575FF 86%)",
+          backgroundColor: "#0A4FE8",
         }}
       >
         <Accessibility className="h-6 w-6" />
@@ -297,7 +299,7 @@ function AccessibilityWidgetContent() {
             {/* Header */}
             <div className="sticky top-0 z-10 flex items-center justify-between gap-3 border-b border-slate-100 bg-white/95 px-5 py-4 backdrop-blur">
               <div className="flex items-center gap-3">
-                <span className="grid h-9 w-9 place-items-center rounded-xl text-white" style={{ backgroundImage: "linear-gradient(146deg, #0035C1 8%, #0575FF 86%)" }}>
+                <span className="grid h-9 w-9 place-items-center rounded-xl bg-[#0A4FE8] text-white">
                   <Accessibility className="h-5 w-5" />
                 </span>
                 <h2 id="cds-a11y-title" className="text-lg font-bold">Accessibility</h2>
@@ -403,7 +405,8 @@ function AccessibilityWidgetContent() {
           </div>
         </div>
       )}
-    </div>
+    </div>,
+    document.body,
   );
 }
 

@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Banknote, BellRing, Copy, Download, Trash2, ExternalLink, Truck, Rocket, Zap, Clock as ClockIcon, Check, Pencil, History, RotateCcw, Loader2, Mail } from "lucide-react";
+import { Banknote, BellRing, Copy, Download, Trash2, ExternalLink, Truck, Rocket, Zap, Clock as ClockIcon, Check, Pencil, History, RotateCcw, Loader2, Mail, Lock } from "lucide-react";
 import { UniversalShareButton } from "@/components/share/UniversalShareButton";
 import FinanceShell, { glassCard } from "@/components/finance/FinanceShell";
 import InvoiceDocument from "@/components/finance/InvoiceDocument";
@@ -77,9 +77,12 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
   const [sendingReminder, setSendingReminder] = useState(false);
   const [payments, setPayments] = useState<FinanceInvoicePayment[]>([]);
   const [paymentModalOpen, setPaymentModalOpen] = useState(false);
+  const [isSuperAdmin, setIsSuperAdmin] = useState(false);
+  // A paid invoice is a settled record. The API enforces the same rule.
+  const locked = invoice?.status === "paid" && !isSuperAdmin;
 
   const onSpeedClick = (value: DeliverySpeed) => {
-    if (invoice?.delivery_speed === value) return;
+    if (locked || invoice?.delivery_speed === value) return;
     if (value === "standard") {
       patchInvoice({ delivery_speed: "standard" });
       return;
@@ -133,6 +136,12 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
     }
   };
   useEffect(() => { load(); }, [id]);
+  useEffect(() => {
+    fetch("/api/admin-check", { cache: "no-store" })
+      .then((response) => (response.ok ? response.json() : null))
+      .then((data) => setIsSuperAdmin(data?.role === "super_admin"))
+      .catch(() => undefined);
+  }, []);
 
   const loadVersions = async () => {
     setHistoryLoading(true);
@@ -224,8 +233,15 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
   };
 
   const patchInvoice = async (patch: Partial<FinanceInvoice>) => {
+    if (locked) return;
     setInvoice((prev) => (prev ? { ...prev, ...patch } : prev));
-    await fetch(`/api/admin/finance/invoices/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(patch) });
+    const response = await fetch(`/api/admin/finance/invoices/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(patch) });
+    if (!response.ok) {
+      const data = await response.json().catch(() => ({}));
+      appAlert(data.error || "The invoice could not be updated.");
+      await load();
+      return;
+    }
     setSavedTerms(true);
     setTimeout(() => setSavedTerms(false), 1500);
   };
@@ -336,7 +352,12 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
               {sendingReminder ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> : <BellRing className="mr-1.5 h-4 w-4" />} Remind payment
             </Button>
           )}
-          <Select value={invoice.status} onValueChange={updateStatus}>
+          {locked && (
+            <span className="inline-flex h-11 items-center gap-1.5 rounded-xl bg-emerald-50 px-3 text-xs font-semibold text-emerald-700" title="Only a super admin can edit a paid invoice">
+              <Lock className="h-3.5 w-3.5" /> Paid and locked
+            </span>
+          )}
+          <Select value={invoice.status} onValueChange={updateStatus} disabled={locked}>
             <SelectTrigger className="h-11 w-36 rounded-xl"><SelectValue /></SelectTrigger>
             <SelectContent>
               <SelectItem value="draft">Draft</SelectItem>
@@ -352,9 +373,11 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
               <Banknote className="mr-1.5 h-4 w-4" /> Record payment
             </Button>
           )}
-          <Button variant="outline" className="h-11 px-4 rounded-xl" onClick={() => router.push(`/admin/finance/invoices/new?draft=${id}`)}>
-            <Pencil className="w-4 h-4 mr-1.5" /> Edit
-          </Button>
+          {!locked && (
+            <Button variant="outline" className="h-11 px-4 rounded-xl" onClick={() => router.push(`/admin/finance/invoices/new?draft=${id}`)}>
+              <Pencil className="w-4 h-4 mr-1.5" /> Edit
+            </Button>
+          )}
           <Button variant="outline" className="h-11 px-4 rounded-xl" onClick={toggleHistory}>
             <History className="w-4 h-4 mr-1.5" /> History
           </Button>
@@ -365,7 +388,7 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
           >
             <Download className="w-4 h-4 mr-1.5" /> PDF
           </Button>
-          <Button variant="outline" className="h-11 px-4 rounded-xl" onClick={remove}><Trash2 className="w-4 h-4 text-red-600" /></Button>
+          {!locked && <Button variant="outline" className="h-11 px-4 rounded-xl" onClick={remove}><Trash2 className="w-4 h-4 text-red-600" /></Button>}
         </>
       }
     >
@@ -473,7 +496,7 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
                       variant="outline"
                       size="sm"
                       className="rounded-lg shrink-0"
-                      disabled={!canRestore || restoringVersionId === version.id}
+                      disabled={locked || !canRestore || restoringVersionId === version.id}
                       onClick={() => restoreVersion(version)}
                     >
                       {restoringVersionId === version.id ? (
@@ -505,6 +528,7 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
       <div className={`${glassCard} p-5 mb-6`}>
         <div className="flex items-center justify-between mb-4">
           <h3 className="font-semibold text-gray-900">Payment Terms & Delivery</h3>
+          {locked && <span className="text-[11px] text-gray-500">Locked because this invoice is paid</span>}
           {savedTerms && (
             <span className="inline-flex items-center gap-1 text-[11px] text-emerald-700"><Check className="w-3 h-3" /> Saved</span>
           )}
@@ -515,6 +539,7 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
             <Input
               className="h-11 rounded-xl mt-1.5"
               defaultValue={invoice.payment_terms || ""}
+              disabled={locked}
               onBlur={(e) => patchInvoice({ payment_terms: e.target.value })}
             />
           </div>
@@ -523,6 +548,7 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
             <Input
               className="h-11 rounded-xl mt-1.5"
               defaultValue={invoice.revisions_note || ""}
+              disabled={locked}
               onBlur={(e) => patchInvoice({ revisions_note: e.target.value })}
             />
           </div>
@@ -531,6 +557,7 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
             <Input
               className="h-11 rounded-xl mt-1.5"
               defaultValue={invoice.working_hours || ""}
+              disabled={locked}
               onBlur={(e) => patchInvoice({ working_hours: e.target.value })}
             />
           </div>
@@ -545,6 +572,7 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
                     key={s.value}
                     type="button"
                     onClick={() => onSpeedClick(s.value as DeliverySpeed)}
+                    disabled={locked}
                     className={`p-3 rounded-xl text-left transition border ${
                       active
                         ? "bg-[#0A4FE8] text-white border-transparent shadow-lg shadow-blue-600/30"
@@ -567,7 +595,7 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
               className="h-11 rounded-xl mt-1.5"
               defaultValue={invoice.delivery_period || ""}
               placeholder="e.g. 3 Working Days"
-              disabled={Boolean(bannerOrder && !bannerOrder.is_custom)}
+              disabled={locked || Boolean(bannerOrder && !bannerOrder.is_custom)}
               onBlur={(e) => patchInvoice({ delivery_period: e.target.value })}
             />
             {bannerOrder && !bannerOrder.is_custom && <p className="mt-1.5 text-[11px] text-gray-500">Standard banners are fixed at 3 business days. Custom banner quotations remain editable.</p>}

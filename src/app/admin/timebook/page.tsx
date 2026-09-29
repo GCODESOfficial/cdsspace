@@ -11,7 +11,9 @@ import {
   KeyRound,
   Loader2,
   MapPin,
+  MessageCircleQuestion,
   Save,
+  Send,
   ShieldCheck,
   UserCheck,
   XCircle,
@@ -20,6 +22,7 @@ import type { LucideIcon } from "lucide-react";
 import { appAlert, appToast } from "@/lib/app-notify";
 import { formatWorkMode, statusLabel, TIMEBOOK_OFFICE, WORK_MODES } from "@/lib/timebook";
 import { MonthlyAttendanceReport } from "@/components/admin/MonthlyAttendanceReport";
+import { Linkified } from "@/components/chat/message-links";
 
 interface TimebookEntry {
   id: string;
@@ -44,6 +47,13 @@ interface LeaveRequest {
   start_date: string;
   end_date: string;
   reason?: string | null;
+  clarifications?: Array<{
+    id: string;
+    sender_type: "admin" | "team_member";
+    sender_label?: string | null;
+    message: string;
+    created_at: string;
+  }>;
   team_members?: { full_name?: string | null } | null;
 }
 
@@ -169,6 +179,8 @@ export default function AdminTimebookPage() {
   const [officeForm, setOfficeForm] = useState({ name: "", address: "", latitude: "", longitude: "", radius_meters: "" });
   const [savingOffice, setSavingOffice] = useState(false);
   const [monthlyReportOpen, setMonthlyReportOpen] = useState(false);
+  const [questionFor, setQuestionFor] = useState<string | null>(null);
+  const [questionDrafts, setQuestionDrafts] = useState<Record<string, string>>({});
 
   const load = async () => {
     setLoading(true);
@@ -267,6 +279,35 @@ export default function AdminTimebookPage() {
       return;
     }
     await load();
+  };
+
+  const askLeaveClarification = async (leaveId: string) => {
+    const message = String(questionDrafts[leaveId] || "").trim();
+    if (!message) {
+      appAlert("Enter the clarification you need.");
+      return;
+    }
+    setSavingId(`leave-question-${leaveId}`);
+    try {
+      const response = await fetch("/api/admin/timebook", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "ask_leave_clarification", leave_id: leaveId, message }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || !payload.ok) {
+        appAlert(payload.error || "Could not send the question.");
+        return;
+      }
+      setQuestionDrafts((current) => ({ ...current, [leaveId]: "" }));
+      setQuestionFor(null);
+      appToast({ message: "Clarification requested", kind: "success" });
+      await load();
+    } catch (error) {
+      appAlert(error instanceof Error ? error.message : "Could not send the question.");
+    } finally {
+      setSavingId(null);
+    }
   };
 
   const generateBypassCode = async () => {
@@ -581,9 +622,43 @@ export default function AdminTimebookPage() {
                       <p className="mt-1 text-xs text-gray-500">
                         {formatWorkMode(leave.leave_type)} · {shortDate(leave.start_date)} to {shortDate(leave.end_date)}
                       </p>
-                      {leave.reason && <p className="mt-2 text-sm text-gray-600">{leave.reason}</p>}
-                      <div className="mt-3 flex gap-2">
+                      {leave.reason && <Linkified text={leave.reason} className="mt-2 block whitespace-pre-wrap text-sm text-gray-600" />}
+                      {(leave.clarifications ?? []).length > 0 && (
+                        <div className="mt-3 space-y-2 rounded-xl border border-blue-100 bg-blue-50/50 p-3">
+                          <p className="text-[11px] font-semibold text-[#0D1B39]">Clarification thread</p>
+                          {(leave.clarifications ?? []).map((message) => (
+                            <div key={message.id} className={`rounded-lg px-3 py-2 text-xs ${message.sender_type === "admin" ? "bg-white text-gray-700" : "ml-4 bg-[#0A4FE8] text-white"}`}>
+                              <p className={`mb-1 text-[10px] font-semibold ${message.sender_type === "admin" ? "text-[#0A4FE8]" : "text-white/75"}`}>
+                                {message.sender_type === "admin" ? (message.sender_label || "CDS Space HR") : (message.sender_label || leave.team_members?.full_name || "Team member")}
+                              </p>
+                              <Linkified text={message.message} className="whitespace-pre-wrap break-words" />
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                      {questionFor === leave.id && (
+                        <div className="mt-3 rounded-xl border border-blue-100 bg-blue-50/40 p-3">
+                          <label htmlFor={`timebook-leave-question-${leave.id}`} className="mb-1.5 block text-[11px] font-semibold text-[#0D1B39]">Question for this team member</label>
+                          <textarea
+                            id={`timebook-leave-question-${leave.id}`}
+                            rows={3}
+                            maxLength={2000}
+                            value={questionDrafts[leave.id] || ""}
+                            onChange={(event) => setQuestionDrafts((current) => ({ ...current, [leave.id]: event.target.value }))}
+                            placeholder="Ask for the detail needed before deciding."
+                            className="w-full resize-y rounded-xl border border-blue-100 bg-white px-3 py-2 text-xs text-[#0D1B39] outline-none focus:border-[#0A4FE8]"
+                          />
+                          <div className="mt-2 flex justify-end gap-2">
+                            <button type="button" onClick={() => setQuestionFor(null)} className="rounded-lg px-3 py-2 text-xs font-semibold text-gray-600">Cancel</button>
+                            <button type="button" disabled={savingId === `leave-question-${leave.id}` || !String(questionDrafts[leave.id] || "").trim()} onClick={() => askLeaveClarification(leave.id)} className="inline-flex items-center gap-1.5 rounded-lg bg-[#0A4FE8] px-3 py-2 text-xs font-semibold text-white disabled:opacity-50">
+                              {savingId === `leave-question-${leave.id}` ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />} Send question
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                      <div className="mt-3 flex flex-wrap gap-2">
                         <button onClick={() => reviewLeave(leave.id, "approved")} className="rounded-lg bg-emerald-600 px-3 py-2 text-xs font-semibold text-white">Approve</button>
+                        <button onClick={() => setQuestionFor((current) => current === leave.id ? null : leave.id)} className="inline-flex items-center gap-1.5 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-xs font-semibold text-[#0A4FE8]"><MessageCircleQuestion className="h-3.5 w-3.5" /> Ask a question</button>
                         <button onClick={() => reviewLeave(leave.id, "rejected")} className="rounded-lg bg-red-50 px-3 py-2 text-xs font-semibold text-red-600">Reject</button>
                       </div>
                     </div>

@@ -12,6 +12,7 @@ import {
   MODEL_STATUSES,
   STEP_STATUSES,
   TARGET_STATUSES,
+  currentBudgetPeriod,
 } from "@/lib/executive-board";
 
 export const runtime = "nodejs";
@@ -35,6 +36,54 @@ function money(value: unknown) {
 
 function nonNegativeMoney(value: unknown) {
   return Math.max(0, money(value));
+}
+
+/** A recurring line repeats into at most this many following months. */
+const MAX_BUDGET_REPEAT_MONTHS = 2;
+
+function monthAfter(year: number, month: number, steps: number) {
+  const index = year * 12 + (month - 1) + steps;
+  return { year: Math.floor(index / 12), month: (index % 12) + 1 };
+}
+
+/**
+ * Copies each budget line into the next `months` months as a planned line with
+ * nothing spent yet. A month that already holds a copy from the same
+ * recurrence group is skipped, so repeating twice never doubles a line.
+ */
+async function repeatBudgetLines(ids: string[], months: number, actor: string) {
+  const sources = await glashQuery<any>(
+    `update public.executive_budgets
+        set recurrence_group_id = coalesce(recurrence_group_id, id)
+      where id = any($1::uuid[])
+      returning id, recurrence_group_id, budget_year, budget_month`,
+    [ids],
+  );
+  let created = 0;
+  for (const source of sources) {
+    for (let step = 1; step <= months; step += 1) {
+      const target = monthAfter(Number(source.budget_year), Number(source.budget_month), step);
+      const rows = await glashQuery<any>(
+        `insert into public.executive_budgets
+           (title, category, period_label, currency, planned_amount, actual_amount, owner, status, notes,
+            created_by, updated_by, budget_year, budget_month, recurrence_group_id)
+         select title, category, '', currency, planned_amount, 0, owner,
+                case when status = 'closed' then 'draft' else status end, notes,
+                $2, $2, $3, $4, recurrence_group_id
+           from public.executive_budgets
+          where id = $1
+            and not exists (
+              select 1 from public.executive_budgets existing
+               where existing.recurrence_group_id = $5
+                 and existing.budget_year = $3 and existing.budget_month = $4
+            )
+         returning id`,
+        [source.id, actor, target.year, target.month, source.recurrence_group_id],
+      );
+      created += rows.length;
+    }
+  }
+  return created;
 }
 
 function isoDate(value: unknown) {
@@ -105,24 +154,60 @@ async function syncRevenueModelTargets(actor: string) {
   );
 }
 
-/** Everything the board page needs, in one round trip. */
-async function loadBoard(draftActorId: string) {
+type ExecutiveBoardView = "overview" | "budgets" | "expansion-budgets" | "targets" | "models" | "vault";
+
+function executiveBoardView(value: string): ExecutiveBoardView {
+  return ["budgets", "expansion-budgets", "targets", "models", "vault"].includes(value)
+    ? value as ExecutiveBoardView
+    : "overview";
+}
+
+const VIEW_PERMISSION: Record<ExecutiveBoardView, string> = {
+  overview: "executive_board.view",
+  budgets: "executive_board.budgets_view",
+  "expansion-budgets": "executive_board.expansion_budgets_view",
+  targets: "executive_board.targets_view",
+  models: "executive_board.models_view",
+  vault: "executive_board.vault_view",
+};
+
+/** Load only the board area the current route is authorised to expose. */
+async function loadBoard(draftActorId: string, view: ExecutiveBoardView) {
+  const overview = view === "overview";
   const [budgets, expansionBudgets, expansionDrafts, models, steps, targets, folders, files, shares] = await Promise.all([
-    glashQuery<any>(`select * from public.executive_budgets order by period_start desc nulls last, created_at desc limit 500`),
-    glashQuery<any>(`select * from public.executive_expansion_budgets order by target_start asc, created_at desc limit 500`),
-    glashQuery<any>(
-      `select payload, updated_at
-         from public.executive_expansion_budget_drafts
-        where actor_id=$1
-        limit 1`,
-      [draftActorId],
-    ),
-    glashQuery<any>(`select * from public.executive_revenue_models order by position asc, created_at asc limit 200`),
-    glashQuery<any>(`select * from public.executive_revenue_steps order by position asc, created_at asc limit 2000`),
-    glashQuery<any>(`select * from public.executive_targets order by due_on asc nulls last, created_at desc limit 500`),
-    glashQuery<any>(`select id, parent_id, name, description, password_hash, created_at from public.executive_vault_folders order by name asc limit 500`),
-    glashQuery<any>(`select id, folder_id, title, description, kind, file_name, file_mime, file_size_bytes, password_hash, created_at, source_kind, source_id, link_url from public.executive_vault_files order by created_at desc limit 1000`),
-    glashQuery<any>(`select * from public.executive_vault_shares order by created_at desc limit 500`),
+    overview || view === "budgets"
+      ? glashQuery<any>(`select * from public.executive_budgets order by budget_year desc, budget_month desc, created_at desc limit 2000`)
+      : Promise.resolve([]),
+    overview || view === "expansion-budgets"
+      ? glashQuery<any>(`select * from public.executive_expansion_budgets order by target_start asc, created_at desc limit 500`)
+      : Promise.resolve([]),
+    view === "expansion-budgets"
+      ? glashQuery<any>(
+        `select payload, updated_at
+           from public.executive_expansion_budget_drafts
+          where actor_id=$1
+          limit 1`,
+        [draftActorId],
+      )
+      : Promise.resolve([]),
+    overview || view === "models"
+      ? glashQuery<any>(`select * from public.executive_revenue_models order by position asc, created_at asc limit 200`)
+      : Promise.resolve([]),
+    overview || view === "models"
+      ? glashQuery<any>(`select * from public.executive_revenue_steps order by position asc, created_at asc limit 2000`)
+      : Promise.resolve([]),
+    overview || view === "targets"
+      ? glashQuery<any>(`select * from public.executive_targets order by due_on asc nulls last, created_at desc limit 500`)
+      : Promise.resolve([]),
+    overview || view === "vault"
+      ? glashQuery<any>(`select id, parent_id, name, description, password_hash, created_at from public.executive_vault_folders order by name asc limit 500`)
+      : Promise.resolve([]),
+    overview || view === "vault"
+      ? glashQuery<any>(`select id, folder_id, title, description, kind, file_name, file_mime, file_size_bytes, password_hash, created_at, source_kind, source_id, link_url from public.executive_vault_files order by created_at desc limit 1000`)
+      : Promise.resolve([]),
+    view === "vault"
+      ? glashQuery<any>(`select * from public.executive_vault_shares order by created_at desc limit 500`)
+      : Promise.resolve([]),
   ]);
 
   const folderHasPassword = new Map<string, boolean>();
@@ -150,18 +235,21 @@ async function loadBoard(draftActorId: string) {
 }
 
 export async function GET(req: NextRequest) {
-  const { session, denied } = await requireAdmin(req, "executive_board.view");
+  const view = executiveBoardView(str(req.nextUrl.searchParams.get("view"), 40));
+  const { session, denied } = await requireAdmin(req, VIEW_PERMISSION[view]);
   if (denied) return denied;
   try {
     // Kept current on read, so a new month brings its targets with it without
     // anyone having to remember. Failing here must not take the board down.
-    try {
-      await syncRevenueModelTargets(session?.email || "system");
-    } catch {
-      // The board is still perfectly usable without this month's generated rows.
+    if (view === "overview" || view === "targets") {
+      try {
+        await syncRevenueModelTargets(session?.email || "system");
+      } catch {
+        // The board is still perfectly usable without this month's generated rows.
+      }
     }
     const draftActorId = session?.memberId || session?.email.toLowerCase() || "system";
-    return NextResponse.json({ ok: true, ...(await loadBoard(draftActorId)) });
+    return NextResponse.json({ ok: true, ...(await loadBoard(draftActorId, view)) });
   } catch (error) {
     return NextResponse.json(
       { ok: false, error: error instanceof Error ? error.message : "Could not load the Executive Board." },
@@ -302,6 +390,12 @@ export async function POST(req: NextRequest) {
       const id = uuid(body.id);
       const title = str(body.title, 200);
       if (!title) return NextResponse.json({ ok: false, error: "A budget needs a title." }, { status: 400 });
+      const today = currentBudgetPeriod();
+      const budgetYear = Number(body.budget_year ?? today.year);
+      const budgetMonth = Number(body.budget_month ?? today.month);
+      if (!Number.isInteger(budgetYear) || budgetYear < 2000 || budgetYear > 2100 || !Number.isInteger(budgetMonth) || budgetMonth < 1 || budgetMonth > 12) {
+        return NextResponse.json({ ok: false, error: "Choose the month and year this budget line belongs to." }, { status: 400 });
+      }
       const values = [
         title,
         pick(body.category, BUDGET_CATEGORIES, "operations"),
@@ -315,22 +409,28 @@ export async function POST(req: NextRequest) {
         pick(body.status, BUDGET_STATUSES, "draft"),
         str(body.notes, 4000) || null,
         actor,
+        budgetYear,
+        budgetMonth,
       ];
       const row = id
         ? await glashMaybeOne<any>(
             `update public.executive_budgets
                 set title=$1, category=$2, period_label=$3, period_start=$4, period_end=$5, currency=$6,
                     planned_amount=$7, actual_amount=$8, owner=$9, status=$10, notes=$11,
-                    updated_by=$12, updated_at=now()
-              where id=$13 returning *`,
+                    updated_by=$12, budget_year=$13, budget_month=$14, updated_at=now()
+              where id=$15 returning *`,
             [...values, id],
           )
         : await glashMaybeOne<any>(
             `insert into public.executive_budgets
-               (title,category,period_label,period_start,period_end,currency,planned_amount,actual_amount,owner,status,notes,created_by,updated_by)
-             values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$12) returning *`,
+               (title,category,period_label,period_start,period_end,currency,planned_amount,actual_amount,owner,status,notes,created_by,updated_by,budget_year,budget_month)
+             values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$12,$13,$14) returning *`,
             values,
           );
+      const repeatMonths = Math.trunc(Number(body.repeat_months || 0));
+      if (!id && row?.id && repeatMonths > 0) {
+        await repeatBudgetLines([row.id], Math.min(repeatMonths, MAX_BUDGET_REPEAT_MONTHS), actor);
+      }
       await logActivity({
         action: id ? "executive_board.budget.update" : "executive_board.budget.create",
         page: "executive-board/budgets",
@@ -339,6 +439,50 @@ export async function POST(req: NextRequest) {
         resource_label: title,
       });
       return NextResponse.json({ ok: true, budget: row });
+    }
+
+    if (action === "move_budgets" || action === "repeat_budgets") {
+      const ids: string[] = Array.from(new Set<string>(
+        (Array.isArray(body.ids) ? body.ids : []).map((value: unknown) => uuid(value)).filter(Boolean) as string[],
+      )).slice(0, 500);
+      if (!ids.length) return NextResponse.json({ ok: false, error: "Choose at least one budget line." }, { status: 400 });
+
+      if (action === "move_budgets") {
+        const year = Number(body.budget_year);
+        const month = Number(body.budget_month);
+        if (!Number.isInteger(year) || year < 2000 || year > 2100 || !Number.isInteger(month) || month < 1 || month > 12) {
+          return NextResponse.json({ ok: false, error: "Choose the month to move these lines to." }, { status: 400 });
+        }
+        const moved = await glashQuery<any>(
+          `update public.executive_budgets
+              set budget_year = $2, budget_month = $3, updated_by = $4, updated_at = now()
+            where id = any($1::uuid[])
+            returning id, title`,
+          [ids, year, month, actor],
+        );
+        await logActivity({
+          action: "executive_board.budget.move",
+          page: "executive-board/budgets",
+          resource_type: "executive_budget",
+          resource_label: `${moved.length} line${moved.length === 1 ? "" : "s"} to ${year}-${String(month).padStart(2, "0")}`,
+          metadata: { lines: moved.map((line: any) => line.title), budget_year: year, budget_month: month },
+        });
+        return NextResponse.json({ ok: true, moved: moved.length });
+      }
+
+      const months = Math.trunc(Number(body.months));
+      if (!Number.isInteger(months) || months < 1 || months > MAX_BUDGET_REPEAT_MONTHS) {
+        return NextResponse.json({ ok: false, error: `A budget line can repeat for the next 1 or ${MAX_BUDGET_REPEAT_MONTHS} months only.` }, { status: 400 });
+      }
+      const created = await repeatBudgetLines(ids, months, actor);
+      await logActivity({
+        action: "executive_board.budget.repeat",
+        page: "executive-board/budgets",
+        resource_type: "executive_budget",
+        resource_label: `${ids.length} line${ids.length === 1 ? "" : "s"} repeated for ${months} month${months === 1 ? "" : "s"}`,
+        metadata: { ids, months, created },
+      });
+      return NextResponse.json({ ok: true, created });
     }
 
     if (action === "delete_budget") {

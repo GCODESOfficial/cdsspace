@@ -544,7 +544,7 @@ export default function DealProposalsPage() {
 
       {detailOpen && selected && editor && (
         <div
-          className="fixed inset-0 z-[9998] flex items-end justify-center bg-[#07133B]/60 p-3 backdrop-blur-sm sm:items-center sm:p-6"
+          className="layer-modal-top fixed inset-0 flex items-end justify-center bg-[#07133B]/60 p-3 backdrop-blur-sm sm:items-center sm:p-6"
           onMouseDown={(event) => { if (event.currentTarget === event.target) closeProposal(); }}
         >
           <div role="dialog" aria-modal="true" aria-label={`${selected.brand_name} proposal`} className="flex max-h-[94vh] w-full max-w-6xl flex-col overflow-hidden rounded-[24px] border border-slate-200 bg-white shadow-[0_28px_80px_rgba(7,19,59,0.28)]">

@@ -2,9 +2,10 @@
 
 import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
-import { PERMISSION_GROUPS, ALL_PERMISSIONS } from "@/lib/admin-permissions";
+import { ALL_PERMISSIONS, PERMISSION_GROUPS } from "@/lib/admin-permissions";
+import { SubAdminPermissionsPicker } from "@/components/admin/SubAdminPermissionsPicker";
 import { useToast } from "@/hooks/use-toast";
-import { Trash2, Loader2, Plus, Eye, EyeOff, Shield, UserPlus, Check, ToggleLeft, ToggleRight, ChevronDown, ChevronRight, Copy, Mail, Link2, X, Send, ShieldPlus, Pencil } from "lucide-react";
+import { Trash2, Loader2, Plus, Eye, EyeOff, Shield, UserPlus, Check, ToggleLeft, ToggleRight, Copy, Mail, Link2, X, Send, ShieldPlus, Pencil, Globe } from "lucide-react";
 import { appAlert, appConfirm, appPrompt } from "@/lib/app-notify";
 import Link from "next/link";
 
@@ -34,6 +35,7 @@ interface TeamAdmin {
   role_title: string | null;
   permissions: string[] | null;
   is_active: boolean;
+  access_anywhere: boolean | null;
 }
 
 export default function SubAdminsPage() {
@@ -50,7 +52,6 @@ export default function SubAdminsPage() {
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [selectedPermissions, setSelectedPermissions] = useState<string[]>([]);
-  const [expandedGroups, setExpandedGroups] = useState<string[]>([]);
 
   // Invite link shown after creating a sub-admin
   const [invite, setInvite] = useState<null | {
@@ -71,7 +72,6 @@ export default function SubAdminsPage() {
   const [roleName, setRoleName] = useState("");
   const [roleDescription, setRoleDescription] = useState("");
   const [rolePermissions, setRolePermissions] = useState<string[]>([]);
-  const [roleExpandedGroups, setRoleExpandedGroups] = useState<string[]>([]);
   const [isSavingRole, setIsSavingRole] = useState(false);
 
   // Role-picker on the sub-admin form
@@ -95,7 +95,6 @@ export default function SubAdminsPage() {
     setRoleName("");
     setRoleDescription("");
     setRolePermissions([]);
-    setRoleExpandedGroups([]);
     setShowRoleModal(true);
   }
 
@@ -104,26 +103,7 @@ export default function SubAdminsPage() {
     setRoleName(role.name);
     setRoleDescription(role.description ?? "");
     setRolePermissions(role.permissions ?? []);
-    setRoleExpandedGroups([]);
     setShowRoleModal(true);
-  }
-
-  function toggleRolePermission(key: string) {
-    setRolePermissions((prev) =>
-      prev.includes(key) ? prev.filter((p) => p !== key) : [...prev, key],
-    );
-  }
-
-  function toggleRoleGroupPermissions(groupKey: string) {
-    const group = PERMISSION_GROUPS.find((g) => g.key === groupKey);
-    if (!group) return;
-    const keys = group.permissions.map((p) => p.key);
-    const allSelected = keys.every((k) => rolePermissions.includes(k));
-    setRolePermissions((prev) =>
-      allSelected
-        ? prev.filter((p) => !keys.includes(p))
-        : Array.from(new Set([...prev, ...keys])),
-    );
   }
 
   async function saveRole(e: React.FormEvent) {
@@ -194,31 +174,13 @@ export default function SubAdminsPage() {
       // Team members who have been granted an admin role (is_sub_admin) show here too.
       supabase
         .from("team_members")
-        .select("id, full_name, email, role_title, permissions, is_active")
+        .select("id, full_name, email, role_title, permissions, is_active, access_anywhere")
         .eq("is_sub_admin", true)
         .order("full_name", { ascending: true }),
     ]);
     if (!error) setSubAdmins(data || []);
     if (!teamRes.error) setTeamAdmins((teamRes.data as TeamAdmin[]) || []);
     setIsFetching(false);
-  }
-
-  function togglePermission(key: string) {
-    setSelectedPermissions((prev) =>
-      prev.includes(key) ? prev.filter((p) => p !== key) : [...prev, key]
-    );
-  }
-
-  function toggleGroup(groupKey: string) {
-    const group = PERMISSION_GROUPS.find(g => g.key === groupKey);
-    if (!group) return;
-    const groupPermKeys = group.permissions.map(p => p.key);
-    const allSelected = groupPermKeys.every(k => selectedPermissions.includes(k));
-    if (allSelected) {
-      setSelectedPermissions(prev => prev.filter(p => !groupPermKeys.includes(p)));
-    } else {
-      setSelectedPermissions(prev => Array.from(new Set([...prev, ...groupPermKeys])));
-    }
   }
 
   function selectAllPermissions() {
@@ -326,6 +288,43 @@ export default function SubAdminsPage() {
       toast({ title: "Copied", description: "Invite link copied to clipboard", variant: "success" });
     } catch {
       toast({ title: "Copy failed", description: "Select the link and copy manually", variant: "destructive" });
+    }
+  }
+
+  // Only a super admin may let an admin work outside the office geofence.
+  const [isSuperAdmin, setIsSuperAdmin] = useState(false);
+  const [savingAnywhereFor, setSavingAnywhereFor] = useState<string | null>(null);
+  useEffect(() => {
+    fetch("/api/admin-check", { cache: "no-store" })
+      .then((response) => (response.ok ? response.json() : null))
+      .then((data) => setIsSuperAdmin(data?.role === "super_admin"))
+      .catch(() => undefined);
+  }, []);
+
+  async function toggleAccessAnywhere(member: TeamAdmin) {
+    const enabled = !member.access_anywhere;
+    const question = enabled
+      ? `Let ${member.full_name} sign in and clock in from anywhere? The office geofence will no longer apply to them. Their location is still recorded.`
+      : `Hold ${member.full_name} to the office geofence again?`;
+    if (!(await appConfirm(question))) return;
+    setSavingAnywhereFor(member.id);
+    try {
+      const response = await fetch(`/api/admin/team-members/${member.id}/access-anywhere`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ enabled }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok || !data.ok) throw new Error(data.error || "The change could not be saved.");
+      setTeamAdmins((current) => current.map((item) => item.id === member.id ? { ...item, access_anywhere: enabled } : item));
+      toast({
+        title: enabled ? "Access from anywhere on" : "Office geofence applies",
+        description: enabled ? `${member.full_name} can now work from any location.` : `${member.full_name} must be at the office on office days.`,
+      });
+    } catch (error) {
+      appAlert(error instanceof Error ? error.message : "The change could not be saved.");
+    } finally {
+      setSavingAnywhereFor(null);
     }
   }
 
@@ -528,77 +527,10 @@ export default function SubAdminsPage() {
                 </button>
               </div>
 
-              <div className="space-y-3">
-                {PERMISSION_GROUPS.map((group) => {
-                  const groupKeys = group.permissions.map(p => p.key);
-                  const groupSelectedCount = groupKeys.filter(k => selectedPermissions.includes(k)).length;
-                  const allGroupSelected = groupSelectedCount === groupKeys.length;
-                  const someGroupSelected = groupSelectedCount > 0;
-                  const isExpanded = expandedGroups.includes(group.key);
-
-                  return (
-                    <div key={group.key} className={`border rounded-xl overflow-hidden transition ${
-                      someGroupSelected ? "border-[#0A4FE8]/30 bg-blue-50/30" : "border-gray-200 bg-gray-50/50"
-                    }`}>
-                      {/* Group header */}
-                      <div className="flex items-center gap-3 px-4 py-3">
-                        <button
-                          type="button"
-                          onClick={() => toggleGroup(group.key)}
-                          className={`w-5 h-5 rounded-md flex items-center justify-center flex-shrink-0 transition ${
-                            allGroupSelected ? "bg-[#0A4FE8]" : someGroupSelected ? "bg-[#0A4FE8]/40" : "bg-gray-200"
-                          }`}
-                        >
-                          {allGroupSelected && <Check className="w-3 h-3 text-white" />}
-                          {!allGroupSelected && someGroupSelected && <div className="w-2 h-0.5 bg-white rounded-full" />}
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setExpandedGroups(prev => prev.includes(group.key) ? prev.filter(g => g !== group.key) : [...prev, group.key])}
-                          className="flex-1 flex items-center justify-between text-left"
-                        >
-                          <div>
-                            <p className="text-[13px] font-semibold text-[#0D1B39]">{group.label}</p>
-                            <p className="text-[11px] text-gray-400">{groupSelectedCount} of {groupKeys.length} permissions</p>
-                          </div>
-                          {isExpanded ? <ChevronDown className="w-4 h-4 text-gray-400" /> : <ChevronRight className="w-4 h-4 text-gray-400" />}
-                        </button>
-                      </div>
-
-                      {/* Sub-permissions */}
-                      {isExpanded && (
-                        <div className="px-4 pb-3 pt-1 space-y-1.5 border-t border-gray-100/60">
-                          {group.permissions.map((perm) => {
-                            const isSelected = selectedPermissions.includes(perm.key);
-                            return (
-                              <button
-                                key={perm.key}
-                                type="button"
-                                onClick={() => togglePermission(perm.key)}
-                                className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-left transition ${
-                                  isSelected ? "bg-blue-50" : "hover:bg-white"
-                                }`}
-                              >
-                                <div className={`w-4 h-4 rounded flex items-center justify-center flex-shrink-0 transition ${
-                                  isSelected ? "bg-[#0A4FE8]" : "bg-gray-200"
-                                }`}>
-                                  {isSelected && <Check className="w-2.5 h-2.5 text-white" />}
-                                </div>
-                                <div>
-                                  <p className={`text-[12px] font-medium ${isSelected ? "text-[#0D1B39]" : "text-gray-600"}`}>
-                                    {perm.label}
-                                  </p>
-                                  <p className="text-[10px] text-gray-400">{perm.description}</p>
-                                </div>
-                              </button>
-                            );
-                          })}
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
+              <SubAdminPermissionsPicker
+                value={selectedPermissions}
+                onChange={setSelectedPermissions}
+              />
             </div>
 
             <button
@@ -728,6 +660,11 @@ export default function SubAdminsPage() {
                           {!member.is_active && (
                             <span className="px-2 py-0.5 rounded-md bg-gray-100 text-gray-400 text-[10px] font-medium">DISABLED</span>
                           )}
+                          {member.access_anywhere && (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-emerald-50 text-emerald-700 text-[10px] font-medium">
+                              <Globe className="w-3 h-3" /> Access from anywhere
+                            </span>
+                          )}
                         </div>
                         <p className="text-[12px] text-gray-400 mt-0.5">{member.email || "-"}</p>
                         <div className="flex flex-wrap gap-1.5 mt-2">
@@ -746,13 +683,32 @@ export default function SubAdminsPage() {
                         </div>
                       </div>
                     </div>
-                    <Link
-                      href="/admin/team-members"
-                      className="flex-shrink-0 inline-flex items-center gap-1.5 rounded-lg border border-gray-200 px-3 py-1.5 text-[12px] font-semibold text-gray-500 hover:border-[#0A4FE8] hover:text-[#0A4FE8] transition"
-                      title="Manage this team member"
-                    >
-                      <Pencil className="w-3.5 h-3.5" /> Manage
-                    </Link>
+                    <div className="flex flex-shrink-0 flex-wrap items-center justify-end gap-2">
+                      {isSuperAdmin && (
+                        <button
+                          type="button"
+                          onClick={() => toggleAccessAnywhere(member)}
+                          disabled={savingAnywhereFor === member.id}
+                          aria-pressed={Boolean(member.access_anywhere)}
+                          className={`inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-[12px] font-semibold transition disabled:opacity-50 ${
+                            member.access_anywhere
+                              ? "border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100"
+                              : "border-gray-200 text-gray-500 hover:border-[#0A4FE8] hover:text-[#0A4FE8]"
+                          }`}
+                          title={member.access_anywhere ? "Hold this admin to the office geofence again" : "Let this admin sign in and clock in from any location"}
+                        >
+                          {savingAnywhereFor === member.id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Globe className="w-3.5 h-3.5" />}
+                          {member.access_anywhere ? "Anywhere: on" : "Allow anywhere"}
+                        </button>
+                      )}
+                      <Link
+                        href="/admin/team-members"
+                        className="inline-flex items-center gap-1.5 rounded-lg border border-gray-200 px-3 py-1.5 text-[12px] font-semibold text-gray-500 hover:border-[#0A4FE8] hover:text-[#0A4FE8] transition"
+                        title="Manage this team member"
+                      >
+                        <Pencil className="w-3.5 h-3.5" /> Manage
+                      </Link>
+                    </div>
                   </div>
                 </div>
               );
@@ -897,94 +853,10 @@ export default function SubAdminsPage() {
                   </button>
                 </div>
 
-                <div className="space-y-3">
-                  {PERMISSION_GROUPS.map((group) => {
-                    const groupKeys = group.permissions.map((p) => p.key);
-                    const selectedCount = groupKeys.filter((k) => rolePermissions.includes(k)).length;
-                    const allSelected = selectedCount === groupKeys.length;
-                    const someSelected = selectedCount > 0;
-                    const isExpanded = roleExpandedGroups.includes(group.key);
-                    return (
-                      <div
-                        key={group.key}
-                        className={`border rounded-xl overflow-hidden transition ${
-                          someSelected ? "border-[#0A4FE8]/30 bg-blue-50/30" : "border-gray-200 bg-gray-50/50"
-                        }`}
-                      >
-                        <div className="flex items-center gap-3 px-4 py-3">
-                          <button
-                            type="button"
-                            onClick={() => toggleRoleGroupPermissions(group.key)}
-                            className={`w-5 h-5 rounded-md flex items-center justify-center flex-shrink-0 transition ${
-                              allSelected ? "bg-[#0A4FE8]" : someSelected ? "bg-[#0A4FE8]/40" : "bg-gray-200"
-                            }`}
-                          >
-                            {allSelected && <Check className="w-3 h-3 text-white" />}
-                            {!allSelected && someSelected && <div className="w-2 h-0.5 bg-white rounded-full" />}
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() =>
-                              setRoleExpandedGroups((prev) =>
-                                prev.includes(group.key)
-                                  ? prev.filter((g) => g !== group.key)
-                                  : [...prev, group.key],
-                              )
-                            }
-                            className="flex-1 flex items-center justify-between text-left"
-                          >
-                            <div>
-                              <p className="text-[13px] font-semibold text-[#0D1B39]">{group.label}</p>
-                              <p className="text-[11px] text-gray-400">
-                                {selectedCount} of {groupKeys.length} permissions
-                              </p>
-                            </div>
-                            {isExpanded ? (
-                              <ChevronDown className="w-4 h-4 text-gray-400" />
-                            ) : (
-                              <ChevronRight className="w-4 h-4 text-gray-400" />
-                            )}
-                          </button>
-                        </div>
-                        {isExpanded && (
-                          <div className="px-4 pb-3 pt-1 space-y-1.5 border-t border-gray-100/60">
-                            {group.permissions.map((perm) => {
-                              const isSelected = rolePermissions.includes(perm.key);
-                              return (
-                                <button
-                                  key={perm.key}
-                                  type="button"
-                                  onClick={() => toggleRolePermission(perm.key)}
-                                  className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-left transition ${
-                                    isSelected ? "bg-blue-50" : "hover:bg-white"
-                                  }`}
-                                >
-                                  <div
-                                    className={`w-4 h-4 rounded flex items-center justify-center flex-shrink-0 transition ${
-                                      isSelected ? "bg-[#0A4FE8]" : "bg-gray-200"
-                                    }`}
-                                  >
-                                    {isSelected && <Check className="w-2.5 h-2.5 text-white" />}
-                                  </div>
-                                  <div>
-                                    <p
-                                      className={`text-[12px] font-medium ${
-                                        isSelected ? "text-[#0D1B39]" : "text-gray-600"
-                                      }`}
-                                    >
-                                      {perm.label}
-                                    </p>
-                                    <p className="text-[10px] text-gray-400">{perm.description}</p>
-                                  </div>
-                                </button>
-                              );
-                            })}
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
+                <SubAdminPermissionsPicker
+                  value={rolePermissions}
+                  onChange={setRolePermissions}
+                />
               </div>
             </div>
 

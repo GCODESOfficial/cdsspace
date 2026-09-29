@@ -2,17 +2,19 @@ import { NextRequest, NextResponse } from "next/server";
 import { logActivity } from "@/lib/activity-log";
 import { financeDb, requireFinanceAdminAsync } from "@/lib/finance/api-auth";
 import { normalizeSalesPrices } from "@/lib/sales-settings";
+import { getLetterheadDesignPrices, saveLetterheadDesignPrices } from "@/lib/letterhead-design-pricing";
 
 export const dynamic = "force-dynamic";
 
 async function readSettings() {
   const db = financeDb();
-  const [countries, deliveryZones, pickupLocations, offerCodes, bankAccounts] = await Promise.all([
+  const [countries, deliveryZones, pickupLocations, offerCodes, bankAccounts, letterheadDesign] = await Promise.all([
     db.from("banner_countries").select("*").order("sort_order").order("country_name"),
     db.from("banner_delivery_zones").select("*").order("priority", { ascending: false }).order("name"),
     db.from("banner_pickup_locations").select("*").order("sort_order").order("name"),
     db.from("banner_discount_codes").select("*").order("created_at", { ascending: false }),
     db.from("sales_bank_accounts").select("*").order("currency").order("sort_order").order("bank_name"),
+    getLetterheadDesignPrices(),
   ]);
   const error = countries.error || deliveryZones.error || pickupLocations.error || offerCodes.error || bankAccounts.error;
   if (error) throw error;
@@ -22,6 +24,7 @@ async function readSettings() {
     pickupLocations: pickupLocations.data || [],
     offerCodes: offerCodes.data || [],
     bankAccounts: bankAccounts.data || [],
+    letterheadDesign,
   };
 }
 
@@ -55,6 +58,11 @@ export async function PUT(request: NextRequest) {
     const pickupLocations = Array.isArray(body.pickupLocations) ? body.pickupLocations : [];
     const offerCodes = Array.isArray(body.offerCodes) ? body.offerCodes : [];
     const bankAccounts = Array.isArray(body.bankAccounts) ? body.bankAccounts : [];
+    // These are set market prices rather than conversions of one another, so
+    // each currency is saved exactly as entered.
+    if (body.letterheadDesign && typeof body.letterheadDesign === "object") {
+      await saveLetterheadDesignPrices(body.letterheadDesign as Record<string, number>, "sales-settings");
+    }
     const db = financeDb();
     const now = new Date().toISOString();
 

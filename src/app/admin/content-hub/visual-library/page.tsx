@@ -102,7 +102,7 @@ export default function VisualLibraryPage() {
     return res.json().catch(() => ({
       ok: false,
       error: res.status === 413
-        ? "Upload is too large. Videos can be up to 100MB each."
+        ? "Upload is too large. Videos can be up to 150MB each."
         : "Upload failed before the server returned details.",
     }));
   }

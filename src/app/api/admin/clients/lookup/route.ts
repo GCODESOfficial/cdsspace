@@ -23,7 +23,7 @@ async function guard(req: NextRequest) {
     if (!session) return { deny: NextResponse.json({ error: "Unauthorized" }, { status: 401 }), session: null };
     if (session.role === "super_admin") return { deny: null, session };
     const ok =
-        hasPermission(session.permissions, "clients") ||
+        hasPermission(session.permissions, "clients.view") ||
         hasPermission(session.permissions, "orders") ||
         hasPermission(session.permissions, "finance") ||
         hasPermission(session.permissions, "finance_invoices");

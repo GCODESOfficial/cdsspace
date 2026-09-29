@@ -15,6 +15,7 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 120;
 
 const MAX_FILE_BYTES = 20 * 1024 * 1024;
+const MAX_VIDEO_BYTES = 150 * 1024 * 1024;
 
 function cleanFileName(value: string) {
   return value.replace(/[^a-z0-9._-]/gi, "-").replace(/-+/g, "-").slice(-120) || "attachment";
@@ -33,8 +34,10 @@ export async function POST(req: NextRequest) {
   if (!taskId || !file) {
     return NextResponse.json({ ok: false, error: "Task and file are required." }, { status: 400 });
   }
-  if (file.size > MAX_FILE_BYTES) {
-    return NextResponse.json({ ok: false, error: "Attachments must be 20MB or smaller." }, { status: 413 });
+  const declaredVideo = file.type.startsWith("video/");
+  const maxBytes = declaredVideo ? MAX_VIDEO_BYTES : MAX_FILE_BYTES;
+  if (file.size > maxBytes) {
+    return NextResponse.json({ ok: false, error: declaredVideo ? "Videos must be 150MB or smaller." : "Attachments must be 20MB or smaller." }, { status: 413 });
   }
 
   const task = await requireTaskAccess(viewer, taskId);
@@ -44,7 +47,10 @@ export async function POST(req: NextRequest) {
 
   try {
     const db = getGlashDbAdmin() as any;
-    const safe = await assertSafeUpload(file, { allow: ["image", "pdf", "office", "zip", "design"], maxBytes: MAX_FILE_BYTES });
+    const safe = await assertSafeUpload(file, { allow: ["image", "pdf", "office", "zip", "design"], maxBytes });
+    if (!safe.contentType.startsWith("video/") && safe.buffer.byteLength > MAX_FILE_BYTES) {
+      throw new UploadSecurityError("Non-video task attachments must be 20MB or smaller.", 413);
+    }
     const safeName = cleanFileName(file.name.replace(/\.[^.]+$/, ""));
     const storagePath = `taskboards/${task.board_id}/${task.id}/${crypto.randomUUID()}-${safeName}.${safe.ext}`;
     const { error } = await db.storage

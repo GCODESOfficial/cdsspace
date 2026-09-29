@@ -6,7 +6,8 @@ import { assertSafeUpload, UploadSecurityError } from "@/lib/upload-security";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const MAX_BYTES = 25 * 1024 * 1024; // 25MB
+const MAX_BYTES = 25 * 1024 * 1024;
+const MAX_VIDEO_BYTES = 150 * 1024 * 1024;
 const ALLOWED = /^(image\/(png|svg\+xml|jpeg|webp|gif)|video\/(mp4|webm|quicktime))$/;
 
 /**
@@ -33,20 +34,24 @@ export async function POST(req: NextRequest) {
   if (!ALLOWED.test(mime)) {
     return NextResponse.json({ ok: false, error: "Unsupported file type. Use PNG, SVG, JPG, WEBP, or MP4." }, { status: 400 });
   }
-  if (file.size > MAX_BYTES) {
-    return NextResponse.json({ ok: false, error: "File is too large (max 25MB)." }, { status: 400 });
+  const maxBytes = mime.startsWith("video/") ? MAX_VIDEO_BYTES : MAX_BYTES;
+  if (file.size > maxBytes) {
+    return NextResponse.json({ ok: false, error: mime.startsWith("video/") ? "Videos must be 150MB or smaller." : "File is too large (max 25MB)." }, { status: 413 });
   }
 
   let safe: Awaited<ReturnType<typeof assertSafeUpload>>;
   try {
     safe = await assertSafeUpload(file, {
       allow: ["image", "design"],
-      maxBytes: MAX_BYTES,
+      maxBytes,
       imageMaxDimension: 12_000,
     });
     const expectedMedia = mime.startsWith("image/") ? "image/" : "video/";
     if (!safe.contentType.startsWith(expectedMedia)) {
       throw new UploadSecurityError("The file contents do not match the selected media type.");
+    }
+    if (!safe.contentType.startsWith("video/") && safe.buffer.byteLength > MAX_BYTES) {
+      throw new UploadSecurityError("Non-video files must be 25MB or smaller.", 413);
     }
   } catch (e) {
     if (e instanceof UploadSecurityError) return NextResponse.json({ ok: false, error: e.message }, { status: e.status });

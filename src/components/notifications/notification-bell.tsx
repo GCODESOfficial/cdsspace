@@ -62,6 +62,10 @@ export default function NotificationBell() {
     fetchNotifications();
   }, [fetchNotifications]);
   useNotificationPulse("client", fetchNotifications);
+  useEffect(() => {
+    window.addEventListener("cds:notification-pulse", fetchNotifications);
+    return () => window.removeEventListener("cds:notification-pulse", fetchNotifications);
+  }, [fetchNotifications]);
 
   // ---------- Close on outside click ----------
   useEffect(() => {

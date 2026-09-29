@@ -11,20 +11,20 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import {
-  Building2, CalendarClock, Check, ChevronDown, ChevronRight, Copy, Download, ExternalLink,
-  FileText, Folder, FolderPlus, Landmark, Link2, Loader2, Lock, MapPin, Paperclip, Pencil,
-  Plus, Rocket, ScrollText, Search, ShieldCheck, Target as TargetIcon, Trash2, Unlock,
+  ArrowRightLeft, Building2, CalendarClock, CalendarRange, Check, ChevronDown, ChevronRight, Copy, Download, ExternalLink,
+  FileText, Folder, FolderPlus, Landmark, Link2, Loader2, Lock, Paperclip, Pencil,
+  Plus, Repeat, Rocket, ScrollText, Search, ShieldCheck, Target as TargetIcon, Trash2, Unlock,
   Upload, Wallet, X,
 } from "lucide-react";
 import {
-  BUDGET_CATEGORIES, BUDGET_STATUSES, KIND_LABELS, MODEL_STATUSES, STATUS_LABELS,
+  BUDGET_CATEGORIES, BUDGET_MONTH_NAMES, BUDGET_MONTHS, BUDGET_STATUSES, KIND_LABELS, MODEL_STATUSES, STATUS_LABELS,
   STEP_STATUSES, TARGET_STATUSES, VAULT_KINDS, EXPANSION_BUDGET_PRIORITIES,
   EXPANSION_BUDGET_STATUSES, EXPANSION_BUDGET_TYPES, EXPANSION_TYPE_LABELS,
-  BOARD_VIEW_CURRENCIES, budgetVariance, convertMoney, currencyUnit, expansionFundingGap,
+  BOARD_VIEW_CURRENCIES, budgetsInPeriod, budgetVariance, budgetYearRollup, convertMoney, currentBudgetPeriod, currencyUnit, expansionFundingGap,
   expansionRequirement, formatBytes, formatMoney, formatMoneyView, planProgress, summariseTargets,
   type BoardViewCurrency,
   shareIsLive, targetProgress,
-  type Budget, type ExpansionBudget, type ExpansionBudgetDraft, type RevenueModel, type RevenueStep, type Target,
+  type Budget, type BudgetPeriod, type ExpansionBudget, type ExpansionBudgetDraft, type RevenueModel, type RevenueStep, type Target,
   type VaultFile, type VaultFolder, type VaultShare,
 } from "@/lib/executive-board";
 import { UnsavedDraftNotice, useUnsavedDraft } from "./useUnsavedDraft";
@@ -121,6 +121,8 @@ export default function ExecutiveBoardApp({ view }: { view: BoardView }) {
   const [busy, setBusy] = useState("");
   const [notice, setNotice] = useState<{ tone: "success" | "error"; text: string } | null>(null);
   const [currency, setCurrency] = useState<BoardViewCurrency>("USD");
+  // Held here so the PDF export covers the month or year on screen.
+  const [budgetPeriod, setBudgetPeriod] = useState<BudgetPeriod>(() => currentBudgetPeriod());
 
   // Remembered per browser so the board opens in the currency you plan in.
   useEffect(() => {
@@ -139,7 +141,7 @@ export default function ExecutiveBoardApp({ view }: { view: BoardView }) {
 
   const load = useCallback(async () => {
     try {
-      const response = await fetch("/api/admin/executive-board", { cache: "no-store" });
+      const response = await fetch(`/api/admin/executive-board?view=${encodeURIComponent(view)}`, { cache: "no-store" });
       const json = await response.json().catch(() => ({}));
       if (!response.ok || !json.ok) throw new Error(json.error || "Could not load the Executive Board.");
       setBoard({
@@ -152,7 +154,7 @@ export default function ExecutiveBoardApp({ view }: { view: BoardView }) {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [view]);
 
   useEffect(() => { void load(); }, [load]);
 
@@ -197,7 +199,7 @@ export default function ExecutiveBoardApp({ view }: { view: BoardView }) {
     setExporting(true);
     try {
       const payload =
-        view === "budgets" ? budgetsPdf(board.budgets, currency)
+        view === "budgets" ? budgetsPdf(board.budgets, currency, budgetPeriod)
           : view === "expansion-budgets" ? expansionBudgetsPdf(board.expansionBudgets, currency)
           : view === "targets" ? targetsPdf(board.targets, currency)
             : view === "models" ? modelsPdf(board.models, currency)
@@ -209,7 +211,7 @@ export default function ExecutiveBoardApp({ view }: { view: BoardView }) {
     } finally {
       setExporting(false);
     }
-  }, [view, board, currency]);
+  }, [view, board, currency, budgetPeriod]);
 
   return (
     <div className="p-4 sm:p-6 lg:p-8">
@@ -246,7 +248,7 @@ export default function ExecutiveBoardApp({ view }: { view: BoardView }) {
 
       <BoardCurrency.Provider value={currency}>
         {view === "overview" && <Overview board={board} />}
-        {view === "budgets" && <Budgets board={board} busy={busy} run={run} />}
+        {view === "budgets" && <Budgets board={board} busy={busy} run={run} period={budgetPeriod} setPeriod={setBudgetPeriod} />}
         {view === "expansion-budgets" && <ExpansionBudgets board={board} busy={busy} run={run} />}
         {view === "targets" && <Targets board={board} busy={busy} run={run} />}
         {view === "models" && <Models board={board} busy={busy} run={run} />}
@@ -423,88 +425,329 @@ function Overview({ board }: { board: Board }) {
 
 /* ------------------------------- Budgets ------------------------------- */
 
-const emptyBudget = (): Partial<Budget> => ({
-  title: "", category: "operations", period_label: "", currency: "USD",
-  planned_amount: 0, actual_amount: 0, status: "draft", owner: "", notes: "",
-});
+const emptyBudget = (period?: { year: number; month: number }): Partial<Budget> => {
+  const today = currentBudgetPeriod();
+  return {
+    title: "", category: "operations", period_label: "", currency: "USD",
+    planned_amount: 0, actual_amount: 0, status: "draft", owner: "", notes: "",
+    budget_year: period?.year ?? today.year, budget_month: period?.month ?? today.month,
+  };
+};
 
-function Budgets({ board, busy, run }: { board: Board; busy: string; run: Run }) {
+const monthAfterPeriod = (period: { year: number; month: number }, steps: number) => {
+  const index = period.year * 12 + (period.month - 1) + steps;
+  return { year: Math.floor(index / 12), month: (index % 12) + 1 };
+};
+const nextMonth = (period: { year: number; month: number }) => monthAfterPeriod(period, 1);
+
+const periodName = (period: BudgetPeriod) =>
+  period.month === "annual" ? `${period.year}` : `${BUDGET_MONTH_NAMES[period.month - 1]} ${period.year}`;
+
+function BudgetPeriodBar({ budgets, period, setPeriod }: { budgets: Budget[]; period: BudgetPeriod; setPeriod: (next: BudgetPeriod) => void }) {
+  const today = currentBudgetPeriod();
+  const years = useMemo(() => {
+    const set = new Set<number>([today.year - 1, today.year, today.year + 1, period.year]);
+    for (const budget of budgets) set.add(Number(budget.budget_year));
+    return Array.from(set).filter(Number.isFinite).sort((a, b) => b - a);
+  }, [budgets, period.year, today.year]);
+  const counts = useMemo(() => {
+    const byMonth = new Array(12).fill(0);
+    for (const budget of budgetsInPeriod(budgets, { year: period.year, month: "annual" })) byMonth[Number(budget.budget_month) - 1] += 1;
+    return byMonth;
+  }, [budgets, period.year]);
+
+  return (
+    <div className="space-y-3 rounded-2xl border border-slate-200 bg-white p-3">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <label className="flex items-center gap-2 text-sm text-slate-500">
+          Year
+          <select
+            className="h-10 rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold text-[#07133B] outline-none focus:border-[#0A4FE8]"
+            value={period.year}
+            onChange={(event) => setPeriod({ ...period, year: Number(event.target.value) })}
+            aria-label="Budget year"
+          >
+            {years.map((year) => <option key={year} value={year}>{year}</option>)}
+          </select>
+        </label>
+        <button
+          type="button"
+          onClick={() => setPeriod({ year: period.year, month: period.month === "annual" ? (period.year === today.year ? today.month : 1) : "annual" })}
+          aria-pressed={period.month === "annual"}
+          className={`inline-flex h-10 items-center gap-2 rounded-xl px-4 text-sm font-semibold transition ${period.month === "annual" ? "bg-[#0A4FE8] text-white" : "border border-slate-200 text-slate-700 hover:border-[#0A4FE8] hover:text-[#0A4FE8]"}`}
+        >
+          <CalendarRange className="h-4 w-4" /> Annual operations budget
+        </button>
+      </div>
+      <div className="-mx-1 flex gap-1 overflow-x-auto px-1 pb-1" role="tablist" aria-label={`Budget months for ${period.year}`}>
+        {BUDGET_MONTHS.map((name, index) => {
+          const month = index + 1;
+          const active = period.month === month;
+          const isToday = period.year === today.year && month === today.month;
+          return (
+            <button
+              key={name}
+              type="button"
+              role="tab"
+              aria-selected={active}
+              onClick={() => setPeriod({ year: period.year, month })}
+              title={`${BUDGET_MONTH_NAMES[index]} ${period.year}${counts[index] ? ` · ${counts[index]} line${counts[index] === 1 ? "" : "s"}` : ""}`}
+              className={`flex min-w-[3.75rem] flex-1 flex-col items-center rounded-xl px-2 py-2 text-sm transition ${active ? "bg-[#0A4FE8] font-semibold text-white" : `text-slate-600 hover:bg-slate-50 ${isToday ? "ring-1 ring-inset ring-[#0A4FE8]/30" : ""}`}`}
+            >
+              {name}
+              <span className={`mt-0.5 text-[11px] ${active ? "text-white/80" : counts[index] ? "text-slate-500" : "text-slate-300"}`}>{counts[index] || "-"}</span>
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function BudgetTotals({ planned, actual, currency }: { planned: number; actual: number; currency: string }) {
+  return (
+    <div className="flex flex-wrap gap-3 text-sm text-slate-500">
+      <span>Planned <Money amount={planned} currency={currency} className="inline-block align-top" tone="font-bold text-[#07133B]" /></span>
+      <span>Actual <Money amount={actual} currency={currency} className="inline-block align-top" tone="font-bold text-[#07133B]" /></span>
+      <span>Variance <Money amount={planned - actual} currency={currency} className="inline-block align-top" tone={planned - actual < 0 ? "font-bold text-rose-600" : "font-bold text-emerald-700"} /></span>
+    </div>
+  );
+}
+
+function AnnualBudget({ budgets, year, setPeriod }: { budgets: Budget[]; year: number; setPeriod: (next: BudgetPeriod) => void }) {
+  const view = useBoardCurrency();
+  const rollup = useMemo(() => budgetYearRollup(budgets, year, view), [budgets, year, view]);
+  const head = "bg-slate-50 text-left text-[11px] font-semibold text-slate-500";
+
+  if (!rollup.lines.length) return <Empty text={`No budget lines for ${year} yet. Pick a month to start planning.`} />;
+
+  return (
+    <div className="space-y-4">
+      <BudgetTotals planned={rollup.planned} actual={rollup.actual} currency={view} />
+      <div className="overflow-x-auto rounded-2xl border border-slate-200 bg-white">
+        <table className="w-full min-w-[640px] text-sm">
+          <thead className={head}>
+            <tr>
+              <th className="px-4 py-3">Month</th><th className="px-4 py-3 text-right">Lines</th>
+              <th className="px-4 py-3 text-right">Planned</th><th className="px-4 py-3 text-right">Actual</th>
+              <th className="px-4 py-3 text-right">Variance</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-100">
+            {rollup.months.map((month) => (
+              <tr key={month.month} className="cursor-pointer hover:bg-slate-50" onClick={() => setPeriod({ year, month: month.month })}>
+                <td className="px-4 py-3 font-semibold text-[#07133B]">{month.name}</td>
+                <td className="px-4 py-3 text-right text-slate-500">{month.lines || "-"}</td>
+                <td className="px-4 py-3 text-right text-slate-600"><Money amount={month.planned} currency={view} /></td>
+                <td className="px-4 py-3 text-right text-slate-600"><Money amount={month.actual} currency={view} /></td>
+                <td className="px-4 py-3 text-right"><Money amount={month.planned - month.actual} currency={view} tone={`font-semibold ${month.planned - month.actual < 0 ? "text-rose-600" : "text-emerald-700"}`} /></td>
+              </tr>
+            ))}
+          </tbody>
+          <tfoot className="border-t border-slate-200 bg-slate-50 font-semibold text-[#07133B]">
+            <tr>
+              <td className="px-4 py-3">Total for {year}</td>
+              <td className="px-4 py-3 text-right">{rollup.lines.length}</td>
+              <td className="px-4 py-3 text-right"><Money amount={rollup.planned} currency={view} /></td>
+              <td className="px-4 py-3 text-right"><Money amount={rollup.actual} currency={view} /></td>
+              <td className="px-4 py-3 text-right"><Money amount={rollup.planned - rollup.actual} currency={view} tone={rollup.planned - rollup.actual < 0 ? "text-rose-600" : "text-emerald-700"} /></td>
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+      <div className="overflow-x-auto rounded-2xl border border-slate-200 bg-white">
+        <table className="w-full min-w-[640px] text-sm">
+          <thead className={head}>
+            <tr>
+              <th className="px-4 py-3">Category</th><th className="px-4 py-3 text-right">Lines</th>
+              <th className="px-4 py-3 text-right">Planned</th><th className="px-4 py-3 text-right">Actual</th>
+              <th className="px-4 py-3 text-right">Variance</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-100">
+            {rollup.categories.map((category) => (
+              <tr key={category.category}>
+                <td className="px-4 py-3 font-semibold capitalize text-[#07133B]">{category.category}</td>
+                <td className="px-4 py-3 text-right text-slate-500">{category.lines}</td>
+                <td className="px-4 py-3 text-right text-slate-600"><Money amount={category.planned} currency={view} /></td>
+                <td className="px-4 py-3 text-right text-slate-600"><Money amount={category.actual} currency={view} /></td>
+                <td className="px-4 py-3 text-right"><Money amount={category.planned - category.actual} currency={view} tone={`font-semibold ${category.planned - category.actual < 0 ? "text-rose-600" : "text-emerald-700"}`} /></td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+function Budgets({ board, busy, run, period, setPeriod }: { board: Board; busy: string; run: Run; period: BudgetPeriod; setPeriod: (next: BudgetPeriod) => void }) {
   const [draft, setDraft] = useState<Partial<Budget> | null>(null);
+  // How many following months a new line repeats into: none, one, or two.
+  const [repeatMonths, setRepeatMonths] = useState(0);
+  const monthPeriod = period.month === "annual" ? null : { year: period.year, month: period.month };
   // A blank form on every "new", with the last unsaved attempt offered beside it.
   const recovery = useUnsavedDraft<Partial<Budget>>({
     key: "budget",
     draft,
     isNew: Boolean(draft) && !draft?.id,
-    blank: emptyBudget(),
+    blank: emptyBudget(monthPeriod ?? undefined),
     onResume: setDraft,
   });
 
   const save = async () => {
     if (!draft) return;
-    const done = await run("/api/admin/executive-board", { action: "save_budget", ...draft }, "budget", "Budget saved.");
-    if (done) { recovery.clear(); setDraft(null); }
+    const repeating = !draft.id && repeatMonths > 0;
+    const done = await run(
+      "/api/admin/executive-board",
+      { action: "save_budget", ...draft, ...(repeating ? { repeat_months: repeatMonths } : {}) },
+      "budget",
+      repeating ? `Budget saved and repeated for the next ${repeatMonths === 1 ? "month" : `${repeatMonths} months`}.` : "Budget saved.",
+    );
+    if (done) {
+      recovery.clear();
+      setDraft(null);
+      setRepeatMonths(0);
+      // Follow the line to the month it was saved in.
+      if (draft.budget_year && draft.budget_month) setPeriod({ year: Number(draft.budget_year), month: Number(draft.budget_month) });
+    }
+  };
+
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [moving, setMoving] = useState<{ ids: string[]; year: number; month: number } | null>(null);
+  // A selection belongs to the month on screen.
+  useEffect(() => { setSelected(new Set()); }, [period.year, period.month]);
+
+  const toggleSelected = (id: string) => setSelected((current) => {
+    const next = new Set(current);
+    if (next.has(id)) next.delete(id); else next.add(id);
+    return next;
+  });
+
+  const openMove = (ids: string[]) => {
+    const target = monthPeriod ? nextMonth(monthPeriod) : currentBudgetPeriod();
+    setMoving({ ids, ...target });
+  };
+
+  const move = async () => {
+    if (!moving) return;
+    const count = moving.ids.length;
+    const done = await run(
+      "/api/admin/executive-board",
+      { action: "move_budgets", ids: moving.ids, budget_year: moving.year, budget_month: moving.month },
+      "budget",
+      `${count} budget line${count === 1 ? "" : "s"} moved to ${periodName({ year: moving.year, month: moving.month })}.`,
+    );
+    if (done) { setMoving(null); setSelected(new Set()); }
+  };
+
+  const repeat = async (ids: string[], months: number) => {
+    if (!monthPeriod) return;
+    const through = periodName(monthAfterPeriod(monthPeriod, months));
+    if (!(await appConfirm(`Repeat ${ids.length} budget line${ids.length === 1 ? "" : "s"} each month through ${through}? The copies start with nothing spent.`))) return;
+    const done = await run("/api/admin/executive-board", { action: "repeat_budgets", ids, months }, "budget", `Repeated through ${through}. Months that already had the line were left as they were.`);
+    if (done) setSelected(new Set());
   };
 
   const view = useBoardCurrency();
+  const lines = useMemo(() => budgetsInPeriod(board.budgets, period), [board.budgets, period]);
+  const allSelected = lines.length > 0 && lines.every((line) => selected.has(line.id));
   const totals = useMemo(() => {
     const into = (amount: number, from: string) => convertMoney(amount, from, view) ?? Number(amount || 0);
     return {
       currency: view,
-      planned: board.budgets.reduce((sum, b) => sum + into(Number(b.planned_amount || 0), b.currency), 0),
-      actual: board.budgets.reduce((sum, b) => sum + into(Number(b.actual_amount || 0), b.currency), 0),
+      planned: lines.reduce((sum, b) => sum + into(Number(b.planned_amount || 0), b.currency), 0),
+      actual: lines.reduce((sum, b) => sum + into(Number(b.actual_amount || 0), b.currency), 0),
     };
-  }, [board.budgets, view]);
+  }, [lines, view]);
 
   return (
     <div className="space-y-4">
+      <BudgetPeriodBar budgets={board.budgets} period={period} setPeriod={setPeriod} />
+
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex flex-wrap gap-3 text-sm text-slate-500">
-          <span>Planned <Money amount={totals.planned} currency={totals.currency} className="inline-block align-top" tone="font-bold text-[#07133B]" /></span>
-          <span>Actual <Money amount={totals.actual} currency={totals.currency} className="inline-block align-top" tone="font-bold text-[#07133B]" /></span>
-          <span>Variance <Money amount={totals.planned - totals.actual} currency={totals.currency} className="inline-block align-top" tone={totals.planned - totals.actual < 0 ? "font-bold text-rose-600" : "font-bold text-emerald-700"} /></span>
-        </div>
-        <button type="button" onClick={() => setDraft(emptyBudget())} className="inline-flex h-10 items-center gap-2 rounded-xl bg-[#0A4FE8] px-4 text-sm font-bold text-white">
-          <Plus className="h-4 w-4" /> New budget line
-        </button>
+        <h2 className="text-lg font-bold text-[#07133B]">
+          {period.month === "annual" ? `Annual operations budget ${period.year}` : `Budget for ${periodName(period)}`}
+        </h2>
+        {monthPeriod && (
+          <button type="button" onClick={() => { setRepeatMonths(0); setDraft(emptyBudget(monthPeriod)); }} className="inline-flex h-10 items-center gap-2 rounded-xl bg-[#0A4FE8] px-4 text-sm font-bold text-white">
+            <Plus className="h-4 w-4" /> New budget line
+          </button>
+        )}
       </div>
 
-      {board.budgets.length === 0 ? <Empty text="No budget lines yet." /> : (
-        <div className="overflow-x-auto rounded-2xl border border-slate-200 bg-white">
-          <table className="w-full min-w-[820px] text-sm">
-            <thead className="bg-slate-50 text-left text-[11px] font-bold uppercase tracking-wider text-slate-400">
-              <tr>
-                <th className="px-4 py-3">Line</th><th className="px-4 py-3">Period</th>
-                <th className="px-4 py-3 text-right">Planned</th><th className="px-4 py-3 text-right">Actual</th>
-                <th className="px-4 py-3 text-right">Variance</th><th className="px-4 py-3">Status</th><th className="px-4 py-3" />
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100">
-              {board.budgets.map((budget) => {
-                const variance = budgetVariance(budget);
-                return (
-                  <tr key={budget.id}>
-                    <td className="px-4 py-3">
-                      <p className="font-semibold text-[#07133B]">{budget.title}</p>
-                      <p className="text-xs text-slate-400">{budget.category}{budget.owner ? ` · ${budget.owner}` : ""}</p>
-                    </td>
-                    <td className="px-4 py-3 text-slate-500">{budget.period_label || (budget.period_start ? `${budget.period_start} to ${budget.period_end || "open"}` : "-")}</td>
-                    <td className="px-4 py-3 text-right text-slate-600"><Money amount={budget.planned_amount} currency={budget.currency} /></td>
-                    <td className="px-4 py-3 text-right text-slate-600"><Money amount={budget.actual_amount} currency={budget.currency} /></td>
-                    <td className="px-4 py-3 text-right"><Money amount={variance} currency={budget.currency} tone={`font-semibold ${variance < 0 ? "text-rose-600" : "text-emerald-700"}`} /></td>
-                    <td className="px-4 py-3"><Badge value={budget.status} /></td>
-                    <td className="px-4 py-3">
-                      <div className="flex justify-end gap-1">
-                        <button type="button" onClick={() => void exportBoardToPdf(budgetPdf(budget, view))} className="rounded-lg p-1.5 text-slate-400 hover:bg-blue-50 hover:text-[#0A4FE8]" aria-label={`Download ${budget.title} with its implementation plan`} title="Download this budget and its implementation plan"><Download className="h-4 w-4" /></button>
-                        <button type="button" onClick={() => setDraft(budget)} className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100" aria-label="Edit"><Pencil className="h-4 w-4" /></button>
-                        <button type="button" onClick={() => run("/api/admin/executive-board", { action: "delete_budget", id: budget.id }, "budget", "Budget removed.")} className="rounded-lg p-1.5 text-slate-400 hover:bg-rose-50 hover:text-rose-600" aria-label="Delete"><Trash2 className="h-4 w-4" /></button>
-                      </div>
-                    </td>
+      {period.month === "annual" ? <AnnualBudget budgets={board.budgets} year={period.year} setPeriod={setPeriod} /> : (
+        <>
+          <BudgetTotals planned={totals.planned} actual={totals.actual} currency={totals.currency} />
+          {selected.size > 0 && (
+            <div className="flex flex-wrap items-center gap-2 rounded-2xl border border-blue-100 bg-blue-50/70 px-4 py-3 text-sm">
+              <span className="font-semibold text-[#07133B]">{selected.size} selected</span>
+              <span className="hidden h-4 w-px bg-blue-200 sm:block" />
+              <button type="button" onClick={() => openMove(Array.from(selected))} disabled={busy === "budget"} className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 font-semibold text-slate-700 hover:border-[#0A4FE8] hover:text-[#0A4FE8] disabled:opacity-50">
+                <ArrowRightLeft className="h-4 w-4" /> Move to another month
+              </button>
+              <button type="button" onClick={() => void repeat(Array.from(selected), 1)} disabled={busy === "budget"} className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 font-semibold text-slate-700 hover:border-[#0A4FE8] hover:text-[#0A4FE8] disabled:opacity-50">
+                <Repeat className="h-4 w-4" /> Repeat next month
+              </button>
+              <button type="button" onClick={() => void repeat(Array.from(selected), 2)} disabled={busy === "budget"} className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 font-semibold text-slate-700 hover:border-[#0A4FE8] hover:text-[#0A4FE8] disabled:opacity-50">
+                <Repeat className="h-4 w-4" /> Repeat for 2 months
+              </button>
+              <button type="button" onClick={() => setSelected(new Set())} className="ml-auto text-xs font-semibold text-slate-500 hover:text-slate-700">Clear</button>
+            </div>
+          )}
+          {lines.length === 0 ? <Empty text={`No budget lines for ${periodName(period)} yet.`} /> : (
+            <div className="overflow-x-auto rounded-2xl border border-slate-200 bg-white">
+              <table className="w-full min-w-[820px] text-sm">
+                <thead className="bg-slate-50 text-left text-[11px] font-semibold text-slate-500">
+                  <tr>
+                    <th className="w-10 py-3 pl-4">
+                      <input type="checkbox" checked={allSelected} onChange={() => setSelected(allSelected ? new Set() : new Set(lines.map((line) => line.id)))} className="h-4 w-4 rounded border-slate-300 text-[#0A4FE8]" aria-label="Select every line this month" />
+                    </th>
+                    <th className="px-4 py-3">Line</th><th className="px-4 py-3">Period</th>
+                    <th className="px-4 py-3 text-right">Planned</th><th className="px-4 py-3 text-right">Actual</th>
+                    <th className="px-4 py-3 text-right">Variance</th><th className="px-4 py-3">Status</th><th className="px-4 py-3" />
                   </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {lines.map((budget) => {
+                    const variance = budgetVariance(budget);
+                    return (
+                      <tr key={budget.id} className={selected.has(budget.id) ? "bg-blue-50/40" : undefined}>
+                        <td className="py-3 pl-4">
+                          <input type="checkbox" checked={selected.has(budget.id)} onChange={() => toggleSelected(budget.id)} className="h-4 w-4 rounded border-slate-300 text-[#0A4FE8]" aria-label={`Select ${budget.title}`} />
+                        </td>
+                        <td className="px-4 py-3">
+                          <p className="flex flex-wrap items-center gap-1.5 font-semibold text-[#07133B]">
+                            {budget.title}
+                            {budget.recurrence_group_id && (
+                              <span className="inline-flex items-center gap-1 rounded-full bg-blue-50 px-2 py-0.5 text-[10.5px] font-semibold text-[#0A4FE8]" title="This line repeats in other months">
+                                <Repeat className="h-3 w-3" /> Repeats
+                              </span>
+                            )}
+                          </p>
+                          <p className="text-xs text-slate-400">{budget.category}{budget.owner ? ` · ${budget.owner}` : ""}</p>
+                        </td>
+                        <td className="px-4 py-3 text-slate-500">{budget.period_label || (budget.period_start ? `${budget.period_start} to ${budget.period_end || "open"}` : "-")}</td>
+                        <td className="px-4 py-3 text-right text-slate-600"><Money amount={budget.planned_amount} currency={budget.currency} /></td>
+                        <td className="px-4 py-3 text-right text-slate-600"><Money amount={budget.actual_amount} currency={budget.currency} /></td>
+                        <td className="px-4 py-3 text-right"><Money amount={variance} currency={budget.currency} tone={`font-semibold ${variance < 0 ? "text-rose-600" : "text-emerald-700"}`} /></td>
+                        <td className="px-4 py-3"><Badge value={budget.status} /></td>
+                        <td className="px-4 py-3">
+                          <div className="flex justify-end gap-1">
+                            <button type="button" onClick={() => void exportBoardToPdf(budgetPdf(budget, view))} className="rounded-lg p-1.5 text-slate-400 hover:bg-blue-50 hover:text-[#0A4FE8]" aria-label={`Download ${budget.title} with its implementation plan`} title="Download this budget and its implementation plan"><Download className="h-4 w-4" /></button>
+                            <button type="button" onClick={() => openMove([budget.id])} className="rounded-lg p-1.5 text-slate-400 hover:bg-blue-50 hover:text-[#0A4FE8]" aria-label={`Move ${budget.title} to another month`} title="Move to another month"><ArrowRightLeft className="h-4 w-4" /></button>
+                            <button type="button" onClick={() => setDraft(budget)} className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100" aria-label="Edit"><Pencil className="h-4 w-4" /></button>
+                            <button type="button" onClick={() => run("/api/admin/executive-board", { action: "delete_budget", id: budget.id }, "budget", "Budget removed.")} className="rounded-lg p-1.5 text-slate-400 hover:bg-rose-50 hover:text-rose-600" aria-label="Delete"><Trash2 className="h-4 w-4" /></button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </>
       )}
 
       {draft && (
@@ -526,7 +769,13 @@ function Budgets({ board, busy, run }: { board: Board; busy: string; run: Run })
                 {BUDGET_STATUSES.map((s) => <option key={s} value={s}>{label(s)}</option>)}
               </select>
             </Field>
-            <Field label="Period label"><input className={inputClass} value={draft.period_label || ""} onChange={(e) => setDraft({ ...draft, period_label: e.target.value })} placeholder="Q1 2026" /></Field>
+            <Field label="Month">
+              <select className={inputClass} value={draft.budget_month ?? 1} onChange={(e) => setDraft({ ...draft, budget_month: Number(e.target.value) })}>
+                {BUDGET_MONTH_NAMES.map((name, index) => <option key={name} value={index + 1}>{name}</option>)}
+              </select>
+            </Field>
+            <Field label="Year"><input type="number" min={2000} max={2100} className={inputClass} value={String(draft.budget_year ?? "")} onChange={(e) => setDraft({ ...draft, budget_year: Number(e.target.value) })} /></Field>
+            <Field label="Period label"><input className={inputClass} value={draft.period_label || ""} onChange={(e) => setDraft({ ...draft, period_label: e.target.value })} placeholder="Optional, e.g. Q3 2026" /></Field>
             <Field label="Owner"><input className={inputClass} value={draft.owner || ""} onChange={(e) => setDraft({ ...draft, owner: e.target.value })} placeholder="Who owns this" /></Field>
             <Field label="Starts"><input type="date" className={inputClass} value={draft.period_start || ""} onChange={(e) => setDraft({ ...draft, period_start: e.target.value })} /></Field>
             <Field label="Ends"><input type="date" className={inputClass} value={draft.period_end || ""} onChange={(e) => setDraft({ ...draft, period_end: e.target.value })} /></Field>
@@ -538,9 +787,45 @@ function Budgets({ board, busy, run }: { board: Board; busy: string; run: Run })
             <Field label="Planned"><input type="number" step="0.01" className={inputClass} value={String(draft.planned_amount ?? 0)} onChange={(e) => setDraft({ ...draft, planned_amount: Number(e.target.value) })} /></Field>
             <Field label="Actual"><input type="number" step="0.01" className={inputClass} value={String(draft.actual_amount ?? 0)} onChange={(e) => setDraft({ ...draft, actual_amount: Number(e.target.value) })} /></Field>
             <div className="sm:col-span-2"><Field label="Notes"><textarea rows={3} className={areaClass} value={draft.notes || ""} onChange={(e) => setDraft({ ...draft, notes: e.target.value })} /></Field></div>
+            {!draft.id && draft.budget_year && draft.budget_month && (
+              <div className="sm:col-span-2">
+                <Field label="Repeat">
+                  <select className={inputClass} value={repeatMonths} onChange={(e) => setRepeatMonths(Number(e.target.value))}>
+                    <option value={0}>Don&apos;t repeat</option>
+                    <option value={1}>Also plan it for {periodName(nextMonth({ year: Number(draft.budget_year), month: Number(draft.budget_month) }))}</option>
+                    <option value={2}>Also plan it for the next 2 months, through {periodName(monthAfterPeriod({ year: Number(draft.budget_year), month: Number(draft.budget_month) }, 2))}</option>
+                  </select>
+                </Field>
+                <p className="mt-1 text-[11px] text-slate-400">A line can repeat for up to 2 months after its own month. Each copy starts with nothing spent.</p>
+              </div>
+            )}
           </div>
           <button type="button" onClick={save} disabled={busy === "budget" || !draft.title} className="mt-5 inline-flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-[#0A4FE8] text-sm font-bold text-white disabled:opacity-50">
             {busy === "budget" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />} Save budget line
+          </button>
+        </Modal>
+      )}
+
+      {moving && (
+        <Modal title={moving.ids.length === 1 ? "Move budget line" : `Move ${moving.ids.length} budget lines`} onClose={() => setMoving(null)}>
+          <p className="mb-4 text-sm text-slate-500">
+            {moving.ids.length === 1 ? "The line keeps its amounts and status" : "The lines keep their amounts and status"}, and {moving.ids.length === 1 ? "leaves" : "leave"} {monthPeriod ? periodName(monthPeriod) : "this month"}.
+          </p>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <Field label="Month">
+              <select className={inputClass} value={moving.month} onChange={(e) => setMoving({ ...moving, month: Number(e.target.value) })}>
+                {BUDGET_MONTH_NAMES.map((name, index) => <option key={name} value={index + 1}>{name}</option>)}
+              </select>
+            </Field>
+            <Field label="Year"><input type="number" min={2000} max={2100} className={inputClass} value={String(moving.year)} onChange={(e) => setMoving({ ...moving, year: Number(e.target.value) })} /></Field>
+          </div>
+          <button
+            type="button"
+            onClick={move}
+            disabled={busy === "budget" || Boolean(monthPeriod && moving.year === monthPeriod.year && moving.month === monthPeriod.month)}
+            className="mt-5 inline-flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-[#0A4FE8] text-sm font-bold text-white disabled:opacity-50"
+          >
+            {busy === "budget" ? <Loader2 className="h-4 w-4 animate-spin" /> : <ArrowRightLeft className="h-4 w-4" />} Move to {periodName({ year: moving.year, month: moving.month })}
           </button>
         </Modal>
       )}
@@ -770,54 +1055,66 @@ function ExpansionBudgets({ board, busy, run }: { board: Board; busy: string; ru
       </div>
 
       {visible.length === 0 ? <Empty text={board.expansionBudgets.length ? "No expansion plans match this stage." : "No expansion budgets yet. Add the first future plan."} /> : (
-        <div className="grid gap-4 xl:grid-cols-2">
-          {visible.map((budget) => {
-            const requirement = expansionRequirement(budget);
-            const fundingGap = expansionFundingGap(budget);
-            const funded = requirement > 0 ? Math.min(100, Math.round((Number(budget.committed_amount || 0) / requirement) * 100)) : 0;
-            return (
-              <Card key={budget.id} className="flex flex-col">
-                <div className="flex items-start justify-between gap-3">
-                  <div className="flex min-w-0 items-start gap-3">
-                    <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-blue-50 text-[#0A4FE8]"><Building2 className="h-5 w-5" /></span>
-                    <div className="min-w-0">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <h2 className="font-semibold text-[#07133B]">{budget.title}</h2>
-                        <Badge value={budget.status} />
-                        <Badge value={budget.priority} />
+        <div className="overflow-x-auto rounded-2xl border border-slate-200 bg-white">
+          <table className="w-full min-w-[1180px] text-sm">
+            <thead className="bg-slate-50 text-left text-[11px] font-semibold text-slate-500">
+              <tr>
+                <th className="px-4 py-3">Plan</th>
+                <th className="px-4 py-3">Timeline</th>
+                <th className="px-4 py-3 text-right">Requirement</th>
+                <th className="px-4 py-3 text-right">Committed</th>
+                <th className="px-4 py-3 text-right">Funding gap</th>
+                <th className="px-4 py-3">Readiness</th>
+                <th className="px-4 py-3">Stage</th>
+                <th className="px-4 py-3" />
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {visible.map((budget) => {
+                const requirement = expansionRequirement(budget);
+                const fundingGap = expansionFundingGap(budget);
+                const funded = requirement > 0 ? Math.min(100, Math.round((Number(budget.committed_amount || 0) / requirement) * 100)) : 0;
+                return (
+                  <tr key={budget.id} className="align-middle transition hover:bg-slate-50/70">
+                    <td className="px-4 py-3">
+                      <div className="flex min-w-0 items-start gap-3">
+                        <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-blue-50 text-[#0A4FE8]"><Building2 className="h-4 w-4" /></span>
+                        <div className="min-w-0">
+                          <p className="max-w-[310px] truncate font-semibold text-[#07133B]" title={budget.title}>{budget.title}</p>
+                          <p className="mt-0.5 max-w-[310px] truncate text-xs text-slate-400">
+                            {EXPANSION_TYPE_LABELS[budget.expansion_type]}{budget.location ? ` · ${budget.location}` : ""}{budget.owner ? ` · ${budget.owner}` : ""}
+                          </p>
+                        </div>
                       </div>
-                      <p className="mt-1 text-xs text-slate-500">{EXPANSION_TYPE_LABELS[budget.expansion_type]}{budget.location ? ` · ${budget.location}` : ""}</p>
-                    </div>
-                  </div>
-                  <div className="flex shrink-0 gap-1">
-                    <button type="button" onClick={() => void exportBoardToPdf(expansionBudgetPdf(budget, view))} className="rounded-lg p-1.5 text-slate-400 hover:bg-blue-50 hover:text-[#0A4FE8]" aria-label={`Download ${budget.title} with its implementation plan`} title="Download this plan and how it is meant to be carried out"><Download className="h-4 w-4" /></button>
-                    <button type="button" onClick={() => edit(budget)} className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-[#0A4FE8]" aria-label={`Edit ${budget.title}`}><Pencil className="h-4 w-4" /></button>
-                    <button type="button" onClick={() => void remove(budget)} className="rounded-lg p-1.5 text-slate-400 hover:bg-rose-50 hover:text-rose-600" aria-label={`Delete ${budget.title}`}><Trash2 className="h-4 w-4" /></button>
-                  </div>
-                </div>
-
-                {budget.rationale && <p className="mt-4 line-clamp-2 text-sm leading-6 text-slate-600">{budget.rationale}</p>}
-
-                <div className="mt-4 grid grid-cols-3 gap-2 rounded-xl bg-slate-50 p-3">
-                  <div><p className="text-[11px] text-slate-400">Requirement</p><Money amount={requirement} currency={budget.currency} className="mt-1 block text-sm font-semibold text-[#07133B]" /></div>
-                  <div><p className="text-[11px] text-slate-400">Committed</p><Money amount={budget.committed_amount} currency={budget.currency} className="mt-1 block text-sm font-semibold text-[#07133B]" /></div>
-                  <div><p className="text-[11px] text-slate-400">Funding gap</p><Money amount={fundingGap} currency={budget.currency} className="mt-1 block text-sm font-semibold text-[#07133B]" /></div>
-                </div>
-
-                <div className="mt-4">
-                  <div className="flex items-center justify-between text-[11px] text-slate-400"><span>Funding readiness</span><span>{funded}%</span></div>
-                  <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-slate-100"><div className="h-full rounded-full bg-[#0A4FE8]" style={{ width: `${funded}%` }} /></div>
-                </div>
-
-                <div className="mt-4 flex flex-wrap gap-x-5 gap-y-2 border-t border-slate-100 pt-4 text-xs text-slate-500">
-                  <span className="inline-flex items-center gap-1.5"><CalendarClock className="h-3.5 w-3.5 text-slate-400" /> {boardDate(budget.target_start)}{budget.target_end ? ` – ${boardDate(budget.target_end)}` : ""}</span>
-                  {budget.location && <span className="inline-flex items-center gap-1.5"><MapPin className="h-3.5 w-3.5 text-slate-400" /> {budget.location}</span>}
-                  {budget.owner && <span>Owner: {budget.owner}</span>}
-                  {budget.funding_source && <span>Funding: {budget.funding_source}</span>}
-                </div>
-              </Card>
-            );
-          })}
+                    </td>
+                    <td className="px-4 py-3 text-xs text-slate-500">
+                      <p>{boardDate(budget.target_start)}</p>
+                      <p className="mt-0.5 text-slate-400">to {budget.target_end ? boardDate(budget.target_end) : "open"}</p>
+                    </td>
+                    <td className="px-4 py-3 text-right font-medium text-slate-700"><Money amount={requirement} currency={budget.currency} /></td>
+                    <td className="px-4 py-3 text-right text-slate-600"><Money amount={budget.committed_amount} currency={budget.currency} /></td>
+                    <td className="px-4 py-3 text-right"><Money amount={fundingGap} currency={budget.currency} tone="font-semibold text-[#07133B]" /></td>
+                    <td className="px-4 py-3">
+                      <div className="w-32">
+                        <div className="flex items-center justify-between text-[11px] text-slate-400"><span>Funded</span><span>{funded}%</span></div>
+                        <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-slate-100"><div className="h-full rounded-full bg-[#0A4FE8]" style={{ width: `${funded}%` }} /></div>
+                      </div>
+                    </td>
+                    <td className="px-4 py-3">
+                      <div className="flex flex-col items-start gap-1.5"><Badge value={budget.status} /><Badge value={budget.priority} /></div>
+                    </td>
+                    <td className="px-4 py-3">
+                      <div className="flex justify-end gap-1">
+                        <button type="button" onClick={() => void exportBoardToPdf(expansionBudgetPdf(budget, view))} className="rounded-lg p-1.5 text-slate-400 hover:bg-blue-50 hover:text-[#0A4FE8]" aria-label={`Download ${budget.title} with its implementation plan`} title="Download this plan and how it is meant to be carried out"><Download className="h-4 w-4" /></button>
+                        <button type="button" onClick={() => edit(budget)} className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-[#0A4FE8]" aria-label={`Edit ${budget.title}`}><Pencil className="h-4 w-4" /></button>
+                        <button type="button" onClick={() => void remove(budget)} className="rounded-lg p-1.5 text-slate-400 hover:bg-rose-50 hover:text-rose-600" aria-label={`Delete ${budget.title}`}><Trash2 className="h-4 w-4" /></button>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
         </div>
       )}
 

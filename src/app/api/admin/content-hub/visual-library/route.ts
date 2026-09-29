@@ -86,7 +86,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json(
       {
         ok: false,
-        error: "Upload could not be read. Videos can be up to 100MB each; upload large videos one at a time.",
+        error: "Upload could not be read. Videos can be up to 150MB each; upload large videos one at a time.",
       },
       { status: 413 },
     );
@@ -150,7 +150,7 @@ export async function POST(req: NextRequest) {
     const message = error instanceof Error ? error.message : "Upload failed.";
     return NextResponse.json(
       { ok: false, error: message },
-      { status: message.includes("Videos must be 100MB or smaller") ? 413 : 500 },
+      { status: message.includes("Videos must be 150MB or smaller") ? 413 : 500 },
     );
   }
 }

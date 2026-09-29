@@ -15,6 +15,19 @@ export const BUDGET_CATEGORIES = [
   "other",
 ] as const;
 
+export const BUDGET_MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"] as const;
+export const BUDGET_MONTH_NAMES = [
+  "January", "February", "March", "April", "May", "June",
+  "July", "August", "September", "October", "November", "December",
+] as const;
+
+/** Today's year and month in Lagos, where the budget is planned. */
+export function currentBudgetPeriod(now = new Date()) {
+  const parts = new Intl.DateTimeFormat("en-GB", { timeZone: "Africa/Lagos", year: "numeric", month: "numeric" }).formatToParts(now);
+  const part = (type: string) => Number(parts.find((entry) => entry.type === type)?.value);
+  return { year: part("year"), month: part("month") };
+}
+
 export const EXPANSION_BUDGET_TYPES = [
   "new_market",
   "new_office",
@@ -106,6 +119,11 @@ export interface Budget {
   period_label: string;
   period_start: string | null;
   period_end: string | null;
+  /** The calendar month (1-12) of budget_year this line is planned for. */
+  budget_year: number;
+  budget_month: number;
+  /** Shared by a line and the copies it was repeated into. */
+  recurrence_group_id?: string | null;
   currency: string;
   planned_amount: number;
   actual_amount: number;
@@ -237,6 +255,44 @@ export interface VaultShare {
 /** Budget variance. Positive means spend is under the plan. */
 export function budgetVariance(budget: Pick<Budget, "planned_amount" | "actual_amount">) {
   return Number(budget.planned_amount || 0) - Number(budget.actual_amount || 0);
+}
+
+/** Which slice of the budget is on screen: one month of a year, or the whole year. */
+export interface BudgetPeriod {
+  year: number;
+  month: number | "annual";
+}
+
+export function budgetsInPeriod(budgets: Budget[], period: BudgetPeriod) {
+  return budgets.filter((budget) => Number(budget.budget_year) === period.year
+    && (period.month === "annual" || Number(budget.budget_month) === period.month));
+}
+
+/**
+ * The annual operations budget: a year's lines rolled up by month and by
+ * category, every figure restated in the view currency.
+ */
+export function budgetYearRollup(budgets: Budget[], year: number, view: string) {
+  const into = (amount: number, from: string) => convertMoney(amount, from, view) ?? Number(amount || 0);
+  const lines = budgetsInPeriod(budgets, { year, month: "annual" });
+  const months = BUDGET_MONTH_NAMES.map((name, index) => ({ month: index + 1, name, lines: 0, planned: 0, actual: 0 }));
+  const categories = new Map<string, { category: string; lines: number; planned: number; actual: number }>();
+  for (const budget of lines) {
+    const planned = into(Number(budget.planned_amount || 0), budget.currency);
+    const actual = into(Number(budget.actual_amount || 0), budget.currency);
+    const month = months[Number(budget.budget_month) - 1];
+    if (month) { month.lines += 1; month.planned += planned; month.actual += actual; }
+    const category = categories.get(budget.category) || { category: budget.category, lines: 0, planned: 0, actual: 0 };
+    category.lines += 1; category.planned += planned; category.actual += actual;
+    categories.set(budget.category, category);
+  }
+  return {
+    lines,
+    months,
+    categories: Array.from(categories.values()).sort((a, b) => b.planned - a.planned),
+    planned: months.reduce((sum, month) => sum + month.planned, 0),
+    actual: months.reduce((sum, month) => sum + month.actual, 0),
+  };
 }
 
 export function expansionRequirement(

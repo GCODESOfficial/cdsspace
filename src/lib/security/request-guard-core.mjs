@@ -48,3 +48,46 @@ export function applicationRateProfile(pathname, requestMethod) {
   }
   return null;
 }
+
+/**
+ * Cookies that identify one signed-in person on one device. Only their presence
+ * is read here; each route still verifies the session itself.
+ */
+export const RATE_LIMIT_SESSION_COOKIES = [
+  "admin_session",
+  "team_session",
+  "cds_client_dashboard",
+  "cds_marketer_dashboard",
+];
+
+// A whole office shares one public address, so signed-in API traffic from one
+// network may reach several people's worth before the network ceiling applies.
+const SIGNED_IN_NETWORK_MULTIPLIER = 8;
+
+/**
+ * The token buckets a request must fit inside.
+ *
+ * Signed-in API traffic is limited per session, not per network. Staff on the
+ * same office connection share one public IP, and a per-IP bucket let their
+ * combined dashboard polling lock every one of them out of the admin portal
+ * with a 429. A per-network ceiling remains, sized for a full office, so a
+ * client inventing session cookies cannot escape the limiter.
+ *
+ * @param {{ name: string; capacity: number; refillPerSecond: number }} profile
+ * @param {string} network
+ * @param {string | null | undefined} sessionToken
+ */
+export function rateLimitBuckets(profile, network, sessionToken) {
+  const perSession = profile.name === "api-read" || profile.name === "api-mutation";
+  if (!sessionToken || !perSession) {
+    return [{ key: `${profile.name}:network:${network}`, capacity: profile.capacity, refillPerSecond: profile.refillPerSecond }];
+  }
+  return [
+    { key: `${profile.name}:session:${sessionToken}`, capacity: profile.capacity, refillPerSecond: profile.refillPerSecond },
+    {
+      key: `${profile.name}:signed-in-network:${network}`,
+      capacity: profile.capacity * SIGNED_IN_NETWORK_MULTIPLIER,
+      refillPerSecond: profile.refillPerSecond * SIGNED_IN_NETWORK_MULTIPLIER,
+    },
+  ];
+}
