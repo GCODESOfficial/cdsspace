@@ -3,11 +3,12 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { AlertTriangle, ChevronDown, ChevronUp, ExternalLink, FileText, Landmark, Loader2, MapPin, Pencil, Plus, RefreshCw, Trash2, UsersRound, X } from "lucide-react";
+import { AlertTriangle, ChevronDown, ChevronUp, ExternalLink, FileText, Landmark, Loader2, Mail, MapPin, Pencil, PenLine, Plus, RefreshCw, Send, Trash2, UsersRound, X } from "lucide-react";
 import { appConfirm } from "@/lib/app-notify";
 import { issueLabel } from "@/lib/prospect-issues";
 import { ACTIVITY_TONE, PRIORITY_TONE, ProspectResearchPanel, WEBSITE_TONE, type ProspectResearch, type ResearchEditHandler } from "@/components/deals/ProspectResearchPanel";
 import { ProposalPreviewModal } from "@/components/deals/ProposalPreviewModal";
+import { FirstEmailComposer, recipientsFor } from "@/components/deals/FirstEmailComposer";
 import type { ResearchOverrides } from "@/lib/prospect-research-overrides";
 
 type ResearchSummary = { id: string; deal_score: number; priority: string; activity_status: string; website_status: string; website_score: number | null; issues: string[] | null; is_public: boolean | null; stock_exchanges: string[] | null; ticker: string | null; industry: string | null; city: string | null; country: string | null; founded_year: number | null; employee_count: number | null; domain: string | null; enriched_at: string | null };
@@ -145,6 +146,44 @@ export default function DealProspectsPage() {
     setProspects((items) => items.map((item) => item.id === prospect.id ? { ...item, research_overrides: json.overrides } : item));
   };
 
+  const [writingEmail, setWritingEmail] = useState("");
+  // The first email is written and sent right here, without leaving the checklist.
+  const [composeFor, setComposeFor] = useState<ProspectResearch | null>(null);
+  /**
+   * Re-audits the company live and writes its first email in the CEO's voice.
+   * A hand edit of the subject or email would hide the new draft, so those
+   * corrections are cleared; the email can be edited again afterwards.
+   */
+  const writeEmail = async (prospect: Prospect) => {
+    const companyId = prospect.research_company_id;
+    if (!companyId) return;
+    setWritingEmail(prospect.id); setNotice(null);
+    try {
+      const response = await fetch("/api/admin/deals/prospect-generation", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "rewrite_outreach", id: companyId }),
+      });
+      const json = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(json.error || "The email could not be written.");
+      const edits = prospect.research_overrides || {};
+      if ("outreach_subject" in edits || "outreach_email" in edits) {
+        await editResearch(prospect)("outreach_subject", null);
+        await editResearch(prospect)("outreach_email", null);
+      }
+      await loadResearch(companyId);
+      setNotice({ tone: "success", text: `A new first email for ${prospect.company_name || prospect.display_name} is ready under Details.` });
+    } catch (error) {
+      setNotice({ tone: "error", text: error instanceof Error ? error.message : "The email could not be written." });
+    } finally { setWritingEmail(""); }
+  };
+
+  const copyRecipients = async (company: ProspectResearch) => {
+    const recipients = recipientsFor(company);
+    if (!recipients.length) { setNotice({ tone: "error", text: "No email address was found for this company." }); return; }
+    try { await navigator.clipboard.writeText(recipients.join(", ")); setNotice({ tone: "success", text: `${recipients.length} address${recipients.length === 1 ? "" : "es"} copied.` }); }
+    catch { setNotice({ tone: "error", text: "The addresses could not be copied." }); }
+  };
+
   // A running clock while a recheck works, so a long one never looks stuck.
   useEffect(() => {
     if (!rechecking) return;
@@ -269,7 +308,20 @@ export default function DealProspectsPage() {
           {isRechecking && <p className="mb-4 inline-flex items-center gap-2 rounded-xl bg-blue-50 px-3 py-2 text-sm text-[#0A4FE8]"><Loader2 className="h-4 w-4 animate-spin" /> Visiting the website and checking public sources again ({recheckSeconds}s). This usually takes under a minute.</p>}
           {result && !isRechecking && <RecheckSummary result={result} onDismiss={() => setRecheckResults((current) => { const next = { ...current }; delete next[prospect.id]; return next; })} />}
           {prospect.research_company_id ? (company ? (
-            <ProspectResearchPanel company={company} overrides={prospect.research_overrides} onEdit={editResearch(prospect)} />
+            <ProspectResearchPanel
+              company={company}
+              overrides={prospect.research_overrides}
+              onEdit={editResearch(prospect)}
+              outreachActions={<div className="flex flex-wrap items-center gap-2">
+                <button type="button" onClick={() => void writeEmail(prospect)} disabled={Boolean(writingEmail)} className="inline-flex min-h-9 items-center gap-2 rounded-xl border border-[#0A4FE8] px-3 text-xs font-semibold text-[#0A4FE8] hover:bg-[#0A4FE8]/5 disabled:opacity-50" title="Look at the company again and write the first email in the CEO's voice">
+                  {writingEmail === prospect.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <PenLine className="h-3.5 w-3.5" />}
+                  {writingEmail === prospect.id ? "Studying them and writing..." : "Write with AI"}
+                </button>
+                <button type="button" onClick={() => setComposeFor(company)} className="inline-flex min-h-9 items-center gap-2 rounded-xl bg-[#0A4FE8] px-3 text-xs font-semibold text-white"><Send className="h-3.5 w-3.5" /> Compose email</button>
+                <button type="button" onClick={() => void copyRecipients(company)} className="inline-flex min-h-9 items-center gap-2 rounded-xl border border-slate-200 px-3 text-xs font-semibold text-slate-700 hover:border-[#0A4FE8]"><Mail className="h-3.5 w-3.5" /> Copy recipients</button>
+                <span className="text-xs text-slate-500">{recipientsFor(company).length} address{recipientsFor(company).length === 1 ? "" : "es"} found{recipientsFor(company).length ? `: ${recipientsFor(company).join(", ")}` : ""}</span>
+              </div>}
+            />
           ) : (
             <p className="inline-flex items-center gap-2 text-sm text-slate-500"><Loader2 className="h-4 w-4 animate-spin" /> Loading research</p>
           )) : (
@@ -325,6 +377,12 @@ export default function DealProspectsPage() {
         </div>
       </form>
     </div>}
+    {composeFor && <FirstEmailComposer
+      company={composeFor}
+      onClose={() => setComposeFor(null)}
+      onSent={(next) => { setNotice(next); void load().catch(() => undefined); }}
+      onChanged={() => void loadResearch(composeFor.id).catch(() => undefined)}
+    />}
     {proposalFor && proposalSource && <ProposalPreviewModal
       source={proposalSource}
       label={proposalFor.company_name || proposalFor.display_name}

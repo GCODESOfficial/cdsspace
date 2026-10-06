@@ -1,1 +1,0 @@
-{"extends":"./tsconfig.json","compilerOptions":{"paths":{"@/*":["./src/*"],"server-only":["./scripts/.tmp-empty.ts"]}}}

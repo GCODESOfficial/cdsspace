@@ -10,7 +10,10 @@ import {
   WRITING_MODEL,
   cleanCopy,
   findBannedPhrases,
+  friendlyCompanyName,
 } from "@/lib/ai/cds-voice";
+
+export { friendlyCompanyName };
 
 /**
  * Writes the first email to a company we have never spoken to.
@@ -44,18 +47,6 @@ export interface FirstEmail {
   essence: string;
   observation: string;
   why_it_matters: string;
-}
-
-const LEGAL_SUFFIX = /[,\s]+(?:inc|incorporated|ltd|limited|llc|plc|corp|corporation|co|company|s\.?a\.?|ag|gmbh|n\.?v\.?|pty|pte)\.?$/i;
-
-/** "BERKSHIRE HATHAWAY INC" becomes "Berkshire Hathaway". */
-export function friendlyCompanyName(name: string) {
-  let value = String(name || "").trim();
-  for (let i = 0; i < 2; i += 1) value = value.replace(LEGAL_SUFFIX, "").trim();
-  if (value && value === value.toUpperCase() && /[A-Z]{3,}/.test(value)) {
-    value = value.toLowerCase().replace(/\b([a-z])/g, (letter) => letter.toUpperCase());
-  }
-  return value || String(name || "").trim();
 }
 
 function wordCount(text: string) {

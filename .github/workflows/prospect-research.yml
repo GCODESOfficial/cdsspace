@@ -16,6 +16,6 @@ jobs:
     steps:
       - name: Advance prospect research
         run: |
-          curl -fsS -X GET "https://cdsspace.pro/api/cron/prospect-research" \
+          curl -fsS --max-time 240 -X GET "https://cdsspace.pro/api/cron/prospect-research" \
             -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
             -w "\nHTTP %{http_code}\n"

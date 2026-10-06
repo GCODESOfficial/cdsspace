@@ -16,8 +16,10 @@ import { logActivity } from "@/lib/activity-log";
 import { recordProspectEvent } from "@/lib/deal-pipeline";
 import { huntCompanyEmails } from "@/lib/prospect-email-hunt";
 import { auditForAiSearch } from "@/lib/prospect-ai-audit";
-import { chatComplete } from "@/lib/ai/openai";
-import { CATEGORIES } from "@/lib/constants";
+import { writeFirstEmail } from "@/lib/prospect-outreach-writer";
+import { CDS_SENDER } from "@/lib/ai/cds-voice";
+import { EMAIL_LOGO_CID } from "@/lib/email-logo";
+import { emailCoverHtml, isEmailCoverPath, loadEmailCover } from "@/lib/email-cover";
 import { sendEmail } from "@/lib/email-from";
 import { brandedEmailHtml } from "@/lib/email-template";
 import { sanitizeCompanyCompetitors } from "@/lib/prospect-competitors";
@@ -29,7 +31,6 @@ export const maxDuration = 300;
 
 const PERMISSION = "deals.prospects";
 
-const SERVICE_NAMES = CATEGORIES.map((category) => category.name);
 
 function companyForOutput<T extends Record<string, unknown>>(company: T): T {
   const competitors = sanitizeCompanyCompetitors(company);
@@ -84,6 +85,18 @@ function str(value: unknown, max = 4000) {
 /** Escapes text destined for the outreach email body. */
 function escapeHtml(value: string) {
   return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
+
+/** A first email as it arrives: the optional cover, then the message as paragraphs. */
+function outreachEmailHtml(input: { message: string; subject: string; coverSrc: string }) {
+  return brandedEmailHtml(
+    (input.coverSrc ? emailCoverHtml(input.coverSrc) : "")
+    + input.message
+      .split(/\n{2,}/)
+      .map((paragraph) => `<p style="margin:0 0 14px;font-size:15px;line-height:1.65;color:#334155;">${escapeHtml(paragraph).replace(/\n/g, "<br />")}</p>`)
+      .join(""),
+    { preheader: input.subject.slice(0, 120) },
+  );
 }
 
 function uuid(value: unknown) {
@@ -203,6 +216,13 @@ async function companyFilters(params: URLSearchParams) {
         and coalesce(brand_finding->>'detail', '') !~* 'different image file from the closest brand image|does not match any brand image.*different shape|does not visibly carry the company name'
     )`);
   }
+
+  // The summary cards above the list stand for a theme rather than one rule,
+  // so they filter on "has any of these" and the card count is the same test.
+  const anyIssues = Array.from(new Set(
+    (params.get("issues_any") || "").split(",").map((value) => value.trim()).filter(isProspectIssue),
+  ));
+  if (anyIssues.length) add((index) => `issues && $${index}::text[]`, anyIssues);
 
   // A decision maker we can actually write to, which is what the summary card
   // above the list counts.
@@ -344,7 +364,17 @@ export async function GET(req: NextRequest) {
            from (select label, company_count from public.prospect_directory_facets
                   where facet = 'industry' order by company_count desc, label limit 40) industry_row) industries,
         (select count(*)::int from public.prospect_directory_facets
-          where facet = 'country' and company_count > 0) countries_covered`);
+          where facet = 'country' and company_count > 0) countries_covered,
+        -- The issue cards. A gin index on issues makes each of these an index
+        -- lookup rather than a scan, so they stay inside the one round trip.
+        (select count(*)::int from public.prospect_companies
+          where issues && array['outdated_website']::text[]) issue_outdated_website,
+        (select count(*)::int from public.prospect_companies
+          where issues && array['poor_branding','inconsistent_communications']::text[]) issue_poor_branding,
+        (select count(*)::int from public.prospect_companies
+          where issues && array['non_responsive_website']::text[]) issue_non_responsive,
+        (select count(*)::int from public.prospect_companies
+          where issues && array['poor_social_design']::text[]) issue_poor_social_design`);
       const counters = summary?.counters || {};
       const value = (bucket: string) => Number(counters[bucket] || 0);
       return NextResponse.json({
@@ -361,6 +391,10 @@ export async function GET(req: NextRequest) {
           multi_country: value("multi_country"),
           countries_covered: Number(summary?.countries_covered || 0),
           reachable_decision_makers: value("reachable_decision_makers"),
+          issue_outdated_website: Number(summary?.issue_outdated_website || 0),
+          issue_poor_branding: Number(summary?.issue_poor_branding || 0),
+          issue_non_responsive: Number(summary?.issue_non_responsive || 0),
+          issue_poor_social_design: Number(summary?.issue_poor_social_design || 0),
         },
         batches: summary?.batches || [],
         topCountries: summary?.top_countries || [],
@@ -836,52 +870,31 @@ export async function POST(req: NextRequest) {
         brandFindings: normalizeBrandFindings(company.brand_consistency),
       });
 
-      const senderName = str(body.sender_name, 120).trim() || process.env.PROSPECT_SENDER_NAME || session?.name || "";
-      const senderTitle = process.env.PROSPECT_SENDER_TITLE || "Founder and CEO, CDS Space";
-
-      const prompt = [
-        `Company: ${company.company_name}`,
-        company.website ? `Website: ${company.website}` : "Website: none found",
-        company.industry ? `Industry: ${company.industry}` : "",
-        company.country ? `Country: ${company.country}` : "",
-        company.employee_range ? `Size: ${company.employee_range}` : "",
-        `What we already know about them: ${str(company.brief, 1200) || "little"}`,
-        "",
-        "AUDIT FINDINGS, observed live on their properties just now. These are facts. Use them and nothing else:",
-        ...audit.findings.map((finding, index) => `${index + 1}. [${finding.severity}] [${finding.area}] ${finding.title}: ${finding.detail} (observed at ${finding.evidence})`),
-        audit.strengths.length ? `\nWhat they are already doing well: ${audit.strengths.join("; ")}` : "",
-        "",
-        `CDS Space services that could be offered: ${SERVICE_NAMES.join("; ")}`,
-        `Signature: ${senderName || "the sender"}, ${senderTitle}`,
-      ].filter(Boolean).join("\n");
-
-      const { text } = await chatComplete([
-        {
-          role: "system",
-          content: [
-            "You are the founder and CEO of CDS Space, a branding, design and digital product agency, writing a first email to a company you have never spoken to.",
-            "You are writing as the CEO, in the first person, personally. Not a sales rep, not a template, not a team. You looked at their business yourself and you are telling them what you saw.",
-            "The opening line must be audacious and specific enough that stopping reading feels like a risk. Lead with the single most costly thing the audit found, stated as a plain observation about THEIR business, naming the page or platform it was seen on. Never open with a greeting about yourself, your agency, or how you came across them.",
-            "Be direct and confident, never rude, never flattering, never desperate. Respect the reader as a peer: you are one business owner telling another something they would want to know.",
-            "Everything you assert must come from the supplied audit findings. Never invent a statistic, a client name, a revenue figure, a competitor claim, or a finding that is not listed.",
-            "Where the audit lists something they do well, acknowledge it in one clause before the problem. It proves you actually looked.",
-            "Explain the cost in terms of customers, credibility, or being absent from the answers buyers now get from AI assistants. Do not use jargon: say what it means for their business, not what the technical defect is called.",
-            "Close with one specific, low-friction next step: a short call, or an offer to send the full audit. Never ask for a meeting to 'discuss synergies' or anything that sounds like a form letter.",
-            "160 to 220 words for the body. Short paragraphs. No bullet points, no headings, no markdown.",
-            "Sign off with the sender's name and title exactly as supplied. Never write a placeholder such as [Your Name].",
-            "Write in plain professional English. Never use em dashes.",
-            "The subject line is at most 60 characters, states the specific observation, and reads like a person wrote it, never like a campaign.",
-            "Return only JSON: {subject, message}.",
-          ].join(" "),
-        },
-        { role: "user", content: prompt },
-      ], { temperature: 0.7, max_tokens: 900, response_format: { type: "json_object" } });
-
-      let written: { subject?: unknown; message?: unknown } = {};
-      try { written = JSON.parse(text); } catch { return NextResponse.json({ error: "The AI reply could not be read. Try again." }, { status: 502 }); }
+      // Diagnosis before pitch: the writer first works out what the company is
+      // and what its website is for, keeps only findings that matter to that,
+      // and ends on a small question rather than a request for a meeting.
+      let written;
+      try {
+        written = await writeFirstEmail({
+          company: {
+            company_name: company.company_name,
+            website: company.website,
+            industry: company.industry,
+            country: company.hq_country || company.country,
+            brief: company.brief,
+            employee_range: company.employee_range,
+            is_public: company.is_public,
+            website_findings: Array.isArray(company.website_findings) ? company.website_findings : [],
+            pain_points: Array.isArray(company.pain_points) ? company.pain_points : [],
+          },
+          findings: audit.findings,
+          strengths: audit.strengths,
+        });
+      } catch (error) {
+        return NextResponse.json({ error: error instanceof Error ? error.message : "The email could not be written. Try again." }, { status: 502 });
+      }
       const subject = str(written.subject, 300).trim();
       const message = str(written.message, 20_000).trim();
-      if (!subject || !message) return NextResponse.json({ error: "The AI did not return a usable email. Try again." }, { status: 502 });
 
       // Kept on the company so the next person to open it starts from the
       // rewritten version rather than the original enrichment draft.
@@ -890,7 +903,7 @@ export async function POST(req: NextRequest) {
         [id, subject, message, actor],
       );
 
-      return NextResponse.json({ subject, message, audit });
+      return NextResponse.json({ subject, message, audit, reasoning: { essence: written.essence, observation: written.observation, why_it_matters: written.why_it_matters } });
     }
 
     if (action === "find_emails") {
@@ -960,6 +973,23 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ emails: merged, added: 1 });
     }
 
+    if (action === "preview_outreach") {
+      // The email exactly as it will arrive, for the composer's preview. The
+      // cover is inlined here only because a preview cannot read attachments;
+      // the sent email carries it as an inline attachment instead.
+      const message = str(body.message, 20_000).trim();
+      const subject = str(body.subject, 300).trim();
+      const coverPath = body.cover_storage_path ? String(body.cover_storage_path) : "";
+      if (coverPath && !isEmailCoverPath(coverPath)) return NextResponse.json({ error: "That cover image is not valid. Upload it again." }, { status: 400 });
+      const cover = coverPath ? await loadEmailCover(coverPath) : null;
+      const coverSrc = cover ? `data:image/webp;base64,${cover.content.toString("base64")}` : "";
+      return NextResponse.json({
+        // The logo is an attachment in the real email; the preview shows the file.
+        html: outreachEmailHtml({ message, subject, coverSrc }).split(`cid:${EMAIL_LOGO_CID}`).join("/navbar/CDS%20Logo.svg"),
+        from: `${CDS_SENDER.name}, CDS Space`,
+      });
+    }
+
     if (action === "send_outreach") {
       const rate = checkIntelligenceRateLimit(`prospect-outreach:${actor}`, 120, 60 * 60 * 1000);
       if (!rate.allowed) return NextResponse.json({ error: "Outreach limit reached for this hour. Try again shortly." }, { status: 429 });
@@ -982,20 +1012,18 @@ export async function POST(req: NextRequest) {
       if (!subject) return NextResponse.json({ error: "A subject is required." }, { status: 400 });
       if (!message) return NextResponse.json({ error: "The email body is empty." }, { status: 400 });
 
-      const html = brandedEmailHtml(
-        message
-          .split(/\n{2,}/)
-          .map((paragraph) => `<p style="margin:0 0 14px;font-size:15px;line-height:1.65;color:#334155;">${escapeHtml(paragraph).replace(/\n/g, "<br />")}</p>`)
-          .join(""),
-        { preheader: subject.slice(0, 120) },
-      );
+      const coverPath = body.cover_storage_path ? String(body.cover_storage_path) : "";
+      if (coverPath && !isEmailCoverPath(coverPath)) return NextResponse.json({ error: "That cover image is not valid. Upload it again." }, { status: 400 });
+      const cover = coverPath ? await loadEmailCover(coverPath) : null;
+      const html = outreachEmailHtml({ message, subject, coverSrc: cover ? `cid:${cover.cid}` : "" });
 
       // One message per recipient. A shared To line would show every prospect
       // the others we are approaching.
       const failed: string[] = [];
       for (const to of recipients) {
         try {
-          await sendEmail({ to, subject, html, text: message, fromName: "CDS Space" });
+          // Sent in the CEO's name: a first email from a person, not a company.
+          await sendEmail({ to, subject, html, text: message, fromName: `${CDS_SENDER.name}, CDS Space`, ...(cover ? { attachments: [cover] } : {}) });
         } catch {
           failed.push(to);
         }

@@ -119,15 +119,19 @@ export async function stopResearchRun(input: { actorKey?: string | null; reason:
  * Moves an active run along. Safe to call from anywhere and often: it does a
  * little work, or nothing at all when no run is active.
  */
-export async function advanceResearchRun(options: { batches?: number } = {}) {
+export async function advanceResearchRun(options: { batches?: number; budgetMs?: number } = {}) {
   const run = await activeResearchRun();
   if (!run) return { ran: false as const };
 
   const batches = Math.max(1, Math.min(options.batches ?? BATCHES_PER_SWEEP, 10));
   const endsAt = new Date(run.startedAt).getTime() + MAX_RUN_HOURS * 60 * 60 * 1000;
+  // A caller behind an HTTP timeout must get an answer, so each sweep stops
+  // taking new batches once its own time budget is spent.
+  const deadline = Date.now() + Math.max(5_000, options.budgetMs ?? 90_000);
   let processed = 0;
   let remaining = 0;
   for (let pass = 0; pass < batches; pass += 1) {
+    if (pass > 0 && Date.now() >= deadline) break;
     if (Date.now() >= endsAt) {
       await expireOverrunningRuns();
       return { ran: true as const, processed, remaining, expired: true };

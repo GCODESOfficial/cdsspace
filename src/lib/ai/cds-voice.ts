@@ -137,3 +137,33 @@ export function cleanCopy(input: string): string {
     .replace(/ +\n/g, "\n")
     .trim();
 }
+
+/** How a proposal reads: written for this client and no other. */
+export const PROPOSAL_VOICE = [
+  CDS_VOICE,
+  "A proposal is the next chapter of a conversation, not a brochure. Write every section for this client only: if a sentence would fit any company after swapping the name, rewrite it with something specific to them.",
+  "Open from what the client stands for and is trying to achieve, then show you understood the situation, then the work. Frame gaps as opportunities with a clear reason, never as failings.",
+  `Never use these phrases or anything like them: ${BANNED_PHRASES.slice(0, 40).join("; ")}.`,
+].join(" ");
+
+/** cleanCopy applied to every string in a parsed AI result. */
+export function cleanDeep<T>(value: T): T {
+  if (typeof value === "string") return cleanCopy(value) as unknown as T;
+  if (Array.isArray(value)) return value.map((entry) => cleanDeep(entry)) as unknown as T;
+  if (value && typeof value === "object") {
+    return Object.fromEntries(Object.entries(value as Record<string, unknown>).map(([key, entry]) => [key, cleanDeep(entry)])) as T;
+  }
+  return value;
+}
+
+const LEGAL_SUFFIX = /[,\s]+(?:inc|incorporated|ltd|limited|llc|plc|corp|corporation|co|company|s\.?a\.?|ag|gmbh|n\.?v\.?|pty|pte)\.?$/i;
+
+/** "BERKSHIRE HATHAWAY INC" becomes "Berkshire Hathaway". */
+export function friendlyCompanyName(name: string) {
+  let value = String(name || "").trim();
+  for (let i = 0; i < 2; i += 1) value = value.replace(LEGAL_SUFFIX, "").trim();
+  if (value && value === value.toUpperCase() && /[A-Z]{3,}/.test(value)) {
+    value = value.toLowerCase().replace(/\b([a-z])/g, (letter) => letter.toUpperCase());
+  }
+  return value || String(name || "").trim();
+}

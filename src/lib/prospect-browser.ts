@@ -219,3 +219,98 @@ export async function renderPage(input: string, options: { scrolls?: number; set
     client.close();
   }
 }
+
+/** What a visitor actually sees, plus measurements that settle questions of fact. */
+export interface SiteVisuals {
+  /** JPEG data URLs, ready to hand to a vision model. */
+  desktop: string;
+  mobile: string;
+  signals: {
+    hasViewportMeta: boolean;
+    /** The page is wider than a phone screen, so it scrolls sideways. */
+    mobileOverflows: boolean;
+    mobileTextSizePx: number;
+    bodyFont: string;
+    stylesheets: number;
+    usesDefaultBrowserFont: boolean;
+  };
+}
+
+const MOBILE_USER_AGENT =
+  "Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1";
+
+/**
+ * Photographs a homepage the way a first-time visitor meets it, on a laptop and
+ * on a phone, and measures what can be measured: whether it adapts to a phone,
+ * whether it scrolls sideways there, how big the text is, and which font it
+ * uses. Returns null when no browser is connected, so an audit can say it was
+ * not able to look rather than pretend it did.
+ */
+export async function captureSiteVisuals(input: string): Promise<SiteVisuals | null> {
+  if (!browserConfigured()) return null;
+  let url: URL;
+  try { url = await assertPublicHttpUrl(input); } catch { return null; }
+  let endpoint: string;
+  try { endpoint = await resolveEndpoint(); } catch { return null; }
+
+  const shoot = async (mobile: boolean) => {
+    const client = await DevToolsSession.open(endpoint);
+    let targetId = "";
+    try {
+      const created = await client.send("Target.createTarget", { url: "about:blank" });
+      targetId = created.targetId;
+      const attached = await client.send("Target.attachToTarget", { targetId, flatten: true });
+      const sessionId = attached.sessionId as string;
+      await client.send("Page.enable", {}, sessionId);
+      await client.send("Runtime.enable", {}, sessionId);
+      await client.send("Emulation.setUserAgentOverride", { userAgent: mobile ? MOBILE_USER_AGENT : HUMAN_USER_AGENT, acceptLanguage: "en-GB,en;q=0.9" }, sessionId);
+      await client.send("Emulation.setDeviceMetricsOverride", mobile
+        ? { width: 390, height: 844, deviceScaleFactor: 2, mobile: true }
+        : { width: 1440, height: 900, deviceScaleFactor: 1, mobile: false }, sessionId);
+      const loaded = client.once("Page.loadEventFired", sessionId, 45_000);
+      await client.send("Page.navigate", { url: url.toString() }, sessionId);
+      await loaded;
+      await humanPause(2500);
+      const measured = await client.send("Runtime.evaluate", {
+        returnByValue: true,
+        expression: `(() => {
+          const body = document.body || document.documentElement;
+          const style = getComputedStyle(body);
+          const paragraph = document.querySelector("p, li, td, a") || body;
+          return {
+            hasViewportMeta: Boolean(document.querySelector('meta[name="viewport"]')),
+            overflows: document.documentElement.scrollWidth > window.innerWidth + 4,
+            textSize: parseFloat(getComputedStyle(paragraph).fontSize) || 0,
+            bodyFont: style.fontFamily || "",
+            stylesheets: document.styleSheets.length,
+          };
+        })()`,
+      }, sessionId);
+      const shot = await client.send("Page.captureScreenshot", { format: "jpeg", quality: 72, captureBeyondViewport: false }, sessionId);
+      return { image: `data:image/jpeg;base64,${shot.data}`, measured: measured?.result?.value || {} };
+    } finally {
+      if (targetId) { try { await client.send("Target.closeTarget", { targetId }); } catch { /* tab already gone */ } }
+      client.close();
+    }
+  };
+
+  try {
+    const desktop = await shoot(false);
+    const mobile = await shoot(true);
+    const font = String(desktop.measured.bodyFont || "");
+    return {
+      desktop: desktop.image,
+      mobile: mobile.image,
+      signals: {
+        hasViewportMeta: Boolean(desktop.measured.hasViewportMeta),
+        mobileOverflows: Boolean(mobile.measured.overflows),
+        mobileTextSizePx: Number(mobile.measured.textSize) || 0,
+        bodyFont: font,
+        stylesheets: Number(desktop.measured.stylesheets) || 0,
+        usesDefaultBrowserFont: /^\s*"?(times new roman|times|serif)"?\s*$/i.test(font) || font.trim() === "",
+      },
+    };
+  } catch {
+    return null;
+  }
+}

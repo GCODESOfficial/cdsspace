@@ -24,11 +24,26 @@ export default function AuditReport({ audit }: { audit: AuditReportData }) {
           <div className="min-w-0">
             <p className="text-sm font-semibold text-blue-100">Evidence-led public brand audit</p>
             <h2 className="mt-2 text-3xl font-bold">{audit.brand_name}</h2>
+            {content.verdict && <p className="mt-3 max-w-3xl text-base font-semibold leading-7 text-white">{content.verdict}</p>}
             <p className="mt-3 max-w-3xl text-sm leading-6 text-blue-100">{content.summary}</p>
           </div>
           {audit.overall_score !== null && <ScoreGauge score={chart.score} />}
         </div>
       </div>
+
+      {(content.context || content.visual_review?.notes) && (
+        <div className="grid gap-5 lg:grid-cols-2">
+          {content.context && <div className="rounded-[24px] border border-slate-200 bg-white p-6 shadow-sm">
+            <h3 className="text-lg font-bold text-[#07133B]">What this company needs</h3>
+            <p className="mt-3 text-sm leading-7 text-slate-600">{content.context}</p>
+          </div>}
+          {content.visual_review?.notes && <div className="rounded-[24px] border border-slate-200 bg-white p-6 shadow-sm">
+            <h3 className="text-lg font-bold text-[#07133B]">How the site looks to a visitor</h3>
+            <p className="mt-3 text-sm leading-7 text-slate-600">{content.visual_review.notes}</p>
+            <p className="mt-3 text-xs text-slate-400">{content.visual_review.checked ? "Checked in a real browser on a laptop and a phone." : "Not checked in a browser; confirm the design by eye."}</p>
+          </div>}
+        </div>
+      )}
 
       <div className="grid gap-5 lg:grid-cols-2">
         <div className="rounded-[24px] border border-slate-200 bg-white p-6 shadow-sm">

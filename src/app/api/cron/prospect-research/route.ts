@@ -20,8 +20,8 @@ function authorized(req: NextRequest) {
 
 export async function GET(req: NextRequest) {
   if (!authorized(req)) return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
-  const batches = Number(new URL(req.url).searchParams.get("batches") || 6);
-  const result = await advanceResearchRun({ batches: Number.isFinite(batches) ? batches : 6 });
+  const batches = Number(new URL(req.url).searchParams.get("batches") || 2);
+  const result = await advanceResearchRun({ batches: Number.isFinite(batches) ? batches : 2, budgetMs: 60_000 });
   return NextResponse.json({ ok: true, ...result, run: await activeResearchRun() });
 }
 

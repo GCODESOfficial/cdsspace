@@ -15,6 +15,9 @@ import { brandedEmailHtml } from "@/lib/email-template";
 import { sendEmail, verifyEmailReady } from "@/lib/email-from";
 import { logActivity } from "@/lib/activity-log";
 import { applyResearchOverrides, mergeResearchOverrides } from "@/lib/prospect-research-overrides";
+import { CDS_SENDER, cleanCopy } from "@/lib/ai/cds-voice";
+import { friendlyCompanyName } from "@/lib/prospect-outreach-writer";
+import { emailCoverHtml, isEmailCoverPath, loadEmailCover } from "@/lib/email-cover";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -400,7 +403,7 @@ export async function POST(req: NextRequest) {
           (brand_name,target_url,social_url,recipient_email,focus_area,title,status,stage,cover_storage_path,cover_mime_type,content,deck,sources,email_subject,owner_email,created_by,updated_by,prospect_id,audit_id)
          values ($1,$2,$3,$4,$5,$6,'ready','ready',$7,$8,$9,$10,$11,$12,$13,$13,$13,$14,$15)
          returning *`,
-        [brandName, targetUrl || null, socialUrl || null, str(body.recipient_email, 320).toLowerCase() || seed.recipient_email || null, focusArea, title, coverPath || null, coverPath ? "image/webp" : null, JSON.stringify(content), JSON.stringify(deck), JSON.stringify(sources), `A focused proposal for ${brandName}`, session.email, prospect?.id || null, seed.audit_id],
+        [brandName, targetUrl || null, socialUrl || null, str(body.recipient_email, 320).toLowerCase() || seed.recipient_email || null, focusArea, title, coverPath || null, coverPath ? "image/webp" : null, JSON.stringify(content), JSON.stringify(deck), JSON.stringify(sources), `A proposal for ${friendlyCompanyName(brandName)}`, session.email, prospect?.id || null, seed.audit_id],
       );
       if (proposal?.id) await recordProposalEvent({ proposalId: proposal.id, type: "created", actor: session.email, detail: prospect ? `${title} (from the checklist entry for ${prospect.display_name})` : title });
       // A prospect we have written a proposal for is no longer one to research.
@@ -524,17 +527,33 @@ export async function POST(req: NextRequest) {
       if (readyError) return NextResponse.json({ ok: false, error: readyError }, { status: 503 });
       const link = `${siteUrl()}/proposal/${proposal.public_token}`;
       const deck = normalizeDeck(proposal.deck, { brandName: proposal.brand_name, focusArea: proposal.focus_area, title: proposal.title });
-      const intro = str(body.message, 1200) || deck.big_picture.intro;
+      const intro = cleanCopy(str(body.message, 1200) || deck.big_picture.intro);
+      // A real greeting: the person if we know their name, otherwise their team.
+      const recipientName = cleanCopy(str(body.recipient_name, 120));
+      const greeting = recipientName ? recipientName.split(/\s+/)[0] : `${friendlyCompanyName(proposal.brand_name)} team`;
+      const coverPath = body.cover_storage_path ? String(body.cover_storage_path) : "";
+      if (coverPath && !isEmailCoverPath(coverPath)) {
+        return NextResponse.json({ ok: false, error: "That cover image is not valid. Upload it again." }, { status: 400 });
+      }
+      const cover = coverPath ? await loadEmailCover(coverPath) : null;
       const html = brandedEmailHtml(`
-        <p style="margin:0 0 16px;">Excellent Day Admin,</p>
-        <p style="margin:0 0 16px;">We prepared a proposal for ${escapeHtml(proposal.brand_name)}: <strong>${escapeHtml(deck.cover.title)}</strong>.</p>
-        <p style="margin:0 0 20px;">${escapeHtml(intro)}</p>
-        <table role="presentation" cellpadding="0" cellspacing="0" style="margin:22px 0;"><tr><td style="border-radius:10px;background:#0A4FE8;"><a href="${escapeHtml(link)}" style="display:inline-block;padding:13px 22px;color:#ffffff;text-decoration:none;font-weight:700;">View the proposal</a></td></tr></table>
-        <p style="margin:0 0 16px;">It runs through who we are, the big picture, the problem, the opportunities, our process, the payoff, and how we kick off. You can also download it as a PDF from the same page.</p>
-        <p style="margin:0 0 16px;">When you are ready, book a time with us at <a href="${escapeHtml(deck.cta.primary_url)}" style="color:#0A4FE8;">${escapeHtml(deck.cta.primary_url)}</a>.</p>
-        <p style="margin:0;color:#667085;font-size:13px;">This proposal is evidence-led and intended as the starting point for a working conversation. Final scope and outcomes are confirmed together.</p>
+        ${cover ? emailCoverHtml() : ""}
+        <p style="margin:0 0 16px;">Hello ${escapeHtml(greeting)},</p>
+        <p style="margin:0 0 16px;">${escapeHtml(intro)}</p>
+        <p style="margin:0 0 6px;">The proposal, <strong>${escapeHtml(deck.cover.title)}</strong>, is ready for you here:</p>
+        <table role="presentation" cellpadding="0" cellspacing="0" style="margin:16px 0 22px;"><tr><td style="border-radius:10px;background:#0A4FE8;"><a href="${escapeHtml(link)}" style="display:inline-block;padding:13px 22px;color:#ffffff;text-decoration:none;font-weight:700;">View the proposal</a></td></tr></table>
+        <p style="margin:0 0 16px;">It sets out what we understood about ${escapeHtml(friendlyCompanyName(proposal.brand_name))}, where we see the opportunity, and how we would approach the work. You can also download it as a PDF from the same page.</p>
+        <p style="margin:0 0 16px;">If it resonates, the simplest next step is a short conversation to shape the scope together. You can choose a time at <a href="${escapeHtml(deck.cta.primary_url)}" style="color:#0A4FE8;">${escapeHtml(deck.cta.primary_url)}</a>, or simply reply to this email.</p>
+        <p style="margin:0 0 4px;">Best regards,</p>
+        <p style="margin:0;"><strong>${escapeHtml(CDS_SENDER.name)}</strong><br/>${escapeHtml(CDS_SENDER.title)}</p>
       `, { eyebrow: "CDS Space proposal", preheader: deck.cover.title });
-      await sendEmail({ to: recipient, subject: proposal.email_subject || proposal.title, html, fromName: "CDS Space" });
+      await sendEmail({
+        to: recipient,
+        subject: proposal.email_subject || proposal.title,
+        html,
+        fromName: `${CDS_SENDER.name}, CDS Space`,
+        ...(cover ? { attachments: [cover] } : {}),
+      });
       await glashQuery(
         `update public.deal_proposals
             set recipient_email=$2, status='sent',

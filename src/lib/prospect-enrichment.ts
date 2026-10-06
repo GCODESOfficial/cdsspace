@@ -1,5 +1,8 @@
 import "server-only";
 
+import { CDS_SENDER, CDS_VOICE, FIRST_EMAIL_PRINCIPLES, MATERIALITY_RULE, cleanCopy } from "@/lib/ai/cds-voice";
+import { composeFirstEmail, friendlyCompanyName } from "@/lib/prospect-outreach-writer";
+
 import { promises as dns } from "node:dns";
 
 import { chatComplete } from "@/lib/ai/openai";
@@ -339,7 +342,7 @@ async function synthesise(input: {
     competitors_local: competitorsFromSearch(input.localResults, { companyName: input.companyName, website: input.website }, 6),
     competitors_global: competitorsFromSearch(input.globalResults, { companyName: input.companyName, website: input.website }, 6),
     outreach_angle: "Lead with the specific website findings rather than a generic pitch.",
-    outreach_subject: `A few notes on ${input.companyName}'s website`,
+    outreach_subject: `A few observations on ${friendlyCompanyName(input.companyName)}`,
     outreach_email: "",
     contact_titles: [] as Array<{ full_name: string; seniority: string }>,
   };
@@ -387,7 +390,9 @@ async function synthesise(input: {
       "countries lists every country the evidence shows the company operates, is registered, or has an office in, including the head office country. Use full country names. Return an empty array when the evidence names none.",
       "employee_count is a whole number staff estimate and must be 0 unless the evidence states or clearly implies a headcount.",
           "contact_titles classifies only the named people supplied, with seniority one of decision_maker, influencer, operational, unknown.",
-          "outreach_email is a short first-contact email (110 to 160 words) that names one observed problem, one consequence, and one next step.",
+          `For the first email, follow this voice and these rules. ${CDS_VOICE} ${MATERIALITY_RULE} ${FIRST_EMAIL_PRINCIPLES}`,
+          "outreach_angle is two sentences: what makes this company distinctive and what its website and channels are for, then the one observation worth leading with and why it matters to that purpose.",
+          `outreach_email is the body of that first email, written as ${CDS_SENDER.name}, ${CDS_SENDER.title}, in the first person singular. Write the body only, with no greeting line and no sign-off; they are added for you.`,
         ].join(" "),
       },
       { role: "user", content: prompt },
@@ -409,9 +414,12 @@ async function synthesise(input: {
         .filter((entry) => SERVICE_NAMES.includes(entry.service)),
       competitors_local: objectList<{ name: string; url: string; note: string; type: string }>(parsed.competitors_local, { name: 160, url: 500, note: 500, type: 20 }, 8),
       competitors_global: objectList<{ name: string; url: string; note: string; type: string }>(parsed.competitors_global, { name: 160, url: 500, note: 500, type: 20 }, 8),
-      outreach_angle: clip(parsed.outreach_angle, 1000) || fallback.outreach_angle,
-      outreach_subject: clip(parsed.outreach_subject, 200) || fallback.outreach_subject,
-      outreach_email: clip(parsed.outreach_email, 4000),
+      outreach_angle: cleanCopy(clip(parsed.outreach_angle, 1000)) || fallback.outreach_angle,
+      outreach_subject: cleanCopy(clip(parsed.outreach_subject, 200)) || fallback.outreach_subject,
+      // Our greeting and the CEO's sign-off are added here, so they are always exact.
+      outreach_email: clip(parsed.outreach_email, 4000)
+        ? composeFirstEmail({ displayName: friendlyCompanyName(input.companyName), body: clip(parsed.outreach_email, 4000) })
+        : "",
       contact_titles: objectList<{ full_name: string; seniority: string }>(parsed.contact_titles, { full_name: 160, seniority: 40 }, 20),
     };
   } catch {

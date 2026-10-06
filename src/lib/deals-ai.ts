@@ -1,6 +1,8 @@
 import "server-only";
 
 import { chatComplete } from "@/lib/ai/openai";
+import { PROPOSAL_VOICE, WRITING_MODEL, cleanCopy, cleanDeep } from "@/lib/ai/cds-voice";
+import { captureSiteVisuals, type SiteVisuals } from "@/lib/prospect-browser";
 import type { BrandFinding } from "@/lib/prospect-brand";
 import type { SiteResearch, WebSearchResult } from "@/lib/sales-growth-research";
 import { emptyDeck, normalizeDeck, type ProposalDeck } from "@/lib/proposal-deck";
@@ -26,6 +28,32 @@ export interface DealAuditContent {
   metrics: Array<{ label: string; value: number; maximum: number }>;
   /** One entry per place the brand is met, so nothing is judged on the homepage alone. */
   touchpoints: DealAuditTouchpoint[];
+  /** What the company is and what its public presence has to do, judged before anything else. */
+  context?: string;
+  /** The audit in one plain sentence. */
+  verdict?: string;
+  /** Whether the site was actually looked at, and what the screenshots and measurements showed. */
+  visual_review?: { checked: boolean; notes: string; signals?: SiteVisuals["signals"] | null };
+}
+
+/** The model that audits. It reads screenshots, so it must be vision-capable. */
+const AUDIT_MODEL = process.env.OPENAI_AUDIT_MODEL || WRITING_MODEL;
+
+/**
+ * Measured facts set ceilings no reading can talk its way past. A homepage
+ * that does not adapt to a phone cannot have a strong website score in 2026,
+ * however the copy reads.
+ */
+function measuredCaps(signals: SiteVisuals["signals"] | null | undefined) {
+  if (!signals) return [] as Array<{ match: RegExp; max: number; reason: string }>;
+  const caps: Array<{ match: RegExp; max: number; reason: string }> = [];
+  if (!signals.hasViewportMeta || signals.mobileOverflows) {
+    caps.push({ match: /website|experience|digital|mobile|conversion/i, max: 40, reason: "The homepage does not adapt to a phone screen, so most visitors see a shrunken desktop page." });
+  }
+  if (signals.stylesheets === 0 && signals.usesDefaultBrowserFont) {
+    caps.push({ match: /website|experience|digital|identity|visual|design/i, max: 35, reason: "The homepage has no stylesheet and uses the browser's default font, so there is no designed interface." });
+  }
+  return caps;
 }
 
 export type DealAuditTouchpoint = {
@@ -103,7 +131,9 @@ export async function buildDealProposalContent(input: {
 
   const system = [
     "You are the senior proposal strategist for CDS Space Branding Agency.",
-    "Return strict JSON with executive_summary, current_state, opportunity, proposed_approach, deliverables[], market_metrics[], expected_impact[], timeline, next_step.",
+    PROPOSAL_VOICE,
+    "Return strict JSON with client_essence, executive_summary, current_state, opportunity, proposed_approach, deliverables[], market_metrics[], expected_impact[], timeline, next_step.",
+    "client_essence comes first: two or three sentences on what this client stands for, who it serves, and what this engagement must protect or advance. Every other section must follow from it. It is never shown to the client.",
     "Each market_metrics item must contain label, value, context, source_url. Include a metric only when the supplied source snippet explicitly supports the exact number. Otherwise omit it.",
     "Use only the supplied public evidence. Never invent market size, growth rates, customers, results, awards, budgets, or relationships.",
     "Expected impact must be framed as a reasonable outcome, not a guarantee. State uncertainty where evidence is incomplete.",
@@ -130,9 +160,9 @@ export async function buildDealProposalContent(input: {
   try {
     const { text } = await chatComplete(
       [{ role: "system", content: system }, { role: "user", content: JSON.stringify(evidence).slice(0, 28_000) }],
-      { response_format: { type: "json_object" }, temperature: 0.3, max_tokens: 2600 },
+      { response_format: { type: "json_object" }, model: WRITING_MODEL, temperature: 0.3, max_tokens: 2600 },
     );
-    const data = objectFrom(text);
+    const data = cleanDeep(objectFrom(text));
     const rawMetrics = Array.isArray(data.market_metrics) ? data.market_metrics : [];
     const sourceUrls = new Set(input.marketSources.map((source) => source.url));
     const marketMetrics = rawMetrics.flatMap((entry) => {
@@ -265,9 +295,21 @@ export async function buildDealBrandAudit(input: {
   };
   if (!canUseAi()) return fallback;
 
+  // Looked at, not just read: the homepage on a laptop and on a phone, with the
+  // measurements that settle questions of fact. Null when no browser is free.
+  const visuals = await captureSiteVisuals(input.targetUrl).catch(() => null);
+
   const system = [
-    "You are a rigorous brand identity and digital experience auditor for CDS Space.",
-    "Return strict JSON with summary, scores[], findings[], recommendations[], future_state, metrics[], touchpoints[].",
+    "You are a senior brand and digital design director auditing a company for CDS Space. Your audit must be true at every level: true to what a real first-time visitor experiences, true to current industry standards, and true to how buyers find and judge companies today.",
+    "Start from context. Decide what the company is, who its audiences are, and what its website and channels need to achieve, then judge everything against that. A deliberate choice (for example, a holding company that communicates only through formal reports and has no social media) is described as a deliberate choice and its real trade-offs, not as a failure.",
+    "Judge design with your own eyes when screenshots are supplied: the desktop and phone screenshots show exactly what a visitor sees. Assess visual hierarchy, typography, layout, use of space, imagery, colour, and whether it reads as a designed, current interface. Unstyled default HTML (browser default fonts, no layout, plain blue links) is not a designed interface and must score low on design however clear its words are.",
+    "Current standards to hold it to: mobile-first responsive layout (most visits are on phones), legible type at phone size, WCAG 2.2 AA accessibility (contrast, focus, text size), clear navigation and calls to action, trust signals for its audience, and being readable by search engines and AI assistants.",
+    "Score each area on this scale: 90-100 best in class for its industry today; 75-89 modern and well executed with minor gaps; 60-74 functional but visibly behind current standards; 40-59 dated, with problems most visitors would notice; below 40 broken or absent on the standard most visitors meet it (for example, unreadable on a phone or undesigned).",
+    "measured_signals are browser measurements and are facts: if has_viewport_meta is false or the page overflows on a phone, the site does not adapt to mobile. Never contradict a measured signal.",
+    `Today is ${new Date().toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" })}. Judge against standards and buyer behaviour as they are today, and never refer to an earlier year as the present.`,
+    "If the company states or plainly shows a deliberate policy (for example, it says it does not answer enquiries, or it clearly chooses to communicate only through formal reports), treat the related gap as a deliberate trade-off: say what it costs and what it protects, with low or medium severity, never as an oversight.",
+    "This audit is read by the client. Write every observation, finding and explanation in plain language a business owner would use. Never mention internal field or tool names such as measured_signals, social_sweep, brandSignals, research, viewport meta, or stylesheet counts; describe what a visitor experiences instead.",
+    "Return strict JSON with context, verdict, visual_review, summary, scores[], findings[], recommendations[], future_state, metrics[], touchpoints[]. context: two sentences on what the company is and what its public presence must do. verdict: one plain sentence a busy executive could act on. visual_review: what the desktop and phone screenshots show, in two or three sentences, or that no screenshots were available.",
     "Scores items: area, score 0-100, explanation. Findings: title, severity high|medium|low, evidence, source_url. Recommendations: priority, title, action, expected_outcome. Metrics: label, value, maximum.",
     `Touchpoints: answer for every one of these keys and no others: ${AUDIT_TOUCHPOINTS.map((entry) => `${entry.key} (${entry.label}: ${entry.asks})`).join("; ")}.`,
     "Each touchpoint: key, label, state strong|adequate|weak|missing|unknown, observation, fix, evidence[] of supplied source urls. Use 'unknown' when the evidence does not cover that touchpoint. Never invent a channel that is not in the evidence.",
@@ -276,9 +318,9 @@ export async function buildDealBrandAudit(input: {
     // A sweep is the difference between "we found nothing" and "there is
     // nothing", and the report has to be able to show which one it means.
     "social_sweep lists every platform searched and the outcome for each. Treat it as the complete record of the social check. Name the platforms in your social observation rather than saying a presence was simply not identified, and state how each absence was established.",
-    "When social_sweep found no profile anywhere, that is a high severity finding, not a middling one. Score the social area accordingly, set the social touchpoint to missing, and say plainly what it costs the brand: nobody who hears the name can verify the company anywhere but its own website.",
+    "When social_sweep found no profile anywhere, set the social touchpoint to missing and score the social area low, because that is a fact. Its severity depends on context: high when this audience expects to find the company on social channels, low and described as a deliberate choice when the company plainly communicates through other channels by design.",
     "social_sweep reports findability, not existence. A search and a page fetch cannot prove an account does not exist, so write about what a customer can and cannot find, never that the company has no accounts. Where nothing was found, say it could not be found from the website's published links or a search, and that it is worth confirming by hand.",
-    "When social_sweep found no profile anywhere, your recommendations must include claiming the name on the listed platforms and standing up the two that suit this audience, with the specifics of what each profile needs. Do not recommend improving, auditing or refreshing channels that do not exist.",
+    "When social_sweep found no profile anywhere and social matters for this audience, recommend claiming the name on the listed platforms and standing up the two that suit it, with what each profile needs. When the absence is deliberate, recommend at most protecting the name. Do not recommend improving, auditing or refreshing channels that do not exist.",
     "Never report a platform as present unless social_sweep lists a profile url for it.",
     "Explain current state, the cost of inconsistency, and a credible future state. Avoid invented commercial results.",
     input.refineNote
@@ -291,9 +333,18 @@ export async function buildDealBrandAudit(input: {
         { role: "system", content: system },
         {
           role: "user",
-          content: JSON.stringify({
+          content: withScreenshots(JSON.stringify({
             brandName: input.brandName,
             targetUrl: input.targetUrl,
+            screenshots_supplied: Boolean(visuals),
+            measured_signals: visuals ? {
+              has_viewport_meta: visuals.signals.hasViewportMeta,
+              overflows_on_phone: visuals.signals.mobileOverflows,
+              phone_text_size_px: visuals.signals.mobileTextSizePx,
+              body_font: visuals.signals.bodyFont,
+              stylesheets: visuals.signals.stylesheets,
+              default_browser_font: visuals.signals.usesDefaultBrowserFont,
+            } : null,
             socialUrl: input.socialUrl,
             socials: input.socials || [],
             social_sweep: input.socialSweep
@@ -313,12 +364,34 @@ export async function buildDealBrandAudit(input: {
             refinement_note: input.refineNote || "",
             previous_audit: input.previous || null,
             research: { ...input.research, text: input.research.text.slice(0, 18_000) },
-          }).slice(0, 30_000),
+          }).slice(0, 30_000), visuals),
         },
       ],
-      { response_format: { type: "json_object" }, temperature: 0.25, max_tokens: 3600 },
+      { response_format: { type: "json_object" }, model: AUDIT_MODEL, temperature: 0.2, max_tokens: 5000 },
     );
-    const data = objectFrom(text);
+    let data = objectFrom(text);
+
+    // A second reading, as a reviewer: every claim is checked against the
+    // evidence and the screenshots, and anything that is not true for this
+    // company, its industry and today's standards is corrected before anyone
+    // sees the audit.
+    try {
+      const review = await chatComplete(
+        [
+          { role: "system", content: [
+            system,
+            "You are now the reviewing partner. Check the draft audit below against the evidence and screenshots. Correct any score, finding, or sentence that is untrue, overstated, understated, generic, or contradicted by the measured signals or by what the screenshots show. Remove claims the evidence cannot support. Make sure the context and severity reflect what this specific company needs. Return the full corrected audit as the same JSON shape.",
+          ].join("\n") },
+          { role: "user", content: withScreenshots(JSON.stringify({ draft_audit: data, measured_signals: visuals?.signals || null, research_summary: { title: input.research.title, description: input.research.description, sources: input.research.sources } }).slice(0, 30_000), visuals) },
+        ],
+        { response_format: { type: "json_object" }, model: AUDIT_MODEL, temperature: 0.1, max_tokens: 5000 },
+      );
+      const reviewed = objectFrom(review.text);
+      if (Array.isArray(reviewed.scores) && reviewed.scores.length) data = reviewed;
+    } catch {
+      // The first reading stands if the review cannot run.
+    }
+    data = cleanDeep(data);
     const sourceUrls = new Set([
       input.targetUrl,
       ...input.research.sources,
@@ -400,11 +473,15 @@ export async function buildDealBrandAudit(input: {
     }
 
     const ceiling = sweep ? socialScoreFrom(sweep) : 100;
+    const caps = measuredCaps(visuals?.signals);
     const finalScores = (scores.length ? scores : fallback.scores).map((entry) => (
       sweep && /social/i.test(entry.area) && entry.score > ceiling
-        ? { ...entry, score: ceiling, explanation: socialObservationFrom(sweep, input.brandName) }
+        ? { ...entry, score: ceiling, explanation: entry.explanation || socialObservationFrom(sweep, input.brandName) }
         : entry
-    ));
+    )).map((entry) => {
+      const cap = caps.find((candidate) => candidate.match.test(entry.area) && entry.score > candidate.max);
+      return cap ? { ...entry, score: cap.max, explanation: entry.explanation || cap.reason } : entry;
+    });
     return {
       summary: String(data.summary || fallback.summary).trim(),
       scores: finalScores,
@@ -413,10 +490,31 @@ export async function buildDealBrandAudit(input: {
       future_state: String(data.future_state || fallback.future_state).trim(),
       metrics: finalScores.map((entry) => ({ label: entry.area, value: entry.score, maximum: 100 })),
       touchpoints,
+      context: String(data.context || "").trim(),
+      verdict: String(data.verdict || "").trim(),
+      visual_review: {
+        checked: Boolean(visuals),
+        notes: visuals
+          ? String(data.visual_review || "").trim()
+          : "No browser was available to look at the site, so the visual design was judged from its code and text only. Confirm it by eye before sending.",
+        signals: visuals?.signals || null,
+      },
     };
   } catch {
     return fallback;
   }
+}
+
+/** The evidence as text, followed by the two screenshots when there are any. */
+function withScreenshots(text: string, visuals: SiteVisuals | null) {
+  if (!visuals) return text;
+  return [
+    { type: "text" as const, text },
+    { type: "text" as const, text: "Screenshot 1: the homepage on a 1440px desktop." },
+    { type: "image_url" as const, image_url: { url: visuals.desktop, detail: "high" as const } },
+    { type: "text" as const, text: "Screenshot 2: the homepage on a phone (390px wide)." },
+    { type: "image_url" as const, image_url: { url: visuals.mobile, detail: "high" as const } },
+  ];
 }
 
 // Builds the nine-slide landscape deck used by the public proposal page, the
@@ -437,8 +535,10 @@ export async function buildProposalDeck(input: {
 
   const system = [
     "You are the senior proposal strategist for CDS Space Branding Agency.",
+    PROPOSAL_VOICE,
     "Write the client-specific narrative for a nine-slide landscape proposal deck.",
-    "Return strict JSON with these keys only: cover, who_we_are, big_picture, rewind, opportunities, payoff, kickoff, cta.",
+    "Return strict JSON with these keys only, in this order: client_essence, cover, who_we_are, big_picture, rewind, opportunities, payoff, kickoff, cta.",
+    "client_essence comes first: two or three sentences on what this client stands for, who it serves, and what this engagement must protect or advance. Every other section must follow from it. It is never shown to the client.",
     "cover: {title, subtitle, prepared_for}. subtitle is a single line of positioning for this client.",
     "who_we_are: {heading, body[]} - two short paragraphs. Keep CDS Space's identity as a full-service branding agency, but tilt the second paragraph toward the solution this client wants.",
     "big_picture: {heading, intro, outcomes[{title, detail}]} - the client's desired outcome, three outcomes.",
@@ -474,9 +574,9 @@ export async function buildProposalDeck(input: {
   try {
     const { text } = await chatComplete(
       [{ role: "system", content: system }, { role: "user", content: JSON.stringify(evidence).slice(0, 28_000) }],
-      { response_format: { type: "json_object" }, temperature: 0.35, max_tokens: 3200 },
+      { response_format: { type: "json_object" }, model: WRITING_MODEL, temperature: 0.35, max_tokens: 3200 },
     );
-    return normalizeDeck(objectFrom(text), { brandName: input.brandName, focusArea: input.focusArea, title: input.title });
+    return normalizeDeck(cleanDeep(objectFrom(text)), { brandName: input.brandName, focusArea: input.focusArea, title: input.title });
   } catch {
     return fallback;
   }
@@ -562,6 +662,7 @@ export async function rewriteProposalField(input: {
       : "Return one polished paragraph unless the current field clearly needs two short paragraphs.";
   const system = [
     "You are editing exactly one field in a CDS Space client proposal.",
+    PROPOSAL_VOICE,
     "Return strict JSON with one key only: {\"value\": string}.",
     `Field: ${spec.label}. Purpose: ${spec.purpose}`,
     structure,
@@ -583,9 +684,9 @@ export async function rewriteProposalField(input: {
   };
   const { text } = await chatComplete(
     [{ role: "system", content: system }, { role: "user", content: JSON.stringify(context).slice(0, 24_000) }],
-    { response_format: { type: "json_object" }, temperature: 0.35, max_tokens: 1000 },
+    { response_format: { type: "json_object" }, model: WRITING_MODEL, temperature: 0.35, max_tokens: 1000 },
   );
-  let value = String(objectFrom(text).value || "").trim().slice(0, spec.maxCharacters);
+  let value = cleanCopy(String(objectFrom(text).value || "")).trim().slice(0, spec.maxCharacters);
   if (spec.format === "single_line") value = value.replace(/\s+/g, " ").trim();
   if (spec.format === "line_list") {
     value = value.split("\n")
@@ -614,6 +715,7 @@ export async function buildProposalEmailOpening(input: {
 
   const system = [
     "You write the opening line of an email that delivers a branding proposal to a prospective client.",
+    PROPOSAL_VOICE,
     "Return strict JSON: {\"message\": string}.",
     "Two to three sentences, at most 60 words. Warm, direct, and specific to this client.",
     "Ground every claim in the supplied deck. Never invent figures, results, timelines, or relationships.",
@@ -635,9 +737,9 @@ export async function buildProposalEmailOpening(input: {
   try {
     const { text } = await chatComplete(
       [{ role: "system", content: system }, { role: "user", content: JSON.stringify(evidence).slice(0, 12_000) }],
-      { response_format: { type: "json_object" }, temperature: 0.4, max_tokens: 400 },
+      { response_format: { type: "json_object" }, model: WRITING_MODEL, temperature: 0.4, max_tokens: 400 },
     );
-    const message = String(objectFrom(text).message || "").trim();
+    const message = cleanCopy(String(objectFrom(text).message || "")).trim();
     return message.slice(0, 1200) || fallback;
   } catch {
     return fallback;

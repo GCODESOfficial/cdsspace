@@ -1,7 +1,7 @@
 /**
  * The issues the directory looks for.
  *
- * These five are what CDS Space sells against, so they are what research
+ * These are what CDS Space sells against, so they are what research
  * records and what the list filters on. They are stored as a text[] on the
  * company row rather than being derived from the findings prose at read time,
  * so a filter over millions of rows stays an index lookup.
@@ -29,6 +29,11 @@ export const PROSPECT_ISSUES = [
     key: "non_responsive_website",
     label: "Non-responsive website",
     blurb: "No responsive viewport, so the site does not adapt to a phone screen.",
+  },
+  {
+    key: "poor_social_design",
+    label: "Poor social media designs",
+    blurb: "Social accounts exist but carry no readable profile artwork, so the feed has nothing branded to show.",
   },
   {
     key: "poorly_designed_website",
@@ -78,7 +83,7 @@ export const EMPTY_WEBSITE_SIGNALS: WebsiteSignals = {
 };
 
 /**
- * Which of the five issues this company has. Only positive evidence counts: a
+ * Which of these issues this company has. Only positive evidence counts: a
  * site that could not be read produces no website issues rather than being
  * assumed bad, because the list is used to start sales conversations.
  */
@@ -121,6 +126,14 @@ export function detectProspectIssues(input: {
   if (input.brandFindings.some((finding) => finding.status === "differs")) {
     issues.add("inconsistent_communications");
   }
+
+  // Social artwork. Only a company that actually has accounts can have poorly
+  // designed ones, and a profile the platform would not let us read stays
+  // "unchecked" rather than counting against it.
+  if (
+    input.socialCount > 0
+    && input.brandFindings.some((finding) => finding.status === "missing" && /profile/i.test(finding.area))
+  ) issues.add("poor_social_design");
 
   return PROSPECT_ISSUES.map((issue) => issue.key).filter((key) => issues.has(key));
 }
