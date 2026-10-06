@@ -1,11 +1,12 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import { NextResponse } from "next/server";
+import { NextResponse, after } from "next/server";
 import { getClientChatContext, getClientProjectThread } from "@/lib/client-project-chat";
 import {
   hydrateTeamMessages,
   TEAM_CHAT_MESSAGE_COLUMNS,
 } from "@/lib/team-chat-server";
 import { resolveChatSticker } from "@/lib/chat-sticker-server";
+import { pushToPhones, teamMemberSubjects } from "@/lib/mobile-push";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -30,13 +31,15 @@ export async function GET(req: Request) {
     .limit(200);
   if (error) return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
 
-  await db
-    .from("team_chat_client_participants")
-    .update({ last_read_at: new Date().toISOString() })
-    .eq("thread_id", threadId)
-    .eq("client_user_id", account.user.id);
-
-  const messages = await hydrateTeamMessages((data || []) as any[]);
+  // Mark read alongside loading the senders (the app polls this every few seconds).
+  const [messages] = await Promise.all([
+    hydrateTeamMessages((data || []) as any[]),
+    db
+      .from("team_chat_client_participants")
+      .update({ last_read_at: new Date().toISOString() })
+      .eq("thread_id", threadId)
+      .eq("client_user_id", account.user.id),
+  ]);
   return NextResponse.json({ ok: true, messages });
 }
 
@@ -98,21 +101,36 @@ export async function POST(req: Request) {
   if (error) return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
 
   const senderName = account.profile.full_name || account.profile.company_name || account.profile.email || "Client";
-  const { data: participants } = await db
-    .from("team_chat_participants")
-    .select("team_member_id")
-    .eq("thread_id", threadId);
-  const notificationRows = (participants || []).map((participant: any) => ({
-    recipient_id: participant.team_member_id,
-    kind: "chat_message",
-    title: `${senderName} · ${access.thread.name || "Project chat"}`,
-    body: body.slice(0, 120) || "Attachment",
-    link: `/team/chat?thread=${threadId}`,
-    thread_id: threadId,
-    actor_member_id: null,
-    actor_is_admin: false,
-  }));
-  if (notificationRows.length) await db.from("team_notifications").insert(notificationRows);
+  // The message is saved: notify the team after the response has gone.
+  after(async () => {
+    const { data: participants } = await db
+      .from("team_chat_participants")
+      .select("team_member_id")
+      .eq("thread_id", threadId);
+    const notificationRows = (participants || []).map((participant: any) => ({
+      recipient_id: participant.team_member_id,
+      kind: "chat_message",
+      title: `${senderName} · ${access.thread.name || "Project chat"}`,
+      body: body.slice(0, 120) || "Attachment",
+      link: `/team/chat?thread=${threadId}`,
+      thread_id: threadId,
+      actor_member_id: null,
+      actor_is_admin: false,
+    }));
+    if (notificationRows.length) await db.from("team_notifications").insert(notificationRows);
+    // Straight to the team's phones (and the admin's, when they are in the chat).
+    const memberIds = (participants || []).map((participant: any) => participant.team_member_id).filter(Boolean);
+    await pushToPhones(
+      teamMemberSubjects(memberIds),
+      {
+        title: `${senderName} in ${access.thread.name || "Project chat"}`,
+        body: body.slice(0, 180) || "Attachment",
+        url: `/team/chat?thread=${threadId}`,
+        tag: `thread-${threadId}`,
+      },
+      { superAdmin: Boolean(access.thread.includes_admin) },
+    );
+  });
 
   const [hydrated] = await hydrateTeamMessages([message]);
   return NextResponse.json({ ok: true, message: hydrated });

@@ -573,7 +573,7 @@ export function LetterheadStudio({
     setItems((current) => current.map((item) => item.id === active.id ? payload.letterhead : item));
   }
 
-  function useUpdatedLetterhead(letterhead: Letterhead) {
+  function applyUpdatedLetterhead(letterhead: Letterhead) {
     setActive(letterhead);
     setItems((current) => current.map((item) => item.id === letterhead.id ? letterhead : item));
   }
@@ -588,7 +588,7 @@ export function LetterheadStudio({
     const payload = await response.json().catch(() => ({}));
     setSignatureLibraryBusy(null);
     if (!response.ok) { setError(payload.error || "The signature could not be removed."); return; }
-    useUpdatedLetterhead(payload.letterhead);
+    applyUpdatedLetterhead(payload.letterhead);
   }
 
   async function removeAllSignatures() {
@@ -599,7 +599,7 @@ export function LetterheadStudio({
     const payload = await response.json().catch(() => ({}));
     setSignatureLibraryBusy(null);
     if (!response.ok) { setError(payload.error || "The signatures could not be removed."); return; }
-    useUpdatedLetterhead(payload.letterhead);
+    applyUpdatedLetterhead(payload.letterhead);
   }
 
   function openSaveSignature(source: SignatureSaveSource) {
@@ -646,7 +646,7 @@ export function LetterheadStudio({
       if (workspaceKind === "client" && await offerClientStorageRequest(payload.code)) return;
       setError(payload.error || "The saved signature could not be added."); return;
     }
-    useUpdatedLetterhead(payload.letterhead);
+    applyUpdatedLetterhead(payload.letterhead);
   }
 
   async function deleteSavedSignature(signature: SavedSignature) {

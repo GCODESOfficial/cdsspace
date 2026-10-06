@@ -77,13 +77,30 @@ export async function verifyUser() {
   if (!user) return null;
 
   if (supabaseAdmin) {
-    const { data: profile, error } = await supabaseAdmin
-      .from("profiles")
-      .select("account_status")
-      .eq("id", user.id)
-      .maybeSingle();
-    if (error || (profile?.account_status && profile.account_status !== "active")) return null;
+    const cached = activeAccountCache.get(user.id);
+    if (!cached || cached < Date.now()) {
+      const { data: profile, error } = await supabaseAdmin
+        .from("profiles")
+        .select("account_status")
+        .eq("id", user.id)
+        .maybeSingle();
+      if (error || (profile?.account_status && profile.account_status !== "active")) {
+        activeAccountCache.delete(user.id);
+        return null;
+      }
+      if (activeAccountCache.size > 5000) activeAccountCache.clear();
+      activeAccountCache.set(user.id, Date.now() + ACTIVE_ACCOUNT_TTL_MS);
+    }
   }
 
   return { user, supabase };
 }
+
+// Accounts recently confirmed active, so each client request doesn't re-read the
+// profile. Closing an account also revokes its sessions, so this only delays
+// what those revocations already enforce, by at most the TTL.
+const ACTIVE_ACCOUNT_TTL_MS = 30_000;
+declare global {
+  var cdsActiveAccountCache: Map<string, number> | undefined;
+}
+const activeAccountCache = (globalThis.cdsActiveAccountCache ??= new Map<string, number>());

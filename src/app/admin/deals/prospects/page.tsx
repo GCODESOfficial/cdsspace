@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
+ 
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -31,7 +31,7 @@ export default function DealProspectsPage() {
     const response = await fetch("/api/admin/deals?resource=prospects", { cache: "no-store" }); const json = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(json.error || "Could not load prospects."); setProspects(json.prospects || []);
   };
-  useEffect(() => { load().catch((error) => setNotice({ tone: "error", text: error.message })).finally(() => setLoading(false)); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { load().catch((error) => setNotice({ tone: "error", text: error.message })).finally(() => setLoading(false)); }, []);  
 
   useEffect(() => {
     if (!form.id) return;

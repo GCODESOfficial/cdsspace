@@ -46,6 +46,7 @@ import {
   ContextMenuSeparator,
   ContextMenuTrigger,
 } from "@/components/ui/context-menu";
+import { isVoiceNote, isVoiceNoteCaption, VoiceNotePlayer } from "@/components/chat/VoiceNotePlayer";
 
 const EmbeddedMeetingPanel = dynamic(
   () => import("@/components/chat/EmbeddedMeetingPanel").then((module) => module.EmbeddedMeetingPanel),
@@ -758,7 +759,7 @@ export default function ClientMessagesPage() {
                                 )}
                                 <p className="mt-1 text-[10px] font-medium text-slate-500">{customSticker.title}</p>
                               </div>
-                            ) : message.text && !(message.attachmentUrl && message.text.startsWith("📎 ")) && (
+                            ) : message.text && !(message.attachmentUrl && (message.text.startsWith("📎 ") || (isVoiceNote(message.attachmentUrl, message.mimeType) && isVoiceNoteCaption(message.text)))) && (
                               <Linkified
                                 text={message.text}
                                 className="whitespace-pre-wrap break-words"
@@ -770,7 +771,9 @@ export default function ClientMessagesPage() {
                             )}
                             {!isStickerMessage && previewUrl && <LinkPreview url={previewUrl} variant={message.isMine ? "dark" : "light"} />}
                             {message.attachmentUrl && !isStickerMessage && (
-                              isImageAttachment(message.attachmentUrl) ? (
+                              isVoiceNote(message.attachmentUrl, message.mimeType) ? (
+                                <VoiceNotePlayer url={message.attachmentUrl} caption={message.text} mine={message.isMine} />
+                              ) : isImageAttachment(message.attachmentUrl) ? (
                                 <PlatformMediaViewer url={message.attachmentUrl} title={displayFileName(message)} triggerClassName="mt-2 block w-full overflow-hidden rounded-xl border border-white/20 bg-white/10">
                                   {/* eslint-disable-next-line @next/next/no-img-element */}
                                   <img src={message.attachmentUrl} alt={displayFileName(message)} className="max-h-80 w-full object-contain" />

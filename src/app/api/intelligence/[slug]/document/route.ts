@@ -4,6 +4,7 @@ import { createClient } from "@/lib/supabase/server";
 import { glashMaybeOne, glashQuery } from "@/lib/glashdb/postgres";
 import { getGlashDbServiceRoleConfig } from "@/lib/glashdb/env";
 import { requestFingerprint } from "@/lib/intelligence/security";
+import { intelligenceViewer } from "@/lib/intelligence/viewer";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -55,8 +56,7 @@ export async function GET(req: NextRequest, { params }: { params: Params }) {
   // and explicit view/download/print requests still resolve the current user.
   if (!publicLive || mode !== "preview") {
     const supabase = await createClient();
-    const { data } = await supabase.auth.getUser();
-    user = data.user;
+    user = await intelligenceViewer(supabase);
   }
   const accountAllowed = publication.access_level === "account" && Boolean(user);
   const privateAllowed = publication.access_level === "private_client" &&

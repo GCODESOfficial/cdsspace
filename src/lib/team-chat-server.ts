@@ -91,7 +91,7 @@ export async function canViewTeamThread(viewer: ChatViewer, threadId: string) {
   if (!memberId) return false;
 
   const [{ data: thread }, { data: part }] = await Promise.all([
-    db.from("team_chat_threads").select("kind, visibility").eq("id", threadId).maybeSingle(),
+    db.from("team_chat_threads").select("kind, visibility, archived_at").eq("id", threadId).maybeSingle(),
     db
       .from("team_chat_participants")
       .select("thread_id")
@@ -101,6 +101,8 @@ export async function canViewTeamThread(viewer: ChatViewer, threadId: string) {
   ]);
 
   if (!thread) return false;
+  // Archived by the super admin: hidden from the other admins; the people in it carry on.
+  if (thread.archived_at && viewer.kind === "admin") return false;
   if (part) return true;
   return thread.kind === "department" || thread.kind === "admin_broadcast" || thread.visibility === "public";
 }

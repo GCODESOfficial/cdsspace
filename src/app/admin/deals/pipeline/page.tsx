@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
+ 
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
@@ -73,7 +73,7 @@ export default function DealPipelinePage() {
     setError(lastIssue instanceof Error ? lastIssue.message : "Could not load the pipeline.");
     setLoading(false); setRefreshing(false);
   };
-  useEffect(() => { load(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { load(); }, []);  
 
   const counts = useMemo(() => {
     const tally: Record<string, number> = {};

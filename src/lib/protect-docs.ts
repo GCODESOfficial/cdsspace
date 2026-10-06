@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
+ 
 // Helpers for Protect Docs: password hashing, access check.
 
 import bcrypt from "bcryptjs";

@@ -60,6 +60,7 @@ export async function GET(req: NextRequest) {
       html,
       text,
       fromName: "CDS Space Reports",
+      dailyThread: true,
     })),
   );
   const sent = results.filter((r) => r.status === "fulfilled").length;

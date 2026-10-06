@@ -211,7 +211,7 @@ export default function AdminBrandBriefDetailPage({
         return (
             <FinanceShell hideNav title="Brand Brief" back={{ href: "/admin/brand-briefs", label: "Brand Briefs" }}>
                 <div className={`${glassCard} p-8`}>
-                    <h3 className="text-lg font-semibold text-gray-900 mb-2">Couldn't open this brief</h3>
+                    <h3 className="text-lg font-semibold text-gray-900 mb-2">Couldn&apos;t open this brief</h3>
                     <p className="text-gray-600 text-sm mb-4">{loadError}</p>
                     <Button onClick={load} className="h-10 px-4 rounded-xl">Retry</Button>
                 </div>

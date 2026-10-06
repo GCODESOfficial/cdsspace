@@ -54,12 +54,12 @@ test("notifications stay live in background and announce CDS Space", async () =>
   assert.match(teamBell, /useNotificationPulse\("team"/);
 });
 
-test("team chat creates receipts and sends immediate notification email", async () => {
+test("team chat creates receipts and notifies by push, never email", async () => {
   const route = await read("src/app/api/team/chat/messages/route.ts");
   assert.match(route, /insert into public\.team_chat_message_receipts/);
-  assert.match(route, /sendEmail/);
-  assert.match(route, /team-chat-task/);
+  assert.match(route, /sendPushToActor/);
   assert.match(route, /chat_task_post/);
+  assert.doesNotMatch(route, /sendEmail|sendOrHoldNotificationEmail/);
 });
 
 test("only the poster and the super admin see who completed a task post", async () => {

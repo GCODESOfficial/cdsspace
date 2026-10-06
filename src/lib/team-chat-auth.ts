@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
+ 
 import { getTeamSession, type TeamSession } from "@/lib/team-auth";
 import { getAdminSession } from "@/lib/admin-session";
 
@@ -50,3 +50,12 @@ export function viewerRoleTitle(v: ChatViewer): string | null {
 export function viewerIsSuperAdmin(v: ChatViewer) {
   return v.kind === "admin" && v.role === "super_admin";
 }
+
+/**
+ * The super admin has no team-member row in chat, so their read state lives in
+ * team_chat_message_receipts under this one viewer key. Threads they have never
+ * opened count only messages from the last SUPER_ADMIN_UNREAD_WINDOW_DAYS, so
+ * old history does not show up as a wall of unread messages.
+ */
+export const SUPER_ADMIN_CHAT_VIEWER_KEY = "super_admin";
+export const SUPER_ADMIN_UNREAD_WINDOW_DAYS = 7;

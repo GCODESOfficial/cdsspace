@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { NextResponse, after } from "next/server";
 import { deliverClientNotificationById } from "@/lib/notification-delivery";
 import { verifyUser } from "@/lib/admin-auth";
 import { getClientChatAdminActor } from "@/lib/client-chat-admin";
@@ -13,6 +13,8 @@ import { ADMIN_FEATURE_PERMISSION_KEYS, notifyAdminFeatureEvent } from "@/lib/ad
 import { queueAdminAlert } from "@/lib/admin-alerts";
 import { resolveChatSticker } from "@/lib/chat-sticker-server";
 import { glashMaybeOne } from "@/lib/glashdb/postgres";
+import { pushToPhones } from "@/lib/mobile-push";
+import { isRoomArchived } from "@/lib/chat-room-archive";
 
 export const dynamic = "force-dynamic";
 
@@ -37,6 +39,11 @@ export async function GET(request: Request) {
       return NextResponse.json({ error: "roomId is required" }, { status: 400 });
     }
 
+    // Archived by the super admin: hidden from other admins (the client still reads it).
+    if (admin && admin.role !== "super_admin" && (await isRoomArchived(roomId))) {
+      return NextResponse.json({ error: "This conversation is archived." }, { status: 404 });
+    }
+
     if (!admin && userSession) {
       const expectedRoomId = `client_${userSession.user.id}`;
       if (roomId !== expectedRoomId) {
@@ -44,18 +51,21 @@ export async function GET(request: Request) {
       }
     }
 
+    // Newest `limit` messages (older ones page in with `before`), returned
+    // oldest-first as before. Sorting ascending with a limit returned the
+    // oldest messages, so a long conversation never showed its latest replies.
     let query = supabaseAdmin
       .from("chat_messages")
       .select("*")
       .eq("room_id", roomId)
-      .order("created_at", { ascending: true })
+      .order("created_at", { ascending: false })
       .limit(limit);
 
     if (before) query = query.lt("created_at", before);
 
     const { data, error } = await query;
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-    return NextResponse.json({ messages: data });
+    return NextResponse.json({ messages: (data || []).reverse() });
   } catch (err) {
     console.error("GET /api/chat/messages error:", err);
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });
@@ -84,6 +94,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "roomId and message are required" }, { status: 400 });
     }
 
+
     // A browser can legitimately hold both an admin portal cookie and a client
     // dashboard session. Client surfaces opt into the client identity explicitly;
     // the room ownership check below prevents that hint from widening access.
@@ -93,6 +104,10 @@ export async function POST(request: Request) {
     }
 
     const isAdmin = !!admin && !clientActorRequested;
+    // Archived by the super admin: the other admins can't reply (the client and super admin can).
+    if (isAdmin && admin!.role !== "super_admin" && (await isRoomArchived(String(roomId)))) {
+      return NextResponse.json({ error: "This conversation is archived." }, { status: 404 });
+    }
     const senderId = isAdmin
       ? (isLegacyClientUuid(admin.id) ? admin.id : null)
       : userSession!.user.id;
@@ -248,77 +263,92 @@ export async function POST(request: Request) {
         }
       }
     } else {
-      // Internal: notify admin
-      const adminEmail = process.env.NEXT_PUBLIC_ADMIN_EMAIL?.trim().toLowerCase() || "ceo@cdsspace.pro";
-      const { data: adminProfile } = await supabaseAdmin
-        .from("profiles")
-        .select("id")
-        .eq("email", adminEmail)
-        .maybeSingle();
-      if (adminProfile?.id && isLegacyClientUuid(adminProfile.id)) {
-        const { data: raisedNotice, error: notificationError } = await supabaseAdmin.from("notifications").insert({
-          user_id: adminProfile.id,
-          type: "new_message",
-          title: "New message from client",
-          message: message.length > 100 ? message.substring(0, 100) + "..." : message,
-          link: `/chat?room=${roomId}`,
-        }).select("id").single();
-        if (raisedNotice?.id) void deliverClientNotificationById(String(raisedNotice.id));
-        if (notificationError) {
-          console.error("Admin chat notification failed:", notificationError.message);
-        }
-      }
-      const { data: senderProfile } = await supabaseAdmin
-        .from("profiles")
-        .select("full_name, company_name, email")
-        .eq("id", userSession!.user.id)
-        .maybeSingle();
-      const senderEmail = String(senderProfile?.email || userSession?.user.email || "").trim() || null;
-      const directoryClient = await glashMaybeOne<{ display_name: string | null }>(
-        `select coalesce(
-           nullif(trim(contact_person), ''),
-           nullif(trim(name), ''),
-           nullif(trim(brand_name), '')
-         ) as display_name
-         from public.clients
-         where platform_user_id::text = $1
-            or ($2 <> '' and lower(email) = lower($2))
-         order by (platform_user_id::text = $1) desc
-         limit 1`,
-        [userSession!.user.id, senderEmail || ""],
-      ).catch(() => null);
-      const senderName = String(
-        senderProfile?.full_name
-        || userSession?.user.user_metadata?.full_name
-        || directoryClient?.display_name
-        || senderProfile?.company_name
-        || userSession?.user.email
-        || "A client",
-      );
-      await notifyAdminFeatureEvent({
-        permissionKeys: ADMIN_FEATURE_PERMISSION_KEYS.messages,
-        title: `New client message from ${senderName}`,
-        body: message.length > 180 ? `${message.slice(0, 180)}…` : message,
-        link: `/admin/messages?room=${encodeURIComponent(roomId)}`,
-        eyebrow: "Sales Hub · Chat/Meet",
-        details: { Client: senderName, Channel: outboundSource === "web" ? "Client dashboard" : outboundSource },
-      });
+      // The message is saved: answer now, and tell the desk once the response
+      // has gone (profile lookups, notifications and email take several round trips).
+      after(async () => {
+        try {
+          // Internal: notify admin
+          const adminEmail = process.env.NEXT_PUBLIC_ADMIN_EMAIL?.trim().toLowerCase() || "ceo@cdsspace.pro";
+          const { data: adminProfile } = await supabaseAdmin
+            .from("profiles")
+            .select("id")
+            .eq("email", adminEmail)
+            .maybeSingle();
+          if (adminProfile?.id && isLegacyClientUuid(adminProfile.id)) {
+            const { data: raisedNotice, error: notificationError } = await supabaseAdmin.from("notifications").insert({
+              user_id: adminProfile.id,
+              type: "new_message",
+              title: "New message from client",
+              message: message.length > 100 ? message.substring(0, 100) + "..." : message,
+              link: `/chat?room=${roomId}`,
+            }).select("id").single();
+            if (raisedNotice?.id) void deliverClientNotificationById(String(raisedNotice.id));
+            if (notificationError) {
+              console.error("Admin chat notification failed:", notificationError.message);
+            }
+          }
+          const { data: senderProfile } = await supabaseAdmin
+            .from("profiles")
+            .select("full_name, company_name, email")
+            .eq("id", userSession!.user.id)
+            .maybeSingle();
+          const senderEmail = String(senderProfile?.email || userSession?.user.email || "").trim() || null;
+          const directoryClient = await glashMaybeOne<{ display_name: string | null }>(
+            `select coalesce(
+               nullif(trim(contact_person), ''),
+               nullif(trim(name), ''),
+               nullif(trim(brand_name), '')
+             ) as display_name
+             from public.clients
+             where platform_user_id::text = $1
+                or ($2 <> '' and lower(email) = lower($2))
+             order by (platform_user_id::text = $1) desc
+             limit 1`,
+            [userSession!.user.id, senderEmail || ""],
+          ).catch(() => null);
+          const senderName = String(
+            senderProfile?.full_name
+            || userSession?.user.user_metadata?.full_name
+            || directoryClient?.display_name
+            || senderProfile?.company_name
+            || userSession?.user.email
+            || "A client",
+          );
+          // Straight to the phones of everyone who answers client messages.
+          void pushToPhones([], {
+            title: senderName,
+            body: message,
+            url: `/admin/messages?room=${encodeURIComponent(roomId)}`,
+            tag: `room-${roomId}`,
+          }, { messageAdmins: true });
+          await notifyAdminFeatureEvent({
+            permissionKeys: ADMIN_FEATURE_PERMISSION_KEYS.messages,
+            title: `New client message from ${senderName}`,
+            body: message.length > 180 ? `${message.slice(0, 180)}…` : message,
+            link: `/admin/messages?room=${encodeURIComponent(roomId)}`,
+            eyebrow: "Sales Hub · Chat/Meet",
+            details: { Client: senderName, Channel: outboundSource === "web" ? "Client dashboard" : outboundSource },
+          });
 
-      // A client waiting on a reply cannot wait for the digest cycle, so the
-      // desk is emailed straight away as well.
-      queueAdminAlert({
-        kind: "client_message",
-        subject: senderName,
-        details: [
-          ["Client", senderName],
-          ["Email", senderEmail],
-          ["Channel", outboundSource === "web" ? "Client dashboard" : outboundSource],
-          ["Attachment", fileUrl ? "Yes" : null],
-        ],
-        body: message,
-        actionPath: `/admin/messages?room=${encodeURIComponent(roomId)}`,
-        actionLabel: "Open the conversation",
-        ...(senderEmail ? { replyTo: senderEmail } : {}),
+          // A client waiting on a reply cannot wait for the digest cycle, so the
+          // desk is emailed straight away as well.
+          queueAdminAlert({
+            kind: "client_message",
+            subject: senderName,
+            details: [
+              ["Client", senderName],
+              ["Email", senderEmail],
+              ["Channel", outboundSource === "web" ? "Client dashboard" : outboundSource],
+              ["Attachment", fileUrl ? "Yes" : null],
+            ],
+            body: message,
+            actionPath: `/admin/messages?room=${encodeURIComponent(roomId)}`,
+            actionLabel: "Open the conversation",
+            ...(senderEmail ? { replyTo: senderEmail } : {}),
+          });
+        } catch (notifyError) {
+          console.error("Client chat admin notification failed:", notifyError);
+        }
       });
     }
 

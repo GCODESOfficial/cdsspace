@@ -290,7 +290,7 @@ export default function TeamCompliancePortal() {
       }
     }, 850);
     return () => window.clearTimeout(timer);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+     
   }, [sopEditor, sopDirty]);
 
   useEffect(() => {
@@ -312,7 +312,7 @@ export default function TeamCompliancePortal() {
       }
     }, 750);
     return () => window.clearTimeout(timer);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+     
   }, [loanEditor, loanDirty]);
 
   useEffect(() => {
@@ -338,7 +338,7 @@ export default function TeamCompliancePortal() {
       }
     }, 750);
     return () => window.clearTimeout(timer);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+     
   }, [overnightEditor, overnightDirty]);
 
   const sopDepartmentOptions = useMemo(

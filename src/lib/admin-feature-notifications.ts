@@ -217,6 +217,9 @@ export async function notifyAdminFeatureEvent(input: {
       link: input.link,
     });
 
+    // Chat messages stay on the bell and push; they are not emailed.
+    if (input.permissionKeys === ADMIN_FEATURE_PERMISSION_KEYS.messages) return;
+
     const emailRecipients = new Map<string, string>();
     emailRecipients.set(SUPER_ADMIN_EMAIL, "CDS Space Admin");
     for (const recipient of recipients) {
@@ -244,6 +247,7 @@ export async function notifyAdminFeatureEvent(input: {
             details: input.details || {},
           }),
           transporter,
+          dailyThread: true,
           // Critical system events remain separate, detailed messages with their
           // own destination button, grouped by business area in the inbox.
           threadCategory,

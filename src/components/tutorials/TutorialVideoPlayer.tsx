@@ -1,6 +1,6 @@
 "use client";
 
-/* eslint-disable @next/next/no-img-element */
+ 
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Camera, Captions, Maximize2, Minimize2, Pause, PictureInPicture2, Play, RotateCcw, RotateCw, Volume2, VolumeX, X } from "lucide-react";

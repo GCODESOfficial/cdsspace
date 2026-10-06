@@ -34,7 +34,19 @@ const CATEGORY_SUBJECT: Record<string, string> = {
   system: "CDS Space updates",
 };
 
+// Chat and task notices are no longer emailed; they reach people by push.
+const RETIRED_CATEGORIES = ["chat", "tasks", "team-chat-task", "team-chat-message"];
+
 export async function flushNotificationEmailQueue(limit = 200, maxAgeHours?: number) {
+  // Chat and task notices queued before they stopped being emailed are retired
+  // unsent, so a backlog of them never lands in anyone's inbox.
+  await glashQuery(
+    `update public.notification_email_queue
+        set sent_at = now(), claimed_at = null, last_error = 'Retired: category is no longer emailed'
+      where sent_at is null and category = any($1::text[])`,
+    [RETIRED_CATEGORIES],
+  );
+
   // Atomically claim work so overlapping scheduler/manual runs cannot send the
   // same message twice. An abandoned claim becomes eligible again after 15 min.
   const rows = await glashQuery<QueueRow>(

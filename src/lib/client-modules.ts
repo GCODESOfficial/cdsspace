@@ -207,17 +207,17 @@ export function clientModuleForPath(dashboardPath: string): ClientModuleDefiniti
             ? dashboardPath.replace("/dashboard/documents", "/dashboard/cdrive")
             : dashboardPath;
     let matched: ClientModuleDefinition | null = null;
-    for (const module of CLIENT_MODULES) {
-        const owns = normalizedPath === module.route || normalizedPath.startsWith(`${module.route}/`);
+    for (const candidate of CLIENT_MODULES) {
+        const owns = normalizedPath === candidate.route || normalizedPath.startsWith(`${candidate.route}/`);
         if (!owns) continue;
-        if (!matched || module.route.length > matched.route.length) matched = module;
+        if (!matched || candidate.route.length > matched.route.length) matched = candidate;
     }
     return matched;
 }
 
 /** True when the client may open this dashboard path. */
 export function isClientPathVisible(dashboardPath: string, visibility: ClientModuleVisibility) {
-    const module = clientModuleForPath(dashboardPath);
-    if (!module) return true;
-    return visibility[module.key] !== false;
+    const owner = clientModuleForPath(dashboardPath);
+    if (!owner) return true;
+    return visibility[owner.key] !== false;
 }

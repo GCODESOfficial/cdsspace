@@ -4,6 +4,7 @@ import { uploadContentHubFile } from "@/lib/content-hub/upload";
 import { REMINDER_OFFSETS } from "@/lib/content-hub/shared";
 import {
   BRANDING_WOTD_BLUE,
+  brandingWordDayNumber,
   getBrandingWordDateKey,
   normalizeBrandingWord,
   pickBrandingWordForDate,
@@ -72,8 +73,18 @@ export async function getWotdWordFast(date = new Date()) {
   // Use the same used-word history and queue as Content Hub generation. The
   // dashboard therefore previews the exact word the admin automation will use,
   // instead of repeatedly falling back to the first word in the library.
+  // When days have gone by without a recorded word (nothing generated the
+  // print), step one word along the queue for each of them: otherwise every
+  // such day showed the same next word.
   const rows = await loadBrandingWords();
-  const nextWord = await loadNextBrandingWord(dateKey, rows);
+  const latest = await glashMaybeOne<{ day: string | null }>(
+    `select max(ai_meta->>'date_key') as day from public.content_items where ai_meta->>'automation' = $1`,
+    [AUTOMATION_KEY],
+  ).catch(() => null);
+  const skip = latest?.day && latest.day < dateKey
+    ? Math.max(0, brandingWordDayNumber(dateKey) - brandingWordDayNumber(latest.day) - 1)
+    : 0;
+  const nextWord = await loadNextBrandingWord(dateKey, rows, skip);
   return { date_key: dateKey, word: nextWord };
 }
 
@@ -217,7 +228,7 @@ async function loadUsedBrandingWords() {
   );
 }
 
-async function loadNextBrandingWord(dateKey: string, rows: BrandingWordLike[]) {
+async function loadNextBrandingWord(dateKey: string, rows: BrandingWordLike[], skip = 0) {
   const used = await loadUsedBrandingWords();
   const excludedWordIds = new Set(used.map((item) => item.word_id).filter((id): id is string => Boolean(id)));
   const excludedWords = new Set(used.map((item) => normalizeBrandingWord(item.word)).filter(Boolean));
@@ -230,7 +241,7 @@ async function loadNextBrandingWord(dateKey: string, rows: BrandingWordLike[]) {
     }
   }
 
-  const word = pickBrandingWordForDate(rows, dateKey, { excludedWordIds, excludedWords });
+  const word = pickBrandingWordForDate(rows, dateKey, { excludedWordIds, excludedWords, skip });
   if (!word) {
     throw new Error("All branding words have already been used. Add more words before creating another WOTD print.");
   }

@@ -24,7 +24,7 @@ export default function Footer() {
         <div>
           <div className="mb-4">
             <div className="flex items-center">
-              <Link href="/Home">
+              <Link href="/">
                 <Image
                   src="/images/cds-logo.svg"
                   alt="CDS Logo"
@@ -92,9 +92,11 @@ export default function Footer() {
                 <li>
 									<Link href="/Links">Links</Link>
 								</li>
+								{/* Logofolio is disabled (src/app/_logofolio).
 								<li>
 									<Link href="/logofolio">Logofolio</Link>
 								</li>
+								*/}
               </ul>
             </div>
 

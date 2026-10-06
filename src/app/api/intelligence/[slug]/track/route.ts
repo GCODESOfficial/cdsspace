@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { glashMaybeOne, glashQuery } from "@/lib/glashdb/postgres";
-import { assertTrustedMutationOrigin, classifyDevice, cleanText, requestFingerprint } from "@/lib/intelligence/security";
+import { classifyDevice, cleanText, requestFingerprint } from "@/lib/intelligence/security";
 import { checkIntelligenceRateLimit } from "@/lib/intelligence/rate-limit";
+import { intelligenceViewer, trustedClientMutation } from "@/lib/intelligence/viewer";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -15,7 +16,7 @@ const EVENT_TYPES = new Set([
 type Params = Promise<{ slug: string }>;
 
 export async function POST(req: NextRequest, { params }: { params: Params }) {
-  if (!assertTrustedMutationOrigin(req)) return NextResponse.json({ ok: false, error: "Untrusted request origin" }, { status: 403 });
+  if (!(await trustedClientMutation(req))) return NextResponse.json({ ok: false, error: "Untrusted request origin" }, { status: 403 });
   const fingerprint = requestFingerprint(req);
   const rate = checkIntelligenceRateLimit(`track:${fingerprint}`, 120, 60_000);
   if (!rate.allowed) return NextResponse.json({ ok: false, error: "Too many events" }, { status: 429 });
@@ -35,7 +36,7 @@ export async function POST(req: NextRequest, { params }: { params: Params }) {
   if (!post) return NextResponse.json({ ok: false, error: "Publication not found" }, { status: 404 });
 
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const user = await intelligenceViewer(supabase);
   const now = Date.now();
   const bucket = Math.floor(now / (30 * 60 * 1000));
   const dedupeKey = eventType === "view" ? `${post.id}:${fingerprint}:view:${bucket}` : null;

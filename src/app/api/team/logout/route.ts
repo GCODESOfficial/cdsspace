@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
+ 
 import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { TEAM_SESSION_COOKIE, forgetCachedTeamSession } from "@/lib/team-auth";

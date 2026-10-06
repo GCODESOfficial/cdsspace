@@ -18,7 +18,7 @@
  * re-run (or overlapping cron tick) never double-sends.
  */
 import { NextRequest, NextResponse } from "next/server";
-import { emailFrom, createEmailTransport, EMAIL_MODE } from "@/lib/email-from";
+import { emailFrom, createEmailTransport, dailyThreadHeaders, EMAIL_MODE } from "@/lib/email-from";
 import { brandedEmailHtml } from "@/lib/email-template";
 import { glashQuery } from "@/lib/glashdb/postgres";
 import { notifyTeamMember } from "@/lib/notify-team";
@@ -115,7 +115,8 @@ export async function GET(req: NextRequest) {
         .sendMail({
           from: emailFrom("CDS Space Content Hub"),
           to: r.publisher_email,
-          subject: title,
+          // Joins the publisher's conversation for the day.
+          ...dailyThreadHeaders(r.publisher_email),
           html: reminderHtml,
           attachments: emailAttachmentsFor(reminderHtml),
         })

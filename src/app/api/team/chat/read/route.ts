@@ -1,7 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase";
-import { getChatViewer, viewerMemberId } from "@/lib/team-chat-auth";
+import { getChatViewer, SUPER_ADMIN_CHAT_VIEWER_KEY, viewerIsSuperAdmin, viewerMemberId } from "@/lib/team-chat-auth";
 import { glashQuery } from "@/lib/glashdb/postgres";
 
 export const runtime = "nodejs";
@@ -13,10 +13,30 @@ export async function POST(req: Request) {
     return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
   }
   const memberId = viewerMemberId(viewer);
-  if (!memberId) return NextResponse.json({ ok: true }); // super admin has no per-thread read state
-
   const { threadId } = await req.json().catch(() => ({}));
   if (!threadId) return NextResponse.json({ ok: false, error: "threadId required" }, { status: 400 });
+
+  // The super admin has no participant row: record their read state as
+  // receipts under one viewer key (it also gives senders their read ticks).
+  if (!memberId) {
+    if (!viewerIsSuperAdmin(viewer)) return NextResponse.json({ ok: true });
+    try {
+      await glashQuery(
+        `insert into public.team_chat_message_receipts (message_id, thread_id, viewer_key, viewer_kind, team_member_id, delivered_at, read_at, last_seen_at)
+         select m.id, m.thread_id, $2, 'admin', null, coalesce(m.sent_at, m.created_at), $3::timestamptz, $3::timestamptz
+         from public.team_chat_messages m
+         where m.thread_id = $1
+           and m.sender_is_admin is not true
+           and m.deleted_at is null
+         on conflict (message_id, viewer_key)
+         do update set read_at = coalesce(public.team_chat_message_receipts.read_at, excluded.read_at), last_seen_at = excluded.last_seen_at`,
+        [threadId, SUPER_ADMIN_CHAT_VIEWER_KEY, new Date().toISOString()],
+      );
+    } catch (error) {
+      return NextResponse.json({ ok: false, error: error instanceof Error ? error.message : "Could not mark read" }, { status: 500 });
+    }
+    return NextResponse.json({ ok: true });
+  }
 
   const db = supabaseAdmin as any;
   const now = new Date().toISOString();

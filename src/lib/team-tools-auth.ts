@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
+ 
 // Shared auth shim used by the ported team tools (cDocs, cMeet, cSign,
 // Protect Docs, cResume). Treats super-admin and team_session cookies
 // as one "actor" with a common shape.

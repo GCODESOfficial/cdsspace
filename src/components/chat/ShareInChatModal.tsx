@@ -269,7 +269,7 @@ export function ShareInChatModal({
               </span>
               <span className="min-w-0">
                 <span className="block text-[14px] font-semibold text-[#0D1B39]">A single team member</span>
-                <span className="block text-[12px] text-gray-500">Send it to one person's DM</span>
+                <span className="block text-[12px] text-gray-500">Send it to one person&apos;s DM</span>
               </span>
             </button>
           </div>

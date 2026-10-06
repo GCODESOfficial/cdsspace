@@ -24,7 +24,7 @@ export async function getClientProjectThread(
       .maybeSingle(),
     db
       .from("team_chat_threads")
-      .select("id, name, kind, project_id, includes_admin, is_announcement_only, created_at")
+      .select("id, name, kind, project_id, includes_admin, is_announcement_only, created_at, archived_at")
       .eq("id", threadId)
       .maybeSingle(),
   ]);

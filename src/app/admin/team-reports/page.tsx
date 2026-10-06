@@ -92,7 +92,7 @@ export default function TeamReportsPage() {
     }
   }, [date]);
 
-  useEffect(() => { load(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, []);
+  useEffect(() => { load();   }, []);
 
   const runAction = useCallback(async (action: string, memberId: string, label: string) => {
     setActing(`${action}:${memberId}`);

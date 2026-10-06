@@ -77,7 +77,7 @@ export function MeetingModeModal({
     return () => window.removeEventListener("keydown", onKey);
   }, [open, busy, onClose]);
 
-  const minSlot = useMemo(defaultSlot, []);
+  const minSlot = useMemo(() => defaultSlot(), []);
 
   if (!open) return null;
 

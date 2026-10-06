@@ -4,6 +4,7 @@ import { readClientDashboardSessionUser } from "@/lib/client-dashboard-session";
 import { publicDeliveryPath } from "@/lib/delivery-links";
 import { glashQuery } from "@/lib/glashdb/postgres";
 import { absolutePublicUrl } from "@/lib/public-site";
+import { signedClientFileQuery } from "@/lib/client-file-links";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -126,6 +127,8 @@ export async function GET() {
           position: Number(file.position || 0),
           created_at: file.created_at,
           download_url: `/api/client/brand-identities/files/${encodeURIComponent(file.id)}`,
+          // For the mobile app, whose in-app browser has no session: valid for 15 minutes.
+          signed_download_url: `/api/client/brand-identities/files/${encodeURIComponent(file.id)}?${signedClientFileQuery(user.id, file.id)}`,
         })),
       })),
     });

@@ -161,6 +161,9 @@ export async function GET(
     .slice(0, 160) || "delivery-file";
   const mimeType = effectiveMimeType(file.mime_type, data.type, file.file_name);
   const disposition = !download && canRenderInline(mimeType) ? "inline" : "attachment";
+  // Browsers refuse to run their built-in PDF viewer under a sandbox CSP, so
+  // PDFs (already scanned for active content at upload) only restrict framing.
+  const isPdf = mimeType.split(";", 1)[0].trim().toLowerCase() === "application/pdf";
   return new NextResponse(data.stream(), {
     status: 200,
     headers: {
@@ -168,7 +171,7 @@ export async function GET(
       "Content-Length": String(data.size),
       "Content-Disposition": `${disposition}; filename="${safeAsciiName}"; filename*=UTF-8''${encodeURIComponent(file.file_name)}`,
       "Cache-Control": "private, no-store, max-age=0",
-      "Content-Security-Policy": "default-src 'none'; sandbox",
+      "Content-Security-Policy": isPdf ? "frame-ancestors 'self'" : "default-src 'none'; sandbox",
       "Referrer-Policy": "no-referrer",
       "X-Content-Type-Options": "nosniff",
     },

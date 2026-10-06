@@ -135,8 +135,8 @@ export function BrandBriefShareModal({
                 )}
 
                 <div className="px-6 py-4 bg-gray-50 border-t border-gray-100 text-[11px] text-gray-500 leading-relaxed">
-                    Clients don't need an account. They'll land on a branded form, fill it in, and submit -
-                    you'll see their answers in the Brand Briefs list the moment they're done.
+                    Clients don&apos;t need an account. They&apos;ll land on a branded form, fill it in, and submit -
+                    you&apos;ll see their answers in the Brand Briefs list the moment they&apos;re done.
                 </div>
             </div>
 

@@ -331,7 +331,7 @@ export default function ObjectiveTest({
                     className="mt-0.5 h-5 w-5 accent-brand-blue"
                   />
                   <span className="text-sm font-medium text-brand-navy">
-                    I understand the rules and I'm ready to start. The 10-minute timer begins the moment I tap “Begin”.
+                    I understand the rules and I&apos;m ready to start. The 10-minute timer begins the moment I tap “Begin”.
                   </span>
                 </label>
 
@@ -513,7 +513,7 @@ export default function ObjectiveTest({
                 className="mt-5 w-full rounded-full px-6 py-3 text-sm font-bold text-white"
                 style={{ backgroundImage: "linear-gradient(146deg, #0035C1 8.83%, #0575FF 86.3%)" }}
               >
-                I'll stay - resume test
+                I&apos;ll stay - resume test
               </button>
             </motion.div>
           </motion.div>

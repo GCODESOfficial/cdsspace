@@ -23,8 +23,8 @@ interface TeamMember {
 const teamMembers: TeamMember[] = [
     {
         name: "Chris John",
-        role: "Chief Executive Officer",
-        description: "Chief Executive Officer of CDS Space, leading brand and product direction. Focused on quality, clarity, and setting the standard.",
+        role: "CEO/Managing Director",
+        description: "CEO and Managing Director of CDS Space, setting the company's direction and steering brand, product, and growth. Focused on quality, clarity, and setting the standard.",
         image: "/optimized/about/chris-john.webp",
         socials: {
             x: "https://x.com/thechrisjohn_",
@@ -35,13 +35,20 @@ const teamMembers: TeamMember[] = [
     },
     {
         name: "Lucy Monday",
-        role: "Managing Director",
-        description: "Lucy leads the agency with a focus on vision and operational excellence. She ensures we stay true to our mission while scaling our impact globally.",
+        role: "General Manager",
+        description: "Lucy runs the agency's day-to-day operations, keeping teams, timelines, and client delivery running smoothly. She ensures we stay true to our mission while scaling our impact globally.",
         image: "/about/lucy.png",
         socials: {
             linkedin: "https://www.linkedin.com/in/lucy-monday-705711190/",
             facebook: "https://www.facebook.com/monday.lucy.3",
         },
+    },
+    {
+        name: "Godsgift Etuk",
+        role: "CTO/Chief Strategist",
+        description: "Godsgift sets the technology vision and long-term strategy for CDS Space. Shapes how we build and scale, aligning every product decision with our growth goals.",
+        image: "/optimized/about/godsgift-etuk.svg",
+        socials: { x: "https://x.com/GCODES_official" },
     },
     {
         name: "Ayomide Ajayi",
@@ -56,13 +63,6 @@ const teamMembers: TeamMember[] = [
         description: "Honest focuses on product clarity and outcomes. Moves fast with clear direction, slows on key decisions. Obsessed with details.",
         image: "/optimized/about/honest-ernest.webp",
         socials: { x: "https://x.com/oneststyles" },
-    },
-    {
-        name: "Godsgift Etuk",
-        role: "Chief Software Developer",
-        description: "Godsgift leads the technical implementation, ensuring every pixel-perfect design is matched by robust, high-performance code.",
-        image: "/optimized/about/godsgift-etuk.webp",
-        socials: { x: "https://x.com/GCODES_official" },
     },
     {
         name: "Edidiong Esuene",

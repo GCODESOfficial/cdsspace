@@ -112,7 +112,7 @@ export default function DealProposalsPage() {
     // ?proposal=<id> lets other surfaces (a kickoff booking on the consultation
     // list, for one) link straight to the proposal they are talking about.
     const requested = new URLSearchParams(window.location.search).get("proposal") || "";
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+     
     const requestedExists = (json.proposals || []).some((item: any) => item.id === requested);
     if (requestedExists) { setSelectedId(requested); setDetailOpen(true); }
   };
@@ -144,7 +144,7 @@ export default function DealProposalsPage() {
   };
   useEffect(() => {
     load().catch((error) => setNotice({ tone: "error", text: error.message })).finally(() => setLoading(false));
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, []);  
 
   useEffect(() => {
     if (chatContextApplied.current) return;

@@ -1,6 +1,6 @@
 "use client";
 
-/* eslint-disable @next/next/no-img-element */
+ 
 
 import { useEffect, useState } from "react";
 import { Shield, Lock, FileText, Loader2, Plus, Search, Trash2, Download, Eye, X as XIcon, FileKey, Paperclip } from "lucide-react";

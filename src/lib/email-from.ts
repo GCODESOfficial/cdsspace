@@ -65,6 +65,23 @@ export function notificationThreadRoot(recipientEmail: string, category: string)
 }
 
 /**
+ * One inbox conversation per recipient per day (Lagos time).
+ *
+ * Mail apps only group messages that share a subject and a thread reference,
+ * so every notification to a person on the same day gets the same dated
+ * subject and points at the same root. The day's emails then open as one
+ * thread instead of a row each. Each message keeps its own heading and body.
+ */
+export function dailyThreadHeaders(recipientEmail: string, now = new Date()) {
+  const day = now.toLocaleDateString("en-CA", { timeZone: "Africa/Lagos" });
+  const label = now.toLocaleDateString("en-GB", {
+    timeZone: "Africa/Lagos", weekday: "short", day: "numeric", month: "short", year: "numeric",
+  });
+  const root = notificationThreadRoot(recipientEmail, `day-${day}`);
+  return { subject: `CDS Space updates \u00b7 ${label}`, references: root, inReplyTo: root };
+}
+
+/**
  * Gmail transport authenticated by the linked account (EMAIL_USER/EMAIL_PASS).
  *
  * The explicit timeouts matter on serverless hosts: without them a blocked/slow
@@ -112,6 +129,8 @@ export interface SendEmailInput {
   threadCategory?: string;
   /** @deprecated Use threadCategory. */
   digestCategory?: string;
+  /** Group into the recipient's conversation for the day. Never for sign-in codes. */
+  dailyThread?: boolean;
 }
 
 function configuredEmailModes(): EmailMode[] {
@@ -250,17 +269,18 @@ export async function sendEmail(input: SendEmailInput): Promise<void> {
     ...(input.html?.includes(`cid:${EMAIL_LOGO_CID}`) ? [emailLogoAttachment()] : []),
     ...(input.attachments || []),
   ];
+  const daily = input.dailyThread ? dailyThreadHeaders(input.to) : null;
   const mail = {
     from,
     to: input.to,
-    subject: input.subject,
+    subject: daily?.subject ?? input.subject,
     html: input.html,
     text: input.text,
     replyTo: input.replyTo,
     attachments: attachments.length ? attachments : undefined,
     messageId: input.messageId,
-    references: input.references,
-    inReplyTo: input.inReplyTo,
+    references: daily?.references ?? input.references,
+    inReplyTo: daily?.inReplyTo ?? input.inReplyTo,
     date: input.date,
   };
 

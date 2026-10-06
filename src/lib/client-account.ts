@@ -180,7 +180,9 @@ export async function ensureClientProfile(user: User): Promise<ClientProfile> {
     });
     const createdAt = profile.created_at ? new Date(profile.created_at).getTime() : 0;
     if (createdAt && Date.now() - createdAt <= 24 * 60 * 60 * 1000) {
-      await notifyAdminOfNewClient(profile).catch((notificationError) => {
+      // Not awaited: this runs on every account read for a day after signup and
+      // mustn't hold up the client's request (it skips when already sent).
+      void notifyAdminOfNewClient(profile).catch((notificationError) => {
         console.error("[client-signup] admin notification failed", notificationError);
       });
     }

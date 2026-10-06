@@ -55,7 +55,7 @@ export default async function Image({ params }: { params: Params }) {
     return new ImageResponse(
       (
         <div style={{ display: "flex", width: "100%", height: "100%" }}>
-          {/* eslint-disable-next-line @next/next/no-img-element */}
+          { }
           <img src={resolved.hero} alt="" width={OG_SIZE.width} height={OG_SIZE.height} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
         </div>
       ),

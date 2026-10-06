@@ -1,0 +1,27 @@
+import { NextRequest, NextResponse } from "next/server";
+import { consumeHandoffCode } from "@/lib/mobile-handoff";
+import { safeClientPath } from "@/lib/client-account";
+import { setClientDashboardSessionOnResponse } from "@/lib/client-dashboard-session";
+import { glashMaybeOne } from "@/lib/glashdb/postgres";
+import { absoluteApplicationUrl } from "@/lib/public-site";
+
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+
+// Opened in the app's in-app browser: spends the code, signs this browser in as
+// the client (the normal web dashboard session) and continues to the page.
+export async function GET(request: NextRequest) {
+  const spent = await consumeHandoffCode("web_session", request.nextUrl.searchParams.get("code"));
+  if (!spent) return NextResponse.redirect(absoluteApplicationUrl("/login?error=session_expired", request));
+
+  const profile = await glashMaybeOne<{ account_status: string }>(
+    "select account_status from public.profiles where id = $1::uuid limit 1",
+    [spent.user_id],
+  );
+  if (profile?.account_status !== "active") return NextResponse.redirect(absoluteApplicationUrl("/login?account=closed", request));
+
+  // The public origin, not request.url: behind the proxy that is the internal
+  // address (https://localhost:3000), which the phone cannot reach.
+  const target = absoluteApplicationUrl(safeClientPath(spent.target_path, "/dashboard"), request);
+  return setClientDashboardSessionOnResponse(NextResponse.redirect(target), { id: spent.user_id, email: spent.email });
+}

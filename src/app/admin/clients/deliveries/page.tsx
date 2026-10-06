@@ -246,8 +246,6 @@ export default function ClientDeliveriesPage() {
     [data?.deliveries, draftId],
   );
 
-  const canAddRecipients = deliveryType === "design";
-
   function clearSelectedCover() {
     setCoverFile(null);
     setCoverPreviewUrl("");
@@ -276,7 +274,7 @@ export default function ClientDeliveriesPage() {
     const unique = Array.from(new Set(values.filter(Boolean)));
     const primary = unique[0] || "";
     setRecipient(primary);
-    setExtraRecipients(canAddRecipients ? unique.slice(1) : []);
+    setExtraRecipients(unique.slice(1));
     if (!newProjectClient && primary) setNewProjectClient(primary);
   }
 
@@ -384,10 +382,6 @@ export default function ClientDeliveriesPage() {
         setNotice({ tone: "error", text: "Choose at least one receiving client." });
         return;
       }
-      if (deliveryType === "brand_identity" && extras.length) {
-        setNotice({ tone: "error", text: "A brand identity can only go to its single project owner." });
-        return;
-      }
       if (!coverFile && !editingDelivery?.cover_version) {
         setNotice({ tone: "error", text: "Upload a delivery cover before sending this handover." });
         return;
@@ -417,7 +411,7 @@ export default function ClientDeliveriesPage() {
       if (includeCover && coverFile) payload.set("cover_image", coverFile, coverFile.name);
       if (includeRemovals) removedFileIds.forEach((id) => payload.append("remove_file_id", id));
       if (!editingPublished && recipient) payload.append("client_reference", recipient);
-      if (!editingPublished && canAddRecipients) extras.forEach((value) => payload.append("client_reference", value));
+      if (!editingPublished) extras.forEach((value) => payload.append("client_reference", value));
       const response = await fetch("/api/admin/clients/deliveries", { method: "POST", body: payload });
       const json = await response.json().catch(() => ({})) as DeliveryMutationResponse;
       if (!response.ok) {
@@ -735,11 +729,13 @@ export default function ClientDeliveriesPage() {
             ) : (
               <div className="text-xs font-semibold text-gray-600 lg:col-span-2">
                 <div className="mb-1.5 flex items-center justify-between gap-3">
-                  <span>Receiving client{canAddRecipients ? "s" : ""}</span>
-                  {canAddRecipients && <span className="font-normal text-gray-400">Select one or multiple clients</span>}
+                  <span>Receiving clients</span>
+                  <span className="font-normal text-gray-400">Select one or multiple clients</span>
                 </div>
-                <ClientRecipientPicker options={recipientOptions} values={recipientValues} onChange={updateRecipients} multiple={canAddRecipients} />
-                {canAddRecipients && <p className="mt-2 text-[11px] font-normal text-gray-400">Each selected client receives their own copy of the same finished work. All copies are logged together.</p>}
+                <ClientRecipientPicker options={recipientOptions} values={recipientValues} onChange={updateRecipients} multiple />
+                <p className="mt-2 text-[11px] font-normal text-gray-400">{deliveryType === "brand_identity"
+                  ? "Every selected client (for example a founder and co-founders) owns this brand identity and receives their own copy. The first client is the project owner."
+                  : "Each selected client receives their own copy of the same finished work. All copies are logged together."}</p>
               </div>
             )}
             {!editingPublished && manualRecipientCount > 0 && (
@@ -750,7 +746,7 @@ export default function ClientDeliveriesPage() {
             )}
             <label className="text-xs font-semibold text-gray-600">
               Delivery type
-              <select disabled={editingPublished} value={deliveryType} onChange={(event) => { const next = event.target.value as "brand_identity" | "design"; setDeliveryType(next); if (next === "brand_identity") setExtraRecipients([]); }} className="mt-1.5 h-11 w-full rounded-xl border border-gray-200 bg-white px-3 text-sm outline-none focus:border-blue-400 disabled:cursor-not-allowed disabled:bg-gray-50 disabled:text-gray-500">
+              <select disabled={editingPublished} value={deliveryType} onChange={(event) => { const next = event.target.value as "brand_identity" | "design"; setDeliveryType(next); }} className="mt-1.5 h-11 w-full rounded-xl border border-gray-200 bg-white px-3 text-sm outline-none focus:border-blue-400 disabled:cursor-not-allowed disabled:bg-gray-50 disabled:text-gray-500">
                 <option value="design">Design deliverable</option>
                 <option value="brand_identity">Brand identity</option>
               </select>

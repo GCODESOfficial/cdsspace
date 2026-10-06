@@ -640,7 +640,7 @@ export const BannersDashboard = ({
                     <div className="space-y-1.5">
                         <h3 className="text-brand-navy text-[14px] font-black">{submittedBanners.length === 0 ? "No submitted banner orders yet" : `No ${filter.toLowerCase()} banners`}</h3>
                         <p className="text-brand-body text-[12px] font-medium opacity-50 max-w-[280px] mx-auto">
-                            We couldn't find any results for this category in your production history.
+                            We couldn&apos;t find any results for this category in your production history.
                         </p>
                     </div>
                 </div>

@@ -4,6 +4,7 @@ import { getClientChatAdminActor } from "@/lib/client-chat-admin";
 import { supabaseAdmin } from "@/lib/supabase";
 import { dealTagsForEmails, type DealClientTag } from "@/lib/deal-client-tags";
 import { glashQuery } from "@/lib/glashdb/postgres";
+import { archivedRooms } from "@/lib/chat-room-archive";
 
 export const dynamic = "force-dynamic";
 
@@ -238,7 +239,13 @@ export async function GET() {
         (a, b) => new Date(b.lastMessageAt).getTime() - new Date(a.lastMessageAt).getTime(),
       );
 
-      return NextResponse.json({ rooms: tagged });
+      // Conversations the super admin archived: theirs under Archived, gone for other admins.
+      const archived = await archivedRooms();
+      const visible = admin!.role === "super_admin"
+        ? tagged.map((room) => (archived.has(room.roomId) ? { ...room, archivedAt: archived.get(room.roomId) } : room))
+        : tagged.filter((room) => !archived.has(room.roomId));
+
+      return NextResponse.json({ rooms: visible });
     }
 
     // Client: still just their own internal room.

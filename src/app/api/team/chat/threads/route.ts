@@ -1,14 +1,21 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { NextResponse } from "next/server";
 import { randomUUID } from "crypto";
-import { getChatViewer, viewerIsSuperAdmin, viewerMemberId } from "@/lib/team-chat-auth";
+import {
+  getChatViewer,
+  SUPER_ADMIN_CHAT_VIEWER_KEY,
+  SUPER_ADMIN_UNREAD_WINDOW_DAYS,
+  viewerIsSuperAdmin,
+  viewerMemberId,
+} from "@/lib/team-chat-auth";
 import { describeTeamMessage, getTeamChatDb, getViewerPayload } from "@/lib/team-chat-server";
+import { glashQuery } from "@/lib/glashdb/postgres";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const THREAD_COLUMNS =
-  "id, kind, name, department, includes_admin, visibility, description, rules, invite_code, is_announcement_only, is_voice_room, is_voice_channel, pinned_message_id, project_id, created_at, updated_at";
+  "id, kind, name, department, includes_admin, visibility, description, rules, invite_code, is_announcement_only, is_voice_room, is_voice_channel, pinned_message_id, project_id, created_at, updated_at, archived_at";
 
 // GET - list threads the viewer can see, newest-activity first.
 //   - Super Admin: sees all Group/Dept/Broadcast threads, plus Direct threads involving an admin.
@@ -60,8 +67,12 @@ export async function GET() {
 
   let query = db
     .from("team_chat_threads")
-    .select("id, kind, name, department, includes_admin, visibility, description, rules, invite_code, is_announcement_only, is_voice_room, is_voice_channel, pinned_message_id, project_id, created_at, updated_at")
+    .select(THREAD_COLUMNS)
     .order("created_at", { ascending: false });
+
+  // Archived by the super admin: hidden from the other admins (admin portal);
+  // the people in it still have it. The super admin gets it marked archived_at.
+  if (viewer.kind === "admin" && !isSuperAdmin) query = query.is("archived_at", null);
 
   if (threadIdFilter) {
     query = query.in("id", threadIdFilter);
@@ -80,6 +91,9 @@ export async function GET() {
   const latest: Record<string, any> = {};
   const unread: Record<string, number> = {};
   const participantNames: Record<string, string> = {};
+  // Direct threads: the other person's member id and photo, for the chat's avatar.
+  const peerIds: Record<string, string> = {};
+  const avatarById: Record<string, string> = {};
 
   if (threadIds.length) {
     const [lastMsgsRes, partsRes] = await Promise.all([
@@ -107,9 +121,10 @@ export async function GET() {
     ) as string[];
     const nameById: Record<string, string> = {};
     if (memberIds.length) {
-      const { data: members } = await db.from("team_members").select("id, full_name").in("id", memberIds);
+      const { data: members } = await db.from("team_members").select("id, full_name, avatar_url").in("id", memberIds);
       (members || []).forEach((m: any) => {
         if (m.full_name) nameById[m.id] = m.full_name;
+        if (m.avatar_url) avatarById[m.id] = m.avatar_url;
       });
     }
 
@@ -119,16 +134,43 @@ export async function GET() {
         const parts = threadParts.filter((p: any) => p.thread_id === t.id);
         if (isSuperAdmin) {
           const other = parts.find((p: any) => nameById[p.team_member_id]);
-          if (other) participantNames[t.id] = nameById[other.team_member_id];
+          if (other) {
+            participantNames[t.id] = nameById[other.team_member_id];
+            peerIds[t.id] = other.team_member_id;
+          }
         } else {
           const other = parts.find((p: any) => p.team_member_id !== memberId && nameById[p.team_member_id]);
-          if (other) participantNames[t.id] = nameById[other.team_member_id];
-          else if (t.includes_admin) participantNames[t.id] = "Super admin";
+          if (other) {
+            participantNames[t.id] = nameById[other.team_member_id];
+            peerIds[t.id] = other.team_member_id;
+          } else if (t.includes_admin) participantNames[t.id] = "Super admin";
         }
       }
     });
 
-    // Unread for team members (admins: skip)
+    // Unread for the super admin: messages from others since their last read
+    // of each thread (receipts under one viewer key), at most a week back.
+    if (isSuperAdmin && !memberId) {
+      const reads = await glashQuery<{ thread_id: string; last_read: string | null }>(
+        `select thread_id, max(read_at) as last_read
+           from public.team_chat_message_receipts
+          where viewer_key = $1 and thread_id = any($2::uuid[]) and read_at is not null
+          group by thread_id`,
+        [SUPER_ADMIN_CHAT_VIEWER_KEY, threadIds],
+      ).catch(() => []);
+      const lastRead: Record<string, number> = {};
+      reads.forEach((r) => {
+        if (r.last_read) lastRead[r.thread_id] = Date.parse(r.last_read);
+      });
+      const floor = Date.now() - SUPER_ADMIN_UNREAD_WINDOW_DAYS * 24 * 3600 * 1000;
+      lastMsgs.forEach((m: any) => {
+        if (m.sender_is_admin || m.deleted_at) return;
+        const since = Math.max(lastRead[m.thread_id] || 0, floor);
+        if (Date.parse(m.created_at) > since) unread[m.thread_id] = (unread[m.thread_id] || 0) + 1;
+      });
+    }
+
+    // Unread for team members and sub-admins (their own participant read state)
     if (memberId) {
       const { data: myParts } = await db
         .from("team_chat_participants")
@@ -153,6 +195,8 @@ export async function GET() {
   const hydrated = (threads || []).map((t: any) => ({
     ...t,
     name: t.name || participantNames[t.id] || null,
+    peer_member_id: peerIds[t.id] || null,
+    peer_avatar_url: peerIds[t.id] ? avatarById[peerIds[t.id]] || null : null,
     last_message: latest[t.id] || null,
     last_message_preview: latest[t.id] ? describeTeamMessage(latest[t.id]) : "No messages yet",
     unread_count: unread[t.id] || 0,
@@ -353,6 +397,14 @@ export async function PATCH(req: Request) {
     updates.visibility = String(body.visibility);
   }
   if (typeof body.is_announcement_only === "boolean") updates.is_announcement_only = body.is_announcement_only;
+  // Archive / restore: the super admin only.
+  if (typeof body.archived === "boolean") {
+    if (!viewerIsSuperAdmin(viewer)) {
+      return NextResponse.json({ ok: false, error: "Only the super admin can archive conversations." }, { status: 403 });
+    }
+    updates.archived_at = body.archived ? new Date().toISOString() : null;
+    updates.archived_by = body.archived ? viewer.kind === "admin" ? viewer.email || "super_admin" : null : null;
+  }
   if (body.generateInvite === true) updates.invite_code = randomUUID().replace(/-/g, "").slice(0, 10);
   if (body.clearInvite === true) updates.invite_code = null;
 

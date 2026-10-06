@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
+ 
 // Tiny markdown-lite parser used by both the public cDoc share page and
 // the PDF exporter. Intentionally narrow - we only support what the
 // editor's formatting buttons produce:

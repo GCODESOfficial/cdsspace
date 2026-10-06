@@ -6,7 +6,7 @@ export default function robots(): MetadataRoute.Robots {
       {
         userAgent: "*",
         allow: "/",
-        disallow: ["/admin/", "/api/", "/access/", "/mobile-blocked/"],
+        disallow: ["/admin/", "/api/", "/mobile-blocked/"],
       },
     ],
     sitemap: "https://cdsspace.pro/sitemap.xml",

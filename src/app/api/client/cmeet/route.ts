@@ -1,5 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { after, NextResponse } from "next/server";
+import { ringCallOnPhones } from "@/lib/mobile-call-push";
 import { getClientAccountState } from "@/lib/client-account";
 import { closeStaleCmeets } from "@/lib/cmeet-autoclose";
 import { agendaItemsToText, normalizeCMeetAgendaItems } from "@/lib/cmeet-agenda";
@@ -109,6 +110,7 @@ export async function POST(req: Request) {
       || resolved.account.user.email
       || "A CDS Space client";
     const clientEmail = resolved.account.profile.email || resolved.account.user.email || null;
+    after(() => ringCallOnPhones(meeting.id));
     after(async () => {
       await notifyClientCMeetStarted({
         roomCode: meeting.room_code,

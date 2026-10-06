@@ -1,5 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import { NextResponse } from "next/server";
+import { after, NextResponse } from "next/server";
+import { cancelCallOnPhones, ringCallOnPhones } from "@/lib/mobile-call-push";
 import { supabaseAdmin } from "@/lib/supabase";
 import { getTeamSession } from "@/lib/team-auth";
 import { getAdminSession } from "@/lib/admin-session";
@@ -73,6 +74,8 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ code: 
         { meeting_id: meeting.id, team_member_id: team.id, joined_at: new Date().toISOString(), left_at: null },
         { onConflict: "meeting_id,team_member_id" }
       );
+    // Answered here: stop it ringing on this member's other phones.
+    after(() => cancelCallOnPhones(meeting.id, { subjects: [`team:${team.id}`, `admin:${team.id}`] }));
     return NextResponse.json({ ok: true });
   }
 
@@ -105,6 +108,7 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ code: 
       updates.status = "cancelled";
     }
     await db.from("team_meetings").update(updates).eq("id", meeting.id);
+    after(() => (action === "start" ? ringCallOnPhones(meeting.id) : cancelCallOnPhones(meeting.id)));
     return NextResponse.json({ ok: true });
   }
 

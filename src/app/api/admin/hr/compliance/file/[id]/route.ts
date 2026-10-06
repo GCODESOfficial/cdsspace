@@ -39,7 +39,10 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
       "Content-Disposition": `${inline ? "inline" : "attachment"}; filename="${safeDownloadName(record.file_name || "HR-document")}"`,
       "Cache-Control": "private, no-store",
       "X-Content-Type-Options": "nosniff",
-      "Content-Security-Policy": "default-src 'none'; img-src 'self' data:; style-src 'unsafe-inline'; sandbox",
+      // Browsers refuse to run their built-in PDF viewer under a sandbox CSP.
+      "Content-Security-Policy": contentType === "application/pdf"
+        ? "frame-ancestors 'self'"
+        : "default-src 'none'; img-src 'self' data:; style-src 'unsafe-inline'; sandbox",
     },
   });
 }

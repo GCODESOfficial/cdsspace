@@ -208,7 +208,7 @@ export function ClientRecipientPicker({
           </div>
 
           <div className="flex items-center justify-between border-t border-gray-100 bg-gray-50/70 px-4 py-2.5 text-[10px] font-medium text-gray-400">
-            <span>{multiple ? "First selection is the primary recipient" : "One client per Brand Identity delivery"}</span>
+            <span>{multiple ? "First selection is the primary recipient" : "Choose one client"}</span>
             <button type="button" onClick={() => setOpen(false)} className="rounded-lg px-3 py-1.5 font-bold text-[#0A4FE8] hover:bg-blue-50">
               Done
             </button>

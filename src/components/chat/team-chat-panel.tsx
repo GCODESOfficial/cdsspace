@@ -27,6 +27,9 @@ import {
   Video,
   SmilePlus,
   Palette,
+  Archive,
+  ArchiveRestore,
+  PinOff,
   Shapes,
   Reply,
   Trash2,
@@ -77,6 +80,8 @@ import {
   ContextMenuSeparator,
   ContextMenuTrigger,
 } from "@/components/ui/context-menu";
+import { isVoiceNote, isVoiceNoteCaption, VoiceNotePlayer } from "@/components/chat/VoiceNotePlayer";
+import { useChatPins } from "@/hooks/use-chat-pins";
 
 interface Thread {
   id: string;
@@ -93,6 +98,8 @@ interface Thread {
   is_voice_channel?: boolean;
   pinned_message_id?: string | null;
   project_id?: string | null;
+  /** Archived by the super admin (only they still receive it, in the admin portal). */
+  archived_at?: string | null;
   last_message: {
     id: string;
     body: string | null;
@@ -508,6 +515,11 @@ export function TeamChatPanel({
   const [threads, setThreads] = useState<Thread[]>([]);
   const [threadsLoading, setThreadsLoading] = useState(true);
   const [threadFilter, setThreadFilter] = useState<ThreadFilter>("team");
+  // Archived conversations: the super admin's alone (other admins never receive them).
+  const [showArchived, setShowArchived] = useState(false);
+  const [archiving, setArchiving] = useState(false);
+  // Pinned chats (the same pins as the app): kept at the top of this person's list.
+  const chatPins = useChatPins();
   const [selectedThread, setSelectedThread] = useState<string | null>(
     initialThreadId ?? null,
   );
@@ -628,17 +640,24 @@ export function TeamChatPanel({
 
   const currentThread =
     threads.find((thread) => thread.id === selectedThread) || null;
+  const canArchive = viewer?.kind === "admin" && !!viewer?.isSuperAdmin;
+  const archivedCount = useMemo(() => threads.filter((thread) => thread.archived_at).length, [threads]);
   const filteredThreads = useMemo(
-    () => threads.filter((thread) =>
-      threadFilter === "team" ? thread.kind === "direct" : thread.kind !== "direct",
+    () => chatPins.pinnedFirst(
+      threads.filter((thread) =>
+        showArchived
+          ? Boolean(thread.archived_at)
+          : !thread.archived_at && (threadFilter === "team" ? thread.kind === "direct" : thread.kind !== "direct"),
+      ),
+      (thread) => `team:${thread.id}`,
     ),
-    [threadFilter, threads],
+    [threadFilter, threads, showArchived, chatPins],
   );
   const directThreadCount = useMemo(
-    () => threads.filter((thread) => thread.kind === "direct").length,
+    () => threads.filter((thread) => thread.kind === "direct" && !thread.archived_at).length,
     [threads],
   );
-  const groupThreadCount = threads.length - directThreadCount;
+  const groupThreadCount = threads.length - archivedCount - directThreadCount;
   // Files/media are allowed in group spaces (department & project group chats)
   // and admin DMs, but blocked in 1-on-1 member chats. The server enforces the
   // same rule; this just hides the affordance.
@@ -785,6 +804,39 @@ export function TeamChatPanel({
         ),
       1600,
     );
+  }
+
+  // Super admin only (PATCH /api/team/chat/threads { archived }): hidden from the other
+  // admins; the people in it and the super admin carry on as usual.
+  async function toggleArchive() {
+    const thread = currentThread;
+    if (!canArchive || !thread || archiving) return;
+    const archive = !thread.archived_at;
+    if (archive) {
+      const confirmed = await appConfirm({
+        title: "Archive this conversation?",
+        message: "Other admins will no longer see it. The people in it can keep messaging, and so can you from Archived. Restore it any time.",
+        confirmLabel: "Archive",
+        destructive: true,
+      });
+      if (!confirmed) return;
+    }
+    setArchiving(true);
+    try {
+      const res = await fetch("/api/team/chat/threads", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ threadId: thread.id, archived: archive }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok || json.ok === false) throw new Error(json.error || "The conversation could not be updated.");
+      setThreads((prev) => prev.map((t) => (t.id === thread.id ? { ...t, archived_at: archive ? new Date().toISOString() : null } : t)));
+      void fetchThreads();
+    } catch (error) {
+      await appAlert(error instanceof Error ? error.message : "The conversation could not be updated.");
+    } finally {
+      setArchiving(false);
+    }
   }
 
   async function fetchThreads() {
@@ -1909,6 +1961,24 @@ export function TeamChatPanel({
               </button>
             ))}
           </div>
+          {canArchive && (archivedCount > 0 || showArchived) ? (
+            <button
+              type="button"
+              onClick={() => setShowArchived((value) => !value)}
+              aria-pressed={showArchived}
+              className={cn(
+                "mt-2 flex h-8 w-full items-center justify-center gap-1.5 rounded-lg text-[11px] font-semibold transition",
+                showArchived
+                  ? "bg-[#0A4FE8] text-white"
+                  : currentTheme.dark
+                    ? "text-slate-300 hover:bg-slate-800/70 hover:text-white"
+                    : "text-slate-500 hover:bg-slate-100 hover:text-[#0D1B39]",
+              )}
+            >
+              <Archive className="h-3.5 w-3.5" />
+              {showArchived ? "Back to conversations" : `Archived (${archivedCount})`}
+            </button>
+          ) : null}
         </div>
 
         <div className="flex-1 overflow-y-auto">
@@ -1923,7 +1993,7 @@ export function TeamChatPanel({
                 currentTheme.dark ? "text-slate-400" : "text-gray-400",
               )}
             >
-              {threadFilter === "team" ? "No direct team chats yet." : "No group chats yet."}
+              {showArchived ? "No archived conversations." : threadFilter === "team" ? "No direct team chats yet." : "No group chats yet."}
             </p>
           ) : (
             <ul className="py-1">
@@ -1966,6 +2036,9 @@ export function TeamChatPanel({
                         >
                           {threadLabel(thread)}
                         </span>
+                        {chatPins.isPinned(`team:${thread.id}`) && (
+                          <Pin className={cn("h-3 w-3 shrink-0", currentTheme.dark ? "text-slate-400" : "text-gray-400")} aria-label="Pinned" />
+                        )}
                         {thread.unread_count > 0 && (
                           <span className="shrink-0 min-w-[18px] h-[18px] px-1 rounded-full bg-[#0A4FE8] text-white text-[9px] font-bold flex items-center justify-center">
                             {thread.unread_count}
@@ -2137,6 +2210,43 @@ export function TeamChatPanel({
                   >
                     <Palette className="w-4 h-4" />
                   </button>
+                  {currentThread && (
+                    <button
+                      onClick={() => void chatPins.toggle(`team:${currentThread.id}`)}
+                      className={cn(
+                        "p-2 rounded-xl transition",
+                        currentTheme.dark
+                          ? "text-slate-300 hover:text-white hover:bg-slate-800/70"
+                          : "text-gray-500 hover:text-[#0A4FE8] hover:bg-blue-50",
+                      )}
+                      title={chatPins.isPinned(`team:${currentThread.id}`) ? "Unpin chat" : "Pin chat"}
+                      aria-label={chatPins.isPinned(`team:${currentThread.id}`) ? "Unpin chat" : "Pin chat"}
+                    >
+                      {chatPins.isPinned(`team:${currentThread.id}`) ? <PinOff className="w-4 h-4" /> : <Pin className="w-4 h-4" />}
+                    </button>
+                  )}
+                  {canArchive && (
+                    <button
+                      onClick={() => void toggleArchive()}
+                      disabled={archiving}
+                      className={cn(
+                        "p-2 rounded-xl transition disabled:opacity-50",
+                        currentTheme.dark
+                          ? "text-slate-300 hover:text-white hover:bg-slate-800/70"
+                          : "text-gray-500 hover:text-[#0A4FE8] hover:bg-blue-50",
+                      )}
+                      title={currentThread?.archived_at ? "Restore conversation" : "Archive conversation"}
+                      aria-label={currentThread?.archived_at ? "Restore conversation" : "Archive conversation"}
+                    >
+                      {archiving ? (
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                      ) : currentThread?.archived_at ? (
+                        <ArchiveRestore className="w-4 h-4" />
+                      ) : (
+                        <Archive className="w-4 h-4" />
+                      )}
+                    </button>
+                  )}
                   <div className="hidden sm:flex items-center gap-1">
                     <button
                       onClick={() => startCall("voice")}
@@ -2277,6 +2387,10 @@ export function TeamChatPanel({
                             const inlineImage =
                               message.message_type === "image" ||
                               Boolean(inlineImageMarker);
+                            // Voice notes from the mobile app: an audio attachment played in place.
+                            const voiceNote =
+                              !!message.attachment_url &&
+                              isVoiceNote(message.attachment_url, message.mime_type);
                             const sticker = getSticker(message.sticker_key);
                             const customStickerId = message.sticker_key?.startsWith(
                               "custom:",
@@ -2670,9 +2784,18 @@ export function TeamChatPanel({
                                                         : "text-[#0D1B39]",
                                                   )}
                                                 >
-                                                  <Linkified
-                                                    text={message.body || ""}
-                                                  />
+                                                  {!(voiceNote && isVoiceNoteCaption(message.body)) && (
+                                                    <Linkified
+                                                      text={message.body || ""}
+                                                    />
+                                                  )}
+                                                  {voiceNote && message.attachment_url && (
+                                                    <VoiceNotePlayer
+                                                      url={message.attachment_url}
+                                                      caption={message.body}
+                                                      mine={mine}
+                                                    />
+                                                  )}
                                                 </div>
                                                 {translatedEntries.length >
                                                   0 && (
@@ -2740,6 +2863,7 @@ export function TeamChatPanel({
                                                   );
                                                 })()}
                                                 {!inlineImage &&
+                                                  !voiceNote &&
                                                   message.attachment_url &&
                                                   (() => {
                                                     const ageMs =

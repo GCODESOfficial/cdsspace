@@ -96,13 +96,10 @@ export type AdminAlertInput = {
  * can log it, and resolves even when every send fails.
  */
 export async function sendAdminAlert(input: AdminAlertInput): Promise<number> {
-  const recipients = input.kind === "client_call"
-    ? Array.from(new Set([
-        ...adminAlertRecipients(),
-        "contact.cdsspace@gmail.com",
-        "christian.john161@gmail.com",
-      ]))
-    : adminAlertRecipients();
+  // Client messages and cMeet calls reach the desk through the admin bell and
+  // push only, so the inbox is not crowded with chat traffic.
+  if (input.kind === "client_message" || input.kind === "client_call") return 0;
+  const recipients = adminAlertRecipients();
   if (!recipients.length) return 0;
 
   const copy = KIND_COPY[input.kind];
@@ -159,6 +156,7 @@ export async function sendAdminAlert(input: AdminAlertInput): Promise<number> {
       html,
       text,
       fromName: "CDS Space Alerts",
+      dailyThread: true,
       ...(input.replyTo ? { replyTo: input.replyTo } : {}),
     })),
   );

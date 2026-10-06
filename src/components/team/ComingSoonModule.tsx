@@ -38,7 +38,7 @@ export function ComingSoonModule({
           <h2 className="text-[26px] font-bold mt-5 tracking-tight">Rolling out soon</h2>
           <p className="text-white/80 text-[14px] mt-3 max-w-lg leading-relaxed">
             The data model and APIs for this module are already wired up. The UI is being
-            refined in the next iteration - you'll see it here when it ships.
+            refined in the next iteration - you&apos;ll see it here when it ships.
           </p>
 
           <ul className="mt-8 space-y-2.5 text-[13px] text-white/85">

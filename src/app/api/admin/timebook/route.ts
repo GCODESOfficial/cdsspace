@@ -5,10 +5,10 @@ import { getAdminSession } from "@/lib/admin-session";
 import { hasPermission } from "@/lib/admin-permissions";
 import { logActivity } from "@/lib/activity-log";
 import { glashMaybeOne, glashOne, glashQuery } from "@/lib/glashdb/postgres";
-import { getTimebookOffice, saveTimebookOffice } from "@/lib/timebook-office";
-import { autoCheckoutOpenTimeEntries } from "@/lib/timebook-auto-checkout";
 import { sendEmail } from "@/lib/email-from";
 import { brandedEmailHtml } from "@/lib/email-template";
+import { getTimebookOffice, saveTimebookOffice } from "@/lib/timebook-office";
+import { autoCheckoutOpenTimeEntries } from "@/lib/timebook-auto-checkout";
 import { notifyTeamMember } from "@/lib/notify-team";
 import {
   attendanceScores,
@@ -577,6 +577,7 @@ export async function POST(req: NextRequest) {
           to: member.email,
           subject: `Your ${formatWorkMode(leave.leave_type)} leave has been ${approved ? "approved" : "declined"}`,
           html,
+          dailyThread: true,
         });
       }
     } catch {

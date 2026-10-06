@@ -10,6 +10,7 @@ import {
 } from "@/lib/auth/client-account-connections";
 import { prepareDirectOAuthUser } from "@/lib/auth/direct-oauth-user";
 import { publicSiteOrigin } from "@/lib/public-site";
+import { clearMobileOAuthCookie, mobileOAuthFailure, mobileOAuthSuccess } from "@/lib/auth/mobile-oauth";
 
 const STATE_COOKIE = "cds_google_login_state";
 const VERIFIER_COOKIE = "cds_google_login_verifier";
@@ -60,6 +61,7 @@ function cookieOptions(maxAge: number) {
 }
 
 function clearLoginCookies<T extends NextResponse>(response: T): T {
+  clearMobileOAuthCookie(response);
   response.cookies.set(STATE_COOKIE, "", cookieOptions(0));
   response.cookies.set(VERIFIER_COOKIE, "", cookieOptions(0));
   response.cookies.set(NEXT_COOKIE, "", cookieOptions(0));
@@ -164,14 +166,14 @@ export async function completeDirectGoogleLogin(request: NextRequest) {
   const verifier = request.cookies.get(VERIFIER_COOKIE)?.value || "";
   const suppliedState = request.nextUrl.searchParams.get("state") || "";
   const oauthError = request.nextUrl.searchParams.get("error");
-  if (oauthError) return clearLoginCookies(loginError(next, "google_cancelled"));
+  if (oauthError) return clearLoginCookies(mobileOAuthFailure(request, "google_cancelled") || loginError(next, "google_cancelled"));
   if (!validState(expectedState, suppliedState) || verifier.length < 43 || verifier.length > 128) {
-    return clearLoginCookies(loginError(next, "google_state_failed"));
+    return clearLoginCookies(mobileOAuthFailure(request, "google_state_failed") || loginError(next, "google_state_failed"));
   }
 
   const code = request.nextUrl.searchParams.get("code") || "";
   if (!code || code.length > 4096) {
-    return clearLoginCookies(loginError(next, "google_callback_failed"));
+    return clearLoginCookies(mobileOAuthFailure(request, "google_callback_failed") || loginError(next, "google_callback_failed"));
   }
 
   try {
@@ -187,7 +189,10 @@ export async function completeDirectGoogleLogin(request: NextRequest) {
       user,
       next,
     });
-    const payload = await finalized.clone().json().catch(() => ({})) as { next?: unknown };
+    const payload = await finalized.clone().json().catch(() => ({})) as { next?: unknown; ok?: unknown; clientUserId?: unknown; email?: unknown; error?: unknown };
+    // Started from the mobile app: hand the app a one-time code, no web session.
+    const mobile = await mobileOAuthSuccess(request, payload);
+    if (mobile) return clearLoginCookies(mobile);
     const destination = typeof payload.next === "string" ? safeOAuthNext(payload.next) : oauthFailurePage(next);
     const response = copyResponseCookies(
       finalized,
@@ -196,6 +201,6 @@ export async function completeDirectGoogleLogin(request: NextRequest) {
     return clearLoginCookies(response);
   } catch (error) {
     console.error("[client-auth] Direct Google sign-in failed", error instanceof Error ? error.message : "Unknown error");
-    return clearLoginCookies(loginError(next, "google_callback_failed"));
+    return clearLoginCookies(mobileOAuthFailure(request, "google_callback_failed") || loginError(next, "google_callback_failed"));
   }
 }

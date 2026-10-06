@@ -36,11 +36,16 @@ import {
   FileText,
   Mail,
   MessageCircleQuestion,
+  Archive,
+  ArchiveRestore,
+  PinOff,
   Cake,
   Copy,
   Check,
+  Trash2,
 } from "lucide-react";
 import { Linkified, LinkPreview, firstUrl } from "@/components/chat/message-links";
+import { useAdminSession } from "@/hooks/use-admin-session";
 import { ChatSidebarPreview } from "@/components/chat/chat-sidebar-preview";
 import { PlatformMediaViewer } from "@/components/media/PlatformMediaViewer";
 import {
@@ -59,6 +64,11 @@ import {
   type ChatStickerSelection,
   type CustomChatSticker,
 } from "@/lib/chat-stickers";
+import { isVoiceNote, isVoiceNoteCaption, VoiceNotePlayer } from "@/components/chat/VoiceNotePlayer";
+import { useChatPins } from "@/hooks/use-chat-pins";
+
+// Quick reactions shared with the mobile app's long-press menu (MessageActions.js).
+const CLIENT_CHAT_REACTIONS = ["👍", "❤️", "😂", "😮", "🙏"];
 
 const EmbeddedMeetingPanel = dynamic(
   () => import("@/components/chat/EmbeddedMeetingPanel").then((module) => module.EmbeddedMeetingPanel),
@@ -69,6 +79,8 @@ type MessageSource = "web" | "whatsapp_cloud" | "whatsapp_qr" | "instagram" | "f
 
 interface ChatRoom {
   roomId: string;
+  /** Archived by the super admin (only they still receive it). */
+  archivedAt?: string | null;
   lastMessage: string;
   lastMessageAt: string;
   unreadCount: number;
@@ -227,8 +239,14 @@ function clientBirthdaySummary(value: string | null | undefined) {
 }
 
 export function AdminChatPanel() {
+  const { session: adminSession } = useAdminSession();
+  const isSuperAdmin = adminSession?.role === "super_admin";
   const [rooms, setRooms] = useState<ChatRoom[]>([]);
   const [selectedRoom, setSelectedRoom] = useState<string | null>(null);
+  const [showArchived, setShowArchived] = useState(false);
+  const [archiving, setArchiving] = useState(false);
+  // Pinned chats (the same pins as the app): kept at the top of this admin's list.
+  const chatPins = useChatPins();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
   const [isSending, setIsSending] = useState(false);
@@ -848,6 +866,69 @@ export function AdminChatPanel() {
     }
   };
 
+  // Super admin only (POST /api/chat/rooms/archive): hidden from the other admins;
+  // the client and the super admin carry on as usual.
+  const toggleArchive = async () => {
+    const room = rooms.find((r) => r.roomId === selectedRoom);
+    if (!isSuperAdmin || !room || archiving) return;
+    const archive = !room.archivedAt;
+    if (archive) {
+      const confirmed = await appConfirm({
+        title: "Archive this conversation?",
+        message: "Other admins will no longer see it. The client can keep messaging, and so can you from Archived. Restore it any time.",
+        confirmLabel: "Archive",
+        destructive: true,
+      });
+      if (!confirmed) return;
+    }
+    setArchiving(true);
+    try {
+      const res = await fetch("/api/chat/rooms/archive", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ roomId: room.roomId, archived: archive }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json.error || "The conversation could not be updated.");
+      setRooms((current) => current.map((r) => (r.roomId === room.roomId ? { ...r, archivedAt: archive ? new Date().toISOString() : null } : r)));
+      roomsSnapshot.current = "";
+      void fetchRooms();
+    } catch (error) {
+      await appAlert(error instanceof Error ? error.message : "The conversation could not be updated.");
+    } finally {
+      setArchiving(false);
+    }
+  };
+
+  const deleteClientMessage = async (msg: ChatMessage) => {
+    if (!isSuperAdmin || msg.id.startsWith("temp_") || actionBusy) return;
+    const confirmed = await appConfirm({
+      title: "Delete this message?",
+      message: "The message and any attachment will be permanently removed for you and the client. This cannot be undone.",
+      confirmLabel: "Delete message",
+      destructive: true,
+    });
+    if (!confirmed) return;
+    setActionBusy(msg.id);
+    try {
+      const res = await fetch(`/api/chat/messages/${msg.id}/actions`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "delete" }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok || !json.ok) throw new Error(json.error || "Could not delete the message");
+      setMessages((prev) => prev.filter((item) => item.id !== msg.id));
+      if (replyingTo?.id === msg.id) setReplyingTo(null);
+      await fetchMessages();
+      await fetchRooms();
+    } catch (err) {
+      await appAlert(err instanceof Error ? err.message : "Could not delete the message");
+    } finally {
+      setActionBusy(null);
+    }
+  };
+
   const formatTime = (dateStr: string) => {
     const date = new Date(dateStr);
     return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
@@ -935,6 +1016,12 @@ export function AdminChatPanel() {
   });
 
   const selectedRoomData = rooms.find((r) => r.roomId === selectedRoom);
+  // Archived conversations: the super admin's alone (other admins never receive them).
+  const archivedCount = rooms.filter((r) => r.archivedAt).length;
+  const listedRooms = chatPins.pinnedFirst(
+    rooms.filter((r) => Boolean(r.archivedAt) === showArchived),
+    (r) => `room:${r.roomId}`,
+  );
   const selectedClient = selectedRoomData?.client || null;
   const selectedClientBirthday = clientBirthdaySummary(selectedClient?.birthday);
   const selectedClientName = selectedRoomData ? getClientName(selectedRoomData) : "Client";
@@ -977,6 +1064,21 @@ export function AdminChatPanel() {
             <PenLine className="h-3.5 w-3.5" />
             Edit welcome msg
           </button>
+          {isSuperAdmin && (archivedCount > 0 || showArchived) ? (
+            <button
+              type="button"
+              onClick={() => setShowArchived((value) => !value)}
+              aria-pressed={showArchived}
+              className={`mt-2 inline-flex h-9 w-full items-center justify-center gap-2 rounded-xl border px-3 text-[11px] font-semibold transition ${
+                showArchived
+                  ? "border-[#5BA8FF] bg-[#0A4FE8] text-white"
+                  : "border-[#344185] bg-[#222D6B] text-[#B9D9FF] hover:border-[#5BA8FF] hover:text-white"
+              }`}
+            >
+              <Archive className="h-3.5 w-3.5" />
+              {showArchived ? "Back to conversations" : `Archived (${archivedCount})`}
+            </button>
+          ) : null}
         </div>
 
         {/* Room List */}
@@ -985,12 +1087,12 @@ export function AdminChatPanel() {
             <div className="p-5 text-center text-gray-400 text-sm">
               Loading conversations...
             </div>
-          ) : rooms.length === 0 ? (
+          ) : listedRooms.length === 0 ? (
             <div className="p-5 text-center text-gray-400 text-sm">
-              No conversations yet
+              {showArchived ? "No archived conversations" : "No conversations yet"}
             </div>
           ) : (
-            rooms.map((room) => (
+            listedRooms.map((room) => (
               <button
                 key={room.roomId}
                 onClick={() => handleSelectRoom(room.roomId)}
@@ -1005,7 +1107,8 @@ export function AdminChatPanel() {
                       <span className="text-white font-medium text-sm truncate flex items-center gap-1.5">
                         {getClientName(room)}
                       </span>
-                      <span className="ms-2 shrink-0 text-xs text-gray-400">
+                      <span className="ms-2 flex shrink-0 items-center gap-1 text-xs text-gray-400">
+                        {chatPins.isPinned(`room:${room.roomId}`) && <Pin className="h-3 w-3" aria-label="Pinned" />}
                         {room.lastMessageAt
                           ? formatRoomTime(room.lastMessageAt)
                           : ""}
@@ -1108,24 +1211,53 @@ export function AdminChatPanel() {
                   ) : null}
                 </div>
               </div>
-              {selectedRoom.startsWith("client_") && (
+              {selectedRoom && (
                 <div className="ms-auto flex items-center gap-1">
                   <button
-                    onClick={() => setMeetingPrompt("voice")}
-                    disabled={!!startingCall}
-                    className="grid h-9 w-9 place-items-center rounded-xl text-gray-400 transition hover:bg-[#2a3578] hover:text-[#5BA8FF] disabled:opacity-40"
-                    title="Start audio call"
+                    onClick={() => void chatPins.toggle(`room:${selectedRoom}`)}
+                    className="grid h-9 w-9 place-items-center rounded-xl text-gray-400 transition hover:bg-[#2a3578] hover:text-[#5BA8FF]"
+                    title={chatPins.isPinned(`room:${selectedRoom}`) ? "Unpin chat" : "Pin chat"}
+                    aria-label={chatPins.isPinned(`room:${selectedRoom}`) ? "Unpin chat" : "Pin chat"}
                   >
-                    {startingCall === "voice" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Phone className="h-4 w-4" />}
+                    {chatPins.isPinned(`room:${selectedRoom}`) ? <PinOff className="h-4 w-4" /> : <Pin className="h-4 w-4" />}
                   </button>
-                  <button
-                    onClick={() => setMeetingPrompt("video")}
-                    disabled={!!startingCall}
-                    className="grid h-9 w-9 place-items-center rounded-xl text-gray-400 transition hover:bg-[#2a3578] hover:text-[#5BA8FF] disabled:opacity-40"
-                    title="Start video call"
-                  >
-                    {startingCall === "video" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Video className="h-4 w-4" />}
-                  </button>
+                  {isSuperAdmin && (
+                    <button
+                      onClick={() => void toggleArchive()}
+                      disabled={archiving}
+                      className="grid h-9 w-9 place-items-center rounded-xl text-gray-400 transition hover:bg-[#2a3578] hover:text-[#5BA8FF] disabled:opacity-40"
+                      title={selectedRoomData?.archivedAt ? "Restore conversation" : "Archive conversation"}
+                      aria-label={selectedRoomData?.archivedAt ? "Restore conversation" : "Archive conversation"}
+                    >
+                      {archiving ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : selectedRoomData?.archivedAt ? (
+                        <ArchiveRestore className="h-4 w-4" />
+                      ) : (
+                        <Archive className="h-4 w-4" />
+                      )}
+                    </button>
+                  )}
+                  {selectedRoom.startsWith("client_") && (
+                    <>
+                    <button
+                      onClick={() => setMeetingPrompt("voice")}
+                      disabled={!!startingCall}
+                      className="grid h-9 w-9 place-items-center rounded-xl text-gray-400 transition hover:bg-[#2a3578] hover:text-[#5BA8FF] disabled:opacity-40"
+                      title="Start audio call"
+                    >
+                      {startingCall === "voice" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Phone className="h-4 w-4" />}
+                    </button>
+                    <button
+                      onClick={() => setMeetingPrompt("video")}
+                      disabled={!!startingCall}
+                      className="grid h-9 w-9 place-items-center rounded-xl text-gray-400 transition hover:bg-[#2a3578] hover:text-[#5BA8FF] disabled:opacity-40"
+                      title="Start video call"
+                    >
+                      {startingCall === "video" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Video className="h-4 w-4" />}
+                    </button>
+                    </>
+                  )}
                 </div>
               )}
             </div>
@@ -1270,6 +1402,7 @@ export function AdminChatPanel() {
                               bookmarked={bookmarked}
                               onForward={() => setForwardMsg(msg)}
                               onAction={runClientMessageAction}
+                              onDelete={isSuperAdmin && !msg.deleted_at ? () => void deleteClientMessage(msg) : undefined}
                             />
                           )}
                           <ContextMenu>
@@ -1327,7 +1460,7 @@ export function AdminChatPanel() {
                                 )}
                                 <p className="mt-1 text-[10px] font-medium text-slate-400">{customSticker.title}</p>
                               </div>
-                            ) : (!msg.file_url || !msg.message.startsWith("📎 ")) && (
+                            ) : (!msg.file_url || !(msg.message.startsWith("📎 ") || (isVoiceNote(msg.file_url, msg.mime_type) && isVoiceNoteCaption(msg.message)))) && (
                               <p className="whitespace-pre-wrap break-words">
                                 {msg.deleted_at ? "Message deleted" : (
                                   <Linkified
@@ -1352,7 +1485,9 @@ export function AdminChatPanel() {
                               </div>
                             )}
                             {msg.file_url && !isStickerMessage && (
-                              isChatImageUrl(msg.file_url) ? (
+                              isVoiceNote(msg.file_url, msg.mime_type) ? (
+                                <VoiceNotePlayer url={msg.file_url} caption={msg.message} mine={isOwn} />
+                              ) : isChatImageUrl(msg.file_url) ? (
                                 <PlatformMediaViewer url={msg.file_url} title="Message visual" triggerClassName="mt-2 block w-full overflow-hidden rounded-xl border border-white/20 bg-white/10">
                                   {/* eslint-disable-next-line @next/next/no-img-element */}
                                   <img src={msg.file_url} alt="Message visual" className="max-h-80 w-full object-contain" />
@@ -1388,12 +1523,30 @@ export function AdminChatPanel() {
                             </ContextMenuTrigger>
                             <ContextMenuContent className="w-52">
                               <ContextMenuItem onClick={() => setReplyingTo(msg)}><Reply className="me-2 h-4 w-4" />Reply</ContextMenuItem>
-                              <ContextMenuItem onClick={() => void reactToClientMessage(msg, "👍")}><SmilePlus className="me-2 h-4 w-4" />React 👍</ContextMenuItem>
-                              <ContextMenuItem onClick={() => void reactToClientMessage(msg, "❤️")}><span className="me-2">❤️</span>React with love</ContextMenuItem>
+                              {/* The same five quick reactions clients have in the app. */}
+                              <div className="flex items-center justify-between gap-1 px-2 py-1.5" role="group" aria-label="React">
+                                <SmilePlus className="h-4 w-4 text-white/40" />
+                                {CLIENT_CHAT_REACTIONS.map((emoji) => (
+                                  <ContextMenuItem
+                                    key={emoji}
+                                    onClick={() => void reactToClientMessage(msg, emoji)}
+                                    className="h-8 w-8 justify-center rounded-full p-0 text-lg"
+                                    aria-label={`React ${emoji}`}
+                                  >
+                                    {emoji}
+                                  </ContextMenuItem>
+                                ))}
+                              </div>
                               <ContextMenuItem onClick={() => setForwardMsg(msg)}><Forward className="me-2 h-4 w-4" />Forward</ContextMenuItem>
                               <ContextMenuSeparator />
                               <ContextMenuItem onClick={() => void runClientMessageAction(msg, bookmarked ? "unbookmark" : "bookmark")}><Bookmark className="me-2 h-4 w-4" />{bookmarked ? "Remove saved" : "Save message"}</ContextMenuItem>
                               <ContextMenuItem onClick={() => void runClientMessageAction(msg, starred ? "unstar" : "star")}><Star className="me-2 h-4 w-4" />{starred ? "Remove star" : "Star message"}</ContextMenuItem>
+                              {isOwn && isSuperAdmin && !msg.deleted_at && (
+                                <>
+                                  <ContextMenuSeparator />
+                                  <ContextMenuItem onClick={() => void deleteClientMessage(msg)} className="text-red-400 focus:text-red-300"><Trash2 className="me-2 h-4 w-4" />Delete message</ContextMenuItem>
+                                </>
+                              )}
                             </ContextMenuContent>
                           </ContextMenu>
                           {!isOwn && (
@@ -1744,12 +1897,14 @@ function ClientMessageTools({
   bookmarked,
   onForward,
   onAction,
+  onDelete,
 }: {
   msg: ChatMessage;
   busy: boolean;
   starred: boolean;
   bookmarked: boolean;
   onForward: () => void;
+  onDelete?: () => void;
   onAction: (
     msg: ChatMessage,
     action: "pin" | "unpin" | "star" | "unstar" | "bookmark" | "unbookmark" | "translate",
@@ -1797,6 +1952,17 @@ function ClientMessageTools({
       >
         <Forward className="w-3.5 h-3.5" />
       </button>
+      {onDelete && (
+        <button
+          onClick={onDelete}
+          disabled={busy}
+          className="p-1.5 rounded-full hover:bg-red-500/15 text-gray-400 hover:text-red-400 disabled:opacity-40"
+          title="Delete message"
+          aria-label="Delete message"
+        >
+          <Trash2 className="w-3.5 h-3.5" />
+        </button>
+      )}
     </div>
   );
 }

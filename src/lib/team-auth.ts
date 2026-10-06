@@ -1,7 +1,8 @@
-import { cookies } from "next/headers";
+import { cookies, headers } from "next/headers";
 import crypto from "crypto";
 import { glashMaybeOne, glashQuery } from "@/lib/glashdb/postgres";
 import { sessionRequiresDailyLogout } from "@/lib/team-session-policy";
+import { parseTeamBearer } from "@/lib/team-mobile-session-core.mjs";
 
 export const TEAM_SESSION_COOKIE = "team_session";
 const SESSION_DAYS = 30;
@@ -205,8 +206,20 @@ async function getLegacyTeamSessionFromToken(token: string): Promise<TeamSession
   return null;
 }
 
-/** Server-only: read the currently logged-in team member from the session cookie. */
+/** The mobile app's team session token ("Authorization: Bearer cdst1.…"), if any. */
+export async function readTeamBearerToken(): Promise<string | null> {
+  const requestHeaders = await headers();
+  return parseTeamBearer(requestHeaders.get("authorization"));
+}
+
+/**
+ * Server-only: read the currently logged-in team member from the session cookie,
+ * or from the mobile app's Bearer token. An explicit Bearer token wins, so a
+ * stray cookie in the phone's cookie jar never stands in for the app's session.
+ */
 export async function getTeamSession(): Promise<TeamSession | null> {
+  const bearer = await readTeamBearerToken();
+  if (bearer) return getTeamSessionFromToken(bearer);
   const store = await cookies();
   const token = store.get(TEAM_SESSION_COOKIE)?.value;
   return getTeamSessionFromToken(token);

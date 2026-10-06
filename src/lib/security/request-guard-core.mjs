@@ -91,3 +91,26 @@ export function rateLimitBuckets(profile, network, sessionToken) {
     },
   ];
 }
+
+// Raw file chunks for client deliveries (the web uploads large files in
+// pieces; the route checks each piece's exact size and the admin's clearance).
+// Kept equal to MAX_DELIVERY_UPLOAD_CHUNK_BYTES in src/lib/client-deliveries.ts.
+export const DELIVERY_CHUNK_PATH = "/api/admin/clients/deliveries/upload";
+export const DELIVERY_CHUNK_MAX_BYTES = 48 * 1024 * 1024;
+
+/**
+ * Largest body a write may carry, or null for no limit here (multipart
+ * uploads are limited by each route). JSON and form posts stay at 2MB; the
+ * delivery chunk route alone accepts raw binary pieces up to 48MB.
+ *
+ * @param {string} pathname
+ * @param {string} contentType
+ * @param {boolean} isAuthSurface
+ */
+export function mutationBodyLimit(pathname, contentType, isAuthSurface) {
+  if (isAuthSurface) return 512 * 1024;
+  const type = contentType.toLowerCase();
+  if (type.startsWith("multipart/form-data")) return null;
+  if (pathname === DELIVERY_CHUNK_PATH && type.startsWith("application/octet-stream")) return DELIVERY_CHUNK_MAX_BYTES;
+  return 2 * 1024 * 1024;
+}

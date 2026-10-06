@@ -21,7 +21,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   const { account, db } = context;
   const { data: message } = await db
     .from("team_chat_messages")
-    .select("id, thread_id, deleted_at, reactions, starred_by, bookmarked_by")
+    .select("id, thread_id, client_user_id, deleted_at, pinned_at, reactions, starred_by, bookmarked_by")
     .eq("id", id)
     .maybeSingle();
   if (!message) return NextResponse.json({ ok: false, error: "Message not found" }, { status: 404 });
@@ -47,6 +47,23 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     patch = { starred_by: toggle(message.starred_by, viewerKey, action === "star") };
   } else if (action === "bookmark" || action === "unbookmark") {
     patch = { bookmarked_by: toggle(message.bookmarked_by, viewerKey, action === "bookmark") };
+  } else if (action === "edit" || action === "delete") {
+    // Clients edit and delete only their own messages (as in WhatsApp).
+    if (message.client_user_id !== account.user.id) {
+      return NextResponse.json({ ok: false, error: action === "edit" ? "You cannot edit this message" : "You cannot delete this message" }, { status: 403 });
+    }
+    if (action === "edit") {
+      const next = typeof body.message === "string" ? body.message.trim().slice(0, 4000) : "";
+      if (!next) return NextResponse.json({ ok: false, error: "Message body required" }, { status: 400 });
+      patch = { body: next, edited_at: new Date().toISOString() };
+    } else {
+      patch = { deleted_at: new Date().toISOString() };
+    }
+  } else if (action === "pin" || action === "unpin") {
+    // A pin is shared: everyone in the project channel sees it.
+    patch = action === "pin"
+      ? { pinned_at: new Date().toISOString(), pinned_by: viewerKey }
+      : { pinned_at: null, pinned_by: null };
   } else {
     return NextResponse.json({ ok: false, error: "Unsupported action" }, { status: 400 });
   }
@@ -55,7 +72,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     .from("team_chat_messages")
     .update(patch)
     .eq("id", id)
-    .select("id, reactions, starred_by, bookmarked_by")
+    .select("id, body, edited_at, deleted_at, pinned_at, pinned_by, reactions, starred_by, bookmarked_by")
     .single();
   if (error) return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
   return NextResponse.json({ ok: true, message: updated });

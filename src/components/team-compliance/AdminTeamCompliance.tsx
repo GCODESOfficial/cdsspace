@@ -278,7 +278,7 @@ export default function AdminTeamCompliance({ section }: { section: Section }) {
       }
     }, 850);
     return () => window.clearTimeout(timer);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+     
   }, [sopEditor, sopDirty]);
 
   function bookPayload(editor: any, status = editor.status, autosave = false) {
@@ -312,7 +312,7 @@ export default function AdminTeamCompliance({ section }: { section: Section }) {
       }
     }, 850);
     return () => window.clearTimeout(timer);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+     
   }, [bookEditor, bookDirty]);
 
   const stats = useMemo(
