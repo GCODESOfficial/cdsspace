@@ -63,7 +63,21 @@ test("blocks executable and antivirus test signatures", async () => {
 
 test("blocks active PDFs, encrypted PDFs, and trailing payloads", async () => {
   await assert.rejects(
-    security.assertSafeUpload(upload("active.pdf", Buffer.from("%PDF-1.7\n1 0 obj <</OpenAction 2 0 R>>\n%%EOF")), { allow: ["pdf"] }),
+    security.assertSafeUpload(upload("active.pdf", Buffer.from("%PDF-1.7\n1 0 obj <</S /JavaScript /JS (app.alert(1))>>\n%%EOF")), { allow: ["pdf"] }),
+    /active content/,
+  );
+  await assert.rejects(
+    security.assertSafeUpload(upload("escaped.pdf", Buffer.from("%PDF-1.7\n1 0 obj <</S /J#61vaScript>>\n%%EOF")), { allow: ["pdf"] }),
+    /active content/,
+  );
+  const { deflateSync } = await import("node:zlib");
+  const hidden = deflateSync(Buffer.from("1 0 <</S /Launch /F (cmd.exe)>>"));
+  await assert.rejects(
+    security.assertSafeUpload(upload("objstm.pdf", Buffer.concat([
+      Buffer.from("%PDF-1.7\n5 0 obj <</Type /ObjStm /Filter /FlateDecode /N 1 /First 4>>\nstream\n"),
+      hidden,
+      Buffer.from("\nendstream\nendobj\n%%EOF"),
+    ])), { allow: ["pdf"] }),
     /active content/,
   );
   await assert.rejects(
@@ -74,6 +88,17 @@ test("blocks active PDFs, encrypted PDFs, and trailing payloads", async () => {
     security.assertSafeUpload(upload("polyglot.pdf", Buffer.from("%PDF-1.7\n%%EOF\nMZpayload")), { allow: ["pdf"] }),
     /appended/,
   );
+});
+
+test("accepts ordinary exported PDFs with view actions and binary streams", async () => {
+  const pdf = Buffer.concat([
+    Buffer.from("%PDF-1.7\n1 0 obj <</Type /Catalog /OpenAction [3 0 R /Fit] /AA <<>> >>\nendobj\n"),
+    Buffer.from("2 0 obj <</Length 40 /Filter /FlateDecode>>\nstream\n"),
+    Buffer.from("\x00\x9c/aa /js /JS\xff<script on=x javascript:", "latin1"),
+    Buffer.from("\nendstream\nendobj\n%%EOF"),
+  ]);
+  const result = await security.assertSafeUpload(upload("brand.pdf", pdf, "application/pdf"), { allow: ["pdf"] });
+  assert.equal(result.ext, "pdf");
 });
 
 test("inspects ZIP contents and rejects embedded executables and compression bombs", async () => {

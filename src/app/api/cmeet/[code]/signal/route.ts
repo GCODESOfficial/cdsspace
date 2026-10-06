@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { cancelCallOnPhones } from "@/lib/mobile-call-push";
 import { glashMaybeOne, glashQuery } from "@/lib/glashdb/postgres";
 import { getToolActor } from "@/lib/team-tools-auth";
 import { getClientAccountState } from "@/lib/client-account";
@@ -239,19 +240,43 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ cod
          from public.team_meetings meeting
         where invitation.meeting_id = meeting.id
           and meeting.room_code = $1
-          and invitation.client_user_id = $2::uuid`,
+          and invitation.client_user_id = $2::uuid
+          and invitation.joined_at is null
+        returning invitation.meeting_id::text`,
       [code, clientAccount.user.id],
-    ).catch(() => undefined);
+    )
+      // Answered on this device: stop it ringing on the client's other phones.
+      .then((rows) => rows[0] && cancelCallOnPhones(rows[0].meeting_id, { subjects: [`client:${clientAccount.user.id}`] }))
+      .catch(() => undefined);
   }
   const staffActor = await getToolActor().catch(() => null);
+  // A team member (or a sub-admin, on the admin portal) who connects has answered:
+  // recorded here as well as by the app's own "joined" call, so the chat can
+  // tell an answered call from a missed one however they joined.
+  const memberId = staffActor?.kind === "team" ? staffActor.id : staffActor?.kind === "admin" ? staffActor.memberId : null;
+  if (memberId) {
+    glashQuery(
+      `update public.team_meeting_participants participant
+          set joined_at = now()
+         from public.team_meetings meeting
+        where participant.meeting_id = meeting.id and meeting.room_code = $1
+          and participant.team_member_id = $2::uuid and participant.joined_at is null`,
+      [code, memberId],
+    ).catch(() => undefined);
+  }
   if (staffActor?.kind === "admin") {
     glashQuery(
       `update public.cmeet_staff_invitations invitation
           set joined_at = coalesce(invitation.joined_at, now()), joined_by = coalesce(invitation.joined_by, $2)
          from public.team_meetings meeting
-        where invitation.meeting_id = meeting.id and meeting.room_code = $1`,
+        where invitation.meeting_id = meeting.id and meeting.room_code = $1
+          and invitation.joined_at is null
+        returning invitation.meeting_id::text`,
       [code, staffActor.email],
-    ).catch(() => undefined);
+    )
+      // One admin took the client's call: it stops ringing on every admin's phone.
+      .then((rows) => rows[0] && cancelCallOnPhones(rows[0].meeting_id, { subjects: [], staff: true }))
+      .catch(() => undefined);
   }
 
   // Opportunistic sweep. Doing it here keeps the table small without a cron,

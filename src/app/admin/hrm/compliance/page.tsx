@@ -253,7 +253,7 @@ export default function HrCompliancePage() {
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <h2 className="text-[15px] font-semibold text-[#0D1B39]">Upcoming birthdays</h2>
-            <p className="mt-0.5 text-[12px] text-slate-500">Reminder timing is configured on each team member's profile.</p>
+            <p className="mt-0.5 text-[12px] text-slate-500">Reminder timing is configured on each team member&apos;s profile.</p>
           </div>
           <Link href="/admin/team-members" className="text-[12px] font-semibold text-[#0A4FE8]">Manage team profiles</Link>
         </div>
@@ -282,7 +282,7 @@ export default function HrCompliancePage() {
         <div className="flex flex-col gap-3 border-b border-slate-100 p-4 md:flex-row md:items-center md:justify-between md:p-5">
           <div>
             <h2 className="text-[15px] font-semibold text-[#0D1B39]">Personnel register</h2>
-            <p className="text-[12px] text-slate-500">Every update is retained in the record's audit history.</p>
+            <p className="text-[12px] text-slate-500">Every update is retained in the record&apos;s audit history.</p>
           </div>
           <div className="flex flex-col gap-2 sm:flex-row">
             <label className="relative">

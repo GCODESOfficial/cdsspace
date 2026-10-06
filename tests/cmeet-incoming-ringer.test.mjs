@@ -41,7 +41,7 @@ test("team and admin shells ring continuously and joining records presence", () 
   assert.match(meetClient, /body: JSON\.stringify\(\{ action: "join" \}\)/);
 });
 
-test("every instant client-created cMeet rings admins and emails both main accounts", () => {
+test("every instant client-created cMeet rings admins without sending email", () => {
   for (const route of [clientCMeetRoute, clientChatCallRoute]) {
     assert.match(route, /if \(!scheduledFor\)/);
     assert.match(route, /cmeet_staff_invitations/);
@@ -53,6 +53,6 @@ test("every instant client-created cMeet rings admins and emails both main accou
   assert.match(adminIncomingRoute, /buildCMeetAutoJoinPath/);
   assert.match(clientCallNotifier, /kind: "client_call"/);
   assert.match(clientCallNotifier, /Join the live cMeet/);
-  assert.match(adminAlerts, /"contact\.cdsspace@gmail\.com"/);
-  assert.match(adminAlerts, /"christian\.john161@gmail\.com"/);
+  // Calls ring phones and the admin shell; they are not emailed.
+  assert.match(adminAlerts, /input\.kind === "client_call"\) return 0;/);
 });

@@ -148,11 +148,9 @@ function TeamLayoutInner({ children }: { children: React.ReactNode }) {
     window.location.replace("/team/login");
   }, [router]);
 
-  if (isLoginPage || isInvitePage) return <>{children}</>;
-
   // Keep trying on the user's behalf while they look at the screen.
   useEffect(() => {
-    if (!sessionUnavailable) return;
+    if (!sessionUnavailable || isLoginPage || isInvitePage) return;
     const retry = window.setInterval(() => { void loadSession(); }, 4_000);
     const onVisible = () => { if (!document.hidden) void loadSession(); };
     document.addEventListener("visibilitychange", onVisible);
@@ -162,7 +160,9 @@ function TeamLayoutInner({ children }: { children: React.ReactNode }) {
       document.removeEventListener("visibilitychange", onVisible);
       window.removeEventListener("online", onVisible);
     };
-  }, [sessionUnavailable, loadSession]);
+  }, [sessionUnavailable, loadSession, isLoginPage, isInvitePage]);
+
+  if (isLoginPage || isInvitePage) return <>{children}</>;
 
   if (checking && !member) {
     return (

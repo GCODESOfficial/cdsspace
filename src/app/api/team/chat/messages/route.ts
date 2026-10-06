@@ -11,22 +11,11 @@ import {
 } from "@/lib/team-chat-server";
 import { canShareProtectedChatResource } from "@/lib/chat-resource-permissions";
 import { glashQuery } from "@/lib/glashdb/postgres";
-import { sendEmail } from "@/lib/email-from";
-import { brandedEmailHtml } from "@/lib/email-template";
 import { sendPushToActor } from "@/lib/web-push-server";
-import { sendOrHoldNotificationEmail } from "@/lib/notification-email-batching";
+import { pushToPhones } from "@/lib/mobile-push";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-
-function escapeHtml(value: unknown) {
-  return String(value ?? "")
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#039;");
-}
 
 export async function GET(req: Request) {
   const viewer = await getChatViewer();
@@ -191,17 +180,18 @@ export async function POST(req: Request) {
     return NextResponse.json({ ok: false, error: protectedShare.error }, { status: 403 });
   }
 
-  // Direct member chats accept inline photos. Other attachments remain in
-  // managed group spaces; admin DMs and group threads allow every valid type.
+  // Direct member chats accept inline photos and voice notes. Other attachments
+  // remain in managed group spaces; admin DMs and group threads allow every valid type.
   const carriesAttachment = !!attachmentUrl || (typeof messageType === "string" && ["file", "image", "video", "audio"].includes(messageType));
   const isInlinePhoto =
     !!attachmentUrl &&
     (messageType === "image" ||
       messageType === "sticker" ||
       /^\[\[image:[^\]]+\]\]$/.test(String(body || "")));
-  if (carriesAttachment && !isInlinePhoto && (await isAttachmentRestrictedThread(threadId))) {
+  const isVoiceNote = !!attachmentUrl && messageType === "audio" && /^audio\//.test(String(mimeType || ""));
+  if (carriesAttachment && !isInlinePhoto && !isVoiceNote && (await isAttachmentRestrictedThread(threadId))) {
     return NextResponse.json(
-      { ok: false, error: "Documents and videos belong in a department or project group chat. Photos can be pasted directly into this chat." },
+      { ok: false, error: "Documents and videos belong in a department or project group chat. Photos and voice notes can be sent directly in this chat." },
       { status: 403 },
     );
   }
@@ -267,7 +257,7 @@ export async function POST(req: Request) {
     .eq("thread_id", threadId);
   const { data: thread } = await db
     .from("team_chat_threads")
-    .select("name, kind")
+    .select("name, kind, includes_admin, project_id")
     .eq("id", threadId)
     .maybeSingle();
   const threadLabel = thread?.name || (thread?.kind === "direct" ? "Direct message" : "Team chat");
@@ -303,6 +293,27 @@ export async function POST(req: Request) {
     }));
   if (notifRows.length) await db.from("team_notifications").insert(notifRows);
 
+  // Phones of the people the team chat itself doesn't notify: clients in a
+  // project chat, and the super admin in a conversation they are part of.
+  if (!scheduledFor) {
+    const phoneNotice = {
+      title: `${senderName} in ${threadLabel}`,
+      body: stickerKey ? "Sticker" : body?.trim() || "Shared an attachment",
+      tag: `thread-${threadId}`,
+    };
+    if (thread?.project_id) {
+      const { data: clients } = await db
+        .from("team_chat_client_participants")
+        .select("client_user_id")
+        .eq("thread_id", threadId);
+      const clientSubjects = (clients || []).map((c: any) => c.client_user_id && `client:${c.client_user_id}`).filter(Boolean);
+      if (clientSubjects.length) void pushToPhones(clientSubjects, { ...phoneNotice, url: `/dashboard/messages?project=${threadId}` });
+    }
+    if (thread?.includes_admin && !viewerIsSuperAdmin(viewer)) {
+      void pushToPhones([], { ...phoneNotice, url: `/admin/team-chat?thread=${threadId}` }, { superAdmin: true });
+    }
+  }
+
   const recipients = (parts || []).filter(
     (part: any) => part.team_member_id && part.team_member_id !== senderId,
   );
@@ -316,75 +327,17 @@ export async function POST(req: Request) {
       [msg.id, threadId, recipients.map((part: any) => part.team_member_id)],
     ).catch(() => undefined);
 
-    const siteUrl = process.env.NEXT_PUBLIC_SITE_URL?.replace(/\/$/, "") || new URL(req.url).origin;
-    const chatUrl = `${siteUrl}/team/chat?thread=${encodeURIComponent(threadId)}`;
     const summary = stickerKey ? "Sticker" : body?.trim() || "Shared an attachment";
-    const profiles = await glashQuery<{
-      id: string;
-      full_name: string | null;
-      email: string | null;
-    }>(
-      `select id, full_name, email
-         from public.team_members
-        where id = any($1::uuid[]) and is_active = true`,
-      [recipients.map((part: any) => part.team_member_id)],
-    ).catch(() => []);
-    const profileById = new Map(profiles.map((profile) => [profile.id, profile]));
-    // Delivery must not hold up the sender. Email in particular can take
-    // seconds, or stall entirely when the host blocks outbound SMTP, and the
-    // message itself is already saved.
-    void Promise.allSettled(
-      recipients.map(async (part: any) => {
-        const profile = profileById.get(part.team_member_id);
-        const email = String(profile?.email || "").trim();
-        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return;
-        const recipientName = profile?.full_name || "Team member";
-
-        // The device notice is always immediate.
-        void sendPushToActor("team", part.team_member_id, {
-          title: `${senderName} in ${threadLabel}`,
-          body: summary,
-          url: `/team/chat?thread=${threadId}`,
-          tag: `thread-${threadId}`,
-        });
-
-        // Ordinary messages are batched into one summary email, so a busy
-        // thread cannot fill an inbox. Task posts need acknowledgement, so
-        // they still go out on their own, immediately.
-        if (!isTaskPost) {
-          await sendOrHoldNotificationEmail({
-            actorKind: "team",
-            actorId: part.team_member_id,
-            email,
-            name: recipientName,
-            title: `${senderName} in ${threadLabel}`,
-            body: summary,
-            link: `/team/chat?thread=${threadId}`,
-            kind: "chat_message",
-          });
-          return;
-        }
-
-        const subject = isTaskPost
-          ? `Task post in ${threadLabel}`
-          : `New message in ${threadLabel}`;
-        await sendEmail({
-          to: email,
-          subject,
-          fromName: "CDS Space",
-          threadCategory: isTaskPost ? "team-chat-task" : "team-chat-message",
-          text: `${senderName}: ${summary}\n${chatUrl}`,
-          html: brandedEmailHtml(
-            `<h1 style="margin:0 0 14px;color:#0D1B39;font-size:22px;">${escapeHtml(subject)}</h1>
-             <p style="margin:0 0 14px;">Hello ${escapeHtml(recipientName)},</p>
-             <p style="margin:0 0 18px;"><strong>${escapeHtml(senderName)}</strong> ${isTaskPost ? "posted a task that requires your acknowledgement" : "sent a message"} in <strong>${escapeHtml(threadLabel)}</strong>.</p>
-             <div style="margin:0 0 20px;padding:14px;border:1px solid #E8EDF5;border-radius:12px;background:#F8FAFD;color:#0D1B39;">${escapeHtml(summary)}</div>
-             <a href="${escapeHtml(chatUrl)}" style="display:inline-block;border-radius:10px;background:#0A4FE8;padding:12px 20px;color:#FFFFFF;text-decoration:none;font-weight:700;">Open team chat</a>`,
-            { eyebrow: isTaskPost ? "Task post" : "Team chat", preheader: escapeHtml(summary) },
-          ),
-        });
-      }),
-    );
+    // Chat reaches people as a device notice and in the app only. Email is
+    // kept for sign-in codes and invoices so inboxes are not crowded.
+    for (const part of recipients) {
+      void sendPushToActor("team", part.team_member_id, {
+        title: `${senderName} in ${threadLabel}`,
+        body: summary,
+        url: `/team/chat?thread=${threadId}`,
+        tag: `thread-${threadId}`,
+      });
+    }
   }
 
   const [message] = await hydrateTeamMessages([msg]);

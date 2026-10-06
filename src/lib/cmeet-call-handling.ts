@@ -13,7 +13,7 @@ import { notifyTeamMember } from "@/lib/notify-team";
  */
 export const CALL_RING_SECONDS = 180;
 
-export type CallActionKind = "redirected" | "rescheduled" | "unavailable";
+export type CallActionKind = "redirected" | "rescheduled" | "unavailable" | "declined";
 
 export async function recordCallAction(input: {
   meetingId: string;

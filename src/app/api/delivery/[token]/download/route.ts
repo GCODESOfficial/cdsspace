@@ -103,31 +103,51 @@ export async function GET(
   const zip = new JSZip();
   const usedPaths = new Set<string>();
 
+  // Streamed: every file is added as a pending download and the archive is sent
+  // as it is produced, so the first bytes leave within seconds. Building the
+  // whole ZIP in memory first made phones (and slow connections) time out
+  // before anything arrived on large deliveries.
   for (const file of files) {
-    const { data, error } = await admin.storage.from(file.storage_bucket).download(file.storage_path);
-    if (error || !data) {
-      console.error("[delivery/download] storage download failed", { deliveryId: delivery.id, storagePath: file.storage_path, error: error?.message });
-      return new NextResponse("One or more delivery assets are temporarily unavailable", { status: 503 });
-    }
     const path = uniquePath(safeZipPath(file.relative_path, file.file_name), usedPaths);
-    const bytes = new Uint8Array(await data.arrayBuffer());
+    const bytes = admin.storage
+      .from(file.storage_bucket)
+      .download(file.storage_path)
+      .then(async ({ data, error }) => {
+        if (error || !data) {
+          console.error("[delivery/download] storage download failed", { deliveryId: delivery.id, storagePath: file.storage_path, error: error?.message });
+          throw new Error("One or more delivery assets are temporarily unavailable");
+        }
+        return new Uint8Array(await data.arrayBuffer());
+      });
     const alreadyCompressed = ["image", "archive", "pdf"].includes(file.file_kind);
     zip.file(path, bytes, { binary: true, compression: alreadyCompressed ? "STORE" : "DEFLATE" });
   }
 
-  const payload = await zip.generateAsync({
-    type: "uint8array",
-    compression: "DEFLATE",
-    compressionOptions: { level: 6 },
-    platform: "UNIX",
+  const body = new ReadableStream<Uint8Array>({
+    start(controller) {
+      zip
+        .generateInternalStream({
+          type: "uint8array",
+          streamFiles: true,
+          compression: "DEFLATE",
+          compressionOptions: { level: 6 },
+          platform: "UNIX",
+        })
+        .on("data", (chunk) => controller.enqueue(chunk))
+        .on("error", (error) => {
+          console.error("[delivery/download] archive failed", { deliveryId: delivery.id, error: error.message });
+          controller.error(error);
+        })
+        .on("end", () => controller.close())
+        .resume();
+    },
   });
   const baseName = downloadName(delivery.title);
   const utf8Name = encodeURIComponent(`${delivery.title}.zip`);
-  return new NextResponse(payload, {
+  return new NextResponse(body, {
     status: 200,
     headers: {
       "Content-Type": "application/zip",
-      "Content-Length": String(payload.byteLength),
       "Content-Disposition": `attachment; filename="${baseName}.zip"; filename*=UTF-8''${utf8Name}`,
       "Cache-Control": "private, no-store, max-age=0",
       "X-Content-Type-Options": "nosniff",

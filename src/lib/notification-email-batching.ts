@@ -5,6 +5,7 @@ import { sendEmail } from "@/lib/email-from";
 import { brandedEmailHtml } from "@/lib/email-template";
 import { publicSiteOrigin } from "@/lib/public-site";
 import type { PushActorKind } from "@/lib/web-push-server";
+import { isEmailableNotificationKind } from "@/lib/email-policy";
 
 /**
  * Keeps notification email from flooding an inbox.
@@ -41,6 +42,8 @@ export function absoluteNotificationLink(link: string | null | undefined) {
 
 /** Sends now if the recipient is quiet, otherwise holds it for the summary. */
 export async function sendOrHoldNotificationEmail(item: NotificationEmailItem) {
+  // Chats, calls, tasks and the like stay on push and the bell; only invoices email.
+  if (!isEmailableNotificationKind(item.kind)) return { held: false, skipped: true };
   try {
     const openWindow = await glashMaybeOne<{ actor_id: string }>(
       `select actor_id from public.notification_email_windows
@@ -95,6 +98,7 @@ async function deliverSingle(item: NotificationEmailItem) {
     text: `${item.title}\n\n${item.body || ""}\n\nOpen in CDS Space: ${url}`,
     html,
     fromName: "CDS Space",
+    dailyThread: true,
   });
 }
 
@@ -106,6 +110,7 @@ type BatchRow = {
   title: string;
   body: string | null;
   link: string | null;
+  kind: string | null;
   created_at: string;
 };
 
@@ -115,7 +120,7 @@ type BatchRow = {
  */
 export async function flushNotificationEmailBatches(options: { dryRun?: boolean } = {}) {
   const rows = await glashQuery<BatchRow>(
-    `select b.id::text, b.actor_kind, b.actor_id, b.recipient_email, b.title, b.body, b.link, b.created_at
+    `select b.id::text, b.actor_kind, b.actor_id, b.recipient_email, b.title, b.body, b.link, b.kind, b.created_at
        from public.notification_email_batches b
        left join public.notification_email_windows w
          on w.actor_kind = b.actor_kind and w.actor_id = b.actor_id
@@ -127,12 +132,22 @@ export async function flushNotificationEmailBatches(options: { dryRun?: boolean 
   );
   if (!rows.length) return { recipients: 0, items: 0, dryRun: Boolean(options.dryRun) };
 
+  // Anything held before email was narrowed to invoices is retired unsent.
+  const retired = rows.filter((row) => !isEmailableNotificationKind(row.kind)).map((row) => row.id);
+  if (retired.length && !options.dryRun) {
+    await glashQuery(
+      `update public.notification_email_batches set sent_at = now() where id = any($1::uuid[])`,
+      [retired],
+    );
+  }
+  const emailable = rows.filter((row) => isEmailableNotificationKind(row.kind));
+
   const groups = new Map<string, BatchRow[]>();
-  for (const row of rows) {
+  for (const row of emailable) {
     const key = `${row.actor_kind}:${row.actor_id}`;
     groups.set(key, [...(groups.get(key) || []), row]);
   }
-  if (options.dryRun) return { recipients: groups.size, items: rows.length, dryRun: true };
+  if (options.dryRun) return { recipients: groups.size, items: emailable.length, dryRun: true };
 
   let sentGroups = 0;
   for (const items of groups.values()) {
@@ -148,7 +163,7 @@ export async function flushNotificationEmailBatches(options: { dryRun?: boolean 
       console.error("[notification-email] summary failed", error);
     }
   }
-  return { recipients: sentGroups, items: rows.length, dryRun: false };
+  return { recipients: sentGroups, items: emailable.length, dryRun: false };
 }
 
 async function sendSummary(items: BatchRow[]) {
@@ -179,5 +194,6 @@ async function sendSummary(items: BatchRow[]) {
     text: `${heading}\n\n${items.map((item) => `- ${item.title}${item.body ? `: ${item.body}` : ""}\n  ${absoluteNotificationLink(item.link)}`).join("\n")}`,
     html,
     fromName: "CDS Space",
+    dailyThread: true,
   });
 }

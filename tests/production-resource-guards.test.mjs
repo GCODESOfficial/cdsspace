@@ -39,5 +39,5 @@ test("a stalled email can never hold a request open", async () => {
 
 test("chat does not wait for delivery before answering the sender", async () => {
   const chat = await read("src/app/api/team/chat/messages/route.ts");
-  assert.match(chat, /void Promise\.allSettled/);
+  assert.match(chat, /void sendPushToActor/);
 });

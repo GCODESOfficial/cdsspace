@@ -2,6 +2,7 @@ import "server-only";
 
 import webpush from "web-push";
 import { glashQuery } from "@/lib/glashdb/postgres";
+import { pushToPhones, teamMemberSubjects } from "@/lib/mobile-push";
 
 /**
  * Delivery of notifications to a browser that is not open.
@@ -44,6 +45,15 @@ export function pushPublicKey() {
 
 /** Sends one notification to every device the actor has subscribed. */
 export async function sendPushToActor(actorKind: PushActorKind, actorId: string, payload: PushPayload) {
+  // Their phones too (the CDS Space app), whether or not browser push is configured.
+  if (actorId && actorKind !== "admin") {
+    void pushToPhones(actorKind === "team" ? teamMemberSubjects([actorId]) : [`client:${actorId}`], {
+      title: payload.title,
+      body: payload.body,
+      url: payload.url,
+      tag: payload.tag,
+    });
+  }
   if (!ready() || !actorId) return;
   try {
     const devices = await glashQuery<{ id: string; endpoint: string; p256dh: string; auth: string }>(

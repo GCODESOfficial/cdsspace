@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
+ 
 import { NextResponse } from "next/server";
 import { getClientChatContext, getClientProjectThread } from "@/lib/client-project-chat";
 import { validateChatUpload } from "@/lib/chat-upload-limits";

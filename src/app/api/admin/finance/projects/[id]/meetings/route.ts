@@ -1,4 +1,5 @@
-import { NextRequest, NextResponse } from "next/server";
+import { after, NextRequest, NextResponse } from "next/server";
+import { ringCallOnPhones } from "@/lib/mobile-call-push";
 import { financeDb, requireFinanceAdminAsync } from "@/lib/finance/api-auth";
 import { normalizeCMeetAgendaItems } from "@/lib/cmeet-agenda";
 
@@ -102,5 +103,6 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
             .insert(participantIds.map((mid) => ({ meeting_id: meeting.id, team_member_id: mid })));
     }
 
+    after(() => ringCallOnPhones(meeting.id));
     return NextResponse.json({ meeting, participant_count: participantIds.length });
 }

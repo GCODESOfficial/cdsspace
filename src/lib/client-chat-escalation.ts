@@ -159,6 +159,7 @@ export async function processClientChatEscalations(): Promise<ClientChatEscalati
           html,
           fromName: "CDS Space Chat/Meet",
           transporter,
+          dailyThread: true,
         });
         await glashQuery(
           `update public.client_chat_response_escalations

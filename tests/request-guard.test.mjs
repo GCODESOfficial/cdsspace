@@ -3,6 +3,9 @@ import test from "node:test";
 import {
   applicationRateProfile,
   clientNetworkFromHeaders,
+  DELIVERY_CHUNK_MAX_BYTES,
+  DELIVERY_CHUNK_PATH,
+  mutationBodyLimit,
   rateLimitBuckets,
 } from "../src/lib/security/request-guard-core.mjs";
 
@@ -78,4 +81,17 @@ test("office staff polling together are not rate limited out of the portal", () 
     }
   }
   assert.equal(rejected, 0);
+});
+
+test("write bodies stay small except raw delivery chunks", () => {
+  const MB = 1024 * 1024;
+  assert.equal(mutationBodyLimit("/api/cdocs", "application/json", false), 2 * MB);
+  assert.equal(mutationBodyLimit("/api/cdocs", "multipart/form-data; boundary=x", false), null);
+  assert.equal(mutationBodyLimit("/login", "multipart/form-data; boundary=x", true), 512 * 1024);
+  assert.equal(mutationBodyLimit(DELIVERY_CHUNK_PATH, "application/octet-stream", false), DELIVERY_CHUNK_MAX_BYTES);
+  assert.equal(DELIVERY_CHUNK_MAX_BYTES, 48 * MB);
+  // Only raw binary on the chunk route is widened.
+  assert.equal(mutationBodyLimit(DELIVERY_CHUNK_PATH, "application/json", false), 2 * MB);
+  assert.equal(mutationBodyLimit("/api/admin/clients/deliveries", "application/octet-stream", false), 2 * MB);
+  assert.equal(mutationBodyLimit(`${DELIVERY_CHUNK_PATH}/x`, "application/octet-stream", false), 2 * MB);
 });

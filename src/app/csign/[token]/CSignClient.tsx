@@ -105,9 +105,9 @@ export default function PublicCsignPage() {
     setSubmitting(true);
     setError(null);
     const res = await fetch(`/api/csign/${token}`, {
-      method: "POST",
+      method: "PUT",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ signature_image_data_url: dataUrl }),
+      body: JSON.stringify({ signed_png_url: dataUrl }),
     });
     const json = await res.json();
     setSubmitting(false);

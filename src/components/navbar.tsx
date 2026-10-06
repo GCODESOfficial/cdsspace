@@ -86,7 +86,7 @@ export default function Navbar() {
       <div className="mx-auto md:px-6 py-4 flex items-center justify-between">
         {/* Logo */}
         <div className="flex items-center relative z-10">
-          <Link href="/Home">
+          <Link href="/">
             <Image
               src="/images/cds-logo.svg"
               alt="CDS Logo"
@@ -133,7 +133,7 @@ export default function Navbar() {
   
 
     <div className='h-[80%] justify-between flex flex-col gap-2'>
-    <Link href="/Home" className="hover:text-gray-300" onClick={toggleMenu}>
+    <Link href="/" className="hover:text-gray-300" onClick={toggleMenu}>
 <div className="rounded-lg p-3 text-center transition bg-[#0A4FE8] hover:bg-[#0000FF] hover:bg-none">
   HOME
 </div>

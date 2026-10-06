@@ -46,6 +46,21 @@ export type LoginInput = {
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
+// Google Play's reviewers can't read this inbox and need sign-in details that
+// don't expire, so this one account gets a fixed code instead of an emailed one.
+// The password is still checked first; every other account is unchanged.
+const STORE_REVIEW_EMAIL = 'godsgiftetuk2001@gmail.com';
+const STORE_REVIEW_OTP = '246810';
+
+function loginOtpFor(email: string) {
+    return email === STORE_REVIEW_EMAIL ? STORE_REVIEW_OTP : generateClientEmailOtp();
+}
+
+async function sendLoginOtp(input: { email: string; name?: string | null; otp: string }) {
+    if (input.email === STORE_REVIEW_EMAIL) return;
+    await sendClientLoginOtp(input);
+}
+
 // Development only: one line per sign-in showing where the time went, e.g.
 // "[client-login timing] checks 820ms, password 2.1s, profile 1.4s, challenge 300ms (total 4.6s)".
 function loginTimer() {
@@ -164,7 +179,7 @@ async function startClientLoginTimed(email: string, password: string, formData: 
     const nextPath = getSafeNextPath(formData.next);
     const binding = createLoginBinding();
     try {
-        const otp = generateClientEmailOtp();
+        const otp = loginOtpFor(email);
         const challenge = await createClientLoginChallenge({
             userId: data.user.id,
             email,
@@ -176,7 +191,7 @@ async function startClientLoginTimed(email: string, password: string, formData: 
         timer.step('challenge');
         // Sent after the response so the person isn't kept waiting on the mail
         // server (often several seconds). If it fails, Resend issues a new code.
-        after(() => sendClientLoginOtp({ email, name: profile.full_name, otp }).catch((sendError: unknown) => {
+        after(() => sendLoginOtp({ email, name: profile.full_name, otp }).catch((sendError: unknown) => {
             console.error('[client-login] sign-in code email failed:', sendError instanceof Error ? sendError.message : sendError);
         }));
         return { binding, result: {
@@ -299,7 +314,7 @@ export async function resendClientLoginChallenge(input: { challengeId: string; b
     }
 
     try {
-        const otp = generateClientEmailOtp();
+        const otp = loginOtpFor(challenge.email);
         const expiresAt = new Date(Date.now() + CLIENT_LOGIN_OTP_TTL_MINUTES * 60_000);
         const resendAt = new Date(Date.now() + CLIENT_LOGIN_OTP_RESEND_SECONDS * 1_000);
         await glashQuery(
@@ -309,7 +324,7 @@ export async function resendClientLoginChallenge(input: { challengeId: string; b
               where id = $1::uuid`,
             [challenge.id, clientLoginOtpHash(challenge.user_id, challenge.email, otp), expiresAt.toISOString(), resendAt.toISOString()],
         );
-        await sendClientLoginOtp({ email: challenge.email, otp });
+        await sendLoginOtp({ email: challenge.email, otp });
         return {
             success: true,
             expiresInSeconds: CLIENT_LOGIN_OTP_TTL_MINUTES * 60,

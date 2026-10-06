@@ -51,14 +51,16 @@ async function loadProject(db: any, id: string) {
   return project;
 }
 
-async function loadDelivery(db: any, projectId: string) {
+/** Co-owners each hold a copy; the project owner's copy is the one managed here. */
+async function loadDelivery(db: any, project: { id: string; user_id: string | null }) {
   const { data, error } = await db
     .from("brand_identity_deliveries")
     .select("*")
-    .eq("project_id", projectId)
-    .maybeSingle();
+    .eq("project_id", project.id)
+    .order("created_at", { ascending: true });
   if (error) throw new Error(error.message);
-  return data || null;
+  const rows = (data || []) as Array<{ user_id: string }>;
+  return rows.find((row) => row.user_id === project.user_id) || rows[0] || null;
 }
 
 async function responsePayload(db: any, project: any, delivery: any) {
@@ -86,7 +88,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
   try {
     const project = await loadProject(db, id);
     if (!project) return NextResponse.json({ error: "Project not found." }, { status: 404 });
-    const delivery = await loadDelivery(db, id);
+    const delivery = await loadDelivery(db, project);
     return NextResponse.json(await responsePayload(db, project, delivery));
   } catch (error) {
     return NextResponse.json({ error: error instanceof Error ? error.message : "Could not load the brand identity delivery." }, { status: 500 });
@@ -114,7 +116,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       return NextResponse.json({ error: "Link this project to a client account email before delivering files." }, { status: 409 });
     }
 
-    let delivery = await loadDelivery(db, id);
+    let delivery = await loadDelivery(db, project);
     const title = cleanText(form.get("title"), 180) || delivery?.title || `${project.name} Brand Identity`;
     const description = cleanText(form.get("description"), 4000) || delivery?.description || null;
 
@@ -186,7 +188,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       position += 1;
     }
 
-    delivery = await loadDelivery(db, id);
+    delivery = await loadDelivery(db, project);
     return NextResponse.json(await responsePayload(db, project, delivery));
   } catch (error) {
     const status = error instanceof UploadSecurityError ? error.status : 500;
@@ -204,7 +206,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   try {
     const project = await loadProject(db, id);
     if (!project) return NextResponse.json({ error: "Project not found." }, { status: 404 });
-    const delivery = await loadDelivery(db, id);
+    const delivery = await loadDelivery(db, project);
     if (!delivery) return NextResponse.json({ error: "Upload the completed brand files first." }, { status: 404 });
 
     const publish = body.is_public === true;

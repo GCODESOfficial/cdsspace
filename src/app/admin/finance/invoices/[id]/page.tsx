@@ -319,7 +319,7 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
     return (
       <FinanceShell title="Invoice" back={{ href: "/admin/finance/invoices", label: "Invoices" }}>
         <div className={`${glassCard} p-8`}>
-          <h3 className="text-lg font-semibold text-gray-900 mb-2">Couldn't open this invoice</h3>
+          <h3 className="text-lg font-semibold text-gray-900 mb-2">Couldn&apos;t open this invoice</h3>
           <p className="text-gray-600 text-sm mb-4">{loadError}</p>
           <div className="flex gap-2">
             <Button onClick={load} className="h-10 px-4 rounded-xl">Retry</Button>

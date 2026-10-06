@@ -225,7 +225,7 @@ export function StaffSignInForm({ initialTab = "admin" }: { initialTab?: Tab }) 
           <p className="font-semibold">Before you sign in</p>
           <ul className="mt-1 list-disc pl-4 space-y-0.5">
             <li><b>Do not use a VPN</b> when logging in or checking in - it interferes with attendance and location verification.</li>
-            <li>Only one team device can be active at a time. Signing in elsewhere closes the previous session.</li>
+            <li>You can be signed in on up to three devices at a time. Signing in on a fourth closes the oldest session.</li>
             <li>Login time, device, browser, operating system, IP address and available location are recorded for security.</li>
             <li>Work sessions are monitored during work hours (activity and periodic screen viewing) to keep reporting, compliance and productive use of work time fair for everyone. Screen images are analysed in real time and are <b>not stored</b>.</li>
           </ul>

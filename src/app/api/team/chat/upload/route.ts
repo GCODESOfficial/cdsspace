@@ -22,16 +22,16 @@ export async function POST(req: Request) {
       return NextResponse.json({ ok: false, error: "No file provided" }, { status: 400 });
     }
 
-    // Direct member chats accept photos, but documents and videos remain in
+    // Direct member chats accept photos and voice notes, but documents and videos remain in
     // managed group spaces. Block before upload so no orphaned blob is stored.
     const threadId = String(formData.get("threadId") || "");
     if (threadId) {
       if (!(await canViewTeamThread(viewer, threadId))) {
         return NextResponse.json({ ok: false, error: "Forbidden" }, { status: 403 });
       }
-      if (await isAttachmentRestrictedThread(threadId) && !file.type.startsWith("image/")) {
+      if (await isAttachmentRestrictedThread(threadId) && !file.type.startsWith("image/") && !file.type.startsWith("audio/")) {
         return NextResponse.json(
-          { ok: false, error: "Documents and videos belong in a department or project group chat. Photos can be pasted directly into this chat." },
+          { ok: false, error: "Documents and videos belong in a department or project group chat. Photos and voice notes can be sent directly in this chat." },
           { status: 403 },
         );
       }

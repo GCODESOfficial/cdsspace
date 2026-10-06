@@ -1,6 +1,6 @@
 "use client";
 
-/* eslint-disable @typescript-eslint/no-explicit-any */
+ 
 
 // CDS Space branded replacements for window.alert / confirm / prompt.
 // Promise-based singleton store + a <AppNotifyRoot /> you mount once.

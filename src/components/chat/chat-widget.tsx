@@ -6,6 +6,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { Bookmark, ChevronDown, Languages, Loader2, MessageSquare, Pin, Send, Star, X } from "lucide-react";
 import { useClientAccount } from "@/components/dashboard/ClientAccountProvider";
 import { PlatformMediaViewer } from "@/components/media/PlatformMediaViewer";
+import { isVoiceNote, isVoiceNoteCaption, VoiceNotePlayer } from "@/components/chat/VoiceNotePlayer";
 
 interface ChatMessage {
   id: string;
@@ -319,7 +320,9 @@ export function ChatWidget() {
                               {bookmarked && <span className="inline-flex items-center gap-1 rounded-full bg-white/15 px-1.5 py-0.5 text-[9px] font-bold"><Bookmark className="w-3 h-3" /> Saved</span>}
                             </div>
                           )}
-                          <p className="whitespace-pre-wrap break-words">{msg.deleted_at ? "Message deleted" : msg.message}</p>
+                          {!(msg.file_url && isVoiceNote(msg.file_url) && isVoiceNoteCaption(msg.message)) && (
+                            <p className="whitespace-pre-wrap break-words">{msg.deleted_at ? "Message deleted" : msg.message}</p>
+                          )}
                           {translations.length > 0 && (
                             <div className={`mt-2 rounded-xl border px-3 py-2 ${isOwn ? "border-white/20 bg-white/10" : "border-gray-300 bg-white/70"}`}>
                               {translations.map(([language, translated]) => (
@@ -331,7 +334,9 @@ export function ChatWidget() {
                             </div>
                           )}
                           {msg.file_url && (
-                            isImageUrl(msg.file_url) ? (
+                            isVoiceNote(msg.file_url) ? (
+                              <VoiceNotePlayer url={msg.file_url} caption={msg.message} mine={isOwn} />
+                            ) : isImageUrl(msg.file_url) ? (
                               <PlatformMediaViewer url={msg.file_url} title="Chat image" triggerClassName="mt-2 block w-full overflow-hidden rounded-xl border border-white/20 bg-white/10">
                                 {/* eslint-disable-next-line @next/next/no-img-element */}
                                 <img src={msg.file_url} alt="Chat image" className="max-h-64 w-full object-contain" />

@@ -72,7 +72,7 @@ export const PhoneInput = React.forwardRef<HTMLInputElement, PhoneInputProps>(
         }, [value]);
 
         const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-            let rawValue = e.target.value;
+            const rawValue = e.target.value;
 
             let processValue = rawValue;
             if (!rawValue.startsWith("+")) {

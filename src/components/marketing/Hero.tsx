@@ -132,7 +132,21 @@ export const Hero = () => {
 
             <div className="w-full max-w-[1440px] mx-auto px-4 sm:px-5 md:px-10 flex flex-col items-center">
                 {/* Main Content Container - Centered fluidly */}
-                <div className="w-full max-w-[1200px] flex flex-col items-center">
+                <div className="relative w-full max-w-[1200px] flex flex-col items-center">
+                    {/* Guide lines - span from the top of the hero down to the video, aligned with the navbar edges */}
+                    <div
+                        className="absolute left-1/2 -translate-x-1/2 w-[100vw] top-[-116px] sm:top-[-132px] md:top-[-174px] bottom-[-56px] sm:bottom-[-64px] md:bottom-[-104px] pointer-events-none"
+                        aria-hidden="true"
+                    >
+                        <div className="absolute inset-x-0 top-[90px] sm:top-[98px] md:top-[112px] 2xl:top-[118px] border-t border-brand-stroke-ii" />
+                        <div className="absolute inset-y-0 left-1/2 -translate-x-1/2 hidden md:block w-full max-w-[920px] xl:max-w-[1080px] 2xl:max-w-[1140px]">
+                            <div className="absolute left-0 top-0 h-[112px] 2xl:h-[118px] border-l border-dashed border-brand-stroke-ii" />
+                            <div className="absolute right-0 top-0 h-[112px] 2xl:h-[118px] border-r border-dashed border-brand-stroke-ii" />
+                            <div className="absolute left-0 top-[112px] 2xl:top-[118px] bottom-0 border-l border-brand-stroke-ii" />
+                            <div className="absolute right-0 top-[112px] 2xl:top-[118px] bottom-0 border-r border-brand-stroke-ii" />
+                        </div>
+                    </div>
+
 
                     {/* 1. Status Badge - Node 5379:854 (y=104px) */}
                     <div

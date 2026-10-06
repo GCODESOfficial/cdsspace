@@ -369,7 +369,7 @@ export default function DashboardPage() {
                                 </div>
                                 {word.pronunciation && <p className="text-[14px] italic text-white/70 mb-3">{word.pronunciation} {word.part_of_speech && `· ${word.part_of_speech}`}</p>}
                                 <p className="text-[15px] text-white/90 leading-relaxed mb-3 max-w-[520px]">{word.meaning}</p>
-                                {word.example && <p className="text-[12px] text-white/60 italic mb-5 max-w-[520px]">"{word.example}"</p>}
+                                {word.example && <p className="text-[12px] text-white/60 italic mb-5 max-w-[520px]">&quot;{word.example}&quot;</p>}
 
                                 <div className="flex items-center gap-2 flex-wrap">
                                     <button onClick={downloadCard}

@@ -39,6 +39,7 @@ export interface ClientDeliveryRow {
   cover_mime_type: string | null;
   cover_updated_at: string | null;
   brand_identity_delivery_id: string | null;
+  delivery_group_id?: string | null;
   created_by: string;
 }
 
@@ -691,26 +692,51 @@ export async function publishClientDelivery(input: {
         throw new DeliveryWorkflowError("The brand identity has no uploaded files.", 409);
       }
 
-      const projectResult = await client.query<{ id: string }>(
-        "select id from public.finance_projects where id = $1 limit 1",
+      const projectResult = await client.query<{ id: string; user_id: string | null }>(
+        "select id, user_id from public.finance_projects where id = $1 limit 1",
         [delivery.project_id],
       );
-      if (!projectResult.rows[0]) throw new DeliveryWorkflowError("The selected project no longer exists.", 404);
-      await client.query(
-        `update public.finance_projects
-            set user_id = $2,
-                client = coalesce($3, $4, client),
-                client_email = coalesce($5, client_email),
-                status = 'completed',
-                completion_date = coalesce(completion_date, current_date),
-                updated_at = now()
-          where id = $1`,
-        [delivery.project_id, profile.id, profile.company_name, profile.full_name, profile.email],
-      );
+      const project = projectResult.rows[0];
+      if (!project) throw new DeliveryWorkflowError("The selected project no longer exists.", 404);
 
+      // A brand sent to several clients (founder + co-founders) gives each one
+      // their own copy. The first copy published in the group owns the project;
+      // later ones join as co-owners without taking the project over.
+      const coOwnerResult = delivery.delivery_group_id
+        ? await client.query(
+          `select 1 from public.client_deliveries
+            where delivery_group_id = $1 and id <> $2
+              and status = 'published' and brand_identity_delivery_id is not null
+            limit 1`,
+          [delivery.delivery_group_id, delivery.id],
+        )
+        : null;
+      const isCoOwner = Boolean(coOwnerResult?.rows.length);
+      if (!isCoOwner) {
+        await client.query(
+          `update public.finance_projects
+              set user_id = $2,
+                  client = coalesce($3, $4, client),
+                  client_email = coalesce($5, client_email),
+                  status = 'completed',
+                  completion_date = coalesce(completion_date, current_date),
+                  updated_at = now()
+            where id = $1`,
+          [delivery.project_id, profile.id, profile.company_name, profile.full_name, profile.email],
+        );
+      }
+
+      // Reuse this client's own copy first. The project owner may otherwise
+      // take over the previous owner's copy (an ownership change); a co-owner
+      // never takes another client's copy.
       const existingIdentity = await client.query<{ id: string }>(
-        "select id from public.brand_identity_deliveries where project_id = $1 limit 1",
-        [delivery.project_id],
+        isCoOwner
+          ? "select id from public.brand_identity_deliveries where project_id = $1 and user_id = $2 limit 1"
+          : `select id from public.brand_identity_deliveries
+              where project_id = $1 and (user_id = $2 or user_id = $3::uuid)
+              order by (user_id = $2) desc
+              limit 1`,
+        isCoOwner ? [delivery.project_id, profile.id] : [delivery.project_id, profile.id, project.user_id],
       );
       if (existingIdentity.rows[0]) {
         brandIdentityId = existingIdentity.rows[0].id;

@@ -753,7 +753,7 @@ export default function MeetRoomPage() {
       sharingTrackRef.current?.stop();
       cameraTrackRef.current?.stop();
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+     
   }, []);
 
   /* -------- Presence heartbeat (keeps the room from auto-closing) -------- */
@@ -1078,7 +1078,7 @@ export default function MeetRoomPage() {
         hostMemberId: meeting.created_by,
         hostIsOwner: true,
         spokenLanguage: translation.spokenLanguage,
-        avatarUrl: me?.kind === "admin" ? "/favicon.png" : me?.avatar_url || null,
+        avatarUrl: me?.kind === "admin" ? me?.avatar_url || "/favicon.png" : me?.avatar_url || null,
         participantKind: me?.kind || "guest",
       }, iceServers);
       clientRef.current = client;
@@ -2026,7 +2026,7 @@ export default function MeetRoomPage() {
               local={{
                 name,
                 label: `${name} (you)${localRoleLabel}`,
-                avatarUrl: me?.kind === "admin" ? "/favicon.png" : me?.avatar_url || null,
+                avatarUrl: me?.kind === "admin" ? me?.avatar_url || "/favicon.png" : me?.avatar_url || null,
                 participantKind: me?.kind || "guest",
                 handRaised,
                 hasAudio: micOn,
@@ -2506,7 +2506,7 @@ function AudioParticipantGrid({
             participant={{
               name: peer.name,
               label: `${peer.name}${peer.hostRole ? ` · ${peer.hostRole}` : peer.isHost ? " · host" : ""}`,
-              avatarUrl: peer.participantKind === "admin" ? "/favicon.png" : peer.avatarUrl,
+              avatarUrl: peer.participantKind === "admin" ? peer.avatarUrl || "/favicon.png" : peer.avatarUrl,
               participantKind: peer.participantKind,
               handRaised: peer.handRaised,
               hasAudio: peer.hasAudio,
@@ -2540,7 +2540,8 @@ function AudioParticipantBubble({
   onRemove?: () => void;
 }) {
   const [avatarFailed, setAvatarFailed] = useState(false);
-  const avatar = participant.participantKind === "admin" ? "/favicon.png" : participant.avatarUrl;
+  // An admin's own photo (a sub-admin's team photo), else the CDS Space logo.
+  const avatar = participant.participantKind === "admin" ? participant.avatarUrl || "/favicon.png" : participant.avatarUrl;
   const isAdmin = participant.participantKind === "admin";
   return (
     <div className="flex min-w-0 flex-col items-center text-center">

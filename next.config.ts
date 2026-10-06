@@ -68,7 +68,9 @@ const nextConfig: NextConfig = {
   // Allow an isolated verification build while a developer server owns .next.
   // Production and normal local development keep the standard directory.
   distDir: process.env.CDS_NEXT_DIST_DIR || ".next",
-  serverExternalPackages: ["@napi-rs/canvas", "ffmpeg-static", "whatsapp-web.js", "puppeteer"],
+  // jspdf: server routes (invoice/receipt PDFs) must load its Node build; bundled,
+  // Turbopack can pick the browser build, which needs \`window\`.
+  serverExternalPackages: ["@napi-rs/canvas", "ffmpeg-static", "whatsapp-web.js", "puppeteer", "jspdf"],
   turbopack: {
     root: path.resolve(__dirname),
   },
@@ -146,6 +148,21 @@ const nextConfig: NextConfig = {
         value: "public, max-age=2592000, stale-while-revalidate=31536000",
       },
     ];
+    const sharedSecurityHeaders = [
+      { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
+      { key: "X-Content-Type-Options", value: "nosniff" },
+      { key: "X-Frame-Options", value: "SAMEORIGIN" },
+      { key: "X-DNS-Prefetch-Control", value: "off" },
+      { key: "Cross-Origin-Opener-Policy", value: "same-origin-allow-popups" },
+      { key: "Cross-Origin-Resource-Policy", value: "same-site" },
+      { key: "Permissions-Policy", value: "camera=(self), microphone=(self), geolocation=(self), payment=(self)" },
+      ...(productionSecurity ? [{ key: "Strict-Transport-Security", value: "max-age=63072000; includeSubDomains; preload" }] : []),
+    ];
+    const routeManagedCspPaths = [
+      "api/delivery/[^/]+/files/",
+      "api/admin/hr/compliance/file/",
+      "api/intelligence/[^/]+/document",
+    ].join("|");
 
     return [
       ...authenticationGatewayPaths.map((source) => ({
@@ -169,21 +186,20 @@ const nextConfig: NextConfig = {
         ],
       },
       {
-        source: "/:path((?!meet(?:/|$)).*)",
+        source: `/:path((?!meet(?:/|$)|${routeManagedCspPaths}).*)`,
         headers: [
           {
             key: "Content-Security-Policy",
             value: contentSecurityPolicy,
           },
-          { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
-          { key: "X-Content-Type-Options", value: "nosniff" },
-          { key: "X-Frame-Options", value: "SAMEORIGIN" },
-          { key: "X-DNS-Prefetch-Control", value: "off" },
-          { key: "Cross-Origin-Opener-Policy", value: "same-origin-allow-popups" },
-          { key: "Cross-Origin-Resource-Policy", value: "same-site" },
-          { key: "Permissions-Policy", value: "camera=(self), microphone=(self), geolocation=(self), payment=(self)" },
-          ...(productionSecurity ? [{ key: "Strict-Transport-Security", value: "max-age=63072000; includeSubDomains; preload" }] : []),
+          ...sharedSecurityHeaders,
         ],
+      },
+      {
+        // File endpoints set their own CSP per file type (a config CSP would
+        // replace it); the page policy's object-src 'none' blocks PDF viewers.
+        source: `/:path((?:${routeManagedCspPaths}).*)`,
+        headers: sharedSecurityHeaders,
       },
       {
         source: "/:path*.:ext(svg|png|jpg|jpeg|gif|webp|avif|ico|mp4|webm|mp3|pdf|woff|woff2)",

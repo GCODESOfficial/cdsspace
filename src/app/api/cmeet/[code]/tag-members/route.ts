@@ -1,5 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import { NextResponse } from "next/server";
+import { after, NextResponse } from "next/server";
+import { ringCallOnPhones } from "@/lib/mobile-call-push";
 import { supabaseAdmin } from "@/lib/supabase";
 import { getToolActor } from "@/lib/team-tools-auth";
 import { buildCMeetPath } from "@/lib/cmeet-links";
@@ -28,6 +29,9 @@ export async function POST(req: Request, ctx: { params: Promise<{ code: string }
   await db
     .from("team_meeting_participants")
     .upsert(rows, { onConflict: "meeting_id,team_member_id" });
+
+  // Tagged into a call under way: their phones ring too.
+  after(() => ringCallOnPhones(m.id, { onlyMembers: member_ids as string[] }));
 
   // Don't self-notify the tagger
   const recipients = (member_ids as string[]).filter(

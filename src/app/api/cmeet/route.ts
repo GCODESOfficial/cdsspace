@@ -1,5 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import { NextResponse } from "next/server";
+import { after, NextResponse } from "next/server";
+import { ringCallOnPhones } from "@/lib/mobile-call-push";
 import { supabaseAdmin } from "@/lib/supabase";
 import { getToolActor } from "@/lib/team-tools-auth";
 import { closeStaleCmeets } from "@/lib/cmeet-autoclose";
@@ -243,6 +244,24 @@ export async function POST(req: Request) {
       return NextResponse.json({ ok: false, error: "The client call invitation could not be created." }, { status: 500 });
     }
   }
+
+  // A teammate calling a conversation the admin is in (includes_admin): the
+  // admin isn't a team member, so isn't among the participants above and was
+  // never rung. CDS Space is rung instead, as for a client's call; the first
+  // admin to join answers it for everyone.
+  if (sourceThreadId && actor.kind === "team" && !scheduledFor) {
+    const { data: thread } = await db
+      .from("team_chat_threads")
+      .select("includes_admin")
+      .eq("id", sourceThreadId)
+      .maybeSingle();
+    if (thread?.includes_admin) {
+      await db.from("cmeet_staff_invitations").insert({ meeting_id: data.id });
+    }
+  }
+
+  // Phones of the people called ring even with the app closed.
+  after(() => ringCallOnPhones(data.id));
 
   return NextResponse.json({
     ok: true,

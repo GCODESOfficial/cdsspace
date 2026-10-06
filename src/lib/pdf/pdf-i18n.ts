@@ -1,4 +1,5 @@
-"use client";
+// No "use client": also used by the server-built invoice PDF, where it falls back
+// to English (no localStorage there) and translates nothing.
 
 // Translate the STATIC labels of a client-side (jsPDF) document into the
 // active language, so a downloaded invoice/receipt/quotation comes out in the

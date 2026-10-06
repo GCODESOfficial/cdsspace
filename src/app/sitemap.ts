@@ -100,16 +100,16 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
       priority: 0.5,
     },
     {
-      url: `${baseUrl}/logofolio`,
-      lastModified: new Date(),
-      changeFrequency: "monthly",
-      priority: 0.6,
-    },
-    {
       url: `${baseUrl}/privacy`,
       lastModified: now,
       changeFrequency: "monthly",
       priority: 0.4,
+    },
+    {
+      url: `${baseUrl}/delete-account`,
+      lastModified: now,
+      changeFrequency: "monthly",
+      priority: 0.3,
     },
     {
       url: `${baseUrl}/terms`,

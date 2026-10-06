@@ -415,7 +415,7 @@ export const LoginForm = ({
 
                 {/* Signup Link */}
                 <div className="flex items-center gap-1.5 lg:gap-2 text-[13px] lg:text-[14px] 2xl:text-[15px]">
-                    <span className="text-brand-body font-medium">Don't have an account?</span>
+                    <span className="text-brand-body font-medium">Don&apos;t have an account?</span>
                     <NextLink href={`/signup${nextPath !== "/dashboard" ? `?next=${encodeURIComponent(nextPath)}` : ""}`} className="text-brand-blue font-semibold hover:underline decoration-2 underline-offset-4">
                         Create account
                     </NextLink>

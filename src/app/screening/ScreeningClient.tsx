@@ -195,7 +195,7 @@ function LoginView({ onSuccess }: { onSuccess: () => void }) {
         </div>
         <h1 className="mt-3 text-2xl font-extrabold leading-tight text-brand-navy sm:text-3xl">Welcome, candidate.</h1>
         <p className="mt-2 text-sm text-brand-body">
-          Sign in with the <strong>email</strong> you applied with and your <strong>application tracking code</strong>. Access opens only after you've been shortlisted.
+          Sign in with the <strong>email</strong> you applied with and your <strong>application tracking code</strong>. Access opens only after you&apos;ve been shortlisted.
         </p>
 
         <form onSubmit={submit} className="mt-6 space-y-4">
@@ -280,7 +280,7 @@ function Dashboard({
       <main className="mx-auto max-w-3xl px-4 pt-6 sm:px-6">
         {/* Greeting + role */}
         <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className="overflow-hidden rounded-[26px] p-6 text-white shadow-xl sm:p-8" style={{ backgroundImage: GRADIENT }}>
-          <p className="text-sm font-medium text-white/80">Hi {c.full_name.split(" ")[0]}, you're screening for</p>
+          <p className="text-sm font-medium text-white/80">Hi {c.full_name.split(" ")[0]}, you&apos;re screening for</p>
           <h1 className="mt-1 text-2xl font-extrabold leading-tight sm:text-3xl">{c.role_title || "Your role"}</h1>
           <div className="mt-3 flex flex-wrap gap-2">
             {c.role_type && <Badge>{c.role_type}</Badge>}

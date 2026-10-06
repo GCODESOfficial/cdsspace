@@ -1,5 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import { NextResponse } from "next/server";
+import { after, NextResponse } from "next/server";
+import { ringCallOnPhones } from "@/lib/mobile-call-push";
 import { supabaseAdmin } from "@/lib/supabase";
 import { getTeamSession } from "@/lib/team-auth";
 import { getAdminSession } from "@/lib/admin-session";
@@ -135,5 +136,6 @@ export async function POST(req: Request) {
     if (notifs.length > 0) await db.from("team_notifications").insert(notifs);
   }
 
+  after(() => ringCallOnPhones(meeting.id));
   return NextResponse.json({ ok: true, id: meeting.id, room_code: meeting.room_code, requires_approval: requiresApproval });
 }

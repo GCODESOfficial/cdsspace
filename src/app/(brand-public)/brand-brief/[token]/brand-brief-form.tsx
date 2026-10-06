@@ -165,7 +165,7 @@ export function BrandBriefForm({ token, initial }: Props) {
                         Tell us about your brand.
                     </h1>
                     <p className="text-white/75 mt-3 text-[14px] sm:text-[15px] leading-relaxed max-w-xl">
-                        No account needed - fill in what you know, skip what you don't, and we'll take it from
+                        No account needed - fill in what you know, skip what you don&apos;t, and we&apos;ll take it from
                         there. You can download a copy as a PDF at any time.
                     </p>
 
@@ -190,7 +190,7 @@ export function BrandBriefForm({ token, initial }: Props) {
                                 Thank you - your brief is with us.
                             </p>
                             <p className="text-[13px] text-gray-500 mt-0.5">
-                                We'll reach out to {draft.contact_email || "you"} within 1 business day. You can
+                                We&apos;ll reach out to {draft.contact_email || "you"} within 1 business day. You can
                                 download a copy below.
                             </p>
                         </div>
@@ -637,7 +637,7 @@ function SaveIndicator({ state, readOnly }: { state: SaveState; readOnly: boolea
     if (state === "error") {
         return (
             <span className="inline-flex items-center gap-1 text-[11px] text-red-500 font-medium">
-                <AlertCircle className="w-3 h-3" /> Couldn't save
+                <AlertCircle className="w-3 h-3" /> Couldn&apos;t save
             </span>
         );
     }

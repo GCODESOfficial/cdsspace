@@ -10,23 +10,43 @@ import { publicSiteOrigin } from "@/lib/public-site";
  * the web pages.
  */
 
-type Row = { id: string; title: string | null; status: string | null; created_at: string | null };
+type Row = {
+  id: string;
+  title: string | null;
+  status: string | null;
+  created_at: string | null;
+  invoice_token?: string | null;
+  invoice_number?: string | null;
+};
 
+// hasInvoice: the table links its invoice (invoice_id), so the app can open it.
 const ORDER_SOURCES = [
-  { table: "design_requests", type: "Design" },
-  { table: "banner_requests", type: "Banner" },
-  { table: "merch_orders", type: "Merch" },
-  { table: "recurring_designs", type: "Recurring" },
+  { table: "design_requests", type: "Design", hasInvoice: false },
+  { table: "banner_requests", type: "Banner", hasInvoice: true },
+  { table: "merch_orders", type: "Merch", hasInvoice: true },
+  { table: "recurring_designs", type: "Recurring", hasInvoice: false },
 ] as const;
 
 export async function clientOrders(userId: string) {
   const groups = await Promise.all(
-    ORDER_SOURCES.map(async ({ table, type }) => {
+    ORDER_SOURCES.map(async ({ table, type, hasInvoice }) => {
       const rows = await glashQuery<Row>(
-        `select id, title, status, created_at from public.${table} where user_id = $1::uuid order by created_at desc`,
+        hasInvoice
+          ? `select o.id, o.title, o.status, o.created_at, i.public_token as invoice_token, i.invoice_number
+               from public.${table} o left join public.finance_invoices i on i.id = o.invoice_id
+              where o.user_id = $1::uuid order by o.created_at desc`
+          : `select id, title, status, created_at from public.${table} where user_id = $1::uuid order by created_at desc`,
         [userId],
       );
-      return rows.map((row) => ({ id: row.id, type, title: row.title, status: row.status, createdAt: row.created_at }));
+      return rows.map((row) => ({
+        id: row.id,
+        type,
+        title: row.title,
+        status: row.status,
+        createdAt: row.created_at,
+        invoiceToken: row.invoice_token || null,
+        invoiceNumber: row.invoice_number || null,
+      }));
     }),
   );
   return groups.flat().sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));

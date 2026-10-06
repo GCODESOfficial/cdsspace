@@ -1,5 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import { NextResponse } from "next/server";
+import { after, NextResponse } from "next/server";
+import { ringCallOnPhones } from "@/lib/mobile-call-push";
 import { getToolActor } from "@/lib/team-tools-auth";
 import { getSupabaseAdmin } from "@/lib/supabase";
 import { buildCMeetPath } from "@/lib/cmeet-links";
@@ -96,5 +97,6 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ code: 
     }
   }
 
+  if (decision === "approve") after(() => ringCallOnPhones(meeting.id));
   return NextResponse.json({ ok: true, meeting: updated });
 }

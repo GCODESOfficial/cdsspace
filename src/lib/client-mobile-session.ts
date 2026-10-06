@@ -61,28 +61,58 @@ async function findActiveSession(token: string) {
   );
 }
 
-export async function verifyClientMobileSession(token: string): Promise<DashboardSessionClaims | null> {
-  const row = await findActiveSession(token).catch(() => null);
-  if (!row) return null;
+// Verified tokens are remembered briefly so the app's bursts of requests (and the
+// several session reads inside one request) don't each pay a database round trip.
+// Revocation below clears the entry at once; another server instance would notice
+// within VERIFIED_TTL_MS.
+const VERIFIED_TTL_MS = 30_000;
+type VerifiedEntry = { claims: DashboardSessionClaims; userId: string; until: number };
+declare global {
+  var cdsMobileSessionCache: Map<string, VerifiedEntry> | undefined;
+}
+const verifiedCache = (globalThis.cdsMobileSessionCache ??= new Map<string, VerifiedEntry>());
 
+function forgetUser(userId: string, exceptHash?: string | null) {
+  for (const [hash, entry] of verifiedCache) {
+    if (entry.userId === userId && hash !== exceptHash) verifiedCache.delete(hash);
+  }
+}
+
+export async function verifyClientMobileSession(token: string): Promise<DashboardSessionClaims | null> {
+  const hash = hashMobileSessionToken(token);
   const now = Date.now();
+  const cached = verifiedCache.get(hash);
+  if (cached && cached.until > now && cached.claims.expiresAt * 1000 > now) return cached.claims;
+
+  const row = await findActiveSession(token).catch(() => null);
+  if (!row) {
+    verifiedCache.delete(hash);
+    return null;
+  }
+
+  let expiresAt = Date.parse(row.expires_at);
   if (now - Date.parse(row.last_used_at) > MOBILE_SESSION_TOUCH_SECONDS * 1000) {
-    const expiresAt = slidingExpiry(Date.parse(row.created_at), now);
-    await glashQuery(
+    const next = slidingExpiry(Date.parse(row.created_at), now);
+    expiresAt = next.getTime();
+    // Not awaited: the request doesn't need to wait for the bookkeeping write.
+    void glashQuery(
       "update public.client_mobile_sessions set last_used_at = now(), expires_at = $2 where id = $1::uuid",
-      [row.id, expiresAt.toISOString()],
+      [row.id, next.toISOString()],
     ).catch(() => undefined);
   }
 
-  return {
+  const claims: DashboardSessionClaims = {
     purpose: "cds-dashboard-session",
     version: 1,
     audience: "client",
     subject: row.user_id,
     email: row.email,
     issuedAt: Math.floor(Date.parse(row.created_at) / 1000),
-    expiresAt: Math.floor(Date.parse(row.expires_at) / 1000),
+    expiresAt: Math.floor(expiresAt / 1000),
   };
+  if (verifiedCache.size > 5000) verifiedCache.clear();
+  verifiedCache.set(hash, { claims, userId: row.user_id, until: now + VERIFIED_TTL_MS });
+  return claims;
 }
 
 /** The mobile token on the current request, if any. */
@@ -97,6 +127,7 @@ export async function readClientMobileSession() {
 }
 
 export async function revokeClientMobileSession(token: string, reason = "logout") {
+  verifiedCache.delete(hashMobileSessionToken(token));
   await glashQuery(
     "update public.client_mobile_sessions set revoked_at = now(), revoke_reason = $2 where token_hash = $1 and revoked_at is null",
     [hashMobileSessionToken(token), reason],
@@ -108,6 +139,7 @@ export async function revokeClientMobileSession(token: string, reason = "logout"
  * exceptToken keeps the device that made the change signed in.
  */
 export async function revokeAllClientMobileSessions(userId: string, reason: string, exceptToken?: string | null) {
+  forgetUser(userId, exceptToken ? hashMobileSessionToken(exceptToken) : null);
   await glashQuery(
     `update public.client_mobile_sessions set revoked_at = now(), revoke_reason = $2
       where user_id = $1::uuid and revoked_at is null and ($3::text is null or token_hash <> $3)`,

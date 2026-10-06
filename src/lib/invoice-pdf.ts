@@ -1,4 +1,5 @@
-"use client";
+// Shared by the browser ("Download PDF") and the server (/api/finance/invoice/[token]/pdf),
+// so no "use client": browser-only work happens inside functions, behind checks.
 
 import jsPDF from "jspdf";
 import { installBrandFont } from "./pdf/pdf-fonts";
@@ -32,7 +33,10 @@ function fmtDate(iso: string | null | undefined) {
  * jsPDF.addImage cannot consume SVG directly, so SVGs are rasterised via
  * an offscreen canvas at the requested pixel size. PNGs are passed through.
  */
-type LoadedImage = { data: string; format: "PNG"; width: number; height: number };
+export type LoadedImage = { data: string; format: "PNG"; width: number; height: number };
+/** Loads a site image (e.g. "/CDS_Seal.png") for the PDF. The browser fetches it;
+ * the server reads it from public/ (lib/finance/invoice-pdf-server.ts). */
+export type PdfImageLoader = (url: string, targetWidth?: number) => Promise<LoadedImage | null>;
 
 async function loadImageAsDataUri(
     url: string,
@@ -115,9 +119,24 @@ async function loadImageAsDataUri(
 type InvoicePdfOptions = {
     bankAccounts?: FinanceBankAccount[];
     receipt?: FinanceReceipt;
+    loadImage?: PdfImageLoader;
 };
 
+/** File name the invoice or receipt PDF is saved under. */
+export function invoicePdfFileName(invoice: FinanceInvoice, receipt?: FinanceReceipt | null) {
+    return receipt ? `Receipt-${receipt.receipt_number || invoice.invoice_number}.pdf` : `Invoice-${invoice.invoice_number}.pdf`;
+}
+
+/** Browser: builds the PDF and downloads it. */
 export async function exportInvoiceToPdf(invoice: FinanceInvoice, items: FinanceInvoiceItem[], options: InvoicePdfOptions = {}) {
+    const doc = await buildInvoicePdf(invoice, items, options);
+    doc.save(invoicePdfFileName(invoice, options.receipt));
+}
+
+/** Builds the invoice (or, with options.receipt, receipt) PDF document. Runs in
+ * the browser and on the server (the app's /api/finance/invoice/[token]/pdf). */
+export async function buildInvoicePdf(invoice: FinanceInvoice, items: FinanceInvoiceItem[], options: InvoicePdfOptions = {}) {
+    const loadImage = options.loadImage ?? loadImageAsDataUri;
     const receipt = options.receipt;
     const isReceipt = Boolean(receipt);
     const paymentAccounts: FinanceBankAccount[] = options.bankAccounts ?? (invoice.currency === "NGN" ? CDS_BANK_ACCOUNTS.map((account) => ({
@@ -128,9 +147,9 @@ export async function exportInvoiceToPdf(invoice: FinanceInvoice, items: Finance
         logo_url: account.logo,
     })) : []);
     const [logoImg, sealImg, ...bankImgs] = await Promise.all([
-        loadImageAsDataUri("/navbar/CDS Logo.svg", 256),
-        loadImageAsDataUri("/CDS_Seal.png"),
-        ...paymentAccounts.map((account) => account.logo_url ? loadImageAsDataUri(account.logo_url) : Promise.resolve(null)),
+        loadImage("/navbar/CDS Logo.svg", 256),
+        loadImage("/CDS_Seal.png"),
+        ...paymentAccounts.map((account) => account.logo_url ? loadImage(account.logo_url) : Promise.resolve(null)),
     ]);
 
     const doc = new jsPDF({ unit: "pt", format: "a4" });
@@ -538,5 +557,5 @@ export async function exportInvoiceToPdf(invoice: FinanceInvoice, items: Finance
         doc.text("cdsspace.pro", margin, pageHeight - 24);
     }
 
-    doc.save(isReceipt ? `Receipt-${receipt?.receipt_number || invoice.invoice_number}.pdf` : `Invoice-${invoice.invoice_number}.pdf`);
+    return doc;
 }

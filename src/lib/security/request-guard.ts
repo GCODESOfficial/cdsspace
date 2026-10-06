@@ -1,9 +1,13 @@
 import { NextResponse, type NextRequest } from "next/server";
+import { parseMobileBearer } from "@/lib/client-mobile-session-core.mjs";
+import { parseTeamBearer } from "@/lib/team-mobile-session-core.mjs";
+import { parseAdminBearer } from "@/lib/admin-mobile-session-core.mjs";
 import {
   applicationRateProfile,
   clientNetworkFromHeaders,
   rateLimitBuckets,
   RATE_LIMIT_SESSION_COOKIES,
+  mutationBodyLimit,
 } from "@/lib/security/request-guard-core.mjs";
 
 const UNSAFE_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
@@ -59,9 +63,16 @@ function exceedsApplicationRate(request: NextRequest) {
   const profile = applicationRateProfile(request.nextUrl.pathname, request.method);
   if (!profile) return false;
   pruneRequestBuckets(now);
+  // The mobile app has no cookies: its Bearer token identifies the person, so
+  // phones sharing one carrier address aren't limited as a single client.
+  // Only the token's shape is checked here; each route verifies the session.
   const sessionToken = RATE_LIMIT_SESSION_COOKIES
     .map((name) => request.cookies.get(name)?.value)
-    .find((value) => Boolean(value));
+    .find((value) => Boolean(value))
+    || parseMobileBearer(request.headers.get("authorization"))
+    || parseTeamBearer(request.headers.get("authorization"))
+    || parseAdminBearer(request.headers.get("authorization"))
+    || undefined;
   const buckets = rateLimitBuckets(profile, clientNetworkFromHeaders(request.headers), sessionToken).map((limit) => {
     const key = requestFingerprint(limit.key);
     const current = requestBuckets.get(key) || { tokens: limit.capacity, lastRefill: now, lastSeen: now };
@@ -197,10 +208,8 @@ export function guardIncomingRequest(request: NextRequest): NextResponse | null 
   const isMutation = UNSAFE_METHODS.has(request.method.toUpperCase());
   const isAuthSurface = ["/login", "/signup", "/forgot-password", "/reset-password"].includes(request.nextUrl.pathname);
   if (isMutation && Number.isFinite(contentLength)) {
-    if (isAuthSurface && contentLength > 512 * 1024) {
-      return NextResponse.json({ ok: false, error: "Request body is too large." }, { status: 413 });
-    }
-    if (!contentType.toLowerCase().startsWith("multipart/form-data") && contentLength > 2 * 1024 * 1024) {
+    const limit = mutationBodyLimit(request.nextUrl.pathname, contentType, isAuthSurface);
+    if (limit != null && contentLength > limit) {
       return NextResponse.json({ ok: false, error: "Request body is too large." }, { status: 413 });
     }
   }

@@ -478,9 +478,6 @@ export async function POST(req: NextRequest) {
   if (!recipientRefs.length) {
     return NextResponse.json({ error: "Choose at least one receiving client." }, { status: 400 });
   }
-  if (deliveryType === "brand_identity" && recipientRefs.length > 1) {
-    return NextResponse.json({ error: "A brand identity belongs to a single project owner, so it can only go to one client." }, { status: 400 });
-  }
   if (!existingId && !files.length && !externalUrl) {
     return NextResponse.json({ error: "Upload at least one finished file or add a Google Drive link." }, { status: 400 });
   }

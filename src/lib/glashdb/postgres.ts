@@ -15,8 +15,9 @@ function createPool(connectionString: string, max = 24) {
     max,
     // Keep warm connections around longer to avoid paying the TCP+TLS+auth
     // handshake on every burst (this is the biggest per-request latency win
-    // for a remote database).
-    idleTimeoutMillis: 60_000,
+    // for a remote database). Five minutes covers the gaps between a mobile
+    // user's taps, which used to land on a fresh, slow connection after 60s.
+    idleTimeoutMillis: 300_000,
     // Neon may need more than eight seconds to wake a cold database. Keep this
     // above the observed cold-start time while retaining separate bounded
     // statement and query timeouts below.

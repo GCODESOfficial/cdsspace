@@ -1,4 +1,5 @@
 import "server-only";
+import { inflateSync } from "node:zlib";
 import sharp, { type Metadata } from "sharp";
 import { MalwareScanError, scanBufferForMalware } from "@/lib/malware-scanner";
 
@@ -225,7 +226,10 @@ export function scanForExecutable(buffer: Buffer): string | null {
 
 /** Detects active/browser-executable markup - used for non-image gates. */
 export function scanForActiveContent(buffer: Buffer): string | null {
-  const head = buffer.subarray(0, 16 * 1024).toString("latin1").toLowerCase();
+  // PDF stream bodies are compressed binary; scanning them yields random false
+  // positives, so only the PDF's object syntax is inspected.
+  const source = startsWithAscii(buffer, "%PDF-") ? pdfObjectText(buffer) : buffer.toString("latin1");
+  const head = source.slice(0, 16 * 1024).toLowerCase();
   if (head.includes("<script")) return "embedded <script>";
   if (head.includes("<?php")) return "embedded PHP";
   if (head.includes("<!doctype html") || head.includes("<html")) return "HTML markup";
@@ -234,9 +238,43 @@ export function scanForActiveContent(buffer: Buffer): string | null {
   return null;
 }
 
+const PDF_STREAM = /stream\r?\n([\s\S]*?)\r?\n?endstream/g;
+const MAX_INFLATED_OBJECT_STREAM = 32 * 1024 * 1024;
+
+/**
+ * PDF object syntax with stream bodies removed. Compressed object streams
+ * (/Type /ObjStm) hold ordinary dictionaries, so those are inflated and kept.
+ */
+function pdfObjectText(buffer: Buffer): string {
+  const text = buffer.toString("latin1");
+  const parts: string[] = [];
+  let last = 0;
+  for (const match of text.matchAll(PDF_STREAM)) {
+    const start = match.index ?? 0;
+    parts.push(text.slice(last, start));
+    const dict = text.slice(Math.max(last, start - 1024), start);
+    if (/\/Type\s*\/ObjStm\b/.test(dict) && /\/FlateDecode\b/.test(dict)) {
+      try {
+        const body = Buffer.from(match[1], "latin1");
+        parts.push(inflateSync(body, { maxOutputLength: MAX_INFLATED_OBJECT_STREAM }).toString("latin1"));
+      } catch {
+        // Undecodable object stream: nothing structural to inspect.
+      }
+    }
+    last = start + match[0].length;
+  }
+  parts.push(text.slice(last));
+  // PDF names may hex-escape characters (/J#61vaScript); decode before matching.
+  return parts.join("\n").replace(/\/[^\s/<>\[\]()%{}]+/g, (name) =>
+    name.replace(/#([0-9a-fA-F]{2})/g, (_, hex: string) => String.fromCharCode(parseInt(hex, 16))));
+}
+
 function validatePdfStructure(buffer: Buffer) {
   const text = buffer.toString("latin1");
-  const riskyToken = /\/(?:JavaScript|JS|Launch|OpenAction|AA|RichMedia|EmbeddedFile|XFA)\b/i.exec(text);
+  // PDF names are case-sensitive. /OpenAction and /AA are only triggers (they
+  // commonly just set the initial view); the dangerous action types they could
+  // fire - JavaScript, Launch, embedded media/files, XFA forms - are blocked.
+  const riskyToken = /\/(?:JavaScript|JS|Launch|RichMedia|EmbeddedFiles?|XFA)(?![A-Za-z0-9])/.exec(pdfObjectText(buffer));
   if (riskyToken) {
     throw new UploadSecurityError(`Blocked: the PDF contains active content (${riskyToken[0]}).`);
   }

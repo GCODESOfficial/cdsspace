@@ -1,11 +1,13 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import { NextResponse } from "next/server";
+import { after, NextResponse } from "next/server";
+import { cancelCallOnPhones } from "@/lib/mobile-call-push";
 import { supabaseAdmin } from "@/lib/supabase";
 import { getToolActor } from "@/lib/team-tools-auth";
 import { closeStaleCmeets } from "@/lib/cmeet-autoclose";
 import { getClientAccountState } from "@/lib/client-account";
 import { CALL_RING_SECONDS } from "@/lib/cmeet-call-handling";
 import { glashMaybeOne } from "@/lib/glashdb/postgres";
+import { callingStatus } from "@/lib/cmeet-call-roster";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -26,12 +28,19 @@ export async function GET(_req: Request, ctx: { params: Promise<{ code: string }
   const canEndStream = actor?.kind === "admin"
     || (actor?.kind === "team" && data.created_by === actor.id)
     || Boolean(account?.user?.id && data.created_by_client === account.user.id);
+  // A sub-admin is a team member with a photo; the super admin has none, so the logo.
+  const adminPhoto = actor?.kind === "admin" && actor.memberId
+    ? (await glashMaybeOne<{ avatar_url: string | null }>(
+        `select avatar_url from public.team_members where id = $1::uuid`,
+        [actor.memberId],
+      ).catch(() => null))?.avatar_url || null
+    : null;
   const viewer = actor?.kind === "admin"
     ? {
         id: actor.memberId,
         name: actor.name,
         kind: "admin" as const,
-        avatar_url: "/favicon.png",
+        avatar_url: adminPhoto || "/favicon.png",
         is_super_admin: actor.role === "super_admin",
       }
     : actor?.kind === "team"
@@ -89,9 +98,19 @@ export async function GET(_req: Request, ctx: { params: Promise<{ code: string }
     };
   }
 
+  // The caller's own view of an instant call: who is being rung, and whether
+  // they declined, so the app can show "Ringing" / "Call declined".
+  const isCaller = actor?.kind === "team"
+    ? data.created_by === actor.id
+    : actor?.kind === "admin"
+      ? Boolean(data.created_by_admin) && (data.created_by ? data.created_by === actor.memberId : actor.role === "super_admin")
+      : Boolean(account?.user?.id && data.created_by_client === account.user.id);
+  const calling = isCaller ? await callingStatus(data.id).catch(() => null) : null;
+
   return NextResponse.json({
     ok: true,
     support,
+    calling,
     meeting: {
       ...data,
       created_by: actor || account ? data.created_by : null,
@@ -155,5 +174,7 @@ export async function DELETE(_req: Request, ctx: { params: Promise<{ code: strin
     return NextResponse.json({ ok: false, error: "Forbidden" }, { status: 403 });
   }
   await db.from("team_meetings").update({ status: "ended", ended_at: new Date().toISOString() }).eq("id", m.id);
+  // The caller hung up (or the host ended it): phones still ringing stop.
+  after(() => cancelCallOnPhones(m.id));
   return NextResponse.json({ ok: true });
 }

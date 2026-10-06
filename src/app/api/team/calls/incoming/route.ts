@@ -4,6 +4,8 @@ import { supabaseAdmin } from "@/lib/supabase";
 import { getTeamSession } from "@/lib/team-auth";
 import { closeStaleCmeets } from "@/lib/cmeet-autoclose";
 import { buildCMeetPath } from "@/lib/cmeet-links";
+import { absoluteAvatarUrl, declineUrlFor } from "@/lib/mobile-call-push";
+import { callShapes, declinedMeetingIds } from "@/lib/cmeet-call-roster";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -53,20 +55,25 @@ export async function GET() {
     return NextResponse.json({ ok: false, error: meetingError.message }, { status: 500 });
   }
 
+  // A call this member declined (on any device) no longer rings for them.
+  const declined = await declinedMeetingIds(session.id, (meetings || []).map((meeting: any) => meeting.id));
   const ringingMeetings = (meetings || [])
-    .filter((meeting: any) => meeting.created_by !== session.id)
+    .filter((meeting: any) => meeting.created_by !== session.id && !declined.has(meeting.id))
     .slice(0, 5);
+  const shapes = await callShapes(ringingMeetings.map((meeting: any) => meeting.id));
   const creatorIds = Array.from(
     new Set(ringingMeetings.map((meeting: any) => meeting.created_by).filter(Boolean)),
   ) as string[];
   const creatorNames = new Map<string, string>();
+  const creatorAvatars = new Map<string, string | null>();
   if (creatorIds.length > 0) {
     const { data: creators } = await db
       .from("team_members")
-      .select("id, full_name")
+      .select("id, full_name, avatar_url")
       .in("id", creatorIds);
     for (const creator of creators || []) {
       creatorNames.set(creator.id, creator.full_name || "A teammate");
+      creatorAvatars.set(creator.id, creator.avatar_url || null);
     }
   }
 
@@ -82,8 +89,14 @@ export async function GET() {
         : meeting.created_by_admin
           ? "Super admin"
           : "CDS Space",
-      startedAt: meeting.started_at || meeting.created_at,
+      callerAvatar: absoluteAvatarUrl(meeting.created_by ? creatorAvatars.get(meeting.created_by) : null)
+        || (meeting.created_by_admin ? absoluteAvatarUrl("/favicon.png") : null),
+      // The app's native call page declines with this (it has no session of its own).
+      declineUrl: declineUrlFor(meeting.id, `team:${session.id}`),
+      startedAt: new Date(meeting.started_at || meeting.created_at).toISOString(),
       link: buildCMeetPath(meeting.room_code, meeting.title),
+      participantCount: shapes.get(meeting.id)?.participantCount ?? 2,
+      group: shapes.get(meeting.id)?.group ?? false,
     })),
   });
 }

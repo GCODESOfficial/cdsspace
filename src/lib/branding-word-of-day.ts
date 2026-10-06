@@ -16,6 +16,8 @@ export interface BrandingWordLike {
 export interface BrandingWordSelectionOptions {
   excludedWordIds?: Iterable<string>;
   excludedWords?: Iterable<string>;
+  /** Take the word this many places further down the queue (days not yet recorded). */
+  skip?: number;
 }
 
 export function getBrandingWordDateKey(date = new Date()) {
@@ -86,6 +88,8 @@ export function pickBrandingWordForDate<T extends BrandingWordLike>(
   if (featured) return featured;
 
   // Editorial rank is the queue. Once a term has been used it is excluded, so
-  // the next valid single branding term advances without repetition.
-  return list[0];
+  // the next valid single branding term advances without repetition. `skip`
+  // moves along it for days that went unrecorded, so the word still changes daily.
+  const skip = Math.max(0, Math.floor(options.skip || 0));
+  return list[skip % list.length];
 }

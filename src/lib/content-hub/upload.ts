@@ -24,7 +24,11 @@ export async function uploadContentHubFile(file: File, folder = "content-hub"): 
   const maxBytes = validation.kind === "video" ? 150 * 1024 * 1024 : validation.kind === "image" ? 10 * 1024 * 1024 : 25 * 1024 * 1024;
   if (file.size > maxBytes) throw new UploadSecurityError("This file is too large for the content library.", 413);
   const safe = await assertSafeUpload(file, { allow: ["image", "pdf", "office", "zip", "design"], maxBytes });
-  if ((validation.kind === "image" && safe.kind !== "image")
+  // A safe SVG is an image here (assertSafeUpload files SVG under "document" and has
+  // already scanned it for scripts and external content). Without this, every SVG
+  // was refused, including the Word of the Day artwork, which stopped generating.
+  const safeSvgImage = safe.contentType === "image/svg+xml";
+  if ((validation.kind === "image" && safe.kind !== "image" && !safeSvgImage)
     || (validation.kind === "video" && !safe.contentType.startsWith("video/"))) {
     throw new UploadSecurityError("The file contents do not match the selected media type.");
   }
