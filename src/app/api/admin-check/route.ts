@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getTeamSessionFromToken } from "@/lib/team-auth";
 import { adminSessionCookieOptions, signAdminCookie, verifyAdminCookie } from "@/lib/admin-session-cookie";
 import { glashMaybeOne } from "@/lib/glashdb/postgres";
+import { sweepResearchIfDue } from "@/lib/prospect-research-runner";
 
 /**
  * A schema problem is permanent and means what it says; anything else - a
@@ -198,6 +199,9 @@ export async function getAdminSessionAsync(req: NextRequest): Promise<AdminSessi
 }
 
 export async function GET(req: NextRequest) {
+  // An admin is using the platform, so this is a good moment to move any
+  // background research along.
+  void sweepResearchIfDue();
   let session: AdminSession | null = null;
   let lastError: unknown = null;
 

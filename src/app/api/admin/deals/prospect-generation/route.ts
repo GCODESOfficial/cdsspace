@@ -6,7 +6,8 @@ import { assertTrustedMutationOrigin } from "@/lib/intelligence/security";
 import { checkIntelligenceRateLimit } from "@/lib/intelligence/rate-limit";
 import { dedupeCandidates, harvestFromUrl, parseCompanyInput, type CompanyCandidate } from "@/lib/prospect-generation";
 import { mergeCandidates, runRegistryImport } from "@/lib/prospect-import";
-import { enrichCompany } from "@/lib/prospect-enrichment";
+import { runEnrichmentPass } from "@/lib/prospect-research-pass";
+import { activeResearchRun, advanceResearchRun, startResearchRun, stopResearchRun } from "@/lib/prospect-research-runner";
 import { DIRECTORY_TARGET, SIZE_BANDS, companyNameKey, normalizeCountry, sizeBandFor } from "@/lib/prospect-directory";
 import { PROSPECT_ISSUES, isProspectIssue } from "@/lib/prospect-issues";
 import { registryCatalogue, registryFor } from "@/lib/prospect-registries";
@@ -294,6 +295,9 @@ async function companyFilters(params: URLSearchParams) {
 
 const SORTS: Record<string, string> = {
   score: "deal_score desc, updated_at desc",
+  // Reading the directory from the weakest prospect upward is how you find
+  // the ones worth fixing or dropping, so it is offered beside the default.
+  score_asc: "deal_score asc, updated_at desc",
   name_asc: "name_key asc",
   name_desc: "name_key desc",
   founded_new: "founded_year desc nulls last",
@@ -699,107 +703,48 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ...result, batch });
     }
 
+    if (action === "start_research") {
+      // The run belongs to the server from here: closing the page no longer
+      // stops it, and it keeps going until stopped or the admin signs out.
+      const run = await startResearchRun({ actorKey: actor, actorName: body.actor_name ? String(body.actor_name) : null });
+      void advanceResearchRun({ batches: 1 }).catch(() => undefined);
+      return NextResponse.json({ ok: true, run });
+    }
+
+    if (action === "stop_research") {
+      const stopped = await stopResearchRun({ reason: "an admin stopped it" });
+      return NextResponse.json({ ok: true, stopped, run: await activeResearchRun() });
+    }
+
+    if (action === "research_status") {
+      return NextResponse.json({ ok: true, run: await activeResearchRun() });
+    }
+
     if (action === "enrich_batch") {
       const rate = checkIntelligenceRateLimit(`prospect-enrich:${actor}`, 2000, 60 * 60 * 1000);
       if (!rate.allowed) return NextResponse.json({ error: "Research limit reached for this hour. Try again shortly." }, { status: 429 });
-
-      const limit = intValue(body.limit, DEFAULT_BATCH, 1, MAX_BATCH);
-      const batchId = uuid(body.batch_id);
-      const companyId = uuid(body.id);
-      const scope = companyId ? "and id = $2" : batchId ? "and batch_id = $2" : "";
-      // Claiming inside one statement stops two open tabs researching the same row.
-      const claimed = await glashQuery<any>(
-        `update public.prospect_companies set enrichment_status='running', enrichment_attempts = enrichment_attempts + 1, updated_at=now()
-         where id in (
-           select id from public.prospect_companies
-           where enrichment_status = 'queued' ${scope}
-           order by created_at limit $1
-           for update skip locked
-         ) returning *`,
-        companyId ? [limit, companyId] : batchId ? [limit, batchId] : [limit],
-      );
-
-      const processed: Array<{ id: string; company_name: string; status: string; deal_score?: number }> = [];
-      for (const row of claimed) {
-        try {
-          const result = await enrichCompany({
-            company_name: row.company_name,
-            domain: row.domain,
-            website: row.website,
-            country: row.hq_country || row.country,
-            industry: row.industry,
-          });
-          await glashQuery(
-            `update public.prospect_companies set
-               company_name=$2, name_key=$3, domain=coalesce($4, domain), website=$5, country=$6, city=$7, industry=$8,
-               employee_range=$9, employee_count=$10, size_band=$11, founded_year=$12,
-               is_public=$13, stock_exchanges=$14::jsonb, ticker=$15, is_startup=$16,
-               activity_status=$17, activity_evidence=$18,
-               website_status=$19, website_score=$20, website_findings=$21::jsonb, issues=$41::text[],
-               brand_consistency=$38::jsonb, domain_variants=$39::jsonb, dns_contacts=$40::jsonb,
-               socials=$22::jsonb, emails=$23::jsonb, phones=$24::jsonb,
-               brief=$25, pain_points=$26::jsonb, how_we_help=$27::jsonb, service_fit=$28::jsonb,
-               competitors_local=$29::jsonb, competitors_global=$30::jsonb,
-               outreach_angle=$31, outreach_subject=$32, outreach_email=$33,
-               deal_score=$34, priority=$35, sources=$36::jsonb,
-               enrichment_status='enriched', enrichment_error=null, enriched_at=now(), updated_by=$37, updated_at=now()
-             where id=$1`,
-            [
-              row.id, result.company_name, companyNameKey(result.company_name), result.domain, result.website,
-              result.country, result.city, result.industry,
-              result.employee_range, result.employee_count, result.size_band, result.founded_year,
-              result.is_public, JSON.stringify(result.stock_exchanges), result.ticker, result.is_startup,
-              result.activity_status, result.activity_evidence,
-              result.website_status, result.website_score, JSON.stringify(result.website_findings),
-              JSON.stringify(result.socials), JSON.stringify(result.emails), JSON.stringify(result.phones),
-              result.brief, JSON.stringify(result.pain_points), JSON.stringify(result.how_we_help), JSON.stringify(result.service_fit),
-              JSON.stringify(result.competitors_local), JSON.stringify(result.competitors_global),
-              result.outreach_angle, result.outreach_subject, result.outreach_email,
-              result.deal_score, result.priority, JSON.stringify(result.sources), actor,
-              JSON.stringify(result.brand_consistency), JSON.stringify(result.domain_variants), JSON.stringify(result.dns_contacts),
-              result.issues,
-            ],
-          );
-
-          // Research often reveals further countries of operation. They attach to
-          // this one company row rather than creating duplicates per country.
-          for (const country of result.countries) {
-            await glashQuery(
-              `insert into public.prospect_company_countries (company_id,country,is_headquarters,source_url)
-               values ($1,$2,$3,$4) on conflict do nothing`,
-              [row.id, country, country === result.country, result.website],
-            );
-          }
-
-          await glashQuery(`delete from public.prospect_company_contacts where company_id=$1`, [row.id]);
-          for (const contact of result.contacts) {
-            await glashQuery(
-              `insert into public.prospect_company_contacts (company_id,full_name,job_title,seniority,email,email_confidence,phone,linkedin_url,source_url)
-               values ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
-              [row.id, contact.full_name, contact.job_title, contact.seniority, contact.email, contact.email_confidence, contact.phone, contact.linkedin_url, contact.source_url],
-            );
-          }
-          processed.push({ id: row.id, company_name: result.company_name, status: "enriched", deal_score: result.deal_score });
-        } catch (error) {
-          const message = error instanceof Error ? error.message : "Research failed.";
-          await glashQuery(
-            `update public.prospect_companies set enrichment_status = case when enrichment_attempts >= 3 then 'failed' else 'queued' end,
-             enrichment_error=$2, updated_at=now() where id=$1`,
-            [row.id, message.slice(0, 500)],
-          );
-          processed.push({ id: row.id, company_name: row.company_name, status: "failed" });
-        }
-      }
-
-      const [counter] = await glashQuery<any>(`select value from public.prospect_directory_counters where bucket = 'enrichment:queued'`);
-      return NextResponse.json({ processed, remaining: Number(counter?.value || 0) });
+      // The work itself lives in a library so the background runner can do the
+      // same pass when nobody has the page open.
+      const result = await runEnrichmentPass({
+        limit: intValue(body.limit, DEFAULT_BATCH, 1, MAX_BATCH),
+        actor,
+        batchId: uuid(body.batch_id),
+        companyId: uuid(body.id),
+      });
+      return NextResponse.json(result);
     }
 
     if (action === "requeue") {
       const id = uuid(body.id);
+      // A retry goes to the front of the queue. Only companies that failed, or
+      // that have sat in "running" for 15 minutes (a pass that died), are put
+      // back; one being researched right now is left to finish.
       const rows = id
-        ? await glashQuery<any>(`update public.prospect_companies set enrichment_status='queued', enrichment_attempts=0, enrichment_error=null, updated_at=now() where id=$1 returning id`, [id])
-        : await glashQuery<any>(`update public.prospect_companies set enrichment_status='queued', enrichment_attempts=0, enrichment_error=null, updated_at=now() where enrichment_status in ('failed','running') returning id`);
+        ? await glashQuery<any>(`update public.prospect_companies set enrichment_status='queued', enrichment_attempts=0, enrichment_error=null, retry_requested_at=now(), updated_at=now() where id=$1 returning id`, [id])
+        : await glashQuery<any>(`update public.prospect_companies set enrichment_status='queued', enrichment_attempts=0, enrichment_error=null, retry_requested_at=now(), updated_at=now()
+            where enrichment_status = 'failed'
+               or (enrichment_status = 'running' and updated_at < now() - interval '15 minutes')
+            returning id`);
       return NextResponse.json({ requeued: rows.length });
     }
 

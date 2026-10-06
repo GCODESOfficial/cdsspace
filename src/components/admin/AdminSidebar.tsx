@@ -203,18 +203,6 @@ const dealsNavItems = [
     permission: "deals",
   },
   {
-    label: "Proposals",
-    href: "/admin/deals/proposals",
-    icon: FileText,
-    permission: "deals.proposals",
-  },
-  {
-    label: "Brand audits",
-    href: "/admin/deals/brand-audits",
-    icon: ClipboardCheck,
-    permission: "deals.audits",
-  },
-  {
     label: "Prospect generation",
     href: "/admin/deals/prospect-generation",
     icon: Radar,
@@ -225,6 +213,18 @@ const dealsNavItems = [
     href: "/admin/deals/prospects",
     icon: Users,
     permission: "deals.prospects",
+  },
+  {
+    label: "Brand audits",
+    href: "/admin/deals/brand-audits",
+    icon: ClipboardCheck,
+    permission: "deals.audits",
+  },
+  {
+    label: "Proposals",
+    href: "/admin/deals/proposals",
+    icon: FileText,
+    permission: "deals.proposals",
   },
   {
     label: "Prospect pipeline",

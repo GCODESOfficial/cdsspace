@@ -1,0 +1,21 @@
+name: Prospect research
+
+# glashdb has no built-in scheduler, so this GitHub Actions workflow is the
+# external cron: every 5 minutes it advances an active prospect research run.
+# Ordinary admin traffic advances it too, so a missed schedule only slows the
+# work rather than stopping it.
+
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch: {}
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Advance prospect research
+        run: |
+          curl -fsS -X GET "https://cdsspace.pro/api/cron/prospect-research" \
+            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
+            -w "\nHTTP %{http_code}\n"

@@ -5,33 +5,16 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
-  AlertTriangle, Bookmark, Building2, ChevronDown, ChevronUp, Chrome, ClipboardCheck, Download, ExternalLink, EyeOff, FileText, Globe, Landmark, Library, Link2, Loader2,
-  Mail, MapPin, Palette, Play, Plus, RefreshCw, Search, Send, Server, SlidersHorizontal, Square, Target, Trash2, TrendingUp, Users, X,
+  AlertTriangle, ArrowDownWideNarrow, ArrowUpNarrowWide, Bookmark, Building2, ChevronDown, ChevronUp, Chrome, ClipboardCheck, Download, ExternalLink, EyeOff, FileText, Globe, Landmark, Library, Link2, Loader2,
+  Mail, MapPin, Play, Plus, RefreshCw, Search, Send, SlidersHorizontal, Square, Target, Trash2, TrendingUp, Users, X,
 } from "lucide-react";
 import { appConfirm } from "@/lib/app-notify";
 import { DIRECTORY_TARGET, SIZE_BANDS, STOCK_EXCHANGES } from "@/lib/prospect-directory";
 import { PROSPECT_ISSUES, issueLabel } from "@/lib/prospect-issues";
+import { ACTIVITY_TONE, PRIORITY_TONE, ProspectResearchPanel, WEBSITE_TONE, type ProspectResearch } from "@/components/deals/ProspectResearchPanel";
+import { ProposalPreviewModal } from "@/components/deals/ProposalPreviewModal";
 
-type Contact = { id: string; full_name: string; job_title: string | null; seniority: string; email: string | null; email_confidence: string; linkedin_url: string | null; source_url: string | null };
-type Competitor = { name: string; url: string; note: string; type: "direct" | "indirect" };
-type Company = {
-  id: string; company_name: string; domain: string | null; website: string | null; country: string | null; hq_country: string | null; city: string | null;
-  country_count: number; countries: string[];
-  industry: string | null; employee_range: string | null; employee_count: number | null; size_band: string | null; founded_year: number | null;
-  is_public: boolean | null; stock_exchanges: string[]; ticker: string | null; is_startup: boolean | null;
-  activity_status: string; activity_evidence: string | null;
-  website_status: string; website_score: number | null; website_findings: string[]; issues: string[];
-  brand_consistency: Array<{ area: string; status: string; detail: string; evidence: string[] }>;
-  domain_variants: Array<{ host: string; url: string; status: number | null; ok: boolean; redirectsTo: string | null; note: string }>;
-  dns_contacts: Array<{ kind: string; value: string; detail: string }>;
-  socials: Array<{ platform: string; url: string }>; emails: Array<{ email: string; source_url: string; kind: string }>;
-  brief: string | null; pain_points: string[]; how_we_help: string[]; service_fit: Array<{ service: string; reason: string }>;
-  competitors_local: Competitor[]; competitors_global: Competitor[];
-  outreach_angle: string | null; outreach_subject: string | null; outreach_email: string | null;
-  deal_score: number; priority: string; sources: string[];
-  enrichment_status: string; enrichment_error: string | null; review_status: string; prospect_id: string | null;
-  contacts: Contact[];
-};
+type Company = ProspectResearch;
 type HuntedEmail = { email: string; source_url: string; kind: string; channel: string; on_domain: boolean };
 type AuditFinding = { area: "ai_search" | "website" | "social" | "video"; title: string; detail: string; severity: "high" | "medium" | "low"; evidence: string };
 type AiAudit = { findings: AuditFinding[]; strengths: string[]; checked: string[]; unreachable: boolean };
@@ -64,9 +47,6 @@ const EMPTY_FILTERS = {
   score_from: "", score_to: "",
 };
 
-const ACTIVITY_TONE: Record<string, string> = { active: "bg-emerald-50 text-emerald-700 border-emerald-200", dormant: "bg-amber-50 text-amber-700 border-amber-200", inactive: "bg-rose-50 text-rose-700 border-rose-200", unknown: "bg-slate-50 text-slate-600 border-slate-200" };
-const WEBSITE_TONE: Record<string, string> = { outdated: "bg-rose-50 text-rose-700 border-rose-200", dated: "bg-amber-50 text-amber-700 border-amber-200", modern: "bg-emerald-50 text-emerald-700 border-emerald-200", missing: "bg-rose-50 text-rose-700 border-rose-200", broken: "bg-rose-50 text-rose-700 border-rose-200", unknown: "bg-slate-50 text-slate-600 border-slate-200" };
-const PRIORITY_TONE: Record<string, string> = { high: "bg-[#0A4FE8] text-white", medium: "bg-blue-50 text-[#0A4FE8]", low: "bg-slate-100 text-slate-600" };
 // What the deal score is made of, so the number on a card can be read rather
 // than guessed. Kept in step with scoreDeal() in src/lib/prospect-enrichment.ts.
 const SCORE_METRIC = [
@@ -81,6 +61,30 @@ const SCORE_METRIC = [
 const SCORE_SPLIT = 45;
 /** Filter views held in memory so revisiting one costs nothing. */
 const LIST_CACHE_LIMIT = 40;
+
+/**
+ * A filter stays applied until it is cleared: across a refresh, a visit to
+ * another page and back, and a return from a company's audit or proposal.
+ * The address carries the view so it can be shared; the browser keeps the
+ * last one for when the page is opened from the menu.
+ */
+const VIEW_STORAGE_KEY = "cds.prospect-directory.view";
+const VIEW_PARAMS = ["sort", "size"] as const;
+
+const FILTER_LABELS: Record<keyof typeof EMPTY_FILTERS, string> = {
+  q: "Search", country: "Country", industry: "Industry", size_band: "Company size", status: "Research state", review: "Review state",
+  priority: "Priority", website_status: "Website", activity: "Trading status", is_public: "Publicly traded", is_startup: "Startup",
+  multi_country: "More than one country", founded_from: "Founded from", founded_to: "Founded to", staff_from: "Staff from", staff_to: "Staff to",
+  exchange: "Stock exchange", letter: "Starts with", has_website: "Has a website", hide_inactive: "Hide inactive companies",
+  issues: "Issues", reachable_decision_maker: "Reachable decision maker", score_from: "Deal score from", score_to: "Deal score to",
+};
+
+function filterChipText(key: keyof typeof EMPTY_FILTERS, value: string) {
+  if (key === "issues") return `Issues: ${value.split(",").filter(Boolean).map(issueLabel).join(", ")}`;
+  if (value === "true") return FILTER_LABELS[key];
+  if (value === "false") return `${FILTER_LABELS[key]}: no`;
+  return `${FILTER_LABELS[key]}: ${value.replace(/_/g, " ")}`;
+}
 const ALPHABET = "abcdefghijklmnopqrstuvwxyz".split("");
 const PAGE_SIZES = [10, 50, 100, 200];
 const AUDIT_AREA: Record<AuditFinding["area"], string> = { ai_search: "AI search", website: "Website", social: "Social branding", video: "Video" };
@@ -153,7 +157,16 @@ export default function ProspectGenerationPage() {
   const [maxPages, setMaxPages] = useState("5");
 
   const [filters, setFilters] = useState({ ...EMPTY_FILTERS });
+  // The list waits for the saved view to be read, so it never flashes the
+  // unfiltered directory first.
+  const [viewRestored, setViewRestored] = useState(false);
+  const [proposalCompany, setProposalCompany] = useState<Company | null>(null);
+  const proposalSource = useMemo(() => proposalCompany ? { company_id: proposalCompany.id } : null, [proposalCompany]);
   const [sort, setSort] = useState("score");
+  // The directory is what this screen is for, so the setup panels start out of
+  // the way. The choice is remembered per browser.
+  const [setupOpen, setSetupOpen] = useState(false);
+  const [serverRun, setServerRun] = useState<{ processedTotal: number; startedByName: string | null; startedAt: string; endsAt?: string } | null>(null);
   const [showFilters, setShowFilters] = useState(false);
   const [page, setPage] = useState(0);
 
@@ -298,6 +311,41 @@ export default function ProspectGenerationPage() {
     });
   }, [loadSummary, loadCompanies, loadRegistries, recordLoadError]);
 
+  useEffect(() => {
+    let saved: Record<string, string> = {};
+    const fromAddress = new URLSearchParams(window.location.search);
+    const known = [...Object.keys(EMPTY_FILTERS), ...VIEW_PARAMS];
+    if (known.some((key) => fromAddress.has(key))) {
+      for (const key of known) { const value = fromAddress.get(key); if (value) saved[key] = value; }
+    } else {
+      try { saved = JSON.parse(window.localStorage.getItem(VIEW_STORAGE_KEY) || "{}") || {}; } catch { saved = {}; }
+    }
+    const next = { ...EMPTY_FILTERS };
+    for (const key of Object.keys(EMPTY_FILTERS) as Array<keyof typeof EMPTY_FILTERS>) {
+      if (typeof saved[key] === "string") next[key] = saved[key];
+    }
+    setFilters(next);
+    setSearch(next.q);
+    if (typeof saved.sort === "string" && saved.sort) setSort(saved.sort);
+    const size = Number(saved.size);
+    if (PAGE_SIZES.includes(size)) setPageSize(size);
+    setViewRestored(true);
+  }, []);
+
+  useEffect(() => {
+    if (!viewRestored) return;
+    const view: Record<string, string> = {};
+    for (const [key, value] of Object.entries(filters)) if (value) view[key] = value;
+    if (sort && sort !== "score") view.sort = sort;
+    if (pageSize !== 100) view.size = String(pageSize);
+    try { window.localStorage.setItem(VIEW_STORAGE_KEY, JSON.stringify(view)); } catch { /* private mode: the address still holds it */ }
+    const params = new URLSearchParams(window.location.search);
+    for (const key of [...Object.keys(EMPTY_FILTERS), ...VIEW_PARAMS]) params.delete(key);
+    for (const [key, value] of Object.entries(view)) params.set(key, value);
+    const query = params.toString();
+    window.history.replaceState(window.history.state, "", `${window.location.pathname}${query ? `?${query}` : ""}`);
+  }, [filters, sort, pageSize, viewRestored]);
+
   // The summary and the registry list do not change when a filter does, so a
   // search reloads the list alone.
   useEffect(() => {
@@ -310,6 +358,7 @@ export default function ProspectGenerationPage() {
   // list on screen, marked as updating, rather than leaving the page looking
   // like the click did nothing until the network answers.
   useEffect(() => {
+    if (!viewRestored) return;
     const cached = cachedView();
     if (cached) {
       setCompanies(cached.companies); setTotal(cached.total); setEstimated(cached.estimated);
@@ -321,7 +370,7 @@ export default function ProspectGenerationPage() {
     loadCompanies()
       .catch((error) => recordLoadError("companies", error))
       .finally(() => { setListLoading(false); setLoading(false); });
-  }, [loadCompanies, cachedView, clearLoadError, recordLoadError]);
+  }, [loadCompanies, cachedView, clearLoadError, recordLoadError, viewRestored]);
 
   // Typing runs the search as it is typed, one short pause after the last key,
   // so a name shows its matches without waiting for a request per keystroke.
@@ -357,17 +406,20 @@ export default function ProspectGenerationPage() {
       : filters.score_from && filters.score_from === filters.score_to ? "exact" : "";
 
   /**
-   * A summary card is a saved view of the list below it. Clicking one replaces
-   * the current filters with the ones that produce exactly the number on the
-   * card, rather than adding to whatever was already set.
+   * A summary card is a saved view of the list below it. Clicking one adds its
+   * filters to the ones already set; filters stay applied until cleared, so a
+   * card never silently undoes them. Clicking the same card again removes only
+   * what that card added.
    */
   const applyCardView = (view: Partial<typeof EMPTY_FILTERS>) => {
     setPage(0);
-    const next = { ...EMPTY_FILTERS, ...view };
-    // Clicking the same card again returns to the unfiltered directory.
-    const same = (Object.keys(EMPTY_FILTERS) as Array<keyof typeof EMPTY_FILTERS>).every((key) => filters[key] === next[key]);
-    setFilters(same ? { ...EMPTY_FILTERS } : next);
-    setSearch("");
+    const keys = Object.keys(view) as Array<keyof typeof EMPTY_FILTERS>;
+    const applied = keys.length > 0 && keys.every((key) => filters[key] === view[key]);
+    setFilters((current) => {
+      const next = { ...current };
+      for (const key of keys) next[key] = applied ? "" : (view[key] ?? "");
+      return next;
+    });
     if (typeof document !== "undefined") document.getElementById("prospect-directory")?.scrollIntoView({ behavior: "smooth", block: "start" });
   };
 
@@ -397,6 +449,9 @@ export default function ProspectGenerationPage() {
   const runResearch = async () => {
     if (runningRef.current) return;
     runningRef.current = true; setRunning(true); setNotice(null); setRunLog([]);
+    // The server owns the run from here, so closing this page no longer stops
+    // the work. While the page is open it also helps, which makes it quicker.
+    await post({ action: "start_research" }).catch(() => undefined);
     try {
       for (;;) {
         if (!runningRef.current) break;
@@ -412,7 +467,56 @@ export default function ProspectGenerationPage() {
     finally { runningRef.current = false; setRunning(false); }
   };
 
-  const stopResearch = () => { runningRef.current = false; setRunning(false); };
+  /**
+   * Puts every failed company back at the front of the queue. It works while
+   * a run is going - the run picks them up on its next pass - and starts one
+   * when nothing is running, so a retry always leads to research.
+   */
+  const [retrying, setRetrying] = useState(false);
+  const retryFailed = async () => {
+    setRetrying(true);
+    try {
+      const json = await post({ action: "requeue" });
+      const count = Number(json.requeued || 0);
+      const alreadyRunning = runningRef.current || running;
+      if (!alreadyRunning) void runResearch();
+      setNotice({
+        tone: "success",
+        text: `${count ? `${count.toLocaleString()} failed ${count === 1 ? "company was" : "companies were"} put` : "Companies that failed earlier are"} at the front of the research queue. ${alreadyRunning ? "The research already running takes them next." : "Research has started."}`,
+      });
+      if (alreadyRunning) void refresh();
+    } catch (error) {
+      setNotice({ tone: "error", text: error instanceof Error ? error.message : "The failed companies could not be retried." });
+    } finally {
+      setRetrying(false);
+    }
+  };
+
+  const stopResearch = async () => {
+    runningRef.current = false;
+    setRunning(false);
+    // Stop it on the server too, otherwise it would carry on without the page.
+    await post({ action: "stop_research" }).catch(() => undefined);
+    await refresh();
+  };
+
+  // A run started earlier, perhaps from another machine, is still going: the
+  // page should show that rather than offering to start a second one.
+  useEffect(() => {
+    let active = true;
+    const check = async () => {
+      const json = await post({ action: "research_status" }).catch(() => null);
+      if (!active) return;
+      const serverRunning = Boolean(json?.run);
+      setServerRun(json?.run || null);
+      if (serverRunning && !runningRef.current) setRunning(true);
+      if (!serverRunning && !runningRef.current) setRunning(false);
+    };
+    void check();
+    const timer = window.setInterval(() => void check(), 15_000);
+    return () => { active = false; window.clearInterval(timer); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Registers cap how deep one query can page, so a run walks several slices and
   // stores where it stopped. Pressing it again continues from there.
@@ -473,27 +577,50 @@ export default function ProspectGenerationPage() {
    * site and what the work is about off the researched record, so nothing is
    * retyped; the deck is still ours to edit before it goes anywhere.
    */
-  const draftProposal = async (listCompany: Company) => {
+  // A proposal opens on what it will be written from, so it can be checked first.
+  const draftProposal = (listCompany: Company) => {
     if (!listCompany.website) {
       setNotice({ tone: "error", text: `${listCompany.company_name} has no public website to build a proposal from.` });
       return;
     }
-    setBusy(`proposal:${listCompany.id}`);
-    setNotice({ tone: "success", text: `Researching and writing a proposal for ${listCompany.company_name}. This takes a moment.` });
+    setProposalCompany(listCompany);
+  };
+
+  /**
+   * Shortlisting shows at once. The row is marked before the request is sent
+   * and only reverts if the server refuses; the answer then fills in the
+   * checklist link the server created.
+   */
+  const toggleShortlist = async (company: Company) => {
+    const before = { review_status: company.review_status, prospect_id: company.prospect_id };
+    const shortlisting = company.review_status !== "shortlisted";
+    const patchRow = (patch: Partial<Company>) => {
+      setCompanies((rows) => rows.map((row) => row.id === company.id ? { ...row, ...patch } : row));
+      if (detailsRef.current[company.id]) {
+        detailsRef.current[company.id] = { ...detailsRef.current[company.id], ...patch };
+        setDetails((current) => ({ ...current, [company.id]: detailsRef.current[company.id] }));
+      }
+    };
+    patchRow({ review_status: shortlisting ? "shortlisted" : "new" });
     try {
-      const company = await ensureDetail(listCompany);
-      const response = await fetch("/api/admin/deals", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "generate_proposal", company_id: company.id }),
-      });
-      const json = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(json.error || "The proposal could not be generated.");
-      const proposalId = typeof json.proposal?.id === "string" ? json.proposal.id : "";
-      if (!proposalId) throw new Error("The proposal finished without an ID.");
-      router.push(`/admin/deals/proposals?proposal=${encodeURIComponent(proposalId)}`);
+      const json = await post({ action: "update_company", id: company.id, review_status: shortlisting ? "shortlisted" : "new" });
+      const saved = json.company || {};
+      patchRow({ review_status: saved.review_status ?? (shortlisting ? "shortlisted" : "new"), prospect_id: saved.prospect_id ?? before.prospect_id });
+      // Remembered views no longer match this row, and the totals have moved.
+      listCacheRef.current.clear();
+      void loadSummary().catch(() => undefined);
+      if (shortlisting) {
+        setNotice({
+          tone: "success",
+          text: saved.prospect_id
+            ? `${company.company_name} was shortlisted and added to the prospect checklist with its research.`
+            : `${company.company_name} was shortlisted. It joins the prospect checklist once its research finishes.`,
+        });
+      }
     } catch (error) {
-      setNotice({ tone: "error", text: error instanceof Error ? error.message : "The proposal could not be generated." });
-    } finally { setBusy(""); }
+      patchRow(before);
+      setNotice({ tone: "error", text: error instanceof Error ? error.message : "The shortlist could not be updated." });
+    }
   };
 
   const removeCompany = async (company: Company) => {
@@ -689,6 +816,27 @@ export default function ProspectGenerationPage() {
         </div>
       </section>
 
+      <div className="mb-4 flex flex-wrap items-center gap-3">
+        <button
+          type="button"
+          onClick={() => {
+            const next = !setupOpen;
+            setSetupOpen(next);
+            try { window.localStorage.setItem("cds.prospect-setup-open", next ? "1" : "0"); } catch { /* a blocked store only costs the memory of this choice */ }
+          }}
+          aria-expanded={setupOpen}
+          className="inline-flex min-h-10 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 hover:border-[#0A4FE8] hover:text-[#0A4FE8]"
+        >
+          {setupOpen ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+          {setupOpen ? "Hide add companies and research queue" : "Add companies and research queue"}
+        </button>
+        {!setupOpen && (totals?.queued || 0) > 0 && (
+          <span className="text-xs text-slate-500">{(totals?.queued || 0).toLocaleString()} queued for research</span>
+        )}
+        {running && <span className="text-xs font-semibold text-[#0A4FE8]">Research is running in the background, so it keeps going while this is hidden.</span>}
+      </div>
+
+      {setupOpen && (
       <section className="mb-6 grid gap-5 lg:grid-cols-[1.4fr_1fr]">
         <form onSubmit={submitImport} className="rounded-[24px] border border-slate-200 bg-white p-5 shadow-sm sm:p-7">
           <h2 className="font-bold text-[#07133B]">Add companies</h2>
@@ -752,12 +900,19 @@ export default function ProspectGenerationPage() {
 
         <div className="rounded-[24px] border border-slate-200 bg-white p-5 shadow-sm sm:p-7">
           <h2 className="font-bold text-[#07133B]">Research queue</h2>
-          <p className="mt-1 text-sm text-slate-500">Research runs in short passes. Keep this page open while it works through the queue.</p>
+          <p className="mt-1 text-sm text-slate-500">Research runs in short passes on the server. It keeps going if you leave this page, until you stop it, sign out of the admin panel, or it reaches four hours.</p>
+          {serverRun && (
+            <p className="mt-2 inline-flex items-center gap-2 rounded-lg bg-blue-50 px-2.5 py-1.5 text-xs font-semibold text-[#0A4FE8]">
+              Running in the background{serverRun.startedByName ? `, started by ${serverRun.startedByName}` : ""}
+              {serverRun.processedTotal > 0 ? ` · ${serverRun.processedTotal.toLocaleString()} researched so far` : ""}
+              {serverRun.endsAt ? ` · stops by ${new Date(serverRun.endsAt).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })}` : ""}
+            </p>
+          )}
           <div className="mt-4 flex flex-wrap gap-2">
             {running
               ? <button onClick={stopResearch} className="inline-flex min-h-11 items-center gap-2 rounded-xl border border-slate-200 px-4 text-sm font-semibold text-slate-700"><Square className="h-4 w-4" /> Stop after this pass</button>
               : <button onClick={runResearch} disabled={!totals?.queued} className="inline-flex min-h-11 items-center gap-2 rounded-xl bg-[#0A4FE8] px-5 text-sm font-semibold text-white disabled:opacity-60"><Play className="h-4 w-4" /> Research {(totals?.queued || 0).toLocaleString()} queued</button>}
-            <button onClick={() => act("requeue", { action: "requeue" }, "Failed and stalled companies were put back in the queue.")} disabled={busy === "requeue"} className="inline-flex min-h-11 items-center gap-2 rounded-xl border border-slate-200 px-4 text-sm font-semibold text-slate-700 hover:border-[#0A4FE8]">{busy === "requeue" ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />} Retry failed</button>
+            <button onClick={() => void retryFailed()} disabled={retrying} title="Put failed companies at the front of the queue. Works while research is running." className="inline-flex min-h-11 items-center gap-2 rounded-xl border border-slate-200 px-4 text-sm font-semibold text-slate-700 hover:border-[#0A4FE8]">{retrying ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />} Retry failed{totals?.failed ? ` (${totals.failed.toLocaleString()})` : ""}</button>
           </div>
           {running && <p className="mt-3 inline-flex items-center gap-2 text-sm text-[#0A4FE8]"><Loader2 className="h-4 w-4 animate-spin" /> Researching, {(totals?.queued || 0).toLocaleString()} left in the queue</p>}
           {runLog.length > 0 && <ul className="mt-3 max-h-40 space-y-1.5 overflow-y-auto text-xs text-slate-500">{runLog.map((line, index) => <li key={index}>{line}</li>)}</ul>}
@@ -771,6 +926,7 @@ export default function ProspectGenerationPage() {
           </div>}
         </div>
       </section>
+      )}
 
       <section id="prospect-directory" className="rounded-[24px] border border-slate-200 bg-white p-5 shadow-sm sm:p-7">
         <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
@@ -782,11 +938,28 @@ export default function ProspectGenerationPage() {
               <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search name, domain, industry" className="h-10 w-56 rounded-xl border border-slate-200 pl-3 pr-9 text-sm outline-none focus:border-[#0A4FE8]" />
               {listLoading && search ? <Loader2 className="absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 animate-spin text-slate-400" /> : null}
             </div>
-            <Select value={sort} onChange={setSort} options={[["score", "Best deal score"], ["name_asc", "Name A to Z"], ["name_desc", "Name Z to A"], ["founded_new", "Newest founded"], ["founded_old", "Oldest founded"], ["staff_desc", "Most staff"], ["staff_asc", "Fewest staff"], ["countries", "Most countries"], ["newest", "Recently added"]]} />
+            <Select value={sort} onChange={setSort} options={[["score", "Deal score, highest first"], ["score_asc", "Deal score, lowest first"], ["name_asc", "Name A to Z"], ["name_desc", "Name Z to A"], ["founded_new", "Newest founded"], ["founded_old", "Oldest founded"], ["staff_desc", "Most staff"], ["staff_asc", "Fewest staff"], ["countries", "Most countries"], ["newest", "Recently added"]]} />
             <Select value={String(pageSize)} onChange={(value) => { setPage(0); setPageSize(Number(value)); }} options={PAGE_SIZES.map((size) => [String(size), `${size} per page`] as [string, string])} />
             <button onClick={() => setShowFilters((current) => !current)} className="inline-flex min-h-10 items-center gap-2 rounded-xl border border-slate-200 px-3 text-sm font-semibold text-slate-700 hover:border-[#0A4FE8]"><SlidersHorizontal className="h-4 w-4" /> Filters{activeFilterCount ? ` (${activeFilterCount})` : ""}</button>
           </div>
         </div>
+
+        {/* Every applied filter, held until it is removed here or cleared. */}
+        {activeFilterCount > 0 && <div className="mb-4 flex flex-wrap items-center gap-2 rounded-2xl border border-blue-100 bg-blue-50/60 px-3 py-2.5">
+          <span className="text-xs font-semibold text-[#07133B]">Applied filters</span>
+          {(Object.keys(EMPTY_FILTERS) as Array<keyof typeof EMPTY_FILTERS>).filter((key) => filters[key]).map((key) => (
+            <button
+              key={key}
+              type="button"
+              onClick={() => { setFilter(key, ""); if (key === "q") setSearch(""); }}
+              className="inline-flex items-center gap-1.5 rounded-full bg-[#0A4FE8] py-1 pl-3 pr-2 text-xs font-semibold text-white hover:bg-[#0846cf]"
+              title={`Remove ${FILTER_LABELS[key].toLowerCase()}`}
+            >
+              {filterChipText(key, filters[key])} <X className="h-3.5 w-3.5" />
+            </button>
+          ))}
+          <button type="button" onClick={() => { setPage(0); setSearch(""); setFilters({ ...EMPTY_FILTERS }); }} className="ml-auto text-xs font-semibold text-[#0A4FE8] hover:underline">Clear all</button>
+        </div>}
 
         <div className="mb-4 flex flex-wrap items-center gap-2">
           <Toggle
@@ -834,7 +1007,7 @@ export default function ProspectGenerationPage() {
         {/* The deal score, as a band. The tooltip carries what the number is
             made of so the reader never has to take it on trust. */}
         <div className="mb-4">
-          <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-400">Deal score</p>
+          <p className="mb-2 text-xs font-semibold text-slate-500">Deal score</p>
           <div className="flex flex-wrap items-center gap-2">
             {([["below", `Below ${SCORE_SPLIT}`, "", String(SCORE_SPLIT - 1)], ["above", `${SCORE_SPLIT} and above`, String(SCORE_SPLIT), ""]] as Array<[string, string, string, string]>).map(([key, label, from, to]) => (
               <button
@@ -846,6 +1019,20 @@ export default function ProspectGenerationPage() {
                 className={`inline-flex min-h-10 items-center gap-2 rounded-xl border px-3 text-sm font-semibold ${scoreBand === key ? "border-[#0A4FE8] bg-[#0A4FE8] text-white" : "border-slate-200 text-slate-700 hover:border-[#0A4FE8]"}`}
               >
                 <Target className="h-4 w-4" /> {label}
+              </button>
+            ))}
+            {/* Ordering, not filtering: these say which end of the range to
+                read from, and sit here because that is where the score is. */}
+            {([["score_asc", "Lowest first, 0 to 100", ArrowUpNarrowWide], ["score", "Highest first, 100 to 0", ArrowDownWideNarrow]] as Array<[string, string, typeof Target]>).map(([key, label, Icon]) => (
+              <button
+                key={key}
+                type="button"
+                onClick={() => setSort(key)}
+                aria-pressed={sort === key}
+                title={`Order the directory by deal score.\nDeal score out of 100.\n${SCORE_METRIC.join("\n")}`}
+                className={`inline-flex min-h-10 items-center gap-2 rounded-xl border px-3 text-sm font-semibold ${sort === key ? "border-[#0A4FE8] bg-blue-50 text-[#0A4FE8]" : "border-slate-200 text-slate-700 hover:border-[#0A4FE8]"}`}
+              >
+                <Icon className="h-4 w-4" /> {label}
               </button>
             ))}
             {scoreBand === "exact" && (
@@ -900,7 +1087,12 @@ export default function ProspectGenerationPage() {
                         <h3 className="font-bold text-[#07133B]">{company.company_name}</h3>
                         <button type="button" onClick={() => setScoreBand(String(company.deal_score), String(company.deal_score))} title={`Show every company scoring ${company.deal_score}.\nDeal score out of 100.\n${SCORE_METRIC.join("\n")}`} className={`rounded-full px-2.5 py-1 text-[11px] font-semibold hover:opacity-80 ${PRIORITY_TONE[company.priority] || PRIORITY_TONE.low}`}>{company.deal_score} score</button>
                         <span className={`rounded-full border px-2.5 py-1 text-[11px] font-semibold ${ACTIVITY_TONE[company.activity_status]}`}>{company.activity_status}</span>
-                        <span className={`rounded-full border px-2.5 py-1 text-[11px] font-semibold ${WEBSITE_TONE[company.website_status]}`}>{company.website_status} website</span>
+                        {/* The issue chips below already say "Outdated
+                            website" in as many words, so the status chip is
+                            left out rather than printing the same fact twice. */}
+                        {!(company.website_status === "outdated" && (company.issues || []).includes("outdated_website")) && (
+                          <span className={`rounded-full border px-2.5 py-1 text-[11px] font-semibold ${WEBSITE_TONE[company.website_status]}`}>{company.website_status} website</span>
+                        )}
                         {company.country_count > 1 && <span className="inline-flex items-center gap-1 rounded-full border border-blue-200 bg-blue-50 px-2.5 py-1 text-[11px] font-semibold text-[#0A4FE8]"><MapPin className="h-3 w-3" /> Available in {company.country_count} countries</span>}
                         {company.is_public && <span className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-semibold text-slate-600"><Landmark className="h-3 w-3" /> {company.stock_exchanges?.length ? `${company.stock_exchanges.join(", ")}${company.ticker ? `: ${company.ticker}` : ""}` : "Publicly traded"}</span>}
                         {company.is_startup && <span className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-semibold text-slate-600">Startup</span>}
@@ -956,12 +1148,7 @@ export default function ProspectGenerationPage() {
                           : "Shortlist this company and add it to the prospect checklist"}
                         icon={Bookmark}
                         active={company.review_status === "shortlisted"}
-                        busy={busy === company.id}
-                        onClick={() => act(
-                          company.id,
-                          { action: "update_company", id: company.id, review_status: company.review_status === "shortlisted" ? "new" : "shortlisted" },
-                          company.review_status === "shortlisted" ? undefined : `${company.company_name} was shortlisted and added to the prospect checklist.`,
-                        )}
+                        onClick={() => void toggleShortlist(company)}
                       />
                       <RowAction
                         label="Details"
@@ -981,58 +1168,10 @@ export default function ProspectGenerationPage() {
                   {expanded === company.id && ((company?: Company) => !company ? (
                     <p className="mt-4 inline-flex items-center gap-2 border-t border-slate-100 pt-4 text-sm text-slate-500"><Loader2 className="h-4 w-4 animate-spin" /> Loading research</p>
                   ) : (
-                    <div className="mt-4 grid gap-4 border-t border-slate-100 pt-4 lg:grid-cols-2">
-                    <Block title="Brief">{company.brief || "Not researched yet."}</Block>
-                    <Block title="Still trading?">{company.activity_evidence || "Not confirmed."}</Block>
-                    {company.countries?.length > 0 && <Block title={`Present in ${company.countries.length} ${company.countries.length === 1 ? "country" : "countries"}`}>{company.countries.join(", ")}</Block>}
-                    <ListBlock title="Website findings" items={company.website_findings} suffix={company.website_score !== null ? `Website score ${company.website_score} out of 100` : ""} />
-                    <ListBlock title="Pain points" items={company.pain_points} />
-                    <ListBlock title="How CDS Space helps" items={company.how_we_help} />
-                    <ListBlock title="Service fit" items={(company.service_fit || []).map((entry) => `${entry.service}: ${entry.reason}`)} />
-                    <div>
-                      <p className="text-xs font-semibold text-slate-600">Key decision makers</p>
-                      {company.contacts.length === 0 ? <p className="mt-1 text-sm text-slate-500">No named contacts were found on public pages.</p>
-                        : <ul className="mt-2 space-y-2">{company.contacts.map((contact) => <li key={contact.id} className="rounded-xl bg-slate-50 p-3 text-sm">
-                          <p className="font-semibold text-[#07133B]">{contact.full_name} <span className="text-xs font-normal text-slate-500">{contact.job_title || ""}</span></p>
-                          <p className="mt-0.5 text-xs text-slate-500">{contact.seniority.replace("_", " ")}{contact.email ? ` · ${contact.email}` : " · no public email"}</p>
-                          {contact.source_url && <a href={contact.source_url} target="_blank" rel="noopener noreferrer" className="mt-0.5 inline-flex items-center gap-1 text-xs font-semibold text-[#0A4FE8]">Source <ExternalLink className="h-3 w-3" /></a>}
-                        </li>)}</ul>}
-                    </div>
-                    <div>
-                      <p className="text-xs font-semibold text-slate-600">Emails and social accounts</p>
-                      <ul className="mt-2 space-y-1 text-sm text-slate-600">
-                        {(company.emails || []).map((entry) => <li key={entry.email}>{entry.email} <span className="text-xs text-slate-400">({entry.kind})</span></li>)}
-                        {(company.socials || []).map((entry) => <li key={entry.url}><a href={entry.url} target="_blank" rel="noopener noreferrer" className="font-semibold text-[#0A4FE8]">{entry.platform}</a></li>)}
-                        {!company.emails?.length && !company.socials?.length && <li className="text-slate-500">None found publicly.</li>}
-                      </ul>
-                    </div>
-                    {company.brand_consistency?.length > 0 && <div>
-                      <p className="flex items-center gap-1.5 text-xs font-semibold text-slate-600"><Palette className="h-3.5 w-3.5 text-[#0A4FE8]" /> Brand consistency, website against social</p>
-                      <ul className="mt-2 space-y-2">{company.brand_consistency.map((entry, index) => <li key={index} className="rounded-xl bg-slate-50 p-3 text-sm">
-                        <p className="font-semibold text-[#07133B]">{entry.area} <span className={`ml-1 rounded-full px-2 py-0.5 text-[11px] ${entry.status === "consistent" ? "bg-emerald-50 text-emerald-700" : entry.status === "variant" ? "bg-[#0A4FE8]/10 text-[#0A4FE8]" : entry.status === "differs" ? "bg-amber-50 text-amber-700" : "bg-slate-100 text-slate-600"}`}>{entry.status === "variant" ? "brand variant" : entry.status}</span></p>
-                        <p className="mt-1 text-slate-600">{entry.detail}</p>
-                        {entry.evidence?.length > 0 && <p className="mt-1 flex flex-wrap gap-2">{entry.evidence.map((link) => <a key={link} href={link} target="_blank" rel="noopener noreferrer" className="text-xs font-semibold text-[#0A4FE8]">view</a>)}</p>}
-                      </li>)}</ul>
-                    </div>}
-                    {company.domain_variants?.length > 0 && <div>
-                      <p className="flex items-center gap-1.5 text-xs font-semibold text-slate-600"><Server className="h-3.5 w-3.5 text-[#0A4FE8]" /> Domain configuration</p>
-                      <ul className="mt-2 space-y-1 text-sm text-slate-600">{company.domain_variants.map((entry) => <li key={entry.host}>
-                        <span className={`mr-1.5 inline-block h-2 w-2 rounded-full ${entry.ok ? "bg-emerald-500" : "bg-rose-500"}`} />
-                        <span className="font-semibold text-[#07133B]">{entry.host}</span> {entry.note}
-                      </li>)}</ul>
-                      {(company.dns_contacts || []).length > 0 && <ul className="mt-2 space-y-1 text-sm text-slate-600">{company.dns_contacts.map((entry, index) => <li key={index}><span className="font-semibold text-[#07133B]">{entry.value}</span> {entry.detail}</li>)}</ul>}
-                    </div>}
-                    <CompetitorBlock
-                      title="Local competitors"
-                      description="Businesses that can credibly serve the same country or local market."
-                      items={company.competitors_local || []}
-                    />
-                    <CompetitorBlock
-                      title="Global competitors"
-                      description="International or cross-border businesses competing for the same buyers."
-                      items={company.competitors_global || []}
-                    />
-                    <div className="lg:col-span-2">
+                    <div className="mt-4 border-t border-slate-100 pt-4">
+                      <ProspectResearchPanel
+                        company={company}
+                        competitorActions={<div>
                       <button
                         type="button"
                         onClick={() => refreshCompetitors(company)}
@@ -1043,24 +1182,13 @@ export default function ProspectGenerationPage() {
                         {busy === `competitors:${company.id}` ? "Checking competitors..." : "Re-check competitors"}
                       </button>
                       <p className="mt-1 text-xs text-slate-400">Re-runs the public research for this company and replaces the competitor lists with verified company-level results.</p>
-                    </div>
-                    <div className="lg:col-span-2">
-                      {company.outreach_email && <>
-                        <p className="text-xs font-semibold text-slate-600">Suggested first email{company.outreach_subject ? ` - ${company.outreach_subject}` : ""}</p>
-                        <p className="mt-1 whitespace-pre-wrap rounded-xl bg-slate-50 p-3 text-sm text-slate-700">{company.outreach_email}</p>
-                      </>}
-                      <div className="mt-2 flex flex-wrap items-center gap-2">
+                    </div>}
+                        outreachActions={<div className="flex flex-wrap items-center gap-2">
                         <button onClick={() => composeEmail(company)} className="inline-flex min-h-9 items-center gap-2 rounded-xl bg-[#0A4FE8] px-3 text-xs font-semibold text-white"><Send className="h-3.5 w-3.5" /> Compose email</button>
                         <button onClick={() => copyRecipients(company)} className="inline-flex min-h-9 items-center gap-2 rounded-xl border border-slate-200 px-3 text-xs font-semibold text-slate-700 hover:border-[#0A4FE8]"><Mail className="h-3.5 w-3.5" /> Copy recipients</button>
                         <span className="text-xs text-slate-500">{recipientsFor(company).length} address{recipientsFor(company).length === 1 ? "" : "es"} found: {recipientsFor(company).join(", ") || "none, search for one in the composer"}</span>
-                      </div>
-                      {company.outreach_email && <p className="mt-2 text-xs text-slate-400">Review every claim against the sources before sending.</p>}
-                    </div>
-                    {company.sources?.length > 0 && <div className="lg:col-span-2">
-                      <p className="text-xs font-semibold text-slate-600">Sources</p>
-                      <ul className="mt-1 space-y-0.5">{company.sources.slice(0, 12).map((source) => <li key={source}><a href={source} target="_blank" rel="noopener noreferrer" className="text-xs text-[#0A4FE8] break-all">{source}</a></li>)}</ul>
-                    </div>}
-                    {company.enrichment_error && <p className="text-xs text-rose-600 lg:col-span-2">Last research error: {company.enrichment_error}</p>}
+                      </div>}
+                      />
                     </div>
                   ))(details[company.id])}
                 </li>
@@ -1083,6 +1211,14 @@ export default function ProspectGenerationPage() {
         onAddManual={addManualRecipient}
         onSend={sendOutreach}
       />}
+      {proposalCompany && proposalSource && (
+        <ProposalPreviewModal
+          source={proposalSource}
+          label={proposalCompany.company_name}
+          onClose={() => setProposalCompany(null)}
+          onGenerated={(proposalId) => router.push(`/admin/deals/proposals?proposal=${encodeURIComponent(proposalId)}`)}
+        />
+      )}
     </main>
   );
 }
@@ -1126,48 +1262,6 @@ function Select({ value, onChange, options, full }: { value: string; onChange: (
   return <select value={value} onChange={(event) => onChange(event.target.value)} className={`h-10 rounded-xl border border-slate-200 bg-white px-3 text-sm outline-none focus:border-[#0A4FE8] ${full ? "w-full" : ""}`}>
     {options.map(([optionValue, optionLabel]) => <option key={optionValue} value={optionValue}>{optionLabel}</option>)}
   </select>;
-}
-
-function Block({ title, children }: { title: string; children: React.ReactNode }) {
-  return <div><p className="text-xs font-semibold text-slate-600">{title}</p><p className="mt-1 text-sm leading-6 text-slate-600">{children}</p></div>;
-}
-
-function ListBlock({ title, items, suffix }: { title: string; items: string[]; suffix?: string }) {
-  return <div>
-    <p className="text-xs font-semibold text-slate-600">{title}</p>
-    {items?.length ? <ul className="mt-1 list-disc space-y-1 pl-4 text-sm leading-6 text-slate-600">{items.map((item, index) => <li key={index}>{item}</li>)}</ul> : <p className="mt-1 text-sm text-slate-500">Nothing recorded.</p>}
-    {suffix && <p className="mt-1 text-xs text-slate-400">{suffix}</p>}
-  </div>;
-}
-
-function CompetitorBlock({ title, description, items }: { title: string; description: string; items: Competitor[] }) {
-  const groups: Array<{ type: Competitor["type"]; label: string; description: string }> = [
-    { type: "direct", label: "Direct", description: "A substantially similar offer for the same customers and use case" },
-    { type: "indirect", label: "Indirect", description: "A substitute satisfying the same need or competing for the same budget" },
-  ];
-  return <div>
-    <p className="text-xs font-semibold text-slate-600">{title}</p>
-    <p className="mt-1 text-[11px] leading-5 text-slate-500">{description}</p>
-    <div className="mt-2 space-y-3">
-      {groups.map((group) => {
-        const competitors = items.filter((entry) => entry.type === group.type);
-        return <div key={group.type} className="rounded-xl border border-slate-200 bg-slate-50/70 p-3">
-          <div className="flex flex-wrap items-center gap-2">
-            <span className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${group.type === "direct" ? "bg-[#0A4FE8]/10 text-[#0A4FE8]" : "bg-violet-50 text-violet-700"}`}>{group.label}</span>
-            <span className="text-[11px] text-slate-500">{group.description}</span>
-          </div>
-          {competitors.length ? <ul className="mt-2 space-y-2">
-            {competitors.map((entry) => <li key={`${entry.type}-${entry.url}`} className="text-sm leading-5 text-slate-600">
-              <a href={entry.url} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 font-semibold text-[#0A4FE8]">
-                {entry.name}<ExternalLink className="h-3 w-3" />
-              </a>
-              {entry.note && <p className="mt-0.5 text-xs leading-5 text-slate-500">{entry.note}</p>}
-            </li>)}
-          </ul> : <p className="mt-2 text-xs text-slate-500">No verified {group.label.toLowerCase()} competitor found for this scope yet.</p>}
-        </div>;
-      })}
-    </div>
-  </div>;
 }
 
 /**

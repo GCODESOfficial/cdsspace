@@ -13,7 +13,7 @@ export const PROSPECT_ISSUES = [
   {
     key: "outdated_website",
     label: "Outdated website",
-    blurb: "Stale copyright, end-of-life libraries, or markup that has not been touched in years.",
+    blurb: "End-of-life libraries, Flash, or markup that has not been touched in years.",
   },
   {
     key: "poor_branding",
@@ -96,7 +96,6 @@ export function detectProspectIssues(input: {
   if (input.reachable) {
     if (
       input.websiteStatus === "outdated"
-      || input.signals.staleCopyrightYears >= 2
       || input.signals.endOfLifeLibraries
       || input.signals.flash
     ) issues.add("outdated_website");
