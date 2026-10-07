@@ -11,7 +11,9 @@ import {
 import { getGlashDbServiceRoleConfig } from "@/lib/glashdb/env";
 import { glashMaybeOne, glashQuery } from "@/lib/glashdb/postgres";
 
-export type ClientAuthProvider = "google" | "linkedin";
+// "apple" is Sign in with Apple, which only the iPhone app offers
+// (/api/mobile/v1/auth/apple); the website cannot start or link it.
+export type ClientAuthProvider = "google" | "linkedin" | "apple";
 
 export type ClientAuthConnection = {
   provider: ClientAuthProvider;
@@ -53,6 +55,11 @@ const LINK_LIFETIME_SECONDS = 10 * 60;
 const PROVIDERS = new Set<ClientAuthProvider>(["google", "linkedin"]);
 
 export function isClientAuthProvider(value: unknown): value is ClientAuthProvider {
+  return value === "google" || value === "linkedin" || value === "apple";
+}
+
+/** Providers the website can start a sign-in or Account Config link for. */
+export function isWebClientAuthProvider(value: unknown): value is "google" | "linkedin" {
   return value === "google" || value === "linkedin";
 }
 
@@ -157,6 +164,7 @@ export function oauthProviderForUser(user: User): ClientAuthProvider | null {
   if (isClientAuthProvider(declared)) return declared;
   if (providerSubject(user, "linkedin")) return "linkedin";
   if (providerSubject(user, "google")) return "google";
+  if (providerSubject(user, "apple")) return "apple";
   return null;
 }
 

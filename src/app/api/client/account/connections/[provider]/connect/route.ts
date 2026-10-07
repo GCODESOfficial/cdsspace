@@ -3,7 +3,7 @@ import { startDirectGoogleLogin } from "@/lib/auth/google-login";
 import { startDirectLinkedInLogin } from "@/lib/auth/linkedin-login";
 import {
   createClientOAuthLinkIntent,
-  isClientAuthProvider,
+  isWebClientAuthProvider,
   loadClientProfileIdentity,
   setClientOAuthLinkCookie,
 } from "@/lib/auth/client-account-connections";
@@ -15,7 +15,7 @@ export const dynamic = "force-dynamic";
 
 export async function GET(request: NextRequest, { params }: { params: Promise<{ provider: string }> }) {
   const { provider } = await params;
-  if (!isClientAuthProvider(provider)) {
+  if (!isWebClientAuthProvider(provider)) {
     return NextResponse.json({ error: "Unsupported sign-in provider." }, { status: 404 });
   }
 
