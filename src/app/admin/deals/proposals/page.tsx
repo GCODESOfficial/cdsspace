@@ -70,6 +70,11 @@ export default function DealProposalsPage() {
   const [cover, setCover] = useState<File | null>(null);
   const [editor, setEditor] = useState<Editor | null>(null);
   const [sendMessage, setSendMessage] = useState("");
+  // Optional for the proposal email: who it greets, and a picture above it.
+  const [sendRecipientName, setSendRecipientName] = useState("");
+  const [emailCover, setEmailCover] = useState<{ path: string; previewUrl: string } | null>(null);
+  const [uploadingEmailCover, setUploadingEmailCover] = useState(false);
+  const emailCoverInput = useRef<HTMLInputElement | null>(null);
   const [note, setNote] = useState("");
   const [showCreate, setShowCreate] = useState(false);
   // The proposal opens over the table rather than beside it, so the list stays
@@ -177,6 +182,8 @@ export default function DealProposalsPage() {
     lastSaved.current = JSON.stringify(next);
     setSaveState("saved");
     setSendMessage("");
+    setSendRecipientName("");
+    setEmailCover(null);
     setNote("");
   }, [selectedId]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -321,12 +328,31 @@ export default function DealProposalsPage() {
   const sendProposal = async () => {
     if (!selected || !editor) return;
     try {
-      await post({ action: "send_proposal", id: selected.id, recipient_email: editor.recipient_email, message: sendMessage }, "send");
+      await post({
+        action: "send_proposal", id: selected.id, recipient_email: editor.recipient_email, message: sendMessage,
+        recipient_name: sendRecipientName, cover_storage_path: emailCover?.path || "",
+      }, "send");
       await load();
       setNotice({ tone: "success", text: `Proposal sent to ${editor.recipient_email}.` });
     } catch (error) {
       setNotice({ tone: "error", text: error instanceof Error ? error.message : "Proposal could not be sent." });
     }
+  };
+
+  /** Uploads the email's optional cover at once; only its storage path is kept. */
+  const uploadEmailCover = async (file: File) => {
+    setUploadingEmailCover(true); setNotice(null);
+    try {
+      const form = new FormData();
+      form.append("kind", "email_cover");
+      form.append("file", file);
+      const response = await fetch("/api/admin/deals/upload", { method: "POST", body: form });
+      const json = await response.json().catch(() => ({}));
+      if (!response.ok || !json.ok) throw new Error(json.error || "The image could not be uploaded.");
+      setEmailCover({ path: json.storage_path, previewUrl: json.preview_url });
+    } catch (error) {
+      setNotice({ tone: "error", text: error instanceof Error ? error.message : "The image could not be uploaded." });
+    } finally { setUploadingEmailCover(false); }
   };
 
   // Drafts the email opening line from the deck the client is about to read.
@@ -657,7 +683,7 @@ export default function DealProposalsPage() {
 
                 <div className="rounded-2xl border border-blue-100 bg-blue-50/60 p-5">
                   <h3 className="flex items-center gap-2 text-sm font-bold text-[#07133B]"><Mail className="h-4 w-4 text-[#0A4FE8]" /> Send to the client</h3>
-                  <p className="mt-1 text-xs text-slate-500">The email carries the branded link and the PDF download. Sending moves the proposal to Sent.</p>
+                  <p className="mt-1 text-xs text-slate-500">Sent in the CEO&apos;s name with the branded link and the PDF download. Sending moves the proposal to Sent.</p>
                   <div className="mt-3 grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto]">
                     <input type="email" value={editor.recipient_email} onChange={(event) => setEditor({ ...editor, recipient_email: event.target.value })} placeholder="client@company.com" className="h-11 w-full rounded-xl border border-slate-200 px-3 text-sm outline-none focus:border-[#0A4FE8]" />
                     <button type="button" onClick={sendProposal} disabled={busy === "send" || !editor.recipient_email} className="inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-[#0A4FE8] px-5 text-sm font-semibold text-white disabled:opacity-60">
@@ -678,6 +704,28 @@ export default function DealProposalsPage() {
                     </button>
                   </div>
                   <textarea value={sendMessage} onChange={(event) => setSendMessage(event.target.value)} rows={3} placeholder="Optional opening line for the email. Leave empty to use the big picture intro." className="mt-1.5 w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-[#0A4FE8]" />
+                  <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                    <label className="block">
+                      <span className="mb-1.5 block text-xs text-slate-500">Recipient&apos;s name <span className="text-slate-400">(optional)</span></span>
+                      <input value={sendRecipientName} onChange={(event) => setSendRecipientName(event.target.value)} placeholder={`Greets "${selected?.brand_name || "the brand"} team" if left empty`} className="h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm outline-none focus:border-[#0A4FE8]" />
+                    </label>
+                    <div>
+                      <span className="mb-1.5 block text-xs text-slate-500">Picture above the email <span className="text-slate-400">(optional)</span></span>
+                      <input ref={emailCoverInput} type="file" accept="image/png,image/jpeg,image/webp" className="hidden" onChange={(event) => { const file = event.target.files?.[0]; event.target.value = ""; if (file) void uploadEmailCover(file); }} />
+                      {emailCover ? (
+                        <div className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white p-1.5">
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img src={emailCover.previewUrl} alt="Email cover" className="h-8 w-14 rounded-md object-cover" />
+                          <button type="button" onClick={() => emailCoverInput.current?.click()} className="text-xs font-semibold text-slate-600 hover:text-[#0A4FE8]">Replace</button>
+                          <button type="button" onClick={() => setEmailCover(null)} className="text-xs font-semibold text-rose-600">Remove</button>
+                        </div>
+                      ) : (
+                        <button type="button" onClick={() => emailCoverInput.current?.click()} disabled={uploadingEmailCover} className="flex h-11 w-full items-center justify-center gap-2 rounded-xl border border-dashed border-slate-300 bg-white text-xs font-semibold text-slate-500 hover:border-[#0A4FE8] hover:text-[#0A4FE8] disabled:opacity-50">
+                          {uploadingEmailCover ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileImage className="h-4 w-4" />} {uploadingEmailCover ? "Uploading..." : "Add a picture"}
+                        </button>
+                      )}
+                    </div>
+                  </div>
                 </div>
               </div>
               </ProposalFieldRewriteContext.Provider>

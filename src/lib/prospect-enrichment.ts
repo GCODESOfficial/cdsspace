@@ -1,5 +1,10 @@
 import "server-only";
 
+import { CDS_SENDER, CDS_VOICE, FIRST_EMAIL_PRINCIPLES, MATERIALITY_RULE, cleanCopy } from "@/lib/ai/cds-voice";
+import { composeFirstEmail, friendlyCompanyName } from "@/lib/prospect-outreach-writer";
+
+import { promises as dns } from "node:dns";
+
 import { chatComplete } from "@/lib/ai/openai";
 import { CATEGORIES } from "@/lib/constants";
 import { fetchPublicPage, isSocialHost, normalizeDomain, researchPublicSite, searchOpenWeb, type SiteResearch } from "@/lib/sales-growth-research";
@@ -167,16 +172,10 @@ function assessWebsite(html: string, research: SiteResearch | null): { status: W
     penalise(6, "Images are served without responsive srcset or lazy loading.");
   }
 
-  const years = Array.from(html.matchAll(/(?:\u00a9|&copy;|copyright)[^0-9]{0,20}((?:19|20)\d{2})/gi)).map((match) => Number(match[1]));
-  const latestYear = years.length ? Math.max(...years) : 0;
-  const thisYear = new Date().getFullYear();
-  if (latestYear && thisYear - latestYear >= 3) {
-    signals.staleCopyrightYears = thisYear - latestYear;
-    penalise(18, `The copyright notice still reads ${latestYear}, suggesting the site has not been updated in ${thisYear - latestYear} years.`);
-  } else if (latestYear && thisYear - latestYear === 2) {
-    signals.staleCopyrightYears = 2;
-    penalise(8, `The copyright notice reads ${latestYear}.`);
-  }
+  // The copyright year is not scored. "© 1995-2026" records when the site's
+  // content was first published, not when it was last touched, and even a
+  // stale footer year says nothing about the user flow, the interface design
+  // or how consistently the brand is presented, which is what we sell against.
 
   score = Math.max(0, Math.min(100, score));
   const status: WebsiteStatus = score < 45 ? "outdated" : score < 70 ? "dated" : "modern";
@@ -223,6 +222,91 @@ function scoreDeal(input: { website: { status: WebsiteStatus; score: number }; a
   return Math.max(0, Math.min(100, score));
 }
 
+/** Whether a domain exists at all, so a remembered website is never stored if it is not real. */
+async function domainResolves(url: string) {
+  let host = "";
+  try { host = new URL(url).hostname; } catch { return false; }
+  if (!host.includes(".")) return false;
+  const lookup = dns.lookup(host).then(() => true, () => false);
+  const timeout = new Promise<boolean>((resolve) => setTimeout(() => resolve(false), 4000));
+  return Promise.race([lookup, timeout]);
+}
+
+/**
+ * Competitors identified from what the company does rather than from a search
+ * result page. Public search rarely returns a clean "who competes with X"
+ * answer, so a company with a clear industry and description is matched
+ * against the businesses known to serve the same customers. Local means
+ * based in the company's own country; global means based in any other.
+ * Each answer must name the competitor's official site, and a site whose
+ * domain does not resolve is dropped.
+ */
+async function competitorsFromKnowledge(input: {
+  companyName: string;
+  website: string | null;
+  country: string;
+  industry: string;
+  brief: string;
+  services: string[];
+}): Promise<{ local: ProspectCompetitor[]; global: ProspectCompetitor[] }> {
+  const none = { local: [], global: [] };
+  if (!canUseAi() || (!input.brief && !input.industry)) return none;
+  try {
+    const { text } = await chatComplete([
+      {
+        role: "system",
+        content: [
+          "You are a market analyst. Identify the real competitors of the company described, using your knowledge of its industry and market.",
+          "A direct competitor sells a substantially similar product or service to the same customers. An indirect competitor meets the same customer need another way, or competes for the same budget.",
+          "Only name companies you are confident exist and operate today, with their official website homepage. Never name the company itself, its subsidiaries, its parent, a directory, a marketplace listing, a news site, or a review site.",
+          "For every competitor give the country where it is headquartered, as a full country name.",
+          "Return up to 6 competitors based in the same country as the company and up to 6 based in other countries, mixing direct and indirect. Prefer well-established companies a buyer in that market would actually compare.",
+          "If you do not know enough about the company's market to name competitors with confidence, return an empty list.",
+          "Write in plain professional English. Do not use em dashes.",
+          'Return only JSON: {"competitors":[{"name":"","url":"","country":"","type":"direct|indirect","note":"one sentence on why it competes"}]}',
+        ].join(" "),
+      },
+      {
+        role: "user",
+        content: [
+          `Company: ${input.companyName}`,
+          input.website ? `Website: ${input.website}` : "",
+          input.country ? `Country: ${input.country}` : "Country: unknown",
+          input.industry ? `Industry: ${input.industry}` : "",
+          input.brief ? `What it does: ${input.brief.slice(0, 1500)}` : "",
+          input.services.length ? `Offers include: ${input.services.slice(0, 8).join("; ")}` : "",
+        ].filter(Boolean).join("\n"),
+      },
+    ], { temperature: 0.2, max_tokens: 1400, response_format: { type: "json_object" } });
+
+    const parsed = parseJson(text);
+    const rows = (Array.isArray(parsed.competitors) ? parsed.competitors : []) as Array<Record<string, unknown>>;
+    const home = normalizeCountry(input.country);
+    const checked = await Promise.all(rows.slice(0, 16).map(async (row) => {
+      const url = clip(row.url, 500);
+      if (!url || !(await domainResolves(/^https?:\/\//i.test(url) ? url : `https://${url}`))) return null;
+      const country = normalizeCountry(clip(row.country, 80)) || clip(row.country, 80);
+      return {
+        name: clip(row.name, 160),
+        url,
+        note: clip(row.note, 500),
+        type: (clip(row.type, 20).toLowerCase() === "indirect" ? "indirect" : "direct") as CompetitorType,
+        country,
+        basis: "knowledge" as const,
+      };
+    }));
+    const found = checked.filter((entry): entry is NonNullable<typeof entry> => Boolean(entry?.name));
+    // Without a known home country there is nothing to be local to.
+    if (!home) return { local: [], global: found };
+    return {
+      local: found.filter((entry) => entry.country === home),
+      global: found.filter((entry) => entry.country && entry.country !== home),
+    };
+  } catch {
+    return none;
+  }
+}
+
 function canUseAi() {
   return Boolean(process.env.OPENAI_API_KEY);
 }
@@ -258,7 +342,7 @@ async function synthesise(input: {
     competitors_local: competitorsFromSearch(input.localResults, { companyName: input.companyName, website: input.website }, 6),
     competitors_global: competitorsFromSearch(input.globalResults, { companyName: input.companyName, website: input.website }, 6),
     outreach_angle: "Lead with the specific website findings rather than a generic pitch.",
-    outreach_subject: `A few notes on ${input.companyName}'s website`,
+    outreach_subject: `A few observations on ${friendlyCompanyName(input.companyName)}`,
     outreach_email: "",
     contact_titles: [] as Array<{ full_name: string; seniority: string }>,
   };
@@ -298,13 +382,17 @@ async function synthesise(input: {
           "Every service you recommend must be chosen from the supplied CDS Space service list, verbatim.",
           "Competitors must be real, separately named companies supported by the supplied search evidence. Never return the target company, one of its own pages, a subsidiary using the same brand, a news article, jobs or careers page, login or portal, directory, comparison site, social network, or generic page title as a competitor.",
           "A company qualifies as a competitor because it can threaten adoption of the target company's offer, not merely because it appears in the same country or industry. Direct means it sells a substantially similar core product or service to the same customers and use case. Indirect means a different product, service, substitute, or delivery model satisfies the same customer job or reduces the need for the target offer. For example, Pepsi is a direct competitor to Coca-Cola while bottled water is an indirect substitute.",
-          "Geography is a separate scope. A local competitor credibly serves the target company's stated country or market. A global competitor competes internationally or across borders. Either scope can contain direct and indirect competitors. Use official company website URLs, keep companies unique across both lists, and return an empty array when evidence is insufficient.",
+          "Geography is a separate scope. A local competitor is a company based in the same country as the target company. A global competitor is a company based outside that country. Either scope can contain direct and indirect competitors. Use official company website URLs, keep companies unique across both lists, and return an empty array when evidence is insufficient.",
+          "Judge a website by what a visitor experiences: how easily they can find what they came for and complete a task (user flow), the quality and modernity of the interface design, and whether the brand is presented consistently and professionally across pages and channels.",
+          "A copyright year or year range in a footer is not evidence that a website is outdated or unmaintained. Never infer the age of a site, or how long since it was updated, from a copyright notice.",
           "Write in plain professional English. Do not use em dashes.",
           "Return only JSON matching: {brief, industry, country, city, countries[], employee_range, employee_count, founded_year, pain_points[], how_we_help[], service_fit[{service, reason}], competitors_local[{name,url,note,type}], competitors_global[{name,url,note,type}], outreach_angle, outreach_subject, outreach_email, contact_titles[{full_name, seniority}]}.",
       "countries lists every country the evidence shows the company operates, is registered, or has an office in, including the head office country. Use full country names. Return an empty array when the evidence names none.",
       "employee_count is a whole number staff estimate and must be 0 unless the evidence states or clearly implies a headcount.",
           "contact_titles classifies only the named people supplied, with seniority one of decision_maker, influencer, operational, unknown.",
-          "outreach_email is a short first-contact email (110 to 160 words) that names one observed problem, one consequence, and one next step.",
+          `For the first email, follow this voice and these rules. ${CDS_VOICE} ${MATERIALITY_RULE} ${FIRST_EMAIL_PRINCIPLES}`,
+          "outreach_angle is two sentences: what makes this company distinctive and what its website and channels are for, then the one observation worth leading with and why it matters to that purpose.",
+          `outreach_email is the body of that first email, written as ${CDS_SENDER.name}, ${CDS_SENDER.title}, in the first person singular. Write the body only, with no greeting line and no sign-off; they are added for you.`,
         ].join(" "),
       },
       { role: "user", content: prompt },
@@ -326,9 +414,12 @@ async function synthesise(input: {
         .filter((entry) => SERVICE_NAMES.includes(entry.service)),
       competitors_local: objectList<{ name: string; url: string; note: string; type: string }>(parsed.competitors_local, { name: 160, url: 500, note: 500, type: 20 }, 8),
       competitors_global: objectList<{ name: string; url: string; note: string; type: string }>(parsed.competitors_global, { name: 160, url: 500, note: 500, type: 20 }, 8),
-      outreach_angle: clip(parsed.outreach_angle, 1000) || fallback.outreach_angle,
-      outreach_subject: clip(parsed.outreach_subject, 200) || fallback.outreach_subject,
-      outreach_email: clip(parsed.outreach_email, 4000),
+      outreach_angle: cleanCopy(clip(parsed.outreach_angle, 1000)) || fallback.outreach_angle,
+      outreach_subject: cleanCopy(clip(parsed.outreach_subject, 200)) || fallback.outreach_subject,
+      // Our greeting and the CEO's sign-off are added here, so they are always exact.
+      outreach_email: clip(parsed.outreach_email, 4000)
+        ? composeFirstEmail({ displayName: friendlyCompanyName(input.companyName), body: clip(parsed.outreach_email, 4000) })
+        : "",
       contact_titles: objectList<{ full_name: string; seniority: string }>(parsed.contact_titles, { full_name: 160, seniority: 40 }, 20),
     };
   } catch {
@@ -702,13 +793,28 @@ export async function enrichCompany(input: {
   ].filter(Boolean) as string[]));
 
   const competitorTarget = { companyName: input.company_name, domain, website };
-  const competitorsLocal = sanitizeCompetitors(
-    synthesis.competitors_local.length ? synthesis.competitors_local : competitorsFromSearch(localResults, competitorTarget),
-    competitorTarget,
-    "direct",
-  );
+  // Search-backed competitors lead. Competitors identified from what the
+  // company does fill the rest, so a scope is not left empty just because no
+  // search result happened to list them.
+  const knowledge = await competitorsFromKnowledge({
+    companyName: input.company_name,
+    website,
+    country: normalizeCountry(synthesis.country || input.country) || "",
+    industry: synthesis.industry || input.industry || "",
+    brief: synthesis.brief || "",
+    services: [research?.title || "", research?.description || ""].filter(Boolean),
+  });
+  // Raw search hits are only a last resort: with no AI reading of the evidence
+  // they match on words, not markets (an advanced-materials maker was handed
+  // Vietnamese medical suppliers), and they carry no country to sort by.
+  const knowledgeFound = knowledge.local.length + knowledge.global.length > 0;
+  const searchedLocal = (synthesis.competitors_local.length ? synthesis.competitors_local : knowledgeFound ? [] : competitorsFromSearch(localResults, competitorTarget))
+    .map((entry) => ({ basis: "search", ...entry }));
+  const searchedGlobal = (synthesis.competitors_global.length ? synthesis.competitors_global : knowledgeFound ? [] : competitorsFromSearch(globalResults, competitorTarget))
+    .map((entry) => ({ basis: "search", ...entry }));
+  const competitorsLocal = sanitizeCompetitors([...searchedLocal, ...knowledge.local], competitorTarget, "direct");
   const competitorsGlobal = sanitizeCompetitors(
-    synthesis.competitors_global.length ? synthesis.competitors_global : competitorsFromSearch(globalResults, competitorTarget),
+    [...searchedGlobal, ...knowledge.global],
     competitorTarget,
     "direct",
     8,

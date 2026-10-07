@@ -2,9 +2,20 @@ import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 import { TEAM_SESSION_COOKIE } from "@/lib/team-auth";
 import { glashQuery } from "@/lib/glashdb/postgres";
+import { getAdminSession } from "@/lib/admin-session";
+import { stopResearchRun } from "@/lib/prospect-research-runner";
 
 export async function POST() {
   const store = await cookies();
+  // Background research belongs to the admin who started it, so signing out
+  // stops it rather than leaving it running for nobody.
+  const admin = await getAdminSession().catch(() => null);
+  if (admin) {
+    await stopResearchRun({
+      actorKey: String(admin.memberId || admin.email || "admin"),
+      reason: "the admin who started it signed out",
+    }).catch(() => 0);
+  }
   const teamToken = store.get(TEAM_SESSION_COOKIE)?.value;
   if (teamToken) {
     await glashQuery(

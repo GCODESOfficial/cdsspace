@@ -14,6 +14,10 @@ import { normalizeDeck, PROPOSAL_STAGES, type ProposalDeck } from "@/lib/proposa
 import { brandedEmailHtml } from "@/lib/email-template";
 import { sendEmail, verifyEmailReady } from "@/lib/email-from";
 import { logActivity } from "@/lib/activity-log";
+import { applyResearchOverrides, mergeResearchOverrides } from "@/lib/prospect-research-overrides";
+import { CDS_SENDER, cleanCopy } from "@/lib/ai/cds-voice";
+import { friendlyCompanyName } from "@/lib/prospect-outreach-writer";
+import { emailCoverHtml, isEmailCoverPath, loadEmailCover } from "@/lib/email-cover";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -164,6 +168,24 @@ async function signedProposalRows() {
  * fields are read off them rather than retyped. Anything the caller passes by
  * hand still wins; this only fills the gaps.
  */
+/** The focus is the brief the proposal is written from, so it has room for the research behind it. */
+const PROPOSAL_FOCUS_MAX = 4000;
+
+/** What the proposal argues, drawn from a company's research (as the team corrected it). */
+function researchFocus(company: any) {
+  const list = (value: unknown) => (Array.isArray(value) ? value : []).map((entry) => String(entry || "").trim()).filter(Boolean);
+  const services = (Array.isArray(company.service_fit) ? company.service_fit : [])
+    .map((entry: any) => entry?.service ? `${entry.service}${entry.reason ? ` (${entry.reason})` : ""}` : "")
+    .filter(Boolean);
+  return [
+    String(company.outreach_angle || "").trim(),
+    list(company.pain_points).length ? `What is holding them back: ${list(company.pain_points).slice(0, 4).join("; ")}.` : "",
+    list(company.how_we_help).length ? `Where CDS Space helps: ${list(company.how_we_help).slice(0, 4).join("; ")}.` : "",
+    services.length ? `Services that fit: ${services.slice(0, 4).join("; ")}.` : "",
+    list(company.website_findings).length ? `On the website: ${list(company.website_findings).slice(0, 3).join("; ")}.` : "",
+  ].filter(Boolean).join("\n\n");
+}
+
 async function proposalSeed(body: Record<string, unknown>) {
   const empty = {
     brand_name: "", target_url: "", social_url: "", focus_area: "",
@@ -181,18 +203,17 @@ async function proposalSeed(body: Record<string, unknown>) {
       [companyId],
     );
     // The focus is the research talking: what is wrong, and what we would do.
-    const focus = [
-      company.outreach_angle || "",
-      (company.pain_points || []).length ? `What is holding them back: ${(company.pain_points || []).slice(0, 4).join("; ")}.` : "",
-      (company.how_we_help || []).length ? `Where CDS Space helps: ${(company.how_we_help || []).slice(0, 4).join("; ")}.` : "",
-      (company.website_findings || []).length ? `On the website: ${(company.website_findings || []).slice(0, 3).join("; ")}.` : "",
-    ].filter(Boolean).join("\n\n");
+    // A company already on the checklist uses the research as corrected there.
+    const checklist = company.prospect_id
+      ? await glashMaybeOne<any>(`select research_overrides from public.deal_prospects where id=$1`, [company.prospect_id])
+      : null;
+    const focus = researchFocus(applyResearchOverrides(company, checklist?.research_overrides));
     return {
       ...empty,
       brand_name: company.company_name || "",
       target_url: publicUrl(company.website),
       social_url: publicUrl(company.socials?.[0]?.url),
-      focus_area: str(focus, 1200) || `Brand, website and communication work for ${company.company_name}.`,
+      focus_area: str(focus, PROPOSAL_FOCUS_MAX) || `Brand, website and communication work for ${company.company_name}.`,
       recipient_email: str(lead?.email || company.emails?.[0]?.email || "", 320).toLowerCase(),
       prospect_id: company.prospect_id || null,
     };
@@ -219,7 +240,7 @@ async function proposalSeed(body: Record<string, unknown>) {
       brand_name: audit.brand_name || "",
       target_url: publicUrl(audit.target_url),
       social_url: publicUrl(audit.social_url),
-      focus_area: str(focus, 1200) || `Acting on the brand audit for ${audit.brand_name}.`,
+      focus_area: str(focus, PROPOSAL_FOCUS_MAX) || `Acting on the brand audit for ${audit.brand_name}.`,
       prospect_id: audit.prospect_id || null,
       audit_id: audit.id,
     };
@@ -229,14 +250,19 @@ async function proposalSeed(body: Record<string, unknown>) {
   if (fromProspect) {
     const prospect = await glashMaybeOne<any>(`select * from public.deal_prospects where id=$1`, [fromProspect]);
     if (!prospect) return { error: "That prospect is no longer on the checklist.", status: 404 } as const;
-    const focus = [prospect.next_action || "", prospect.notes || ""].map((value) => String(value || "").trim()).filter(Boolean).join("\n\n")
-      || String(prospect.research_brief || "").trim().slice(0, 900);
+    // A checklist entry that came from the directory argues from its research,
+    // with the team's corrections applied, plus whatever the team has noted.
+    const researched = await glashMaybeOne<any>(`select * from public.prospect_companies where prospect_id=$1 limit 1`, [prospect.id]);
+    const notes = [prospect.next_action || "", prospect.notes || ""].map((value) => String(value || "").trim()).filter(Boolean).join("\n\n");
+    const focus = researched
+      ? [researchFocus(applyResearchOverrides(researched, prospect.research_overrides)), notes ? `Our notes: ${notes}` : ""].filter(Boolean).join("\n\n")
+      : notes || String(prospect.research_brief || "").trim().slice(0, 900);
     return {
       ...empty,
       brand_name: prospect.company_name || prospect.display_name || "",
       target_url: publicUrl(prospect.website),
       social_url: publicUrl(prospect.social_url),
-      focus_area: str(focus, 1200) || `Brand and communication work for ${prospect.company_name || prospect.display_name}.`,
+      focus_area: str(focus, PROPOSAL_FOCUS_MAX) || `Brand and communication work for ${prospect.company_name || prospect.display_name}.`,
       recipient_email: str(prospect.email || "", 320).toLowerCase(),
       prospect_id: prospect.id,
     };
@@ -278,7 +304,20 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ ok: true, pipeline });
     }
     if (resource === "prospects") {
-      const prospects = await glashQuery<any>(`select * from public.deal_prospects order by follow_up_at asc nulls last, updated_at desc limit 500`);
+      // Each entry carries the directory record its research came from, if any,
+      // with the headline figures its row shows before the details are opened.
+      const prospects = await glashQuery<any>(`
+        select p.*, r.id research_company_id, to_jsonb(r) research_summary
+          from public.deal_prospects p
+          left join lateral (
+            select c.id, c.deal_score, c.priority, c.activity_status, c.website_status, c.website_score, c.issues,
+                   c.is_public, c.stock_exchanges, c.ticker, c.industry, c.city, coalesce(c.hq_country, c.country) country,
+                   c.founded_year, c.employee_count, c.domain, c.enriched_at
+              from public.prospect_companies c
+             where c.prospect_id = p.id
+             limit 1
+          ) r on true
+         order by p.follow_up_at asc nulls last, p.updated_at desc limit 500`);
       return NextResponse.json({ ok: true, prospects });
     }
     const metrics = await glashMaybeOne<any>(`select
@@ -302,6 +341,14 @@ export async function POST(req: NextRequest) {
   if (denied || !session) return denied || NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
 
   try {
+    if (action === "preview_proposal") {
+      // Everything a proposal would be written from, returned for the team to
+      // read and correct before anything is generated.
+      const seed = await proposalSeed(body);
+      if ("error" in seed) return NextResponse.json({ ok: false, error: seed.error }, { status: seed.status });
+      return NextResponse.json({ ok: true, seed: { ...seed, focus_max: PROPOSAL_FOCUS_MAX } });
+    }
+
     if (action === "generate_proposal") {
       if (!checkIntelligenceRateLimit(`deal-proposal:${session.email}`, 12, 60 * 60_000).allowed) {
         return NextResponse.json({ ok: false, error: "Proposal research limit reached. Please wait before generating another." }, { status: 429 });
@@ -316,7 +363,7 @@ export async function POST(req: NextRequest) {
       const brandName = str(body.brand_name, 180) || seed.brand_name;
       const targetUrl = publicUrl(body.target_url) || seed.target_url;
       const socialUrl = publicUrl(body.social_url) || seed.social_url;
-      const focusArea = str(body.focus_area, 1200) || seed.focus_area;
+      const focusArea = str(body.focus_area, PROPOSAL_FOCUS_MAX) || seed.focus_area;
       if (!brandName || !focusArea || (!targetUrl && !socialUrl)) {
         return NextResponse.json({ ok: false, error: "Brand name, work focus, and a website or social link are required." }, { status: 400 });
       }
@@ -356,7 +403,7 @@ export async function POST(req: NextRequest) {
           (brand_name,target_url,social_url,recipient_email,focus_area,title,status,stage,cover_storage_path,cover_mime_type,content,deck,sources,email_subject,owner_email,created_by,updated_by,prospect_id,audit_id)
          values ($1,$2,$3,$4,$5,$6,'ready','ready',$7,$8,$9,$10,$11,$12,$13,$13,$13,$14,$15)
          returning *`,
-        [brandName, targetUrl || null, socialUrl || null, str(body.recipient_email, 320).toLowerCase() || seed.recipient_email || null, focusArea, title, coverPath || null, coverPath ? "image/webp" : null, JSON.stringify(content), JSON.stringify(deck), JSON.stringify(sources), `A focused proposal for ${brandName}`, session.email, prospect?.id || null, seed.audit_id],
+        [brandName, targetUrl || null, socialUrl || null, str(body.recipient_email, 320).toLowerCase() || seed.recipient_email || null, focusArea, title, coverPath || null, coverPath ? "image/webp" : null, JSON.stringify(content), JSON.stringify(deck), JSON.stringify(sources), `A proposal for ${friendlyCompanyName(brandName)}`, session.email, prospect?.id || null, seed.audit_id],
       );
       if (proposal?.id) await recordProposalEvent({ proposalId: proposal.id, type: "created", actor: session.email, detail: prospect ? `${title} (from the checklist entry for ${prospect.display_name})` : title });
       // A prospect we have written a proposal for is no longer one to research.
@@ -373,7 +420,7 @@ export async function POST(req: NextRequest) {
       const existing = await glashMaybeOne<any>(`select * from public.deal_proposals where id=$1`, [id]);
       if (!existing) return NextResponse.json({ ok: false, error: "Proposal not found." }, { status: 404 });
       const title = str(body.title, 240) || existing.title;
-      const focusArea = str(body.focus_area, 1200) || existing.focus_area;
+      const focusArea = str(body.focus_area, PROPOSAL_FOCUS_MAX) || existing.focus_area;
       const content = proposalContent(body.content) || existing.content;
       const deck: ProposalDeck = normalizeDeck(body.deck ?? existing.deck, { brandName: existing.brand_name, focusArea, title });
       const updated = await glashMaybeOne<any>(
@@ -411,7 +458,7 @@ export async function POST(req: NextRequest) {
       // may still be inside the autosave debounce. It is normalised before it
       // becomes model context, and only the requested string is returned.
       const title = str(body.title, 240) || proposal.title;
-      const focusArea = str(body.focus_area, 1200) || proposal.focus_area;
+      const focusArea = str(body.focus_area, PROPOSAL_FOCUS_MAX) || proposal.focus_area;
       const deck = normalizeDeck(body.deck ?? proposal.deck, { brandName: proposal.brand_name, focusArea, title });
       const value = await rewriteProposalField({
         brandName: proposal.brand_name,
@@ -480,17 +527,33 @@ export async function POST(req: NextRequest) {
       if (readyError) return NextResponse.json({ ok: false, error: readyError }, { status: 503 });
       const link = `${siteUrl()}/proposal/${proposal.public_token}`;
       const deck = normalizeDeck(proposal.deck, { brandName: proposal.brand_name, focusArea: proposal.focus_area, title: proposal.title });
-      const intro = str(body.message, 1200) || deck.big_picture.intro;
+      const intro = cleanCopy(str(body.message, 1200) || deck.big_picture.intro);
+      // A real greeting: the person if we know their name, otherwise their team.
+      const recipientName = cleanCopy(str(body.recipient_name, 120));
+      const greeting = recipientName ? recipientName.split(/\s+/)[0] : `${friendlyCompanyName(proposal.brand_name)} team`;
+      const coverPath = body.cover_storage_path ? String(body.cover_storage_path) : "";
+      if (coverPath && !isEmailCoverPath(coverPath)) {
+        return NextResponse.json({ ok: false, error: "That cover image is not valid. Upload it again." }, { status: 400 });
+      }
+      const cover = coverPath ? await loadEmailCover(coverPath) : null;
       const html = brandedEmailHtml(`
-        <p style="margin:0 0 16px;">Excellent Day Admin,</p>
-        <p style="margin:0 0 16px;">We prepared a proposal for ${escapeHtml(proposal.brand_name)}: <strong>${escapeHtml(deck.cover.title)}</strong>.</p>
-        <p style="margin:0 0 20px;">${escapeHtml(intro)}</p>
-        <table role="presentation" cellpadding="0" cellspacing="0" style="margin:22px 0;"><tr><td style="border-radius:10px;background:#0A4FE8;"><a href="${escapeHtml(link)}" style="display:inline-block;padding:13px 22px;color:#ffffff;text-decoration:none;font-weight:700;">View the proposal</a></td></tr></table>
-        <p style="margin:0 0 16px;">It runs through who we are, the big picture, the problem, the opportunities, our process, the payoff, and how we kick off. You can also download it as a PDF from the same page.</p>
-        <p style="margin:0 0 16px;">When you are ready, book a time with us at <a href="${escapeHtml(deck.cta.primary_url)}" style="color:#0A4FE8;">${escapeHtml(deck.cta.primary_url)}</a>.</p>
-        <p style="margin:0;color:#667085;font-size:13px;">This proposal is evidence-led and intended as the starting point for a working conversation. Final scope and outcomes are confirmed together.</p>
+        ${cover ? emailCoverHtml() : ""}
+        <p style="margin:0 0 16px;">Hello ${escapeHtml(greeting)},</p>
+        <p style="margin:0 0 16px;">${escapeHtml(intro)}</p>
+        <p style="margin:0 0 6px;">The proposal, <strong>${escapeHtml(deck.cover.title)}</strong>, is ready for you here:</p>
+        <table role="presentation" cellpadding="0" cellspacing="0" style="margin:16px 0 22px;"><tr><td style="border-radius:10px;background:#0A4FE8;"><a href="${escapeHtml(link)}" style="display:inline-block;padding:13px 22px;color:#ffffff;text-decoration:none;font-weight:700;">View the proposal</a></td></tr></table>
+        <p style="margin:0 0 16px;">It sets out what we understood about ${escapeHtml(friendlyCompanyName(proposal.brand_name))}, where we see the opportunity, and how we would approach the work. You can also download it as a PDF from the same page.</p>
+        <p style="margin:0 0 16px;">If it resonates, the simplest next step is a short conversation to shape the scope together. You can choose a time at <a href="${escapeHtml(deck.cta.primary_url)}" style="color:#0A4FE8;">${escapeHtml(deck.cta.primary_url)}</a>, or simply reply to this email.</p>
+        <p style="margin:0 0 4px;">Best regards,</p>
+        <p style="margin:0;"><strong>${escapeHtml(CDS_SENDER.name)}</strong><br/>${escapeHtml(CDS_SENDER.title)}</p>
       `, { eyebrow: "CDS Space proposal", preheader: deck.cover.title });
-      await sendEmail({ to: recipient, subject: proposal.email_subject || proposal.title, html, fromName: "CDS Space" });
+      await sendEmail({
+        to: recipient,
+        subject: proposal.email_subject || proposal.title,
+        html,
+        fromName: `${CDS_SENDER.name}, CDS Space`,
+        ...(cover ? { attachments: [cover] } : {}),
+      });
       await glashQuery(
         `update public.deal_proposals
             set recipient_email=$2, status='sent',
@@ -681,6 +744,27 @@ export async function POST(req: NextRequest) {
         : await glashMaybeOne<any>(`insert into public.deal_prospects (category,display_name,company_name,website,social_url,email,phone,location,notes,next_action,follow_up_at,status,created_by,updated_by,research_brief) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11::timestamptz,$12,$13,$13,$14) returning *`, values);
       await logActivity({ action: id ? "deals.prospect.update" : "deals.prospect.create", page: "deals/prospects", resource_type: "deal_prospect", resource_id: prospect?.id, resource_label: displayName, metadata: { category, status } });
       return NextResponse.json({ ok: true, prospect }, { status: id ? 200 : 201 });
+    }
+
+    if (action === "save_research_overrides") {
+      const id = uuid(body.id);
+      if (!id) return NextResponse.json({ ok: false, error: "Invalid prospect." }, { status: 400 });
+      const existing = await glashMaybeOne<any>(`select research_overrides, display_name from public.deal_prospects where id=$1`, [id]);
+      if (!existing) return NextResponse.json({ ok: false, error: "That prospect is no longer on the checklist." }, { status: 404 });
+      const overrides = mergeResearchOverrides(existing.research_overrides, body.changes);
+      const prospect = await glashMaybeOne<any>(
+        `update public.deal_prospects set research_overrides=$2::jsonb, updated_by=$3, updated_at=now() where id=$1 returning *`,
+        [id, JSON.stringify(overrides), session.email],
+      );
+      await logActivity({
+        action: "deals.prospect.research_edit",
+        page: "deals/prospects",
+        resource_type: "deal_prospect",
+        resource_id: id,
+        resource_label: existing.display_name,
+        metadata: { fields: Object.keys((body.changes as Record<string, unknown>) || {}) },
+      });
+      return NextResponse.json({ ok: true, prospect, overrides });
     }
 
     if (action === "delete_prospect") {

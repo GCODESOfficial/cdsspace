@@ -5,6 +5,10 @@ export interface ProspectCompetitor {
   url: string;
   note: string;
   type: CompetitorType;
+  /** Where the competitor is headquartered, when known. */
+  country?: string;
+  /** "search" when public results showed it; "knowledge" when identified from the industry and what the company does. */
+  basis?: "search" | "knowledge";
 }
 
 export interface CompetitorSearchResult {
@@ -135,7 +139,7 @@ export function competitorsFromSearch(
     if (!url || !host || isBlockedHost(host) || sameOrChildDomain(host, targetDomain)) return [];
     if (!name || PAGE_TITLE_NOISE.test(name) || LIST_RESULT_NOISE.test(result.title)) return [];
     if (PATH_RESULT_NOISE.test(pathname) || !domainLooksLikeCompany(host, name) || isOwnBrand(name, target.companyName, targetDomain)) return [];
-    return [{ name, url, note: cleanText(result.description, 500), type: result.type }];
+    return [{ name, url, note: cleanText(result.description, 500), type: result.type, basis: "search" as const }];
   });
   return sanitizeCompetitors(candidates, target, "direct", max);
 }
@@ -171,7 +175,13 @@ export function sanitizeCompetitors(
     if (!identity || seen.has(identity) || seen.has(nameIdentity)) continue;
     seen.add(identity);
     seen.add(nameIdentity);
-    output.push({ name, url, note, type: competitorType(entry.type || entry.relationship, note, fallbackType) });
+    const country = cleanText(entry.country, 80);
+    const basis = entry.basis === "knowledge" || entry.basis === "search" ? entry.basis : undefined;
+    output.push({
+      name, url, note, type: competitorType(entry.type || entry.relationship, note, fallbackType),
+      ...(country ? { country } : {}),
+      ...(basis ? { basis } : {}),
+    });
     if (output.length >= max) break;
   }
   return output;

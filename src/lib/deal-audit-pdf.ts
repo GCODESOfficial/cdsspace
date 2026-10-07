@@ -3,7 +3,8 @@ import "server-only";
 import jsPDF from "jspdf";
 import { installBrandFont } from "@/lib/pdf/pdf-fonts";
 import type { DealAuditContent } from "@/lib/deals-ai";
-import { auditChartData, SEVERITY, TOUCHPOINT_STATE, type AuditStateKey } from "@/lib/audit-charts";
+import { auditChartData, SEVERITY } from "@/lib/audit-charts";
+import { EMAIL_LOGO_PNG_BASE64 } from "@/lib/email-logo";
 
 export interface DealAuditDocument {
   brand_name: string;
@@ -45,275 +46,167 @@ export function dealAuditFileName(audit: { brand_name: string }) {
   return `CDS-Space-${slug(audit.brand_name)}-brand-audit.pdf`;
 }
 
+/**
+ * The audit on one A4 page, under a CDS Space header: the verdict and score,
+ * what the company needs, the scorecard beside the main findings, three
+ * priority actions, and where it could go. Every block has a fixed number of
+ * lines, so the page never spills onto a second sheet however long the audit.
+ */
 export function buildDealAuditPdf(audit: DealAuditDocument): ArrayBuffer {
   const doc = new jsPDF({ unit: "pt", format: "a4", orientation: "portrait", compress: true });
   installBrandFont(doc);
   const content = audit.content || ({} as DealAuditContent);
   const chart = auditChartData(content, audit.overall_score);
-  let y = 0;
-
-  /**
-   * jsPDF has no arc primitive, so the gauge is drawn as short round-capped
-   * segments along the sweep. At this radius they read as one smooth ring.
-   */
-  const arc = (cx: number, cy: number, radius: number, fromDeg: number, toDeg: number, width: number, color: [number, number, number]) => {
-    if (toDeg <= fromDeg) return;
-    // Angles are clockwise from twelve o'clock, so the sweep reads like a dial.
-    const point = (deg: number) => {
-      const radians = (deg * Math.PI) / 180;
-      return [cx + Math.sin(radians) * radius, cy - Math.cos(radians) * radius] as const;
-    };
-    const steps = Math.max(2, Math.ceil((toDeg - fromDeg) / 3));
-    doc.setDrawColor(...color);
-    doc.setLineWidth(width);
-    doc.setLineCap("round");
-    for (let step = 0; step < steps; step += 1) {
-      const [x1, y1] = point(fromDeg + ((toDeg - fromDeg) * step) / steps);
-      const [x2, y2] = point(fromDeg + ((toDeg - fromDeg) * (step + 1)) / steps);
-      doc.line(x1, y1, x2, y2);
-    }
-    doc.setLineCap("butt");
-  };
+  const dated = new Date(audit.created_at).toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" });
 
   const setText = (color: [number, number, number], size: number, bold = false) => {
     doc.setFont("NeueCampton", bold ? "bold" : "normal");
     doc.setFontSize(size);
     doc.setTextColor(...color);
   };
-
-  const lines = (value: string, width: number) => doc.splitTextToSize(value || "", width) as string[];
-
-  /** Starts a new page whenever the next block would run off the bottom. */
-  const room = (needed: number) => {
-    if (y + needed <= HEIGHT - MARGIN) return;
-    doc.addPage();
-    y = MARGIN;
+  /** Wrapped to a width and cut to a number of lines, ending in an ellipsis if cut. */
+  const clamp = (value: string, width: number, max: number) => {
+    const rows = doc.splitTextToSize(String(value || "").trim(), width) as string[];
+    if (rows.length <= max) return rows;
+    const kept = rows.slice(0, max);
+    kept[max - 1] = `${kept[max - 1].replace(/[\s,.;:]+$/, "")}...`;
+    return kept;
   };
-
-  const paragraph = (value: string, size = 10, color: [number, number, number] = BODY, bold = false, width = CONTENT, indent = 0) => {
-    if (!value) return;
-    setText(color, size, bold);
-    const rows = lines(value, width);
-    for (const row of rows) {
-      room(size + 4);
-      doc.text(row, MARGIN + indent, y);
-      y += size + 4;
-    }
+  const write = (rows: string[], x: number, top: number, size: number) => {
+    rows.forEach((row, index) => doc.text(row, x, top + index * (size + 3.5)));
+    return top + rows.length * (size + 3.5);
   };
-
-  /**
-   * Every section opens its own page. A section that ran on from the previous
-   * one used to be cut in half by the page break; giving each its own page
-   * costs a little paper and makes the document readable straight through.
-   */
-  const heading = (value: string) => {
-    doc.addPage();
-    y = MARGIN + 14;
-    setText(INK, 16, true);
-    doc.text(value, MARGIN, y);
-    y += 10;
-    doc.setDrawColor(...PALE);
-    doc.setLineWidth(1.5);
-    doc.line(MARGIN, y, MARGIN + CONTENT, y);
-    y += 22;
-  };
-
-  // Cover band.
-  doc.setFillColor(...BLUE);
-  doc.rect(0, 0, WIDTH, 190, "F");
-  setText([255, 255, 255], 10, true);
-  doc.text("CDS SPACE BRAND AUDIT", MARGIN, 56);
-  setText([255, 255, 255], 24, true);
-  for (const row of lines(audit.brand_name, CONTENT - 110).slice(0, 2)) {
-    doc.text(row, MARGIN, 90 + (lines(audit.brand_name, CONTENT - 110).indexOf(row) * 28));
-  }
-  setText([222, 234, 255], 9.5);
-  doc.text(audit.target_url || "", MARGIN, 150);
-  doc.text(new Date(audit.created_at).toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" }), MARGIN, 166);
-  // The score as a three-quarter arc, opened at the bottom so the figure reads
-  // as the headline rather than a label on a ring.
-  if (audit.overall_score !== null) {
-    const cx = WIDTH - MARGIN - 46;
-    const cy = 100;
-    // The unfilled track is a solid tint of the band rather than white at low
-    // opacity, which this jsPDF build does not honour on strokes.
-    arc(cx, cy, 38, 225, 495, 11, GAUGE_TRACK);
-    arc(cx, cy, 38, 225, 225 + (270 * chart.score) / 100, 11, [255, 255, 255]);
-    setText([255, 255, 255], 28, true);
-    doc.text(String(chart.score), cx, cy + 6, { align: "center" });
-    setText([222, 234, 255], 8);
-    doc.text("out of 100", cx, cy + 22, { align: "center" });
-  }
-  y = 220;
-
-  paragraph(content.summary || "", 11, BODY);
-
-  /** The stacked distribution of touchpoint states, with its own legend. */
-  const healthBar = () => {
-    if (!chart.touchpointTotal) return;
+  const sectionTitle = (value: string, x: number, top: number) => {
     setText(INK, 10.5, true);
-    doc.text("Touchpoint health", MARGIN, y);
-    setText(MUTED, 9.5);
-    doc.text(`${chart.healthy} of ${chart.touchpointTotal} working as they should`, MARGIN + CONTENT, y, { align: "right" });
-    y += 10;
-    let x = MARGIN;
-    for (const state of chart.states) {
-      const width = Math.max(4, state.share * (CONTENT - Math.max(0, chart.states.length - 1) * 2));
-      doc.setFillColor(...rgb(state.color));
-      doc.roundedRect(x, y, width, 9, 4, 4, "F");
-      x += width + 2;
-    }
-    y += 22;
-    let legendX = MARGIN;
-    for (const state of chart.states) {
-      const text = `${state.label}  ${state.count}`;
-      setText(BODY, 9);
-      const width = doc.getTextWidth(text) + 18;
-      if (legendX + width > MARGIN + CONTENT) { legendX = MARGIN; y += 15; }
-      doc.setFillColor(...rgb(state.color));
-      doc.circle(legendX + 3.5, y - 3, 3.5, "F");
-      setText(BODY, 9);
-      doc.text(text, legendX + 12, y);
-      legendX += width;
-    }
-    y += 20;
-  };
-
-  /** Findings by severity. Three counts, so tiles rather than a chart. */
-  const severityTiles = () => {
-    if (!chart.severities.length) return;
-    const gap = 10;
-    const width = (CONTENT - gap * (chart.severities.length - 1)) / chart.severities.length;
-    chart.severities.forEach((severity, index) => {
-      const left = MARGIN + index * (width + gap);
-      doc.setFillColor(...PALE);
-      doc.roundedRect(left, y, width, 54, 8, 8, "F");
-      doc.setFillColor(...rgb(severity.color));
-      doc.circle(left + 15, y + 18, 3.5, "F");
-      setText(MUTED, 8.5, true);
-      doc.text(`${severity.label.toUpperCase()} SEVERITY`, left + 24, y + 21);
-      setText(INK, 20, true);
-      const countWidth = doc.getTextWidth(String(severity.count));
-      doc.text(String(severity.count), left + 14, y + 45);
-      setText(MUTED, 8);
-      doc.text(`of ${chart.findingsTotal} findings`, left + 14 + countWidth + 7, y + 45);
-    });
-    y += 76;
-  };
-
-  /**
-   * The cover page carries the whole picture: the score, the summary, how the
-   * touchpoints sit and what the findings weigh. Everything after it is one
-   * section per page.
-   */
-  if (chart.touchpointTotal || chart.severities.length) {
-    y += 22;
-    setText(INK, 13, true);
-    doc.text("At a glance", MARGIN, y);
-    y += 8;
+    doc.text(value, x, top);
     doc.setDrawColor(...PALE);
-    doc.setLineWidth(1.5);
-    doc.line(MARGIN, y, MARGIN + CONTENT, y);
-    y += 24;
-    healthBar();
-    if (chart.severities.length) { y += 6; severityTiles(); }
-  }
+    doc.setLineWidth(1.2);
+    return top + 14;
+  };
 
-  if (chart.scores.length) {
-    heading("Scorecard");
-    paragraph("Each area out of 100, strongest first.", 9.5, MUTED);
-    y += 10;
-    for (const item of chart.scores) {
-      room(50);
-      setText(INK, 10, true);
-      doc.text(item.area, MARGIN, y);
-      setText(BLUE, 10, true);
-      doc.text(String(item.score), MARGIN + CONTENT, y, { align: "right" });
-      y += 8;
-      doc.setFillColor(...PALE);
-      doc.roundedRect(MARGIN, y, CONTENT, 6, 3, 3, "F");
-      const width = (item.score / 100) * CONTENT;
-      if (width > 0) {
-        doc.setFillColor(...BLUE);
-        doc.roundedRect(MARGIN, y, Math.max(width, 6), 6, 3, 3, "F");
+  // CDS Space header.
+  try { doc.addImage(`data:image/png;base64,${EMAIL_LOGO_PNG_BASE64}`, "PNG", MARGIN, 26, 24, 24); } catch { /* the name alone still brands the page */ }
+  setText(INK, 13, true);
+  doc.text("CDS Space", MARGIN + 32, 43);
+  setText(MUTED, 9);
+  doc.text(`Brand audit  |  ${dated}`, WIDTH - MARGIN, 43, { align: "right" });
+  doc.setDrawColor(...BLUE);
+  doc.setLineWidth(1.5);
+  doc.line(MARGIN, 60, WIDTH - MARGIN, 60);
+
+  // The headline panel: who, the verdict, and the score.
+  const panelTop = 74;
+  const panelHeight = 118;
+  doc.setFillColor(...BLUE);
+  doc.roundedRect(MARGIN, panelTop, CONTENT, panelHeight, 12, 12, "F");
+  const textWidth = CONTENT - 130;
+  setText([255, 255, 255], 18, true);
+  let y = write(clamp(audit.brand_name, textWidth, 1), MARGIN + 18, panelTop + 30, 18);
+  setText([214, 228, 255], 8.5);
+  y = write(clamp(audit.target_url || "", textWidth, 1), MARGIN + 18, y + 2, 8.5);
+  setText([255, 255, 255], 9.5);
+  write(clamp(content.verdict || content.summary || "", textWidth, 4), MARGIN + 18, y + 8, 9.5);
+  if (audit.overall_score !== null) {
+    const cx = WIDTH - MARGIN - 58;
+    const cy = panelTop + panelHeight / 2 - 2;
+    const arc = (from: number, to: number, color: [number, number, number]) => {
+      const point = (deg: number) => [cx + Math.sin((deg * Math.PI) / 180) * 36, cy - Math.cos((deg * Math.PI) / 180) * 36] as const;
+      const steps = Math.max(2, Math.ceil((to - from) / 3));
+      doc.setDrawColor(...color); doc.setLineWidth(9); doc.setLineCap("round");
+      for (let step = 0; step < steps; step += 1) {
+        const [x1, y1] = point(from + ((to - from) * step) / steps);
+        const [x2, y2] = point(from + ((to - from) * (step + 1)) / steps);
+        doc.line(x1, y1, x2, y2);
       }
-      y += 21;
-      paragraph(item.explanation, 9, MUTED);
-      y += 8;
-    }
+      doc.setLineCap("butt");
+    };
+    arc(225, 495, GAUGE_TRACK);
+    if (chart.score > 0) arc(225, 225 + (270 * chart.score) / 100, [255, 255, 255]);
+    setText([255, 255, 255], 24, true);
+    doc.text(String(chart.score), cx, cy + 6, { align: "center" });
+    setText([214, 228, 255], 7.5);
+    doc.text("out of 100", cx, cy + 20, { align: "center" });
   }
 
-  if (content.touchpoints?.length) {
-    heading("Every touchpoint");
-    healthBar();
-    y += 8;
+  // What the company needs, then the summary.
+  y = panelTop + panelHeight + 24;
+  if (content.context) {
+    y = sectionTitle("What this company needs", MARGIN, y);
+    setText(BODY, 9);
+    y = write(clamp(content.context, CONTENT, 3), MARGIN, y, 9) + 8;
+  }
+  y = sectionTitle("Summary", MARGIN, y);
+  setText(BODY, 9);
+  y = write(clamp(content.summary || "", CONTENT, 5), MARGIN, y, 9) + 14;
 
-    for (const touchpoint of content.touchpoints) {
-      room(76);
-      const shape = TOUCHPOINT_STATE[touchpoint.state as AuditStateKey] || TOUCHPOINT_STATE.unknown;
-      doc.setFillColor(...rgb(shape.color));
-      doc.circle(MARGIN + 3.5, y - 3.5, 3.5, "F");
-      setText(INK, 10.5, true);
-      doc.text(touchpoint.label, MARGIN + 13, y);
-      setText(MUTED, 9, true);
-      doc.text(shape.label.toUpperCase(), MARGIN + CONTENT, y, { align: "right" });
-      y += 14;
-      paragraph(touchpoint.observation, 9.5, BODY, false, CONTENT - 13, 13);
-      if (touchpoint.fix) paragraph(`What to do: ${touchpoint.fix}`, 9, MUTED, false, CONTENT - 13, 13);
-      y += 10;
+  // Scorecard and findings, side by side.
+  const gap = 22;
+  const half = (CONTENT - gap) / 2;
+  const columnsTop = y;
+  let left = sectionTitle("Scorecard", MARGIN, columnsTop) + 2;
+  for (const item of chart.scores.slice(0, 8)) {
+    setText(INK, 8.5, true);
+    doc.text(clamp(item.area, half - 30, 1)[0] || "", MARGIN, left);
+    setText(BLUE, 8.5, true);
+    doc.text(String(item.score), MARGIN + half, left, { align: "right" });
+    doc.setFillColor(...PALE);
+    doc.roundedRect(MARGIN, left + 4, half, 4.5, 2, 2, "F");
+    if (item.score > 0) {
+      doc.setFillColor(...(item.score < 40 ? rgb(SEVERITY_COLOR.high || "#DC2626") : item.score < 60 ? rgb(SEVERITY_COLOR.medium || "#D97706") : BLUE));
+      doc.roundedRect(MARGIN, left + 4, Math.max(4.5, (item.score / 100) * half), 4.5, 2, 2, "F");
     }
+    left += 24;
   }
 
-  if (content.findings?.length) {
-    heading("Findings");
-    severityTiles();
-    y += 6;
-
-    for (const finding of content.findings) {
-      room(60);
-      const tone = SEVERITY_COLOR[String(finding.severity)] || SEVERITY_COLOR.low;
-      doc.setFillColor(...rgb(tone));
-      doc.circle(MARGIN + 3.5, y - 3.5, 3.5, "F");
-      setText(INK, 10.5, true);
-      doc.text(finding.title, MARGIN + 13, y);
-      setText(MUTED, 9, true);
-      doc.text(String(finding.severity || "").toUpperCase(), MARGIN + CONTENT, y, { align: "right" });
-      y += 14;
-      paragraph(finding.evidence, 9.5, BODY, false, CONTENT - 13, 13);
-      paragraph(finding.source_url, 8, MUTED, false, CONTENT - 13, 13);
-      y += 10;
-    }
+  const rightX = MARGIN + half + gap;
+  let right = sectionTitle("What we found", rightX, columnsTop) + 2;
+  const order = { high: 0, medium: 1, low: 2 } as Record<string, number>;
+  for (const finding of [...(content.findings || [])].sort((a, b) => (order[a.severity] ?? 3) - (order[b.severity] ?? 3)).slice(0, 4)) {
+    doc.setFillColor(...rgb(SEVERITY_COLOR[String(finding.severity)] || SEVERITY_COLOR.low || "#64748B"));
+    doc.circle(rightX + 3, right - 3, 3, "F");
+    setText(INK, 8.5, true);
+    right = write(clamp(finding.title, half - 12, 1), rightX + 11, right, 8.5);
+    setText(BODY, 8);
+    right = write(clamp(finding.evidence, half - 11, 3), rightX + 11, right + 1, 8) + 8;
   }
 
-  if (content.recommendations?.length) {
-    heading("Priority actions");
-    for (const item of [...content.recommendations].sort((a, b) => a.priority - b.priority)) {
-      room(60);
-      doc.setFillColor(...BLUE);
-      doc.circle(MARGIN + 8, y - 3, 8, "F");
-      setText([255, 255, 255], 9, true);
-      doc.text(String(item.priority), MARGIN + 8, y, { align: "center" });
-      setText(INK, 10.5, true);
-      doc.text(item.title, MARGIN + 26, y);
-      y += 14;
-      paragraph(item.action, 9.5, BODY, false, CONTENT - 26, 26);
-      if (item.expected_outcome) paragraph(`Expected outcome: ${item.expected_outcome}`, 9, MUTED, false, CONTENT - 26, 26);
-      y += 8;
-    }
-  }
+  // Three priority actions in a row.
+  y = Math.max(left, right) + 10;
+  y = sectionTitle("Priority actions", MARGIN, y) + 2;
+  const cardGap = 10;
+  const cardWidth = (CONTENT - cardGap * 2) / 3;
+  const cardHeight = 96;
+  [...(content.recommendations || [])].sort((a, b) => a.priority - b.priority).slice(0, 3).forEach((item, index) => {
+    const x = MARGIN + index * (cardWidth + cardGap);
+    doc.setFillColor(...PALE);
+    doc.roundedRect(x, y - 4, cardWidth, cardHeight, 8, 8, "F");
+    doc.setFillColor(...BLUE);
+    doc.circle(x + 14, y + 10, 7, "F");
+    setText([255, 255, 255], 8, true);
+    doc.text(String(index + 1), x + 14, y + 13, { align: "center" });
+    setText(INK, 8.5, true);
+    write(clamp(item.title, cardWidth - 34, 2), x + 26, y + 13, 8.5);
+    setText(BODY, 7.8);
+    write(clamp(item.action, cardWidth - 18, 6), x + 9, y + 40, 7.8);
+  });
+  y += cardHeight + 14;
 
   if (content.future_state) {
-    heading("What it can become");
-    paragraph(content.future_state, 10.5, BODY);
+    y = sectionTitle("What it can become", MARGIN, y);
+    setText(BODY, 9);
+    y = write(clamp(content.future_state, CONTENT, 3), MARGIN, y, 9);
   }
 
-  const pages = doc.getNumberOfPages();
-  for (let page = 1; page <= pages; page += 1) {
-    doc.setPage(page);
-    setText(MUTED, 8);
-    doc.text("Prepared by CDS Space from publicly available evidence.", MARGIN, HEIGHT - 24);
-    doc.text(`${page} / ${pages}`, WIDTH - MARGIN, HEIGHT - 24, { align: "right" });
-  }
+  // Footer: how the audit was made.
+  doc.setDrawColor(...PALE);
+  doc.setLineWidth(1);
+  doc.line(MARGIN, HEIGHT - 44, WIDTH - MARGIN, HEIGHT - 44);
+  setText(MUTED, 7.5);
+  const method = content.visual_review?.checked
+    ? "Reviewed in a real browser on desktop and phone, and against current design, accessibility and search standards."
+    : "Prepared from the site's public code and text; the visual design was not checked in a browser.";
+  doc.text(`Prepared by CDS Space from publicly available evidence on ${dated}. ${method}`, MARGIN, HEIGHT - 30, { maxWidth: CONTENT });
+  doc.text("cdsspace.pro", WIDTH - MARGIN, HEIGHT - 18, { align: "right" });
 
   return doc.output("arraybuffer");
 }
