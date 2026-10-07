@@ -3,12 +3,12 @@
 import { useEffect, useState } from "react";
 import Image from "next/image";
 import {
-  AlertTriangle, CalendarRange, Check, CreditCard, Eye, EyeOff, KeyRound, Loader2, LockKeyhole,
+  AlertTriangle, ArrowRightLeft, Banknote, CalendarRange, Check, Clock3, CreditCard, Eye, EyeOff, KeyRound, Loader2, LockKeyhole,
   Link2, Save, Settings2, ShieldCheck, Trash2, UserRound, WalletCards, X,
 } from "lucide-react";
 import { useClientAccount } from "@/components/dashboard/ClientAccountProvider";
+import { CLIENT_BILLING_CURRENCY_OPTIONS, normalizeClientBillingCurrency } from "@/lib/client-billing";
 import { SecureProfilePhotoPicker } from "@/components/shared/SecureProfilePhotoPicker";
-import { CLIENT_BILLING_CURRENCY_OPTIONS, type ClientBillingCurrency } from "@/lib/client-billing";
 import { appConfirm } from "@/lib/app-notify";
 
 interface PaymentMethod {
@@ -30,7 +30,9 @@ interface PaymentMethod {
 interface PaymentMethodResponse {
   configured: boolean;
   mode: "live" | "test" | "unconfigured";
-  setup: { amount: number; currency: string };
+  currency: string;
+  available: boolean;
+  setup: { amount: number; currency: string } | null;
   method: PaymentMethod | null;
 }
 
@@ -50,7 +52,6 @@ export default function ClientSettingsPage() {
   const [companyName, setCompanyName] = useState(account.companyName);
   const [phoneNumber, setPhoneNumber] = useState(account.phoneNumber);
   const [avatarUrl, setAvatarUrl] = useState(account.avatarUrl);
-  const [billingCurrency, setBillingCurrency] = useState<ClientBillingCurrency>(account.billingCurrency);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<Notice>(null);
 
@@ -68,7 +69,7 @@ export default function ClientSettingsPage() {
         method: "PATCH",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ fullName, companyName, phoneNumber, billingCurrency }),
+        body: JSON.stringify({ fullName, companyName, phoneNumber }),
       });
       const payload = await response.json().catch(() => ({}));
       if (!response.ok) {
@@ -79,7 +80,6 @@ export default function ClientSettingsPage() {
         fullName: payload.profile?.fullName || fullName.trim(),
         companyName: payload.profile?.companyName || "",
         phoneNumber: payload.profile?.phoneNumber || "",
-        billingCurrency: payload.profile?.billingCurrency || billingCurrency,
       });
       setMessage({ type: "success", text: "Account configuration saved." });
     } catch (error) {
@@ -122,7 +122,6 @@ export default function ClientSettingsPage() {
               <Field label="Company" value={companyName} onChange={setCompanyName} autoComplete="organization" />
               <Field label="Phone number" value={phoneNumber} onChange={setPhoneNumber} autoComplete="tel" />
               <ReadOnlyField label="Email address" value={account.email} />
-              <BillingCurrencyField value={billingCurrency} onChange={setBillingCurrency} />
             </div>
             <NoticeBox notice={message} />
             <button type="submit" disabled={saving} className="mt-6 inline-flex h-12 w-full items-center justify-center gap-2 rounded-[12px] bg-[#0A4FE8] px-5 text-sm font-semibold text-white shadow-[0_8px_20px_rgba(5,90,230,0.2)] disabled:opacity-60 sm:w-auto">
@@ -131,6 +130,7 @@ export default function ClientSettingsPage() {
             </button>
           </form>
 
+          <BillingCurrencySection />
           <PasswordSection />
           <ConnectedAccountsSection />
           <PaymentMethodSection />
@@ -261,6 +261,173 @@ function ProviderIcon({ provider }: { provider: AuthProvider }) {
   );
 }
 
+interface CurrencyRequest {
+  id: string;
+  currentCurrency: string;
+  requestedCurrency: string;
+  reason: string;
+  status: "pending" | "approved" | "declined" | "cancelled";
+  requestedAt: string;
+  reviewedAt: string | null;
+  reviewNote: string | null;
+}
+
+// The billing currency is set once during account setup. A client who chose the wrong
+// one asks for a change here; an admin approves it (admin/clients/list) and it switches.
+function BillingCurrencySection() {
+  const { account, updateAccount } = useClientAccount();
+  const [request, setRequest] = useState<CurrencyRequest | null>(null);
+  const [loaded, setLoaded] = useState(false);
+  const [open, setOpen] = useState(false);
+  const [requested, setRequested] = useState("");
+  const [reason, setReason] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [notice, setNotice] = useState<Notice>(null);
+  const [allowance, setAllowance] = useState({ used: 0, limit: 2 });
+  const current = account.billingCurrency;
+  const pending = request?.status === "pending";
+  const left = Math.max(0, allowance.limit - allowance.used);
+  const keepAllowance = (payload: { used?: number; limit?: number }) => {
+    if (typeof payload.used === "number" && typeof payload.limit === "number") setAllowance({ used: payload.used, limit: payload.limit });
+  };
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/client/account/currency-request", { credentials: "include", cache: "no-store" })
+      .then((response) => (response.ok ? response.json() : null))
+      .then((payload) => {
+        if (cancelled || !payload) return;
+        setRequest(payload.request || null);
+        keepAllowance(payload);
+        // An approved change since this page loaded: show the new currency straight away.
+        const latest = normalizeClientBillingCurrency(payload.currency);
+        if (latest && latest !== current) updateAccount({ billingCurrency: latest });
+      })
+      .catch(() => undefined)
+      .finally(() => !cancelled && setLoaded(true));
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  async function submit(event: React.FormEvent) {
+    event.preventDefault();
+    setBusy(true);
+    setNotice(null);
+    try {
+      const response = await fetch("/api/client/account/currency-request", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ requestedCurrency: requested, reason }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      keepAllowance(payload);
+      if (!response.ok) throw new Error(payload.error || "Could not send your request.");
+      setRequest(payload.request);
+      setOpen(false);
+      setReason("");
+      setRequested("");
+      setNotice({ type: "success", text: "Request sent. We'll notify you once an admin reviews it." });
+    } catch (error) {
+      setNotice({ type: "error", text: error instanceof Error ? error.message : "Could not send your request." });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function withdraw() {
+    if (!(await appConfirm({ title: "Withdraw request?", message: "Your billing currency stays as it is.", confirmLabel: "Withdraw request", destructive: true }))) return;
+    setBusy(true);
+    setNotice(null);
+    try {
+      const response = await fetch("/api/client/account/currency-request", { method: "DELETE", credentials: "include" });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(payload.error || "Could not withdraw your request.");
+      setRequest(payload.request || null);
+      keepAllowance(payload);
+      setNotice({ type: "info", text: "Request withdrawn." });
+    } catch (error) {
+      setNotice({ type: "error", text: error instanceof Error ? error.message : "Could not withdraw your request." });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const currentOption = CLIENT_BILLING_CURRENCY_OPTIONS.find((option) => option.code === current);
+  const choices = CLIENT_BILLING_CURRENCY_OPTIONS.filter((option) => option.code !== current);
+
+  return (
+    <section className="rounded-[16px] border border-brand-stroke/70 bg-white p-5 shadow-[0_10px_40px_rgba(15,40,90,0.05)] sm:p-6">
+      <SectionHeading icon={Banknote} title="Billing currency" description="Set during account setup. New quotations, invoices and plan prices use it; existing invoices keep their currency." />
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex items-center gap-3">
+          <span className="grid h-11 min-w-11 place-items-center rounded-[12px] bg-blue-50 px-2 text-sm font-semibold text-brand-blue">{current}</span>
+          <div>
+            <p className="text-[15px] font-semibold text-brand-navy">{currentOption?.name || current}</p>
+            <p className="text-xs text-brand-body/55">Your account billing currency</p>
+          </div>
+        </div>
+        {loaded && !pending && !open && left > 0 && (
+          <button type="button" onClick={() => { setOpen(true); setNotice(null); }} className="inline-flex h-11 items-center justify-center gap-2 rounded-[12px] border border-brand-stroke px-4 text-sm font-semibold text-brand-blue hover:bg-blue-50/60">
+            <ArrowRightLeft className="h-4 w-4" />Request a change
+          </button>
+        )}
+      </div>
+
+      {pending && request && (
+        <div className="mt-5 flex flex-col gap-3 rounded-[12px] border border-amber-200 bg-amber-50/70 p-4 sm:flex-row sm:items-start">
+          <Clock3 className="h-5 w-5 shrink-0 text-amber-600" />
+          <div className="min-w-0 flex-1">
+            <p className="text-sm font-semibold text-brand-navy">Change to {request.requestedCurrency} is waiting for review</p>
+            <p className="mt-1 break-words text-xs leading-relaxed text-brand-body/65">&ldquo;{request.reason}&rdquo;</p>
+            <p className="mt-1 text-[11px] text-brand-body/50">Sent {new Date(request.requestedAt).toLocaleDateString()}</p>
+          </div>
+          <button type="button" disabled={busy} onClick={() => void withdraw()} className="h-9 shrink-0 rounded-[10px] border border-amber-200 bg-white px-3 text-xs font-semibold text-brand-body disabled:opacity-50">Withdraw</button>
+        </div>
+      )}
+
+      {!pending && request?.status === "declined" && (
+        <p className="mt-5 rounded-[12px] border border-slate-200 bg-slate-50 px-4 py-3 text-xs leading-relaxed text-brand-body/70">
+          Your last request to change to {request.requestedCurrency} was declined{request.reviewNote ? `: ${request.reviewNote}` : "."}
+        </p>
+      )}
+
+      {loaded && !pending && (
+        <p className="mt-4 text-xs text-brand-body/55">
+          {left > 0
+            ? `You can request a currency change ${left === 1 ? "1 more time" : `${left} times`}.`
+            : `You have used all ${allowance.limit} currency change requests for this account. Contact CDS Space support if you still need help.`}
+        </p>
+      )}
+
+      {open && (
+        <form onSubmit={submit} className="mt-5 space-y-4 rounded-[12px] border border-brand-stroke/70 bg-brand-bg/30 p-4">
+          <label className="block">
+            <span className="mb-2 block text-[13px] font-semibold text-brand-body">New billing currency</span>
+            <select required value={requested} onChange={(event) => setRequested(event.target.value)} className="h-12 w-full rounded-[12px] border border-brand-stroke bg-white px-4 text-[15px] text-brand-navy outline-none transition focus:border-brand-blue/40 focus:ring-4 focus:ring-blue-100/70">
+              <option value="" disabled>Choose a currency</option>
+              {choices.map((option) => <option key={option.code} value={option.code}>{option.name} ({option.code})</option>)}
+            </select>
+          </label>
+          <label className="block">
+            <span className="mb-2 block text-[13px] font-semibold text-brand-body">Reason</span>
+            <textarea required minLength={10} maxLength={1000} rows={3} value={reason} onChange={(event) => setReason(event.target.value)} placeholder="For example: I chose GBP by mistake; my company is registered in Nigeria." className="w-full rounded-[12px] border border-brand-stroke bg-white px-4 py-3 text-[14px] text-brand-navy outline-none transition focus:border-brand-blue/40 focus:ring-4 focus:ring-blue-100/70" />
+          </label>
+          <p className="text-[11px] leading-5 text-brand-body/55">An admin reviews every request. Once approved, your account switches to the new currency. Each account can send {allowance.limit} requests in total{left === 1 ? "; this is your last one" : ""}.</p>
+          <div className="flex flex-col gap-2 sm:flex-row">
+            <button type="submit" disabled={busy || !requested || reason.trim().length < 10} className="inline-flex h-11 items-center justify-center gap-2 rounded-[12px] bg-[#0A4FE8] px-5 text-sm font-semibold text-white disabled:opacity-50">
+              {busy && <Loader2 className="h-4 w-4 animate-spin" />}{busy ? "Sending..." : "Send request"}
+            </button>
+            <button type="button" onClick={() => setOpen(false)} className="h-11 rounded-[12px] border border-brand-stroke px-5 text-sm font-semibold text-brand-body">Cancel</button>
+          </div>
+        </form>
+      )}
+
+      <NoticeBox notice={notice} />
+    </section>
+  );
+}
+
 function PasswordSection() {
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
@@ -383,6 +550,7 @@ function PaymentMethodSection() {
   const method = data?.method;
   const setupAmount = data?.setup ? formatMinorAmount(data.setup.amount, data.setup.currency) : null;
   const cardName = method ? (method.card_brand || method.card_type || "Card") : "";
+  const currencyUnsupported = Boolean(data?.configured && !data.available);
 
   return (
     <section className="rounded-[16px] border border-brand-stroke/70 bg-white p-5 shadow-[0_10px_40px_rgba(15,40,90,0.05)] sm:p-6">
@@ -403,11 +571,19 @@ function PaymentMethodSection() {
           <div className="mt-5 flex flex-wrap items-end justify-between gap-3">
             <p className="text-[11px] text-white/65">Paystack · {method.payment_email}</p>
             <div className="flex gap-2">
-              <button type="button" onClick={() => { void startSetup(); }} disabled={starting || !data?.configured} className="inline-flex h-9 items-center gap-2 rounded-[10px] bg-white px-3 text-[12px] font-bold text-[#075BE5] disabled:opacity-60">
+              {data?.available && <button type="button" onClick={() => { void startSetup(); }} disabled={starting} className="inline-flex h-9 items-center gap-2 rounded-[10px] bg-white px-3 text-[12px] font-bold text-[#075BE5] disabled:opacity-60">
                 {starting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <CreditCard className="h-3.5 w-3.5" />} Update card
-              </button>
+              </button>}
               <button type="button" onClick={() => { void remove(); }} className="grid h-9 w-9 place-items-center rounded-[10px] border border-white/20 bg-white/10 text-white" aria-label="Remove payment method"><Trash2 className="h-3.5 w-3.5" /></button>
             </div>
+          </div>
+        </div>
+      ) : currencyUnsupported ? (
+        <div className="flex flex-col gap-4 rounded-[14px] border border-dashed border-slate-200 bg-slate-50/70 p-5 sm:flex-row sm:items-center">
+          <span className="grid h-11 w-11 shrink-0 place-items-center rounded-[12px] bg-white text-brand-body/50 shadow-sm"><CreditCard className="h-5 w-5" /></span>
+          <div className="min-w-0 flex-1">
+            <h3 className="text-sm font-semibold text-brand-navy">Card payments are not available for {data?.currency}</h3>
+            <p className="mt-1 text-xs leading-5 text-brand-body/60">You can pay invoices and subscriptions by bank transfer from the invoice page.</p>
           </div>
         </div>
       ) : (
@@ -646,18 +822,6 @@ function PasswordField({ label, value, onChange, visible, autoComplete }: { labe
 
 function ReadOnlyField({ label, value }: { label: string; value: string }) {
   return <label className="block"><span className="mb-2 block text-[13px] font-semibold text-brand-body">{label}</span><span className="flex h-12 w-full items-center gap-2 rounded-[12px] border border-brand-stroke bg-slate-50 px-4 text-[14px] text-brand-body"><Check className="h-4 w-4 text-emerald-500" />{value}</span></label>;
-}
-
-function BillingCurrencyField({ value, onChange }: { value: ClientBillingCurrency; onChange: (value: ClientBillingCurrency) => void }) {
-  return (
-    <label className="block sm:col-span-2">
-      <span className="mb-2 block text-[13px] font-semibold text-brand-body">Billing currency</span>
-      <select value={value} onChange={(event) => onChange(event.target.value as ClientBillingCurrency)} className="h-12 w-full rounded-[12px] border border-brand-stroke bg-brand-bg/40 px-4 text-[15px] text-brand-navy outline-none transition focus:border-brand-blue/40 focus:bg-white focus:ring-4 focus:ring-blue-100/70">
-        {CLIENT_BILLING_CURRENCY_OPTIONS.map((currency) => <option key={currency.code} value={currency.code}>{currency.name} ({currency.code})</option>)}
-      </select>
-      <span className="mt-2 block text-[11px] leading-5 text-brand-body/55">This currency is used for new account budgets, quotations and invoices.</span>
-    </label>
-  );
 }
 
 function formatMinorAmount(amount: number, currency: string) {

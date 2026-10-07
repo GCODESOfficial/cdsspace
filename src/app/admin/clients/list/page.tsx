@@ -5,7 +5,7 @@ import { useToast } from "@/hooks/use-toast";
 import {
   Trash2, Loader2, Plus, Pencil, Save, Building2, Search, Mail, Phone,
   Filter, Cake, MessageCircle, UserRound, MapPin, BellRing, CheckCircle2,
-  BadgeCheck, CircleAlert, Copy, HardDrive, Link2, Send, UserPlus, X,
+  ArrowRightLeft, BadgeCheck, CircleAlert, Copy, HardDrive, Link2, Send, UserPlus, X,
 } from "lucide-react";
 import { BirthdayModal, type BirthdayClient } from "@/components/admin/BirthdayCelebrate";
 import {
@@ -16,7 +16,7 @@ import {
 } from "@/lib/birthday-card";
 import BulkActionBar from "@/components/admin/BulkActionBar";
 import { INDUSTRY_CATEGORIES } from "@/lib/industry-categories";
-import { appConfirm } from "@/lib/app-notify";
+import { appConfirm, appPrompt } from "@/lib/app-notify";
 
 interface Client {
   id: string;
@@ -70,6 +70,19 @@ interface StorageRequest {
   storage_limit_bytes: string;
 }
 
+interface CurrencyRequest {
+  id: string;
+  client_user_id: string;
+  current_currency: string;
+  requested_currency: string;
+  reason: string;
+  requested_at: string;
+  full_name: string | null;
+  company_name: string | null;
+  email: string;
+  public_user_id: string | null;
+}
+
 const STATUS_FILTERS = [
   { key: "all", label: "All" },
   { key: "active", label: "Active" },
@@ -119,6 +132,8 @@ export default function ClientsListPage() {
   const [inviteLink, setInviteLink] = useState<string | null>(null);
   const [storageRequests, setStorageRequests] = useState<StorageRequest[]>([]);
   const [storageRequestBusy, setStorageRequestBusy] = useState<string | null>(null);
+  const [currencyRequests, setCurrencyRequests] = useState<CurrencyRequest[]>([]);
+  const [currencyRequestBusy, setCurrencyRequestBusy] = useState<string | null>(null);
   const { toast } = useToast();
 
   // Form fields
@@ -142,13 +157,15 @@ export default function ClientsListPage() {
 
   async function fetchClients() {
     setIsFetching(true);
-    const [response, storageResponse] = await Promise.all([
+    const [response, storageResponse, currencyResponse] = await Promise.all([
       fetch("/api/admin/clients/directory", { cache: "no-store" }),
       fetch("/api/admin/clients/storage-requests", { cache: "no-store" }),
+      fetch("/api/admin/clients/currency-requests", { cache: "no-store" }),
     ]);
-    const [data, storageData] = await Promise.all([
+    const [data, storageData, currencyData] = await Promise.all([
       response.json().catch(() => ({})),
       storageResponse.json().catch(() => ({})),
+      currencyResponse.json().catch(() => ({})),
     ]);
     if (!response.ok) {
       toast({ title: "Could not load clients", description: data.error || "Please try again.", variant: "destructive" });
@@ -157,6 +174,7 @@ export default function ClientsListPage() {
       setPlatformProfiles(data.platformProfiles || []);
     }
     if (storageResponse.ok) setStorageRequests(storageData.requests || []);
+    if (currencyResponse.ok) setCurrencyRequests(currencyData.requests || []);
     setIsFetching(false);
   }
 
@@ -176,6 +194,31 @@ export default function ClientsListPage() {
     }
     setStorageRequests((current) => current.filter((item) => item.id !== requestId));
     toast({ title: decision === "approve" ? "Storage increased" : "Request declined", description: decision === "approve" ? "The client can continue uploading and creating work." : "The client was notified." });
+  }
+
+  async function reviewCurrencyRequest(request: CurrencyRequest, decision: "approve" | "decline") {
+    let note: string | null = null;
+    if (decision === "approve") {
+      if (!(await appConfirm({ title: `Change billing currency to ${request.requested_currency}?`, message: `New quotations, invoices and plan prices for this client will use ${request.requested_currency}. Existing invoices keep their currency.`, confirmLabel: "Approve change" }))) return;
+    } else {
+      const answer = await appPrompt({ title: "Decline currency change?", message: "Optionally tell the client why. They will be notified.", placeholder: "Reason (optional)", confirmLabel: "Decline request" });
+      if (answer === null || answer === undefined) return;
+      note = String(answer).trim() || null;
+    }
+    setCurrencyRequestBusy(request.id);
+    const response = await fetch("/api/admin/clients/currency-requests", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ requestId: request.id, decision, note }),
+    });
+    const payload = await response.json().catch(() => ({}));
+    setCurrencyRequestBusy(null);
+    if (!response.ok) {
+      toast({ title: "Request not updated", description: payload.error || "Please try again.", variant: "destructive" });
+      return;
+    }
+    setCurrencyRequests((current) => current.filter((item) => item.id !== request.id));
+    toast({ title: decision === "approve" ? "Billing currency changed" : "Request declined", description: decision === "approve" ? `The client now bills in ${request.requested_currency}.` : "The client was notified." });
   }
 
   function resetForm() {
@@ -433,6 +476,30 @@ export default function ClientsListPage() {
           <Plus className="w-4 h-4" /> Add Client
         </button>
       </div>
+
+      {currencyRequests.length > 0 && (
+        <section id="currency-requests" className="mb-6 rounded-2xl border border-amber-100 bg-white p-4 shadow-sm sm:p-5">
+          <div className="flex items-start gap-3">
+            <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-amber-50 text-amber-600"><ArrowRightLeft className="h-5 w-5" /></span>
+            <div><h2 className="text-sm font-semibold text-[#0D1B39]">Currency change requests</h2><p className="mt-1 text-xs text-slate-500">Clients asking to switch the billing currency they chose during setup.</p></div>
+          </div>
+          <div className="mt-4 grid gap-3 lg:grid-cols-2">
+            {currencyRequests.map((request) => (
+              <article key={request.id} className="flex flex-col gap-3 rounded-xl border border-slate-200 p-4">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0"><p className="truncate text-sm font-semibold text-[#0D1B39]">{request.full_name || request.company_name || request.email}</p><p className="mt-1 truncate text-xs text-slate-400">{request.email}{request.public_user_id ? ` · ${request.public_user_id}` : ""}</p></div>
+                  <span className="inline-flex shrink-0 items-center gap-1.5 rounded-lg bg-slate-50 px-2.5 py-1 text-xs font-semibold text-slate-600">{request.current_currency}<ArrowRightLeft className="h-3 w-3 text-slate-400" /><span className="text-[#0A4FE8]">{request.requested_currency}</span></span>
+                </div>
+                <p className="break-words rounded-lg bg-slate-50 px-3 py-2 text-xs leading-relaxed text-slate-600">{request.reason}</p>
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-[11px] text-slate-400">{new Date(request.requested_at).toLocaleDateString()}</span>
+                  <div className="flex gap-2"><button type="button" disabled={currencyRequestBusy === request.id} onClick={() => void reviewCurrencyRequest(request, "decline")} className="h-9 rounded-lg border border-slate-200 px-3 text-xs font-semibold text-slate-600 disabled:opacity-50">Decline</button><button type="button" disabled={currencyRequestBusy === request.id} onClick={() => void reviewCurrencyRequest(request, "approve")} className="inline-flex h-9 items-center gap-2 rounded-lg bg-[#0A4FE8] px-3 text-xs font-semibold text-white disabled:opacity-50">{currencyRequestBusy === request.id && <Loader2 className="h-3.5 w-3.5 animate-spin" />}Approve change</button></div>
+                </div>
+              </article>
+            ))}
+          </div>
+        </section>
+      )}
 
       {storageRequests.length > 0 && (
         <section id="storage-requests" className="mb-6 rounded-2xl border border-blue-100 bg-white p-4 shadow-sm sm:p-5">

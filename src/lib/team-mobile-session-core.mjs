@@ -2,9 +2,10 @@
 // imports so they can be tested directly.
 //
 // The app has no cookies, so it sends its team device session as
-// "Authorization: Bearer cdst1.<session token>". The token is the same row in
-// public.team_device_sessions the web cookie uses, so the three-device limit, the
-// 18:15 Lagos cutoff, sign-out and admin revocation all apply unchanged.
+// "Authorization: Bearer cdst1.<session token>". The token is a row in
+// public.team_device_sessions like the web cookie's, but with login_source
+// 'mobile_app' it is exempt from the device limit, the 18:15 Lagos cutoff and
+// expiry: only sign-out or deactivating the account ends it.
 
 export const TEAM_BEARER_PREFIX = "cdst1";
 

@@ -1,7 +1,7 @@
 import "server-only";
 
 import { financeDb } from "@/lib/finance/api-auth";
-import { getPaystackStatus } from "@/lib/paystack";
+import { paystackAvailableFor } from "@/lib/paystack";
 
 /**
  * Public invoice lookup, shared by GET /api/finance/invoice/[token] (the invoice
@@ -42,6 +42,7 @@ export async function loadPublicInvoice(token: string) {
     sb.from("invoice_payment_submissions")
       .select("id, method, status, amount, currency, payer_name, payer_email, transfer_reference, proof_file_name, proof_mime_type, proof_size_bytes, submitted_at, reviewed_at, admin_note")
       .eq("invoice_id", invoice.id)
+      .neq("status", "initiated") // an unpaid Paystack checkout is not a payment
       .order("submitted_at", { ascending: false })
       .limit(1)
       .maybeSingle(),
@@ -62,6 +63,6 @@ export async function loadPublicInvoice(token: string) {
     paymentSubmission: paymentSubmission ?? null,
     receipt: receipt ? { ...receipt, invoice_number: invoice.invoice_number } : null,
     bankAccounts: bankAccounts ?? [],
-    paymentOptions: { paystack: getPaystackStatus().configured, bankTransfer: (bankAccounts?.length || 0) > 0 },
+    paymentOptions: { paystack: paystackAvailableFor(invoice.currency), bankTransfer: (bankAccounts?.length || 0) > 0 },
   };
 }

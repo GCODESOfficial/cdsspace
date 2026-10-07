@@ -15,7 +15,14 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const THREAD_COLUMNS =
-  "id, kind, name, department, includes_admin, visibility, description, rules, invite_code, is_announcement_only, is_voice_room, is_voice_channel, pinned_message_id, project_id, created_at, updated_at, archived_at";
+  "id, kind, name, department, includes_admin, visibility, description, rules, invite_code, is_announcement_only, is_voice_room, is_voice_channel, pinned_message_id, project_id, created_at, updated_at, archived_at, settings";
+
+// A group's photo is kept in its settings (threads/avatar); only the photo leaves the server.
+function withGroupPhoto(t: any) {
+  const { settings, ...rest } = t || {};
+  const avatar = settings && typeof settings === "object" ? settings.avatar_url : null;
+  return { ...rest, avatar_url: typeof avatar === "string" && avatar ? avatar : null };
+}
 
 // GET - list threads the viewer can see, newest-activity first.
 //   - Super Admin: sees all Group/Dept/Broadcast threads, plus Direct threads involving an admin.
@@ -193,7 +200,7 @@ export async function GET() {
   }
 
   const hydrated = (threads || []).map((t: any) => ({
-    ...t,
+    ...withGroupPhoto(t),
     name: t.name || participantNames[t.id] || null,
     peer_member_id: peerIds[t.id] || null,
     peer_avatar_url: peerIds[t.id] ? avatarById[peerIds[t.id]] || null : null,
@@ -420,5 +427,5 @@ export async function PATCH(req: Request) {
     .single();
   if (error) return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
 
-  return NextResponse.json({ ok: true, thread: updated });
+  return NextResponse.json({ ok: true, thread: withGroupPhoto(updated) });
 }

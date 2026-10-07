@@ -129,6 +129,32 @@ async function fetchWithSafeRedirects(initial: URL, signal: AbortSignal) {
     throw new UnsafeOutboundUrlError("Too many redirects.");
 }
 
+// Instagram's og:image is a square cut from the middle of the post (its URL carries a
+// crop such as "stp=c655.0.1966.1966a"), so landscape and 4:5 designs lose their edges.
+// The post's public /media/?size=l redirects to the whole image (fit inside 1080px):
+// used instead when it resolves to an image on Instagram's CDN, else the og:image stays.
+const INSTAGRAM_POST = /^\/(?:[\w.]+\/)?(p|reel|tv)\/([\w-]+)/;
+async function instagramFullImage(url: URL, signal: AbortSignal): Promise<string | null> {
+    if (!/(^|\.)instagram\.com$/i.test(url.hostname)) return null;
+    const match = INSTAGRAM_POST.exec(url.pathname);
+    if (!match) return null;
+    try {
+        const res = await fetch(`https://www.instagram.com/${match[1]}/${match[2]}/media/?size=l`, {
+            signal,
+            redirect: "manual",
+            headers: { "user-agent": "Mozilla/5.0 (compatible; CDSSpace-LinkPreview/1.0; +https://cdsspace.pro)" },
+            cache: "no-store",
+        });
+        const location = res.headers.get("location");
+        if (![301, 302, 303, 307, 308].includes(res.status) || !location) return null;
+        const target = new URL(location, url);
+        if (!/(^|\.)(cdninstagram\.com|fbcdn\.net)$/i.test(target.hostname)) return null;
+        return (await assertPublicHttpUrl(target)).toString();
+    } catch {
+        return null;
+    }
+}
+
 export async function GET(req: NextRequest) {
     const target = req.nextUrl.searchParams.get("url");
     if (!target) {
@@ -187,10 +213,13 @@ export async function GET(req: NextRequest) {
             (pageTitle ? decodeEntities(pageTitle) : null) ||
             parsed.hostname;
         const description = first(meta, "og:description", "twitter:description", "description");
-        const image = await safeAssetUrl(
-            first(meta, "og:image:secure_url", "og:image", "og:image:url", "twitter:image", "twitter:image:src", "image"),
-            finalUrl,
-        );
+        const image =
+            (await instagramFullImage(new URL(finalUrl), ctrl.signal)) ||
+            (await instagramFullImage(parsed, ctrl.signal)) ||
+            (await safeAssetUrl(
+                first(meta, "og:image:secure_url", "og:image", "og:image:url", "twitter:image", "twitter:image:src", "image"),
+                finalUrl,
+            ));
         const siteName = first(meta, "og:site_name", "application-name") || parsed.hostname.replace(/^www\./, "");
         const favicon = await safeAssetUrl(iconHref(html) || `${new URL(finalUrl).origin}/favicon.ico`, finalUrl);
 

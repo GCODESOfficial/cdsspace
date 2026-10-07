@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getClientAccountState } from "@/lib/client-account";
+import { clientCurrencyOrDefault } from "@/lib/client-billing-server";
 import { clientDashboardPath } from "@/lib/client-routes";
 import {
   createPaymentSetupSession,
@@ -32,8 +33,13 @@ export async function POST(request: NextRequest) {
   const email = (account.user.email || account.profile.email || "").trim().toLowerCase();
   if (!email) return NextResponse.json({ error: "A verified account email is required." }, { status: 400 });
 
+  const setup = getPaystackCardSetupConfig(clientCurrencyOrDefault(account.profile.billing_currency));
+  if (!setup) {
+    return NextResponse.json({ error: "Card setup through Paystack is not available for your billing currency." }, { status: 409 });
+  }
+
   const reference = newPaystackReference();
-  const { amount, currency } = getPaystackCardSetupConfig();
+  const { amount, currency } = setup;
   await createPaymentSetupSession({ userId: account.user.id, reference, email, amount, currency });
 
   try {

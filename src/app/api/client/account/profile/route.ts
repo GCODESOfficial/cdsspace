@@ -1,5 +1,4 @@
 import { NextResponse } from "next/server";
-import { normalizeClientBillingCurrency } from "@/lib/client-billing";
 import { readClientDashboardSession } from "@/lib/client-dashboard-session";
 import { glashMaybeOne } from "@/lib/glashdb/postgres";
 
@@ -33,21 +32,18 @@ async function updateProfile(input: {
   fullName: string;
   companyName: string | null;
   phoneNumber: string | null;
-  billingCurrency: string;
 }) {
   return glashMaybeOne<SavedProfile>(
     `update public.profiles
         set full_name = $2,
             company_name = $3,
             phone_number = $4,
-            billing_currency = $5,
-            billing_currency_selected_at = now(),
             updated_at = now()
       where id = $1::uuid
         and account_status = 'active'
       returning full_name, company_name, phone_number, billing_currency,
                 billing_currency_selected_at`,
-    [input.userId, input.fullName, input.companyName, input.phoneNumber, input.billingCurrency],
+    [input.userId, input.fullName, input.companyName, input.phoneNumber],
   );
 }
 
@@ -64,16 +60,11 @@ export async function PATCH(request: Request) {
   const fullName = cleanOptionalText(body?.fullName, 160);
   const companyName = cleanOptionalText(body?.companyName, 200);
   const phoneNumber = cleanOptionalText(body?.phoneNumber, 60);
-  const billingCurrency = normalizeClientBillingCurrency(body?.billingCurrency);
+  // The billing currency is chosen once during account setup (/onboarding) and can't be
+  // changed afterwards, so any billingCurrency sent here (older app builds) is ignored.
 
   if (!fullName || fullName.length < 2) {
     return NextResponse.json({ error: "Enter your full name." }, { status: 400 });
-  }
-  if (!billingCurrency) {
-    return NextResponse.json(
-      { error: "Choose one of the supported billing currencies." },
-      { status: 400 },
-    );
   }
 
   const input = {
@@ -81,7 +72,6 @@ export async function PATCH(request: Request) {
     fullName,
     companyName,
     phoneNumber,
-    billingCurrency,
   };
 
   try {

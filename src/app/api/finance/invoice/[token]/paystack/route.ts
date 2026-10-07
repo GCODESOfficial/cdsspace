@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { financeDb } from "@/lib/finance/api-auth";
-import { getPaystackStatus, newPaystackInvoiceReference, paystackRequest } from "@/lib/paystack";
+import { getPaystackStatus, newPaystackInvoiceReference, paystackAvailableFor, paystackRequest } from "@/lib/paystack";
 import { applicationOrigin } from "@/lib/public-site";
 
 export const runtime = "nodejs";
@@ -23,18 +23,25 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   if (invoice.status === "paid" || invoice.status === "cancelled" || invoice.status === "draft") {
     return NextResponse.json({ error: "This invoice is not open for payment." }, { status: 409 });
   }
+  if (!paystackAvailableFor(invoice.currency)) {
+    return NextResponse.json({ error: `Paystack checkout is not available for ${invoice.currency} invoices.` }, { status: 409 });
+  }
   const email = String(invoice.client_email || "").trim().toLowerCase();
   if (!email) return NextResponse.json({ error: "A client email is required for Paystack checkout." }, { status: 400 });
   const outstanding = Math.max(Number(invoice.total || 0) - Number(invoice.amount_paid || 0), 0);
   if (outstanding <= 0) return NextResponse.json({ error: "This invoice has no outstanding balance." }, { status: 409 });
 
+  const { data: pendingTransfer } = await db.from("invoice_payment_submissions").select("id").eq("invoice_id", invoice.id).eq("status", "pending").maybeSingle();
+  if (pendingTransfer) return NextResponse.json({ error: "A bank transfer for this invoice is already being confirmed by CDS Space Finance." }, { status: 409 });
+
+  // Each checkout gets its own "initiated" row so a late webhook for an earlier
+  // attempt still matches its reference. Initiated rows never reach Finance review.
   const reference = newPaystackInvoiceReference();
-  const { data: existingSubmission } = await db.from("invoice_payment_submissions").select("id").eq("invoice_id", invoice.id).eq("status", "pending").maybeSingle();
   const submissionPayload = {
     invoice_id: invoice.id,
     user_id: invoice.user_id || null,
     method: "paystack",
-    status: "pending",
+    status: "initiated",
     amount: outstanding,
     currency: invoice.currency,
     payer_name: invoice.client_name || null,
@@ -43,10 +50,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     submitted_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
   };
-  const submissionWrite = existingSubmission
-    ? await db.from("invoice_payment_submissions").update(submissionPayload).eq("id", existingSubmission.id)
-    : await db.from("invoice_payment_submissions").insert(submissionPayload);
-  const submissionError = submissionWrite.error;
+  const { error: submissionError } = await db.from("invoice_payment_submissions").insert(submissionPayload);
   if (submissionError) return NextResponse.json({ error: "Could not prepare this payment." }, { status: 500 });
 
   try {

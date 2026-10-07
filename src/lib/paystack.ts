@@ -1,6 +1,7 @@
 import "server-only";
 
 import crypto from "node:crypto";
+import { after } from "next/server";
 import { glashMaybeOne, glashQuery } from "@/lib/glashdb/postgres";
 import { getSupabaseAdmin } from "@/lib/supabase";
 import { emailInvoiceReceipt } from "@/lib/finance/receipt-server";
@@ -8,12 +9,18 @@ import { deliverInvoicePaymentConfirmation } from "@/lib/finance/payment-confirm
 import { recordInvoicePayment } from "@/lib/finance/invoice-payments";
 
 const PAYSTACK_API = "https://api.paystack.co";
-const SUPPORTED_SETUP_CURRENCIES = new Set(["NGN", "GHS", "ZAR", "KES", "USD"]);
-const DEFAULT_SETUP_AMOUNTS: Record<string, number> = {
+
+/**
+ * Client billing currencies Paystack can charge. Every Paystack checkout
+ * (card setup, invoices, subscriptions) charges in the client's or invoice's
+ * own currency; any other currency gets no Paystack option at all.
+ * Add "USD" once Paystack approves international payments for the account.
+ */
+export const PAYSTACK_CURRENCIES: ReadonlySet<string> = new Set(["NGN"]);
+
+/** Card verification charge per currency, in minor units (NGN 50, USD 2). */
+const CARD_SETUP_AMOUNTS: Record<string, number> = {
   NGN: 5000,
-  GHS: 10,
-  ZAR: 100,
-  KES: 300,
   USD: 200,
 };
 
@@ -82,14 +89,17 @@ export function getPaystackStatus() {
   };
 }
 
-export function getPaystackCardSetupConfig() {
-  const requestedCurrency = (process.env.PAYSTACK_CARD_SETUP_CURRENCY || "NGN").trim().toUpperCase();
-  const currency = SUPPORTED_SETUP_CURRENCIES.has(requestedCurrency) ? requestedCurrency : "NGN";
-  const requestedAmount = Number(process.env.PAYSTACK_CARD_SETUP_AMOUNT || "");
-  const amount = Number.isInteger(requestedAmount) && requestedAmount > 0
-    ? requestedAmount
-    : DEFAULT_SETUP_AMOUNTS[currency];
-  return { currency, amount };
+/** True when Paystack is configured and can charge in this currency. */
+export function paystackAvailableFor(currency: unknown) {
+  return getPaystackStatus().configured
+    && PAYSTACK_CURRENCIES.has(String(currency || "").trim().toUpperCase());
+}
+
+/** Card setup charge in the client's billing currency, or null when Paystack cannot charge it. */
+export function getPaystackCardSetupConfig(billingCurrency: unknown) {
+  const currency = String(billingCurrency || "").trim().toUpperCase();
+  if (!PAYSTACK_CURRENCIES.has(currency)) return null;
+  return { currency, amount: CARD_SETUP_AMOUNTS[currency] };
 }
 
 export function newPaystackReference() {
@@ -286,12 +296,24 @@ interface PaystackInvoiceRow {
   currency: string;
 }
 
-async function deliverPaystackInvoiceConfirmation(invoiceId: string) {
-  const db = getSupabaseAdmin();
-  await Promise.allSettled([
-    emailInvoiceReceipt(db, invoiceId),
-    deliverInvoicePaymentConfirmation(db, invoiceId),
-  ]);
+/**
+ * Receipt email and chat confirmation run after the response is sent: the email
+ * can take several seconds, and the browser callback must redirect the client
+ * back without waiting for it (a slow send ended in a gateway error).
+ */
+function deliverPaystackInvoiceConfirmation(invoiceId: string) {
+  after(async () => {
+    const db = getSupabaseAdmin();
+    const results = await Promise.allSettled([
+      emailInvoiceReceipt(db, invoiceId),
+      deliverInvoicePaymentConfirmation(db, invoiceId),
+    ]);
+    for (const result of results) {
+      if (result.status === "rejected") {
+        console.error("[paystack] invoice confirmation delivery failed", result.reason instanceof Error ? result.reason.message : result.reason);
+      }
+    }
+  });
 }
 
 /** Verify a hosted Paystack invoice payment before changing finance state. */
@@ -315,7 +337,7 @@ export async function finalizePaystackInvoicePayment(reference: string, supplied
   );
   if (!record) return null;
   if (record.submission_status === "confirmed") {
-    await deliverPaystackInvoiceConfirmation(record.invoice_id);
+    deliverPaystackInvoiceConfirmation(record.invoice_id);
     return record;
   }
 
@@ -348,9 +370,9 @@ export async function finalizePaystackInvoicePayment(reference: string, supplied
     `update public.invoice_payment_submissions
         set status = 'confirmed', reviewed_at = coalesce(reviewed_at, now()),
             reviewed_by = 'Paystack verification', updated_at = now()
-      where id = $1 and status = 'pending'`,
+      where id = $1 and status in ('initiated', 'pending')`,
     [record.submission_id],
   );
-  if (paymentResult.invoice.status === "paid") await deliverPaystackInvoiceConfirmation(record.invoice_id);
+  if (paymentResult.invoice.status === "paid") deliverPaystackInvoiceConfirmation(record.invoice_id);
   return record;
 }

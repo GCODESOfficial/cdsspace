@@ -49,6 +49,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     .from("invoice_payment_submissions")
     .select("*")
     .eq("invoice_id", id)
+    .neq("status", "initiated") // unpaid Paystack checkouts are not payments to review
     .order("submitted_at", { ascending: false });
   const { data: payments } = await sb
     .from("finance_invoice_payments")

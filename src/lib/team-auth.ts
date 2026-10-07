@@ -5,6 +5,10 @@ import { sessionRequiresDailyLogout } from "@/lib/team-session-policy";
 import { parseTeamBearer } from "@/lib/team-mobile-session-core.mjs";
 
 export const TEAM_SESSION_COOKIE = "team_session";
+// team_device_sessions.login_source of sessions the mobile app holds (its sign-in and
+// its admin → team switch). These last until the member signs out.
+export const MOBILE_APP_LOGIN_SOURCES = ["mobile_app", "mobile_admin_bridge"];
+export const isMobileAppLoginSource = (source: string | null | undefined) => !!source && MOBILE_APP_LOGIN_SOURCES.includes(source);
 const SESSION_DAYS = 30;
 export type TeamDeviceType = "desktop" | "mobile";
 
@@ -97,11 +101,12 @@ export async function getTeamSessionFromToken(token: string | undefined | null):
     session_created_at: string;
     is_active: boolean;
     device_type: TeamDeviceType | null;
+    login_source: string | null;
   }>(
     `select m.id, m.full_name, m.email, m.email_verified_at, m.username, m.avatar_url, m.role_title, m.department,
       m.is_sub_admin, m.permissions, m.language, s.expires_at as session_expires_at,
       s.created_at as session_created_at, m.is_active,
-      s.device_type
+      s.device_type, s.login_source
      from public.team_device_sessions s
      join public.team_members m on m.id = s.team_member_id
      where s.session_token = $1
@@ -111,15 +116,9 @@ export async function getTeamSessionFromToken(token: string | undefined | null):
     );
   } catch (primaryError) {
     if (cached && Date.now() - cached.at < SESSION_OUTAGE_GRACE_MS) return cached.session;
-    // Older installations may not have the device-session table yet. Only
-    // treat this as an invalid session if the legacy lookup succeeds and
-    // genuinely finds no token; if both reads fail, surface a transient error
-    // so dashboard shells do not incorrectly send a valid user to login.
-    try {
-      return await getLegacyTeamSessionFromToken(token);
-    } catch {
-      throw primaryError;
-    }
+    // A failed read says nothing about the session, so surface a transient error
+    // instead of "signed out" (the legacy lookup never finds a live session).
+    throw primaryError;
   }
 
   if (!data) {
@@ -127,7 +126,10 @@ export async function getTeamSessionFromToken(token: string | undefined | null):
   }
 
   if (!data || !data.is_active) return null;
-  if (sessionRequiresDailyLogout(data.session_created_at)) {
+  // The mobile app stays signed in until the member signs out (or is deactivated):
+  // no 18:15 cutoff and no expiry.
+  const mobileApp = isMobileAppLoginSource(data.login_source);
+  if (!mobileApp && sessionRequiresDailyLogout(data.session_created_at)) {
     await glashQuery(
       "update public.team_device_sessions set revoked_at = now(), revoke_reason = 'daily_1815_cutoff' where session_token = $1 and revoked_at is null",
       [token],
@@ -139,7 +141,7 @@ export async function getTeamSessionFromToken(token: string | undefined | null):
     verifiedSessions.delete(token);
     return null;
   }
-  if (data.session_expires_at && new Date(data.session_expires_at) < new Date()) {
+  if (!mobileApp && data.session_expires_at && new Date(data.session_expires_at) < new Date()) {
     await glashQuery(
       "update public.team_device_sessions set revoked_at = now(), revoke_reason = 'expired' where session_token = $1",
       [token],

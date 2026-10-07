@@ -10,14 +10,22 @@ Configure these values locally and in the live deployment:
 
 ```text
 PAYSTACK_SECRET_KEY=sk_test_... or sk_live_...
-PAYSTACK_CARD_SETUP_CURRENCY=NGN
-PAYSTACK_CARD_SETUP_AMOUNT=5000
 NEXT_PUBLIC_SITE_URL=https://your-public-cds-space-domain.example
 ```
 
-`PAYSTACK_CARD_SETUP_AMOUNT` is expressed in the currency's minor unit. The
-default is `5000` in NGN, which is NGN 50. The supported setup currencies are
-NGN, GHS, ZAR, KES and USD.
+## Currencies
+
+Paystack charges in NGN only for now (`PAYSTACK_CURRENCIES` in
+`src/lib/paystack.ts`). Add USD there once Paystack approves international
+payments and a USD payout account. Each checkout uses the client's own currency:
+
+- Card setup charges the client's billing currency: NGN 50 or USD 2.
+- Invoices are paid in the invoice currency.
+- Subscriptions are paid in the client's billing currency.
+
+Clients billed in GBP, EUR, RWF, CNY or AED see no Paystack option on the web
+or in the app, and the server refuses Paystack checkout for them. They pay by
+bank transfer.
 
 No Paystack public key is required for this flow because transaction
 initialization happens on the server and the client is redirected to the

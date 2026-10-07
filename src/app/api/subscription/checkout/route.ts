@@ -5,12 +5,11 @@ import { financeDb } from "@/lib/finance/api-auth";
 import { formatMoney, generateInvoiceNumber, randomToken } from "@/lib/finance/types";
 import { sendEmail } from "@/lib/email-from";
 import { brandedEmailHtml } from "@/lib/email-template";
-import { getPaystackStatus } from "@/lib/paystack";
+import { getPaystackStatus, paystackAvailableFor } from "@/lib/paystack";
 import {
   calculateSubscriptionAmount,
   isSubscriptionPlanId,
   normalizedDesignQuantity,
-  PAYSTACK_SUBSCRIPTION_CURRENCIES,
   SUBSCRIPTION_PRICE_COLUMNS,
   SUPREME_MAX_DESIGNS,
   subscriptionPlan,
@@ -111,7 +110,7 @@ export async function GET() {
       prices,
       industries: [...new Set(prices.map((row: { industry: string }) => row.industry))],
       paystack: {
-        available: paystackStatus.configured && PAYSTACK_SUBSCRIPTION_CURRENCIES.has(currency),
+        available: paystackAvailableFor(currency),
         configured: paystackStatus.configured,
         mode: paystackStatus.mode,
       },
@@ -145,7 +144,7 @@ export async function POST(request: NextRequest) {
 
     const currency = clientCurrencyOrDefault(auth.account.profile.billing_currency);
     const paystackStatus = getPaystackStatus();
-    const paystackAvailable = paystackStatus.configured && PAYSTACK_SUBSCRIPTION_CURRENCIES.has(currency);
+    const paystackAvailable = paystackAvailableFor(currency);
     if (paymentMethod === "paystack" && !paystackAvailable) {
       return NextResponse.json({
         error: paystackStatus.configured

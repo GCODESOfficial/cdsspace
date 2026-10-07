@@ -15,8 +15,9 @@ const fail = (error: string, status: number, extra: Record<string, unknown> = {}
 
 // Team sign-in for the mobile app. Same checks as /api/team/login, plus the
 // access token from the emailed code (it must belong to the account signing in).
-// Returns the device session as a Bearer token instead of a cookie; as on the web,
-// a member can be signed in on up to three devices and a fourth ends the oldest.
+// Returns the device session as a Bearer token instead of a cookie. It lasts until
+// the member signs out (no 18:15 cutoff, no expiry, not counted in the device limit);
+// deactivating the account still ends it.
 export async function POST(req: NextRequest) {
   const body = await readMobileBody(req);
   const identifier = str(body.identifier).trim().toLowerCase();

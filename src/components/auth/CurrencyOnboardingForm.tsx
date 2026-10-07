@@ -72,7 +72,7 @@ export function CurrencyOnboardingForm({
         <p className="mb-2 text-[12px] font-bold uppercase tracking-[0.12em] text-brand-blue">Account setup</p>
         <h1 className="text-[28px] font-bold tracking-[-0.02em] text-brand-navy 2xl:text-[36px]">Choose your billing currency</h1>
         <p className="mt-2 max-w-[580px] text-[14px] font-medium leading-relaxed text-brand-body 2xl:text-[15px]">
-          This choice sets the currency for new project budgets, quotations and invoices connected to your account.
+          This choice sets the currency for new project budgets, quotations and invoices connected to your account. It is set once and can&apos;t be changed later.
         </p>
       </header>
 

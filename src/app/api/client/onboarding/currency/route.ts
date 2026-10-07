@@ -11,6 +11,10 @@ export async function POST(request: NextRequest) {
   const account = await getClientAccountState();
   if (!account) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   if (!account.agreement) return NextResponse.json({ error: "Complete the user agreement first." }, { status: 403 });
+  // The billing currency is set once, during account setup, and can't be changed afterwards.
+  if (account.profile.billing_currency) {
+    return NextResponse.json({ error: "Your billing currency is already set and can't be changed." }, { status: 409 });
+  }
 
   const body = await request.json().catch(() => ({}));
   const billingCurrency = normalizeClientBillingCurrency(body?.billingCurrency);
@@ -28,9 +32,13 @@ export async function POST(request: NextRequest) {
       updated_at: new Date().toISOString(),
     })
     .eq("id", account.user.id)
+    .is("billing_currency", null)
     .select("billing_currency, billing_currency_selected_at")
     .single();
 
+  if (!error && !data) {
+    return NextResponse.json({ error: "Your billing currency is already set and can't be changed." }, { status: 409 });
+  }
   if (error || !data) {
     return NextResponse.json({ error: error?.message || "Could not save your billing currency." }, { status: 500 });
   }

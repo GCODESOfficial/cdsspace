@@ -333,19 +333,14 @@ export function SubscriptionPlanCatalog({
                 {error && <div role="alert" className="rounded-[12px] border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>}
                 {!selectedPrice && <div className="rounded-[12px] border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">The admin must set a price for this plan and industry before checkout.</div>}
 
-                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <div className={`grid grid-cols-1 gap-3 ${catalog.paystack.available ? "sm:grid-cols-2" : ""}`}>
                   <button type="button" disabled={!selectedPrice || Boolean(submitting)} onClick={() => void beginCheckout("invoice")} className="inline-flex h-12 items-center justify-center gap-2 rounded-[12px] border border-[#0A4FE8] bg-white px-4 text-sm font-semibold text-[#0A4FE8] transition hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-45">
                     {submitting === "invoice" ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileText className="h-4 w-4" />} Generate invoice
                   </button>
-                  <button type="button" disabled={!selectedPrice || !catalog.paystack.available || Boolean(submitting)} onClick={() => void beginCheckout("paystack")} className="inline-flex h-12 items-center justify-center gap-2 rounded-[12px] bg-[#0A4FE8] px-4 text-sm font-semibold text-white transition hover:bg-[#083EC0] disabled:cursor-not-allowed disabled:opacity-45">
+                  {catalog.paystack.available && <button type="button" disabled={!selectedPrice || Boolean(submitting)} onClick={() => void beginCheckout("paystack")} className="inline-flex h-12 items-center justify-center gap-2 rounded-[12px] bg-[#0A4FE8] px-4 text-sm font-semibold text-white transition hover:bg-[#083EC0] disabled:cursor-not-allowed disabled:opacity-45">
                     {submitting === "paystack" ? <Loader2 className="h-4 w-4 animate-spin" /> : <CreditCard className="h-4 w-4" />} Pay with Paystack
-                  </button>
+                  </button>}
                 </div>
-                {!catalog.paystack.available && (
-                  <p className="text-center text-xs leading-relaxed text-brand-mute">
-                    {catalog.paystack.configured ? `Paystack is unavailable for ${catalog.currency}; generate an invoice to use the available payment options.` : "Paystack is not configured; generate an invoice to continue."}
-                  </p>
-                )}
               </div>
             </div>
           )}

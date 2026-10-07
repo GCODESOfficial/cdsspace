@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getClientAccountState } from "@/lib/client-account";
+import { clientCurrencyOrDefault } from "@/lib/client-billing-server";
 import {
   getPaystackCardSetupConfig,
   getPaystackStatus,
@@ -14,10 +15,14 @@ export async function GET() {
   if (!account?.agreement) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const status = getPaystackStatus();
+  const currency = clientCurrencyOrDefault(account.profile.billing_currency);
+  const setup = getPaystackCardSetupConfig(currency);
   return NextResponse.json({
     provider: "paystack",
     ...status,
-    setup: getPaystackCardSetupConfig(),
+    currency,
+    available: status.configured && Boolean(setup),
+    setup,
     method: await loadClientPaymentMethod(account.user.id),
   });
 }

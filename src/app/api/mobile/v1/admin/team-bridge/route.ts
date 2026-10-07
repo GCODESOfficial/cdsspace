@@ -30,7 +30,7 @@ export async function POST(req: NextRequest) {
     if (!teamMember) {
       return adminMobileJson({ ok: false, error: "This admin account is not linked to an active team member." }, 403);
     }
-    const { sessionToken, expiresAt } = await createTeamSession(teamMember.id, req, { source: "admin_bridge", clientDevice: { platform: "Mobile app" } });
+    const { sessionToken, expiresAt } = await createTeamSession(teamMember.id, req, { source: "mobile_admin_bridge", clientDevice: { platform: "Mobile app" } });
     return adminMobileJson({
       ok: true,
       reused: false,

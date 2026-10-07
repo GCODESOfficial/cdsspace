@@ -17,7 +17,7 @@ import {
 } from "@/lib/team-auth";
 import { getGlashPoolClient, glashMaybeOne, glashOne, glashQuery } from "@/lib/glashdb/postgres";
 import { insertActivityLog } from "@/lib/activity-log";
-import { forgetCachedTeamSession } from "@/lib/team-auth";
+import { forgetCachedTeamSession, isMobileAppLoginSource, MOBILE_APP_LOGIN_SOURCES } from "@/lib/team-auth";
 
 export interface TeamLocationInput {
   latitude?: number | null;
@@ -175,9 +175,9 @@ function headerLocation(headers: Headers) {
   return { city, region, country };
 }
 
-// A team member may stay signed in on up to this many devices at once (web,
-// desktop and the mobile app). A new sign-in beyond the limit ends the oldest.
-export const MAX_ACTIVE_TEAM_DEVICES = 3;
+// A team member may stay signed in on this many web/desktop devices at once; a new
+// sign-in beyond the limit ends the oldest. Mobile app sessions are not counted.
+export const MAX_ACTIVE_TEAM_DEVICES = 1;
 
 export async function createTeamSession(memberId: string, req?: { headers: Headers }, context: TeamSessionContext = {}) {
   const sessionToken = generateSessionToken();
@@ -218,19 +218,23 @@ export async function createTeamSession(memberId: string, req?: { headers: Heade
     await client.query("select id from public.team_members where id = $1 for update", [memberId]);
     // Keep the newest live sessions so this sign-in makes MAX_ACTIVE_TEAM_DEVICES;
     // end the older ones, and close any open session that has already expired.
+    // Mobile app sessions last until the member signs out, so they are never
+    // ended here and do not count toward the limit.
     const revoked = await client.query<{ session_token: string }>(
       `update public.team_device_sessions
           set revoked_at = now(),
               revoke_reason = case when expires_at <= now() then 'expired' else 'device_limit_exceeded' end
         where team_member_id = $1 and revoked_at is null
+          and coalesce(login_source, '') <> all($3::text[])
           and id not in (
             select id from public.team_device_sessions
              where team_member_id = $1 and revoked_at is null and expires_at > now()
+               and coalesce(login_source, '') <> all($3::text[])
              order by created_at desc
              limit $2
           )
         returning session_token`,
-      [memberId, MAX_ACTIVE_TEAM_DEVICES - 1],
+      [memberId, isMobileAppLoginSource(source) ? MAX_ACTIVE_TEAM_DEVICES : MAX_ACTIVE_TEAM_DEVICES - 1, MOBILE_APP_LOGIN_SOURCES],
     );
     replacedSessionCount = revoked.rowCount || 0;
     replacedTokens = revoked.rows.map((row) => row.session_token);

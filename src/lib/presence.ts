@@ -29,6 +29,9 @@ export async function recordAdminPresence(input: { key: string; superAdmin: bool
  *  - cds               CDS Space: whichever admin who answers client messages was active last
  *  - superadmin        the super admin
  */
+// ISO 8601 in UTC: plain ::text gives "2026-10-06 13:19:10.435+00", which phones can't read.
+const iso = (expr: string) => `to_char((${expr}) at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')`;
+
 export async function lastSeen(keys: string[]): Promise<Record<string, string | null>> {
   const result: Record<string, string | null> = {};
   const teamIds = keys.filter((key) => key.startsWith("team:")).map((key) => key.slice(5)).filter((id) => /^[0-9a-f-]{36}$/i.test(id));
@@ -37,10 +40,10 @@ export async function lastSeen(keys: string[]): Promise<Record<string, string | 
   if (teamIds.length) {
     const rows = await glashQuery<{ id: string; seen: string | null }>(
       `select m.id::text,
-              greatest(
+              ${iso(`greatest(
                 (select max(s.last_seen_at) from public.team_device_sessions s where s.team_member_id = m.id and s.revoked_at is null),
                 (select a.last_seen_at from public.admin_presence a where a.admin_key = m.id::text)
-              )::text as seen
+              )`)} as seen
          from public.team_members m
         where m.id = any($1::uuid[])`,
       [teamIds],
@@ -49,15 +52,15 @@ export async function lastSeen(keys: string[]): Promise<Record<string, string | 
   }
   if (clientIds.length) {
     const rows = await glashQuery<{ id: string; seen: string | null }>(
-      `select client_user_id::text as id, last_seen_at::text as seen from public.client_presence where client_user_id = any($1::uuid[])`,
+      `select client_user_id::text as id, ${iso("last_seen_at")} as seen from public.client_presence where client_user_id = any($1::uuid[])`,
       [clientIds],
     ).catch(() => []);
     for (const row of rows) result[`client:${row.id}`] = row.seen;
   }
   if (keys.includes("cds") || keys.includes("superadmin")) {
     const row = (await glashQuery<{ cds: string | null; superadmin: string | null }>(
-      `select max(last_seen_at) filter (where takes_client_messages)::text as cds,
-              max(last_seen_at) filter (where is_super_admin)::text as superadmin
+      `select ${iso("max(last_seen_at) filter (where takes_client_messages)")} as cds,
+              ${iso("max(last_seen_at) filter (where is_super_admin)")} as superadmin
          from public.admin_presence`,
     ).catch(() => []))[0];
     if (keys.includes("cds")) result.cds = row?.cds ?? null;

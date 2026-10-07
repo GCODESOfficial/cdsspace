@@ -2,8 +2,9 @@ import "server-only";
 
 import { glashQuery } from "@/lib/glashdb/postgres";
 import { dailyTeamCutoffIsDue, mostRecentTeamSessionCutoffIso } from "@/lib/team-session-policy";
-import { forgetCachedTeamSession } from "@/lib/team-auth";
+import { forgetCachedTeamSession, MOBILE_APP_LOGIN_SOURCES } from "@/lib/team-auth";
 
+// Mobile app sessions are exempt: they last until the member signs out.
 export async function enforceDailyTeamSessionCutoff(now = new Date()) {
   const cutoffAt = mostRecentTeamSessionCutoffIso(now);
 
@@ -12,8 +13,9 @@ export async function enforceDailyTeamSessionCutoff(now = new Date()) {
         set revoked_at = now(), revoke_reason = 'daily_1815_cutoff'
       where revoked_at is null
         and created_at < $1::timestamptz
+        and coalesce(login_source, '') <> all($2::text[])
       returning id, team_member_id, session_token`,
-    [cutoffAt],
+    [cutoffAt, MOBILE_APP_LOGIN_SOURCES],
   );
 
   if (revoked.length) {

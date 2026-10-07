@@ -72,8 +72,6 @@ export const SUBSCRIPTION_PRICE_COLUMNS: Record<ClientBillingCurrency, string> =
   AED: "price_aed",
 };
 
-export const PAYSTACK_SUBSCRIPTION_CURRENCIES = new Set<ClientBillingCurrency>(["NGN", "USD"]);
-
 export function isSubscriptionPlanId(value: unknown): value is SubscriptionPlanId {
   return typeof value === "string" && SUBSCRIPTION_PLAN_IDS.includes(value as SubscriptionPlanId);
 }
